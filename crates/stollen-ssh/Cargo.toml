@@ -5,4 +5,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# In-process SSH test server, used by this crate's tests and by the app's tests.
+testing = ["dep:rand"]
+
 [dependencies]
+stollen-core = { workspace = true }
+russh = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true, optional = true }
+
+[dev-dependencies]
+stollen-ssh = { path = ".", features = ["testing"] }
+rand = { workspace = true }
+russh = { workspace = true }
+stollen-core = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
