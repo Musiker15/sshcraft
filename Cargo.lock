@@ -1091,6 +1091,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f5094c54661b38d03bd7e50df373292118db60b585c08a411c6d840017fe7d"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs"
 version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4614,10 +4623,19 @@ checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
 name = "stollen-app"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "directories",
+ "rand",
+ "russh",
  "serde",
  "serde_json",
+ "stollen-core",
+ "stollen-ssh",
  "tauri",
  "tauri-build",
+ "tokio",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

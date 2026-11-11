@@ -46,15 +46,22 @@ impl TestServer {
 
     /// Drops every connection and stops listening.
     pub fn stop(&mut self) {
-        if let Some((handle, task)) = self.running.take() {
-            handle.shutdown("test server stopped".into());
-            task.abort();
-        }
+        let _ = self.stop_task();
+    }
+
+    fn stop_task(&mut self) -> Option<JoinHandle<()>> {
+        let (handle, task) = self.running.take()?;
+        handle.shutdown("test server stopped".into());
+        task.abort();
+        Some(task)
     }
 
     /// Stops and listens again on the same port, optionally with a new host key.
     pub async fn restart(&mut self, new_host_key: bool) {
-        self.stop();
+        if let Some(task) = self.stop_task() {
+            // The listener is only released once the aborted task has been dropped.
+            let _ = task.await;
+        }
         if new_host_key {
             self.host_key = random_host_key();
             self.host_fingerprint = fingerprint(&self.host_key);
