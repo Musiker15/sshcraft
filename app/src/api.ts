@@ -92,6 +92,7 @@ export const sessionWrite = (id: string, text: string) =>
   invoke<void>("session_write", { id, data: Array.from(encoder.encode(text)) });
 export const sessionResize = (id: string, cols: number, rows: number) =>
   invoke<void>("session_resize", { id, cols, rows });
+export const sessionAck = (id: string, bytes: number) => invoke<void>("session_ack", { id, bytes });
 export const sessionClose = (id: string) => invoke<void>("session_close", { id });
 export const answerHostKey = (promptId: number, accept: boolean) =>
   invoke<void>("answer_host_key", { promptId, accept });

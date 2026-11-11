@@ -2,6 +2,7 @@
 //! against the store (asking the user for unknown ones), and reconnects lost sessions.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -10,6 +11,7 @@ use stollen_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_recon
 use stollen_core::store::Store;
 use stollen_core::vault::Vault;
 use stollen_ssh::{ConnectParams, HostKeyVerifier, ShellEvent, ShellWriter, SshError};
+use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -54,9 +56,54 @@ pub trait HostKeyPrompter: Send + Sync + 'static {
     async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
 }
 
+/// The UI may hold this many unacknowledged output bytes before Stollen stops reading from
+/// the server. Keeps a runaway `cat` from flooding the webview.
+pub const OUTPUT_HIGH_WATERMARK: usize = 512 * 1024;
+
+/// Output bytes handed to the UI but not yet acknowledged as rendered.
+#[derive(Default)]
+struct Flow {
+    in_flight: AtomicUsize,
+    drained: Notify,
+}
+
+impl Flow {
+    fn add(&self, bytes: usize) {
+        self.in_flight.fetch_add(bytes, Ordering::SeqCst);
+    }
+
+    fn ack(&self, bytes: usize) {
+        let _ = self
+            .in_flight
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+                Some(v.saturating_sub(bytes))
+            });
+        self.drained.notify_waiters();
+    }
+
+    fn reset(&self) {
+        self.in_flight.store(0, Ordering::SeqCst);
+        self.drained.notify_waiters();
+    }
+
+    async fn wait_below_watermark(&self) {
+        loop {
+            let drained = self.drained.notified();
+            if self.in_flight.load(Ordering::SeqCst) <= OUTPUT_HIGH_WATERMARK {
+                return;
+            }
+            drained.await;
+        }
+    }
+}
+
 struct Live {
-    writer: Arc<tokio::sync::Mutex<Option<ShellWriter>>>,
+    /// Keystrokes in call order. A per-connection task forwards them to the server.
+    input: mpsc::UnboundedSender<Vec<u8>>,
+    /// Cloned out before awaiting, so no lock is held while talking to the server.
+    writer: Arc<Mutex<Option<ShellWriter>>>,
     size: Arc<Mutex<(u32, u32)>>,
+    flow: Arc<Flow>,
     task: JoinHandle<()>,
 }
 
@@ -70,6 +117,15 @@ struct Context {
     vault: Option<Arc<Vault>>,
     prompter: Arc<dyn HostKeyPrompter>,
     delay_scale: f32,
+}
+
+/// What `run` shares with the manager for one session.
+struct Shared {
+    sink: Arc<dyn SessionSink>,
+    input: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>,
+    writer: Arc<Mutex<Option<ShellWriter>>>,
+    size: Arc<Mutex<(u32, u32)>>,
+    flow: Arc<Flow>,
 }
 
 impl SessionManager {
@@ -107,42 +163,55 @@ impl SessionManager {
         sink: Arc<dyn SessionSink>,
     ) -> SessionId {
         let id = Uuid::new_v4();
-        let writer = Arc::new(tokio::sync::Mutex::new(None));
-        let size = Arc::new(Mutex::new((cols, rows)));
-        let task = tokio::spawn(run(
-            self.ctx.clone(),
-            host_id,
+        let (input, input_rx) = mpsc::unbounded_channel();
+        let shared = Shared {
             sink,
-            writer.clone(),
-            size.clone(),
-        ));
+            input: Arc::new(tokio::sync::Mutex::new(input_rx)),
+            writer: Arc::new(Mutex::new(None)),
+            size: Arc::new(Mutex::new((cols, rows))),
+            flow: Arc::new(Flow::default()),
+        };
+        let live = Live {
+            input,
+            writer: shared.writer.clone(),
+            size: shared.size.clone(),
+            flow: shared.flow.clone(),
+            task: tokio::spawn(run(self.ctx.clone(), host_id, shared)),
+        };
         self.sessions
             .lock()
             .expect("sessions lock")
-            .insert(id, Live { writer, size, task });
+            .insert(id, live);
         id
     }
 
-    pub async fn write(&self, id: SessionId, data: &[u8]) -> Result<(), String> {
-        let writer = self.writer(id)?;
-        let guard = writer.lock().await;
-        match guard.as_ref() {
-            Some(w) => w.write(data).await.map_err(|e| e.to_string()),
+    /// Queues input for the server. Synchronous, so calls keep their order.
+    /// Input typed while disconnected is sent after the reconnect.
+    pub fn write(&self, id: SessionId, data: &[u8]) -> Result<(), String> {
+        let sessions = self.sessions.lock().expect("sessions lock");
+        let live = sessions.get(&id).ok_or("unknown session")?;
+        live.input
+            .send(data.to_vec())
+            .map_err(|_| "session has ended".to_owned())
+    }
+
+    pub async fn resize(&self, id: SessionId, cols: u32, rows: u32) -> Result<(), String> {
+        let writer = {
+            let sessions = self.sessions.lock().expect("sessions lock");
+            let live = sessions.get(&id).ok_or("unknown session")?;
+            *live.size.lock().expect("size lock") = (cols, rows);
+            live.writer.lock().expect("writer lock").clone()
+        };
+        match writer {
+            Some(w) => w.resize(cols, rows).await.map_err(|e| e.to_string()),
             None => Ok(()),
         }
     }
 
-    pub async fn resize(&self, id: SessionId, cols: u32, rows: u32) -> Result<(), String> {
-        let (writer, size) = {
-            let sessions = self.sessions.lock().expect("sessions lock");
-            let live = sessions.get(&id).ok_or("unknown session")?;
-            (live.writer.clone(), live.size.clone())
-        };
-        *size.lock().expect("size lock") = (cols, rows);
-        let guard = writer.lock().await;
-        match guard.as_ref() {
-            Some(w) => w.resize(cols, rows).await.map_err(|e| e.to_string()),
-            None => Ok(()),
+    /// The UI has rendered `bytes` more output bytes.
+    pub fn ack(&self, id: SessionId, bytes: usize) {
+        if let Some(live) = self.sessions.lock().expect("sessions lock").get(&id) {
+            live.flow.ack(bytes);
         }
     }
 
@@ -151,53 +220,58 @@ impl SessionManager {
             live.task.abort();
         }
     }
-
-    fn writer(
-        &self,
-        id: SessionId,
-    ) -> Result<Arc<tokio::sync::Mutex<Option<ShellWriter>>>, String> {
-        self.sessions
-            .lock()
-            .expect("sessions lock")
-            .get(&id)
-            .map(|l| l.writer.clone())
-            .ok_or_else(|| "unknown session".to_owned())
-    }
 }
 
 fn end(sink: &dyn SessionSink, reason: EndReason, detail: Option<String>) {
     sink.status(SessionStatus::Ended { reason, detail });
 }
 
-/// The whole life of one tab: connect, pump output, reconnect after a drop, end.
-async fn run(
-    ctx: Arc<Context>,
-    host_id: HostId,
-    sink: Arc<dyn SessionSink>,
-    writer: Arc<tokio::sync::Mutex<Option<ShellWriter>>>,
-    size: Arc<Mutex<(u32, u32)>>,
+/// Forwards queued input to one connection, in order. Aborted when the connection ends,
+/// which also frees a write that is stuck on a dead connection.
+async fn forward_input(
+    input: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>,
+    writer: ShellWriter,
 ) {
+    let mut input = input.lock().await;
+    while let Some(data) = input.recv().await {
+        if writer.write(&data).await.is_err() {
+            return;
+        }
+    }
+}
+
+/// The whole life of one tab: connect, pump output, reconnect after a drop, end.
+async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
+    let sink = shared.sink.clone();
     let mut attempt = 0u32;
     let mut ever_connected = false;
     loop {
         sink.status(SessionStatus::Connecting);
-        let reason = match connect_once(&ctx, host_id, &size).await {
+        let reason = match connect_once(&ctx, host_id, &shared.size).await {
             Ok((shell_writer, mut events)) => {
-                *writer.lock().await = Some(shell_writer);
+                *shared.writer.lock().expect("writer lock") = Some(shell_writer.clone());
+                let forwarder = tokio::spawn(forward_input(shared.input.clone(), shell_writer));
+                shared.flow.reset();
                 sink.status(SessionStatus::Connected);
                 ever_connected = true;
                 attempt = 0;
                 let mut reason = Disconnect::Lost("connection closed".into());
-                while let Some(event) = events.recv().await {
-                    match event {
-                        ShellEvent::Data(bytes) => sink.data(bytes),
-                        ShellEvent::Ended(r) => {
+                loop {
+                    shared.flow.wait_below_watermark().await;
+                    match events.recv().await {
+                        Some(ShellEvent::Data(bytes)) => {
+                            shared.flow.add(bytes.len());
+                            sink.data(bytes);
+                        }
+                        Some(ShellEvent::Ended(r)) => {
                             reason = r;
                             break;
                         }
+                        None => break,
                     }
                 }
-                *writer.lock().await = None;
+                forwarder.abort();
+                *shared.writer.lock().expect("writer lock") = None;
                 reason
             }
             Err(Failure::End(reason, detail)) => return end(sink.as_ref(), reason, detail),

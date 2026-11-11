@@ -41,8 +41,9 @@ pub async fn session_open(
     Ok(state.sessions.open(host_id, cols, rows, sink))
 }
 
+/// Synchronous on purpose: sync commands run in call order, so keystrokes stay in order.
 #[tauri::command]
-pub async fn session_write(
+pub fn session_write(
     state: State<'_, AppState>,
     id: SessionId,
     data: Vec<u8>,
@@ -50,8 +51,13 @@ pub async fn session_write(
     state
         .sessions
         .write(id, &data)
-        .await
         .map_err(|e| CommandError::new("session", e))
+}
+
+/// The UI has rendered `bytes` output bytes of this session.
+#[tauri::command]
+pub fn session_ack(state: State<'_, AppState>, id: SessionId, bytes: usize) {
+    state.sessions.ack(id, bytes);
 }
 
 #[tauri::command]

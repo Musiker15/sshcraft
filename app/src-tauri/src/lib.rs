@@ -29,6 +29,7 @@ pub fn run() {
             commands::sessions::session_open,
             commands::sessions::session_write,
             commands::sessions::session_resize,
+            commands::sessions::session_ack,
             commands::sessions::session_close,
             commands::sessions::answer_host_key,
         ])

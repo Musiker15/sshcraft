@@ -218,7 +218,7 @@ async fn exit_does_not_reconnect() {
     let sink = Arc::new(RecordingSink::default());
     let id = f.manager.open(f.host_id, 80, 24, sink.clone());
     sink.wait_for(|s| connected_count(s) == 1).await;
-    f.manager.write(id, b"exit\n").await.unwrap();
+    f.manager.write(id, b"exit\n").unwrap();
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::Exited));
     assert!(
@@ -235,7 +235,7 @@ async fn output_reaches_sink() {
     let sink = Arc::new(RecordingSink::default());
     let id = f.manager.open(f.host_id, 80, 24, sink.clone());
     sink.wait_for(|s| connected_count(s) == 1).await;
-    f.manager.write(id, b"ping\n").await.unwrap();
+    f.manager.write(id, b"ping\n").unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while !sink.data.lock().unwrap().windows(4).any(|w| w == b"ping") {
         assert!(tokio::time::Instant::now() < deadline, "no echo");
@@ -251,4 +251,57 @@ async fn missing_vault_ends_with_error() {
     manager.open(f.host_id, 80, 24, sink.clone());
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::Error));
+}
+
+#[tokio::test]
+async fn writes_are_delivered_in_order() {
+    let f = fixture(true).await;
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(f.host_id, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    let mut expected = Vec::new();
+    for i in 0..300 {
+        let chunk = format!("{i:04};");
+        expected.extend_from_slice(chunk.as_bytes());
+        f.manager.write(id, chunk.as_bytes()).unwrap();
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while sink.data.lock().unwrap().len() < expected.len() {
+        assert!(tokio::time::Instant::now() < deadline, "echo incomplete");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(*sink.data.lock().unwrap(), expected);
+}
+
+#[tokio::test]
+async fn output_waits_for_acknowledgement() {
+    let f = fixture(true).await;
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(f.host_id, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.manager.write(id, b"flood\n").unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let unacked = sink.data.lock().unwrap().len();
+    assert!(unacked > 0, "some output must arrive");
+    assert!(
+        unacked <= OUTPUT_HIGH_WATERMARK + 64 * 1024,
+        "{unacked} bytes delivered without acknowledgement"
+    );
+    let total = stollen_ssh::testing::flood_pattern().len();
+    let mut acked = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let received = sink.data.lock().unwrap().len();
+        if received >= total {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "stalled at {received}"
+        );
+        f.manager.ack(id, received - acked);
+        acked = received;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(sink.data.lock().unwrap().len(), total);
 }

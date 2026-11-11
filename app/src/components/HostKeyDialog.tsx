@@ -13,8 +13,11 @@ export function HostKeyDialog({ prompt, onAnswer }: Props) {
         </p>
         <div className="mono">{prompt.fingerprint}</div>
         <div className="buttons">
-          <button onClick={() => onAnswer(false)}>Ablehnen</button>
-          <button className="primary" onClick={() => onAnswer(true)} autoFocus>
+          {/* Focus on "reject": a stray Enter while typing elsewhere must never trust a key. */}
+          <button onClick={() => onAnswer(false)} autoFocus>
+            Ablehnen
+          </button>
+          <button className="primary" onClick={() => onAnswer(true)}>
             Vertrauen und verbinden
           </button>
         </div>
