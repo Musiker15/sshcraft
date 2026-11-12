@@ -148,3 +148,38 @@ async fn rotation_resumes_for_a_shared_area() {
     );
     let _: AreaId = manifest.area_id;
 }
+
+#[tokio::test]
+async fn items_last_written_by_a_revoked_device_survive_the_rotation() {
+    let server = TestServer::start().await;
+    let (a, a2, a3) = (Dev::new(), Dev::new(), Dev::new());
+    let export = create(&server, &a, "a@example.org").await;
+    join(&server, &a2, &export).await;
+    let server_a2 = a2.row().id;
+    let mut host = common::sample_host("from-a2");
+    host.location = Some(server_a2);
+    {
+        let store = a2.store.lock().unwrap();
+        store.upsert_host(&host).unwrap();
+        sshcraft_sync::engine::record_local_change(
+            &store,
+            sshcraft_core::store::ItemKind::Host,
+            &host.id.0.to_string(),
+            5,
+        )
+        .unwrap();
+    }
+    common::sync(&a2).await;
+    common::sync(&a).await;
+    let mut e = engine(&a).await;
+    revoke_device(&mut e, &a.store, &a.vault, a2.row().device_id, 10)
+        .await
+        .unwrap();
+    join(&server, &a3, &export).await;
+    common::sync(&a3).await;
+    assert_eq!(
+        a3.hosts().len(),
+        1,
+        "the host written by the revoked device is still there"
+    );
+}

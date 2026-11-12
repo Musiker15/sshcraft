@@ -213,3 +213,32 @@ async fn a_live_owner_keeps_the_share() {
     let mut ea = engine(&a).await;
     ea.pull(&a.store, &a.vault).await.unwrap();
 }
+
+#[tokio::test]
+async fn the_heirs_own_keys_stay_out_of_the_share() {
+    let server = TestServer::start().await;
+    let (_a, b, c, _area, _) = setup(&server).await;
+    let server_b = b.row().id;
+    // B assigns an own key (in B's personal area) to the shared host, on B's device only.
+    {
+        let store = b.store.lock().unwrap();
+        let info = b.vault.generate_ed25519(&store, "b-own").unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_b))
+            .unwrap();
+        let mut host = store.list_hosts().unwrap().pop().unwrap();
+        host.settings.key = Some(KeyRef::Stored { id: info.id });
+        store.upsert_host(&host).unwrap();
+    }
+    let store = server.store().await;
+    sshcraft_server::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
+        .await
+        .unwrap();
+    sync(&b).await;
+    sync(&c).await;
+    assert_eq!(
+        c.hosts()[0].settings.key,
+        None,
+        "B's own key does not reach C"
+    );
+}

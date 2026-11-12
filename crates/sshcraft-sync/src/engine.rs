@@ -1182,7 +1182,7 @@ fn is_key_record(
 /// the area the record goes to, sends no key: each device (each member) assigns its own
 /// (design, sections 7 and 8). Agent keys never go into a share. `apply_in` keeps the local
 /// assignment.
-fn strip_unsynced_keys(
+pub(crate) fn strip_unsynced_keys(
     store: &Store,
     server: ServerId,
     item: &mut crate::items::SyncItem,

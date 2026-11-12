@@ -479,6 +479,10 @@ async fn finish_area(
 
     // 3. Every record still under the old key, sealed again under the new one.
     let own = engine.own_devices(store).await?.0;
+    let personal = engine
+        .personal_area(store)
+        .map(|(m, _)| m.area_id.0)
+        .unwrap_or_default();
     let mut authors: HashMap<AccountPublic, Option<DeviceSet>> = HashMap::new();
     let mut since = 0;
     loop {
@@ -509,21 +513,35 @@ async fn finish_area(
                     None => None,
                 }
             };
-            let body = match devices {
-                // Records of devices revoked before do not open any more and are not carried
-                // over.
-                Some(devices) => match record.open(&old_key, old, devices) {
-                    Ok(body) => body,
-                    Err(_) => continue,
-                },
-                // The author's account is gone: what this device verified before stands in.
-                None => match &known {
-                    Some((kind, item, entry)) => {
-                        let guard = lock(store)?;
-                        encode(&local_item(&guard, vault, *kind, item, entry.modified_at)?)?
-                    }
-                    None => continue,
-                },
+            let opened = devices.and_then(|devices| record.open(&old_key, old, devices).ok());
+            let body = match (opened, &known) {
+                (Some(body), _) => body,
+                // The author's device was revoked, or its account is gone: what this device
+                // verified before stands in, without keys that are not in this area.
+                (None, Some((kind, item, entry))) => {
+                    let guard = lock(store)?;
+                    let mut local = match guard.copy_entry(engine.server, *kind, item)? {
+                        Some((copy_area, original)) => crate::shares::copy_item(
+                            &guard,
+                            vault,
+                            engine.server,
+                            copy_area,
+                            *kind,
+                            &original,
+                            entry.modified_at,
+                        )?,
+                        None => local_item(&guard, vault, *kind, item, entry.modified_at)?,
+                    };
+                    crate::engine::strip_unsynced_keys(
+                        &guard,
+                        engine.server,
+                        &mut local,
+                        area.0,
+                        personal,
+                    )?;
+                    encode(&local)?
+                }
+                (None, None) => continue,
             };
             // An older version than this device saw is a rollback: do not sign it again.
             if known
