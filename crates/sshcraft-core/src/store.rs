@@ -19,6 +19,9 @@ pub enum StoreError {
     /// Groups would nest deeper than `MAX_GROUP_DEPTH`.
     #[error("groups nest too deep")]
     TooDeep,
+    /// A key bound to this device cannot move to a sync server.
+    #[error("this key is bound to this device")]
+    DeviceBound,
 }
 
 /// A key as stored on disk. `sealed_secret` is the vault's ciphertext, never plaintext.

@@ -315,3 +315,23 @@ fn turning_key_sync_on_refetches_from_the_start() {
     store.update_server_flags(s, true, true).unwrap();
     assert_eq!(store.areas(s).unwrap()[0].cursor, 0);
 }
+
+#[test]
+fn device_key_cannot_move_to_server() {
+    let store = Store::open_in_memory().unwrap();
+    let server = server(&store);
+    let vault =
+        crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default()))
+            .unwrap();
+    let key =
+        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let info = vault.store_device_key(&store, "hello", &key).unwrap();
+    let id = info.id.0.to_string();
+    assert!(matches!(
+        store.set_location(ItemKind::Key, &id, Some(server)),
+        Err(StoreError::DeviceBound)
+    ));
+    assert_eq!(store.location_of(ItemKind::Key, &id).unwrap(), None);
+    // Back to "only on this device" is fine.
+    store.set_location(ItemKind::Key, &id, None).unwrap();
+}

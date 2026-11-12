@@ -52,7 +52,10 @@ fn key_body_carries_the_private_key_and_is_zeroized() {
     let (store, vault) = setup();
     let info = vault.generate_ed25519(&store, "deploy").unwrap();
     let item = local_item(&store, &vault, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
-    let ItemBody::Key { id, name, openssh } = &item.body else {
+    let ItemBody::Key {
+        id, name, openssh, ..
+    } = &item.body
+    else {
         panic!("expected a key");
     };
     let _: &Zeroizing<String> = openssh;
