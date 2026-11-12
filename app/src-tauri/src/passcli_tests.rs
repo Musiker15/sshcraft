@@ -287,3 +287,58 @@ fn run_with_timeout_does_not_wait_for_a_grandchild_holding_the_pipe() {
         started.elapsed()
     );
 }
+
+#[test]
+fn vault_list_gives_share_ids() {
+    let json = r#"{"vaults": [
+        {"name": "Personal", "vault_id": "v1", "share_id": "s1"},
+        {"name": "SSH Keys", "vault_id": "v2", "share_id": "s2"}
+    ]}"#;
+    assert_eq!(
+        parse_vault_list(json).unwrap(),
+        vec!["s1".to_owned(), "s2".to_owned()]
+    );
+    assert!(parse_vault_list("not json").is_err());
+}
+
+#[test]
+fn item_list_names_the_vault() {
+    // pass-cli 2.7 refuses `item list` without a vault.
+    assert_eq!(
+        item_list_args("s2"),
+        vec![
+            "item",
+            "list",
+            "--share-id",
+            "s2",
+            "--filter-type",
+            "ssh-key",
+            "--filter-state",
+            "active",
+            "--output",
+            "json"
+        ]
+    );
+}
+
+#[test]
+fn trashed_keys_are_left_out() {
+    let json = r#"{"items": [
+        {"id": "a", "share_id": "s", "title": "live", "item_type": "ssh_key", "state": "active"},
+        {"id": "b", "share_id": "s", "title": "old", "item_type": "ssh_key", "state": "trashed"}
+    ]}"#;
+    let keys = parse_key_list(json).unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].title, "live");
+}
+
+/// Against the installed pass-cli; run by hand: prints how many keys it lists, nothing else.
+#[test]
+#[ignore = "needs an installed and signed-in pass-cli"]
+fn live_list_counts_keys() {
+    let cli = PassCliProcess::locate().expect("pass-cli installed");
+    let started = std::time::Instant::now();
+    let keys = cli.list_ssh_keys().expect("list");
+    println!("{} keys in {:?}", keys.len(), started.elapsed());
+    assert!(!keys.is_empty());
+}
