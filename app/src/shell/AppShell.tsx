@@ -9,6 +9,7 @@ import {
   listGroups,
   listHosts,
   listKeys,
+  listRecent,
   vaultStatus,
   type Group,
   type Host,
@@ -27,9 +28,11 @@ import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
 import { KeysPage } from "../pages/KeysPage";
 import { NewTabPage } from "../pages/NewTabPage";
+import { CommandPalette } from "../palette/CommandPalette";
+import type { PaletteActionId } from "../palette/rank";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { initialTabs, tabsReducer } from "../state/tabs";
+import { HOME_ID, initialTabs, tabsReducer } from "../state/tabs";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Drawer } from "./Drawer";
 import { ErrorMessage } from "./ErrorMessage";
@@ -54,6 +57,12 @@ export function AppShell() {
   const [page, setPage] = useState<Page>("hosts");
   const [helloMissing, setHelloMissing] = useState(false);
   const [helloDismissed, setHelloDismissed] = useState(false);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const reloadRecent = useCallback(() => {
+    listRecent(20).then(setRecent, () => {});
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -69,6 +78,7 @@ export function AppShell() {
 
   useEffect(() => {
     void reload();
+    reloadRecent();
     void vaultStatus().then((s) => setVault(s.ok ? null : s));
     // Hello is only checked when a stored key is first used; the core reports the outcome.
     void helloStatus().then((s) => setHelloMissing(s.missing));
@@ -83,7 +93,7 @@ export function AppShell() {
     return () => {
       for (const unlisten of listeners) void unlisten.then((stop) => stop());
     };
-  }, [reload]);
+  }, [reload, reloadRecent]);
 
   const connect = useCallback((host: Host) => {
     dispatch({ type: "open", tab: { id: crypto.randomUUID(), hostId: host.id, title: host.name } });
@@ -105,7 +115,7 @@ export function AppShell() {
           dispatch({ type: "prev" });
           break;
         case "palette":
-          // The command palette arrives with task 10.
+          setPaletteOpen(true);
           break;
       }
     },
@@ -125,6 +135,32 @@ export function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  function paletteAction(id: PaletteActionId) {
+    switch (id) {
+      case "newTab":
+        runAction("newTab");
+        break;
+      case "closeTab":
+        runAction("closeTab");
+        break;
+      case "newHost":
+        setEditor({ kind: "host" });
+        break;
+      case "newGroup":
+        setEditor({ kind: "group" });
+        break;
+      case "importSshConfig":
+        setEditor({ kind: "sshconfig" });
+        break;
+      case "openHosts":
+      case "openKeys":
+      case "openSettings":
+        setPage(id === "openHosts" ? "hosts" : id === "openKeys" ? "keys" : "settings");
+        dispatch({ type: "activate", id: HOME_ID });
+        break;
+    }
+  }
 
   const askDelete = (message: string, action: () => Promise<void>) =>
     setConfirming({ message, confirmLabel: t("common.delete"), action });
@@ -199,7 +235,12 @@ export function AppShell() {
           </div>
         )}
         {activeTab?.kind === "new" && (
-          <NewTabPage hosts={hosts} onPick={(host) => dispatch({ type: "pick", id: activeTab.id, hostId: host.id, title: host.name })} />
+          <NewTabPage
+            hosts={hosts}
+            groups={groups}
+            recent={recent}
+            onPick={(host) => dispatch({ type: "pick", id: activeTab.id, hostId: host.id, title: host.name })}
+          />
         )}
         {/* Sessions stay mounted while hidden, so switching tabs never drops a connection. */}
         {tabs.tabs.map(
@@ -210,7 +251,10 @@ export function AppShell() {
                   tab={tab}
                   active={tab.id === tabs.activeId}
                   onAttach={(sessionId) => dispatch({ type: "attach", id: tab.id, sessionId })}
-                  onStatus={(status) => dispatch({ type: "status", id: tab.id, status })}
+                  onStatus={(status) => {
+                    dispatch({ type: "status", id: tab.id, status });
+                    if (status.state === "connected") reloadRecent();
+                  }}
                 />
                 <SessionStatusLine status={tab.status} />
               </div>
@@ -228,6 +272,17 @@ export function AppShell() {
           )}
           {editor.kind === "sshconfig" && <SshConfigImport onDone={done} onCancel={() => setEditor(null)} />}
         </Drawer>
+      )}
+
+      {paletteOpen && (
+        <CommandPalette
+          hosts={hosts}
+          groups={groups}
+          recent={recent}
+          onClose={() => setPaletteOpen(false)}
+          onHost={connect}
+          onAction={paletteAction}
+        />
       )}
 
       {confirming && (
