@@ -63,7 +63,7 @@ impl PassCli for FakePassCli {
         _item_id: &str,
     ) -> Result<Zeroizing<String>, PassCliError> {
         ensure_ready(self.status)?;
-        parse_private_key(&view_json(&self.private_key.lock().unwrap()))
+        parse_private_key(view_json(&self.private_key.lock().unwrap()).as_bytes())
     }
 }
 
@@ -88,7 +88,7 @@ fn key_list_keeps_only_ssh_keys() {
 
 #[test]
 fn private_key_is_read_from_ssh_key_content() {
-    let key = parse_private_key(&view_json("PEM")).unwrap();
+    let key = parse_private_key(view_json("PEM").as_bytes()).unwrap();
     assert_eq!(key.as_str(), "PEM");
 }
 
@@ -96,11 +96,11 @@ fn private_key_is_read_from_ssh_key_content() {
 fn item_without_private_key_is_an_error() {
     let json = r#"{"item":{"content":{"content":{"Login":{"username":"x"}}}}}"#;
     assert!(matches!(
-        parse_private_key(json),
+        parse_private_key(json.as_bytes()),
         Err(PassCliError::NoPrivateKey)
     ));
     assert!(matches!(
-        parse_private_key(&view_json("")),
+        parse_private_key(view_json("").as_bytes()),
         Err(PassCliError::NoPrivateKey)
     ));
 }
@@ -159,4 +159,10 @@ fn logged_out_cli_reports_logged_out() {
         private_key: Mutex::new(String::new()),
     };
     assert!(matches!(cli.list_ssh_keys(), Err(PassCliError::LoggedOut)));
+}
+
+#[test]
+fn private_key_with_escapes_is_decoded() {
+    let key = parse_private_key(view_json("line1\nline2\n").as_bytes()).unwrap();
+    assert_eq!(key.as_str(), "line1\nline2\n");
 }

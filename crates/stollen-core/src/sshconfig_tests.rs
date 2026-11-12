@@ -144,3 +144,56 @@ fn alias_without_hostname_uses_alias_as_address() {
     );
     assert_eq!(plan[0].settings.address.as_deref(), Some("example.net"));
 }
+
+fn candidate(alias: &str, group: Option<&str>, address: Option<&str>) -> ImportCandidate {
+    ImportCandidate {
+        alias: alias.into(),
+        group: group.map(Into::into),
+        settings: crate::model::ConnectionSettings {
+            address: address.map(Into::into),
+            username: Some("u".into()),
+            ..Default::default()
+        },
+        key_note: None,
+    }
+}
+
+#[test]
+fn apply_import_creates_exactly_the_given_candidates() {
+    let store = crate::store::Store::open_in_memory().unwrap();
+    let created = apply_import(
+        &store,
+        &[
+            candidate("a", Some("example.org"), None),
+            candidate("b", Some("example.org"), None),
+            candidate("c", None, Some("other.org")),
+        ],
+    )
+    .unwrap();
+    assert_eq!(created, 3);
+    let groups = store.list_groups().unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].defaults.address.as_deref(), Some("example.org"));
+    let hosts = store.list_hosts().unwrap();
+    assert_eq!(hosts.len(), 3);
+    let a = hosts.iter().find(|h| h.name == "a").unwrap();
+    assert_eq!(a.group_id, Some(groups[0].id));
+    assert_eq!(a.settings.username.as_deref(), Some("u"));
+}
+
+#[test]
+fn apply_import_skips_existing_hosts_and_reuses_groups() {
+    let store = crate::store::Store::open_in_memory().unwrap();
+    apply_import(&store, &[candidate("a", Some("example.org"), None)]).unwrap();
+    let created = apply_import(
+        &store,
+        &[
+            candidate("a", Some("example.org"), None),
+            candidate("d", Some("example.org"), None),
+        ],
+    )
+    .unwrap();
+    assert_eq!(created, 1);
+    assert_eq!(store.list_groups().unwrap().len(), 1);
+    assert_eq!(store.list_hosts().unwrap().len(), 2);
+}

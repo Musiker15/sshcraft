@@ -81,11 +81,45 @@ pub fn parse_key_list(json: &str) -> Result<Vec<PassKey>, PassCliError> {
         .collect())
 }
 
-pub fn parse_private_key(json: &str) -> Result<Zeroizing<String>, PassCliError> {
-    // The parsed tree holds the key too; it is dropped at the end of this function.
-    let value: Value = serde_json::from_str(json).map_err(|_| malformed())?;
-    match value["item"]["content"]["content"]["SshKey"]["private_key"].as_str() {
-        Some(key) if !key.trim().is_empty() => Ok(Zeroizing::new(key.to_owned())),
+// Typed view of `pass-cli item view --output json`: only the private key is kept, and only
+// inside a `Zeroizing` buffer. serde_json's internal scratch buffer for escaped strings is not
+// zeroed; that copy and the pipe buffer inside `Command::output` are the remaining residue.
+#[derive(serde::Deserialize)]
+struct ItemView {
+    item: ItemViewItem,
+}
+
+#[derive(serde::Deserialize)]
+struct ItemViewItem {
+    content: ItemViewOuter,
+}
+
+#[derive(serde::Deserialize)]
+struct ItemViewOuter {
+    content: ItemViewInner,
+}
+
+#[derive(serde::Deserialize)]
+struct ItemViewInner {
+    #[serde(rename = "SshKey")]
+    ssh_key: Option<SshKeyContent>,
+}
+
+#[derive(serde::Deserialize)]
+struct SshKeyContent {
+    private_key: Option<Zeroizing<String>>,
+}
+
+pub fn parse_private_key(json: &[u8]) -> Result<Zeroizing<String>, PassCliError> {
+    let view: ItemView = serde_json::from_slice(json).map_err(|_| malformed())?;
+    match view
+        .item
+        .content
+        .content
+        .ssh_key
+        .and_then(|k| k.private_key)
+    {
+        Some(key) if !key.trim().is_empty() => Ok(key),
         _ => Err(PassCliError::NoPrivateKey),
     }
 }
@@ -198,8 +232,7 @@ impl PassCli for PassCliProcess {
             &["item", "view", &uri, "--output", "json"],
             Some(VIEW_REASON),
         )?;
-        let text = Zeroizing::new(String::from_utf8_lossy(&out).into_owned());
-        parse_private_key(&text)
+        parse_private_key(&out)
     }
 }
 

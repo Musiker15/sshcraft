@@ -26,25 +26,22 @@ impl UserPresence for WindowsHello {
         let reason = reason.to_owned();
         tokio::task::spawn_blocking(move || verify_blocking(hwnd, &reason))
             .await
-            .unwrap_or(Presence::Unavailable)
+            // A crashed check must not open the gate.
+            .unwrap_or(Presence::Declined)
     }
 }
 
 #[cfg(windows)]
 fn verify_blocking(hwnd: isize, reason: &str) -> Presence {
-    use windows::Security::Credentials::UI::{
-        UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
-    };
+    use windows::Security::Credentials::UI::{UserConsentVerificationResult, UserConsentVerifier};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
     use windows::core::{HSTRING, factory};
     use windows_future::IAsyncOperation;
 
-    let available = UserConsentVerifier::CheckAvailabilityAsync()
-        .and_then(|op| op.join())
-        .is_ok_and(|a| a == UserConsentVerifierAvailability::Available);
-    if !available {
-        return Presence::Unavailable;
+    let availability = UserConsentVerifier::CheckAvailabilityAsync().and_then(|op| op.join());
+    if let Some(presence) = gate_from_availability(availability) {
+        return presence;
     }
     let result =
         factory::<UserConsentVerifier, IUserConsentVerifierInterop>().and_then(|interop| {
@@ -57,11 +54,39 @@ fn verify_blocking(hwnd: isize, reason: &str) -> Presence {
             };
             op.join()
         });
+    presence_from_result(result)
+}
+
+/// `None` when Windows Hello is ready to ask. Only "not set up" opens the gate without a
+/// prompt; a busy device or a failed check counts as declined, so it can be retried.
+#[cfg(windows)]
+fn gate_from_availability(
+    availability: windows::core::Result<
+        windows::Security::Credentials::UI::UserConsentVerifierAvailability,
+    >,
+) -> Option<Presence> {
+    use windows::Security::Credentials::UI::UserConsentVerifierAvailability as A;
+    match availability {
+        Ok(A::Available) => None,
+        Ok(A::DeviceNotPresent | A::NotConfiguredForUser | A::DisabledByPolicy) => {
+            Some(Presence::Unavailable)
+        }
+        _ => Some(Presence::Declined),
+    }
+}
+
+#[cfg(windows)]
+fn presence_from_result(
+    result: windows::core::Result<
+        windows::Security::Credentials::UI::UserConsentVerificationResult,
+    >,
+) -> Presence {
+    use windows::Security::Credentials::UI::UserConsentVerificationResult as R;
     match result {
-        Ok(UserConsentVerificationResult::Verified) => Presence::Verified,
-        Ok(UserConsentVerificationResult::DeviceNotPresent)
-        | Ok(UserConsentVerificationResult::NotConfiguredForUser)
-        | Ok(UserConsentVerificationResult::DisabledByPolicy) => Presence::Unavailable,
+        Ok(R::Verified) => Presence::Verified,
+        Ok(R::DeviceNotPresent | R::NotConfiguredForUser | R::DisabledByPolicy) => {
+            Presence::Unavailable
+        }
         _ => Presence::Declined,
     }
 }
@@ -69,4 +94,55 @@ fn verify_blocking(hwnd: isize, reason: &str) -> Presence {
 #[cfg(not(windows))]
 fn verify_blocking(_hwnd: isize, _reason: &str) -> Presence {
     Presence::Unavailable
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use windows::Security::Credentials::UI::{
+        UserConsentVerificationResult as R, UserConsentVerifierAvailability as A,
+    };
+
+    fn err<T>() -> windows::core::Result<T> {
+        Err(windows::core::Error::from_hresult(windows::core::HRESULT(
+            -1,
+        )))
+    }
+
+    #[test]
+    fn available_lets_the_prompt_run() {
+        assert_eq!(gate_from_availability(Ok(A::Available)), None);
+    }
+
+    #[test]
+    fn missing_hello_counts_as_unavailable() {
+        for a in [
+            A::DeviceNotPresent,
+            A::NotConfiguredForUser,
+            A::DisabledByPolicy,
+        ] {
+            assert_eq!(gate_from_availability(Ok(a)), Some(Presence::Unavailable));
+        }
+    }
+
+    #[test]
+    fn busy_device_or_error_counts_as_declined() {
+        assert_eq!(
+            gate_from_availability(Ok(A::DeviceBusy)),
+            Some(Presence::Declined)
+        );
+        assert_eq!(gate_from_availability(err()), Some(Presence::Declined));
+    }
+
+    #[test]
+    fn only_verified_passes() {
+        assert_eq!(presence_from_result(Ok(R::Verified)), Presence::Verified);
+        assert_eq!(presence_from_result(Ok(R::Canceled)), Presence::Declined);
+        assert_eq!(presence_from_result(Ok(R::DeviceBusy)), Presence::Declined);
+        assert_eq!(presence_from_result(err()), Presence::Declined);
+        assert_eq!(
+            presence_from_result(Ok(R::NotConfiguredForUser)),
+            Presence::Unavailable
+        );
+    }
 }

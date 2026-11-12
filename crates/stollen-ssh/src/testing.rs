@@ -225,8 +225,13 @@ pub async fn spawn_agent(keys: &[PrivateKey], confirm: bool) -> crate::DynAgent 
 
     let (client_side, server_side) = tokio::io::duplex(64 * 1024);
     let listener = futures::stream::iter(vec![Ok::<_, std::io::Error>(server_side)]);
+    let mode = if confirm {
+        AgentMode::Normal
+    } else {
+        AgentMode::RefuseSign
+    };
     tokio::spawn(async move {
-        let _ = russh::keys::agent::server::serve(listener, TestAgent { confirm }).await;
+        let _ = russh::keys::agent::server::serve(listener, TestAgent { mode }).await;
     });
     let mut client = AgentClient::connect(client_side).dynamic();
     for key in keys {
@@ -235,9 +240,36 @@ pub async fn spawn_agent(keys: &[PrivateKey], confirm: bool) -> crate::DynAgent 
     client
 }
 
+/// An in-memory SSH agent that accepts keys but never answers a key list request,
+/// like a Proton Pass that holds the pipe open while it hangs.
+pub async fn spawn_stalled_agent(keys: &[PrivateKey]) -> crate::DynAgent {
+    use russh::keys::agent::client::AgentClient;
+
+    let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+    let listener = futures::stream::iter(vec![Ok::<_, std::io::Error>(server_side)]);
+    tokio::spawn(async move {
+        let agent = TestAgent {
+            mode: AgentMode::Stall,
+        };
+        let _ = russh::keys::agent::server::serve(listener, agent).await;
+    });
+    let mut client = AgentClient::connect(client_side).dynamic();
+    for key in keys {
+        client.add_identity(key, &[]).await.expect("add identity");
+    }
+    client
+}
+
+#[derive(Clone, Copy)]
+enum AgentMode {
+    Normal,
+    RefuseSign,
+    Stall,
+}
+
 #[derive(Clone)]
 struct TestAgent {
-    confirm: bool,
+    mode: AgentMode,
 }
 
 impl russh::keys::agent::server::Agent for TestAgent {
@@ -245,7 +277,14 @@ impl russh::keys::agent::server::Agent for TestAgent {
         &self,
         msg: russh::keys::agent::server::MessageType,
     ) -> impl std::future::Future<Output = bool> + Send {
-        let allowed = self.confirm || !matches!(msg, russh::keys::agent::server::MessageType::Sign);
-        async move { allowed }
+        use russh::keys::agent::server::MessageType;
+        let mode = self.mode;
+        async move {
+            match (mode, msg) {
+                (AgentMode::RefuseSign, MessageType::Sign) => false,
+                (AgentMode::Stall, MessageType::RequestKeys) => std::future::pending().await,
+                _ => true,
+            }
+        }
     }
 }

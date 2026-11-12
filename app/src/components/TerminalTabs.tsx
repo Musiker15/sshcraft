@@ -71,7 +71,7 @@ function StatusLine({ status }: { status: SessionStatus }) {
   }
 }
 
-function EndedLine({ reason, detail }: { reason: string; detail: string | null }) {
+export function EndedLine({ reason, detail }: { reason: string; detail: string | null }) {
   switch (reason) {
     case "exited":
       return <div className="statusline">Sitzung beendet</div>;
@@ -87,7 +87,7 @@ function EndedLine({ reason, detail }: { reason: string; detail: string | null }
     case "host_key_rejected":
       return <div className="statusline danger">Server-Schlüssel abgelehnt, nicht verbunden.</div>;
     case "auth_failed":
-      return <div className="statusline danger">Der Server hat den Schlüssel nicht angenommen.</div>;
+      return <div className="statusline danger">{detail ?? "Der Server hat den Schlüssel nicht angenommen."}</div>;
     case "lost":
       return <div className="statusline danger">Verbindung verloren{detail ? `: ${detail}` : ""}</div>;
     default:

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey};
 use stollen_core::policy::Disconnect;
-use stollen_ssh::testing::{TestServer, flood_pattern, spawn_agent};
+use stollen_ssh::testing::{TestServer, flood_pattern, spawn_agent, spawn_stalled_agent};
 use stollen_ssh::{
     ConnectParams, Credential, HostKeyVerifier, Shell, ShellEvent, SshError, connect,
     list_agent_keys,
@@ -210,4 +210,35 @@ async fn list_agent_keys_returns_fingerprints() {
     want.sort();
     assert_eq!(got, want);
     assert!(keys.iter().all(|k| k.algorithm == "ssh-ed25519"));
+}
+
+#[tokio::test]
+async fn stalled_agent_times_out_on_connect() {
+    let (server, k) = setup().await;
+    let p = ConnectParams {
+        address: "127.0.0.1".into(),
+        port: server.port,
+        username: "tester".into(),
+        credential: Credential::Agent {
+            fingerprint: fingerprint(&k),
+            agent: spawn_stalled_agent(std::slice::from_ref(&k)).await,
+        },
+    };
+    let result = tokio::time::timeout(Duration::from_secs(8), connect(p, Verifier::new(true)))
+        .await
+        .expect("a stalled agent must not hang the connect");
+    assert!(
+        matches!(result, Err(SshError::AgentUnavailable(_))),
+        "{:?}",
+        result.err()
+    );
+}
+
+#[tokio::test]
+async fn stalled_agent_times_out_on_list() {
+    let mut agent = spawn_stalled_agent(&[key()]).await;
+    let result = tokio::time::timeout(Duration::from_secs(8), list_agent_keys(&mut agent))
+        .await
+        .expect("a stalled agent must not hang the key list");
+    assert!(matches!(result, Err(SshError::AgentUnavailable(_))));
 }

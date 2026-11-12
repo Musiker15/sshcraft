@@ -5,9 +5,10 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::model::{ConnectionSettings, KeyRef};
+use crate::model::{ConnectionSettings, Group, GroupId, Host, HostId, KeyRef};
+use crate::store::{Store, StoreError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigHost {
@@ -25,7 +26,7 @@ pub struct ParsedConfig {
     pub skipped: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportCandidate {
     pub alias: String,
     pub group: Option<String>,
@@ -247,6 +248,64 @@ pub fn plan_import(
             }
         })
         .collect()
+}
+
+/// Creates exactly the given candidates (as confirmed in the preview) and the groups they
+/// name. A host that already exists with the same name and address is skipped; a group with
+/// the same name is reused. Returns the number of hosts created.
+pub fn apply_import(store: &Store, candidates: &[ImportCandidate]) -> Result<usize, StoreError> {
+    let mut groups = store.list_groups()?;
+    let hosts = store.list_hosts()?;
+    let mut created = 0;
+
+    for candidate in candidates {
+        let group_id = match &candidate.group {
+            Some(name) => Some(match groups.iter().find(|g| &g.name == name) {
+                Some(g) => g.id,
+                None => {
+                    let group = Group {
+                        id: GroupId::new(),
+                        name: name.clone(),
+                        defaults: ConnectionSettings {
+                            address: Some(name.clone()),
+                            ..Default::default()
+                        },
+                    };
+                    store.upsert_group(&group)?;
+                    let id = group.id;
+                    groups.push(group);
+                    id
+                }
+            }),
+            None => None,
+        };
+        let address_of = |h: &Host| {
+            h.settings.address.clone().or_else(|| {
+                h.group_id
+                    .and_then(|gid| groups.iter().find(|g| g.id == gid))
+                    .and_then(|g| g.defaults.address.clone())
+            })
+        };
+        let new_address = candidate
+            .settings
+            .address
+            .clone()
+            .or_else(|| candidate.group.clone());
+        let exists = hosts
+            .iter()
+            .any(|h| h.name == candidate.alias && address_of(h) == new_address);
+        if exists {
+            continue;
+        }
+        store.upsert_host(&Host {
+            id: HostId::new(),
+            name: candidate.alias.clone(),
+            group_id,
+            settings: candidate.settings.clone(),
+        })?;
+        created += 1;
+    }
+    Ok(created)
 }
 
 #[cfg(test)]

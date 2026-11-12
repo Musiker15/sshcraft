@@ -32,7 +32,9 @@ export function SshConfigImport({ onDone, onCancel }: Props) {
   async function submit() {
     setBusy(true);
     try {
-      const result = await sshConfigImport([...selected]);
+      if (!preview) return;
+      // Send back exactly what was shown, so nothing changes between preview and import.
+      const result = await sshConfigImport(preview.candidates.filter((c) => selected.has(c.alias)));
       alert(`${result.created} Host(s) angelegt.`);
       onDone();
     } catch (e) {

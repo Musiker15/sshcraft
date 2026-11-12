@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use stollen_core::model::{ConnectionSettings, Group, GroupId, Host, HostId};
 use stollen_core::sshconfig::{self, ImportCandidate};
 use tauri::State;
 
@@ -80,68 +79,14 @@ pub async fn ssh_config_preview() -> CommandResult<SshConfigPreview> {
     preview().await
 }
 
-/// Creates the chosen hosts (and their groups). Hosts that already exist with the same name
-/// and address are skipped.
+/// Creates exactly the candidates the user confirmed in the preview, nothing re-read.
 #[tauri::command]
-pub async fn ssh_config_import(
+pub fn ssh_config_import(
     state: State<'_, AppState>,
-    aliases: Vec<String>,
+    candidates: Vec<ImportCandidate>,
 ) -> CommandResult<SshConfigImportResult> {
-    let candidates = preview().await?.candidates;
     let store = state.store.lock().expect("store lock");
-    let mut groups = store.list_groups()?;
-    let hosts = store.list_hosts()?;
-    let mut created = 0;
-
-    for candidate in candidates
-        .into_iter()
-        .filter(|c| aliases.contains(&c.alias))
-    {
-        let group_id = match &candidate.group {
-            Some(name) => Some(match groups.iter().find(|g| &g.name == name) {
-                Some(g) => g.id,
-                None => {
-                    let group = Group {
-                        id: GroupId::new(),
-                        name: name.clone(),
-                        defaults: ConnectionSettings {
-                            address: Some(name.clone()),
-                            ..Default::default()
-                        },
-                    };
-                    store.upsert_group(&group)?;
-                    let id = group.id;
-                    groups.push(group);
-                    id
-                }
-            }),
-            None => None,
-        };
-        let address_of = |h: &Host| {
-            h.settings.address.clone().or_else(|| {
-                h.group_id
-                    .and_then(|gid| groups.iter().find(|g| g.id == gid))
-                    .and_then(|g| g.defaults.address.clone())
-            })
-        };
-        let new_address = candidate
-            .settings
-            .address
-            .clone()
-            .or_else(|| candidate.group.clone());
-        let exists = hosts
-            .iter()
-            .any(|h| h.name == candidate.alias && address_of(h) == new_address);
-        if exists {
-            continue;
-        }
-        store.upsert_host(&Host {
-            id: HostId::new(),
-            name: candidate.alias,
-            group_id,
-            settings: candidate.settings,
-        })?;
-        created += 1;
-    }
-    Ok(SshConfigImportResult { created })
+    Ok(SshConfigImportResult {
+        created: sshconfig::apply_import(&store, &candidates)?,
+    })
 }

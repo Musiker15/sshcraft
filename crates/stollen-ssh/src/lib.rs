@@ -41,11 +41,22 @@ pub struct AgentKey {
     pub public_key: String,
 }
 
-pub async fn list_agent_keys(agent: &mut DynAgent) -> Result<Vec<AgentKey>, SshError> {
-    let identities = agent
-        .request_identities()
+/// How long the agent may take to list its keys.
+const AGENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a signature may take; generous, because the user may have to confirm it.
+const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
+
+async fn agent_identities(
+    agent: &mut DynAgent,
+) -> Result<Vec<russh::keys::agent::AgentIdentity>, SshError> {
+    tokio::time::timeout(AGENT_REQUEST_TIMEOUT, agent.request_identities())
         .await
-        .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
+        .map_err(|_| SshError::AgentUnavailable("no answer".into()))?
+        .map_err(|e| SshError::AgentUnavailable(e.to_string()))
+}
+
+pub async fn list_agent_keys(agent: &mut DynAgent) -> Result<Vec<AgentKey>, SshError> {
+    let identities = agent_identities(agent).await?;
     Ok(identities
         .iter()
         .map(|identity| {
@@ -212,24 +223,27 @@ pub async fn connect(
             fingerprint,
             mut agent,
         } => {
-            let identities = agent
-                .request_identities()
-                .await
-                .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
+            let identities = agent_identities(&mut agent).await?;
             let identity = identities
                 .into_iter()
                 .find(|i| i.public_key().fingerprint(HashAlg::Sha256).to_string() == fingerprint)
                 .ok_or(SshError::AgentKeyMissing)?;
-            handle
-                .authenticate_publickey_with(
-                    params.username,
-                    identity.public_key().into_owned(),
-                    hash,
-                    &mut agent,
-                )
+            let signed = handle.authenticate_publickey_with(
+                params.username,
+                identity.public_key().into_owned(),
+                hash,
+                &mut agent,
+            );
+            tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
                 .await
+                .map_err(|_| SshError::AgentUnavailable("no answer while signing".into()))?
                 .map_err(|e| match e {
-                    russh::AgentAuthError::Key(_) => SshError::AgentRefused,
+                    russh::AgentAuthError::Key(russh::keys::Error::AgentFailure) => {
+                        SshError::AgentRefused
+                    }
+                    russh::AgentAuthError::Key(other) => {
+                        SshError::AgentUnavailable(other.to_string())
+                    }
                     other => protocol(other),
                 })?
         }

@@ -83,7 +83,8 @@ export type ImportCandidate = {
 };
 export type SshConfigPreview = { candidates: ImportCandidate[]; skipped: string[] };
 export const sshConfigPreview = () => invoke<SshConfigPreview>("ssh_config_preview");
-export const sshConfigImport = (aliases: string[]) => invoke<{ created: number }>("ssh_config_import", { aliases });
+export const sshConfigImport = (candidates: ImportCandidate[]) =>
+  invoke<{ created: number }>("ssh_config_import", { candidates });
 
 export type PassCliStatus = "not_installed" | "logged_out" | "ready";
 export type PassKey = { share_id: string; item_id: string; title: string };
