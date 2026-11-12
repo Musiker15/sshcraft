@@ -41,7 +41,7 @@ straight to a sync server.
 | Source | Where | What comes over |
 |---|---|---|
 | `~/.ssh/config` | home folder | hosts, users, ports, keys found in the Proton Pass agent |
-| `known_hosts` | `~/.ssh/known_hosts` | one host per name and port; optionally the host keys |
+| `known_hosts` | `~/.ssh/known_hosts` | one host per line; optionally the host keys of every name |
 | Key files | `~/.ssh` | private keys in OpenSSH, PEM or PuTTY (`.ppk`) format, with passphrase |
 | CSV | any file | columns `name`, `group` (path with `/`), `tags`, `address`, `port`, `username`, `os`; Termius-style headings are understood too |
 | PuTTY | Windows registry, or a `.reg` export | SSH sessions with host, port, user and key file |
