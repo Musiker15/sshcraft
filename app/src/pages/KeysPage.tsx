@@ -1,6 +1,6 @@
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { deleteKey, listAgentKeys, type AgentKey, type KeyInfo } from "../api";
+import { deleteKey, listAgentKeys, type AgentKey, type KeyInfo, type ServerView } from "../api";
 import { KeyGenerateForm, KeyImportForm } from "../components/KeyForms";
 import { ProtonPassImport } from "../components/ProtonPassImport";
 import { useLanguage, useT } from "../i18n/i18n";
@@ -14,7 +14,15 @@ type Panel = "import" | "generate" | "protonpass" | null;
 type Menu = { items: MenuItem[]; at: { x: number; y: number } };
 
 /** Keys in this vault (with secret) and keys the Proton Pass agent offers (never copied). */
-export function KeysPage({ keys, onChanged }: { keys: KeyInfo[]; onChanged: () => void }) {
+type Props = {
+  keys: KeyInfo[];
+  onChanged: () => void;
+  /** Sync servers; a key can move only to one that syncs keys. */
+  servers?: ServerView[];
+  onMove?: (id: string, location: string | null) => void;
+};
+
+export function KeysPage({ keys, onChanged, servers = [], onMove }: Props) {
   const t = useT();
   const lang = useLanguage();
   const [panel, setPanel] = useState<Panel>(null);
@@ -43,6 +51,20 @@ export function KeysPage({ keys, onChanged }: { keys: KeyInfo[]; onChanged: () =
       setProblem(e);
     }
   }
+
+  const serverName = (id: string | null | undefined) => servers.find((s) => s.id === id)?.name;
+  /** "Move to": this device only, or a server that syncs keys; not where the key is now. */
+  const moveItems = (key: KeyInfo) => {
+    if (!onMove) return [];
+    const places: { id: string | null; name: string }[] = [
+      { id: null, name: t("sync.localOnly") },
+      ...servers.filter((s) => s.sync_keys && !s.revoked).map((s) => ({ id: s.id, name: s.name })),
+    ];
+    return places
+      .filter((p) => p.id !== (key.location ?? null))
+      .filter((p) => p.id !== null || key.location)
+      .map((p) => ({ label: t("sync.moveTo", { place: p.name }), onSelect: () => onMove(key.id, p.id) }));
+  };
 
   return (
     <section className="page">
@@ -73,6 +95,7 @@ export function KeysPage({ keys, onChanged }: { keys: KeyInfo[]; onChanged: () =
                   at: { x: e.clientX, y: e.clientY },
                   items: [
                     { label: t("keys.copyPublic"), onSelect: () => void navigator.clipboard.writeText(key.public_key) },
+                    ...moveItems(key),
                     { label: t("common.delete"), onSelect: () => setDeleting(key), danger: true },
                   ],
                 });
@@ -82,7 +105,10 @@ export function KeysPage({ keys, onChanged }: { keys: KeyInfo[]; onChanged: () =
                 <KeyRound size={18} aria-hidden="true" />
               </span>
               <span className="card-text">
-                <span className="card-title">{key.name}</span>
+                <span className="card-title">
+                  {key.name}
+                  {serverName(key.location) && <span className="badge">{serverName(key.location)}</span>}
+                </span>
                 <span className="card-sub">{key.algorithm}</span>
                 <span className="card-sub mono">{key.fingerprint}</span>
               </span>

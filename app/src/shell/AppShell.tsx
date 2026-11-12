@@ -241,7 +241,16 @@ export function AppShell() {
                   }
                 />
               )}
-              {page === "keys" && <KeysPage keys={keys} onChanged={() => void reload()} />}
+              {page === "keys" && (
+                <KeysPage
+                  keys={keys}
+                  onChanged={() => void reload()}
+                  servers={servers}
+                  onMove={(id: string, location: string | null) =>
+                    void moveItem("key", id, location).then(() => reload(), setProblem)
+                  }
+                />
+              )}
               {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
               {(page === "snippets" || page === "forwarding" || page === "logs") && <PlaceholderPage page={page} />}
             </main>

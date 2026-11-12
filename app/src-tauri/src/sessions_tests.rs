@@ -682,3 +682,30 @@ fn hello_reason_follows_the_app_language() {
     assert_eq!(hello_reason(LanguageSetting::Auto, Some("fr-FR")), english);
     assert_eq!(hello_reason(LanguageSetting::Auto, None), english);
 }
+
+#[tokio::test]
+async fn a_key_not_on_this_device_ends_before_hello() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().pop().unwrap();
+        host.settings.key = Some(KeyRef::Stored {
+            id: sshcraft_core::model::KeyId::new(),
+        });
+        store.upsert_host(&host).unwrap();
+    }
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = f.manager_with_presence(presence.clone());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(f.host_id, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(
+        ended_code(&sink.statuses()),
+        Some(ErrorCode::KeyNotOnDevice)
+    );
+    assert_eq!(
+        presence.asked(),
+        0,
+        "no Windows Hello prompt for a key that is not here"
+    );
+}

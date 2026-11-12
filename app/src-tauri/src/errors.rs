@@ -32,6 +32,7 @@ pub enum ErrorCode {
     HostMissingAddress,
     HostMissingUsername,
     HostMissingKey,
+    KeyNotOnDevice,
     Network,
     Session,
     SyncBadOrigin,

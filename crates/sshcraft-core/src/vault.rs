@@ -107,6 +107,9 @@ pub struct KeyInfo {
     pub algorithm: String,
     pub fingerprint: String,
     pub public_key: String,
+    /// The sync server this key belongs to; missing means "only on this device".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<ServerId>,
 }
 
 impl From<KeyRecord> for KeyInfo {
@@ -117,6 +120,7 @@ impl From<KeyRecord> for KeyInfo {
             algorithm: r.algorithm,
             fingerprint: r.fingerprint,
             public_key: r.public_key,
+            location: r.location,
         }
     }
 }

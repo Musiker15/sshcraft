@@ -30,6 +30,7 @@ export type KeyInfo = {
   algorithm: string;
   fingerprint: string;
   public_key: string;
+  location?: string | null;
 };
 
 export type EndReason =

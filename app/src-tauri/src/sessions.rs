@@ -471,6 +471,18 @@ async fn connect_once(
                 .vault
                 .as_ref()
                 .ok_or_else(|| error(ErrorCode::VaultLocked, None))?;
+            // A synced host can point to a key that lives on another device: say so before
+            // asking for Windows Hello for nothing.
+            let here = ctx
+                .store
+                .lock()
+                .expect("store lock")
+                .key_record(*id)
+                .map_err(|e| error(ErrorCode::Store, Some(e.to_string())))?
+                .is_some();
+            if !here {
+                return Err(error(ErrorCode::KeyNotOnDevice, None));
+            }
             let reason = {
                 let store = ctx.store.lock().expect("store lock");
                 let language = crate::settings::load(&store).language;

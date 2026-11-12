@@ -20,6 +20,7 @@
   "errors.internal": "Ein interner Fehler ist aufgetreten.",
   "errors.invalid_key": "Das ist kein gültiger privater Schlüssel.",
   "errors.io": "Eine Datei ließ sich nicht lesen.",
+  "errors.key_not_on_device": "Dieser Host nutzt einen Schlüssel, der nicht auf diesem Gerät liegt. Ordne ihm einen deiner Schlüssel zu.",
   "errors.master_key_missing": "Der Hauptschlüssel fehlt im Schlüsselspeicher des Systems.",
   "errors.name_required": "Bitte einen Namen eingeben.",
   "errors.network": "Der Server war nicht erreichbar.",

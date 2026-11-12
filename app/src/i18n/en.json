@@ -20,6 +20,7 @@
   "errors.internal": "An internal error occurred.",
   "errors.invalid_key": "This is not a valid private key.",
   "errors.io": "A file could not be read.",
+  "errors.key_not_on_device": "This host uses a key that is not on this device. Assign one of your keys to it.",
   "errors.master_key_missing": "The master key is missing from the system key store.",
   "errors.name_required": "Please enter a name.",
   "errors.network": "The server could not be reached.",
