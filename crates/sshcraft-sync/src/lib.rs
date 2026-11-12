@@ -4,6 +4,7 @@
 //! is verified before it touches the local store.
 
 pub mod client;
+pub mod items;
 
 use sshcraft_proto::ProtoError;
 

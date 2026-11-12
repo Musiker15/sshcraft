@@ -53,7 +53,7 @@ pub struct Group {
     pub name: String,
     pub defaults: ConnectionSettings,
     /// The sync server this group belongs to; `None` means "only on this device".
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<ServerId>,
 }
 
@@ -65,7 +65,7 @@ pub struct Host {
     pub settings: ConnectionSettings,
     /// The sync server this host belongs to; `None` means "only on this device". A host in a
     /// group always has its group's location.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<ServerId>,
 }
 

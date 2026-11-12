@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 data-encoding = { workspace = true }
 zeroize = { workspace = true }
+russh = { workspace = true }
 
 [dev-dependencies]
 sshcraft-server = { workspace = true }
