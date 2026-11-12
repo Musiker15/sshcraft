@@ -677,7 +677,11 @@ async fn hop(ctx: &Context, resolved: &ResolvedHost) -> Result<Hop, Failure> {
         address: resolved.address.clone(),
         port: resolved.port,
         username: resolved.username.clone(),
-        auth: Auth { key, password },
+        auth: Auth {
+            key,
+            password,
+            certificate: None,
+        },
     })
 }
 

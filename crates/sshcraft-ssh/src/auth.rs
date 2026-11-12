@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use russh::client::{self, KeyboardInteractiveAuthResponse};
-use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
+use russh::keys::agent::AgentIdentity;
+use russh::keys::{Certificate, HashAlg, PrivateKeyWithHashAlg};
 use russh::{MethodKind, MethodSet};
 use zeroize::Zeroizing;
 
@@ -12,17 +13,85 @@ use crate::{AGENT_SIGN_TIMEOUT, Credential, SshError, agent_identities, protocol
 
 /// How to sign in on one host: a key, a stored password, both or neither (then the user is asked
 /// where the server allows it).
+#[derive(Default)]
 pub struct Auth {
     pub key: Option<Credential>,
     pub password: Option<Zeroizing<String>>,
+    /// An OpenSSH user certificate for `key`. Offered first while it is valid; the key alone
+    /// follows when the server turns it down.
+    pub certificate: Option<Certificate>,
 }
 
 impl Auth {
     pub fn key(credential: Credential) -> Self {
         Self {
             key: Some(credential),
-            password: None,
+            ..Default::default()
         }
+    }
+}
+
+/// Whether `cert` is valid right now (`valid_after <= now < valid_before`).
+pub fn certificate_valid_now(cert: &Certificate) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    cert.valid_after() <= now && now < cert.valid_before()
+}
+
+/// Lets a [`KeySigner`](crate::KeySigner) answer russh's signing request.
+struct SignerAdapter<'a>(&'a mut dyn crate::KeySigner);
+
+#[derive(Debug, thiserror::Error)]
+enum SignerAuthError {
+    #[error(transparent)]
+    Send(#[from] russh::SendError),
+    #[error("{0}")]
+    Signer(SshError),
+}
+
+impl From<SignerAuthError> for SshError {
+    fn from(e: SignerAuthError) -> Self {
+        match e {
+            SignerAuthError::Signer(e) => e,
+            SignerAuthError::Send(e) => protocol(e),
+        }
+    }
+}
+
+impl russh::Signer for SignerAdapter<'_> {
+    type Error = SignerAuthError;
+
+    #[allow(clippy::manual_async_fn)]
+    fn auth_sign(
+        &mut self,
+        _key: &AgentIdentity,
+        _hash_alg: Option<HashAlg>,
+        to_sign: Vec<u8>,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send {
+        async move {
+            let blob = self
+                .0
+                .sign(&to_sign)
+                .await
+                .map_err(SignerAuthError::Signer)?;
+            let len = u32::try_from(blob.len())
+                .map_err(|_| SignerAuthError::Signer(SshError::SignerFailed("too long".into())))?;
+            let mut out = to_sign;
+            out.extend_from_slice(&len.to_be_bytes());
+            out.extend_from_slice(&blob);
+            Ok(out)
+        }
+    }
+}
+
+/// Whether a failed attempt still leaves `publickey` to try.
+fn may_retry_key(result: &russh::client::AuthResult) -> bool {
+    match result {
+        russh::client::AuthResult::Success => false,
+        russh::client::AuthResult::Failure {
+            remaining_methods, ..
+        } => remaining_methods.contains(&MethodKind::PublicKey),
     }
 }
 
@@ -128,8 +197,10 @@ pub(crate) async fn authenticate<H: client::Handler>(
         password_rejected: false,
         offers_tried_password: false,
     };
+    // An expired (or not yet valid) certificate is not offered at all.
+    let certificate = auth.certificate.filter(certificate_valid_now);
     let first = match auth.key {
-        Some(credential) => publickey(handle, username, credential).await?,
+        Some(credential) => publickey(handle, username, credential, certificate).await?,
         None => handle.authenticate_none(username).await.map_err(protocol)?,
     };
     match first {
@@ -248,6 +319,7 @@ async fn publickey<H: client::Handler>(
     handle: &mut client::Handle<H>,
     username: &str,
     credential: Credential,
+    certificate: Option<Certificate>,
 ) -> Result<russh::client::AuthResult, SshError> {
     let hash = handle
         .best_supported_rsa_hash()
@@ -255,10 +327,44 @@ async fn publickey<H: client::Handler>(
         .map_err(protocol)?
         .flatten();
     match credential {
-        Credential::Key(key) => handle
-            .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
-            .await
-            .map_err(protocol),
+        Credential::Key(key) => {
+            let key = Arc::new(key);
+            if let Some(cert) = certificate {
+                let result = handle
+                    .authenticate_openssh_cert(username, key.clone(), cert)
+                    .await
+                    .map_err(protocol)?;
+                if !may_retry_key(&result) {
+                    return Ok(result);
+                }
+            }
+            handle
+                .authenticate_publickey(username, PrivateKeyWithHashAlg::new(key, hash))
+                .await
+                .map_err(protocol)
+        }
+        Credential::Signer {
+            public_key,
+            mut signer,
+        } => {
+            // Signers are hardware keys (`sk-`): no RSA hash to choose.
+            let mut adapter = SignerAdapter(signer.as_mut());
+            if let Some(cert) = certificate {
+                let signed =
+                    handle.authenticate_certificate_with(username, cert, None, &mut adapter);
+                let result = tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
+                    .await
+                    .map_err(|_| SshError::SignerFailed("no answer while signing".into()))??;
+                if !may_retry_key(&result) {
+                    return Ok(result);
+                }
+            }
+            let signed =
+                handle.authenticate_publickey_with(username, public_key, None, &mut adapter);
+            Ok(tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
+                .await
+                .map_err(|_| SshError::SignerFailed("no answer while signing".into()))??)
+        }
         Credential::Agent {
             fingerprint,
             mut agent,

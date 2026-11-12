@@ -42,6 +42,7 @@ fn hop(name: &str, address: &str, port: u16, password: &str) -> Hop {
         auth: Auth {
             key: None,
             password: Some(Zeroizing::new(password.to_owned())),
+            certificate: None,
         },
     }
 }

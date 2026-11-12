@@ -34,6 +34,7 @@ fn hop(name: &str, port: u16) -> Hop {
         auth: Auth {
             key: None,
             password: Some(Zeroizing::new("pw".into())),
+            certificate: None,
         },
     }
 }

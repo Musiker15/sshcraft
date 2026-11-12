@@ -16,7 +16,17 @@ use tokio::sync::mpsc;
 pub mod agent;
 mod auth;
 mod proxy;
-pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter};
+pub use auth::{
+    Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter, certificate_valid_now,
+};
+
+/// Signs for a key whose private half SSHCraft does not hold (a FIDO2 key, Windows Hello).
+#[async_trait::async_trait]
+pub trait KeySigner: Send {
+    /// The SSH signature blob for `data`: `string algorithm, string signature`, and for `sk-`
+    /// keys also `byte flags, uint32 counter`. Without the length in front.
+    async fn sign(&mut self, data: &[u8]) -> Result<Vec<u8>, SshError>;
+}
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -33,6 +43,11 @@ pub enum Credential {
     Agent {
         fingerprint: String,
         agent: DynAgent,
+    },
+    /// A key that signs elsewhere: only its public half is here.
+    Signer {
+        public_key: russh::keys::PublicKey,
+        signer: Box<dyn KeySigner>,
     },
 }
 
@@ -178,6 +193,10 @@ pub enum SshError {
     AgentKeyMissing,
     #[error("the ssh agent refused to sign")]
     AgentRefused,
+    #[error("signing was cancelled")]
+    SignerCancelled,
+    #[error("signing failed: {0}")]
+    SignerFailed(String),
     #[error("the command did not finish in time")]
     Timeout,
     #[error("sign-in was cancelled")]
@@ -204,6 +223,8 @@ impl From<&SshError> for Disconnect {
             | SshError::AgentUnavailable(_)
             | SshError::AgentKeyMissing
             | SshError::AgentRefused
+            | SshError::SignerCancelled
+            | SshError::SignerFailed(_)
             | SshError::AuthCancelled
             | SshError::PasswordRejected => Disconnect::AuthFailed,
             SshError::Connect(m) | SshError::Protocol(m) => Disconnect::Lost(m.clone()),
@@ -283,6 +304,8 @@ pub struct Session {
     forward_agent: bool,
     /// The jump hosts' connections the session runs through, kept open while it lives.
     jumps: Arc<Vec<client::Handle<ClientHandler>>>,
+    /// The target's certificate had expired, so the key went alone.
+    certificate_expired: bool,
 }
 
 pub struct Shell {
@@ -350,6 +373,7 @@ pub async fn connect_route(
         .ok_or_else(|| SshError::Connect("no host to connect to".into()))?;
     let timeout = params.connect_timeout;
     let mut connected: Vec<client::Handle<ClientHandler>> = Vec::new();
+    let mut certificate_expired = false;
     for (index, hop) in params.hops.into_iter().enumerate() {
         let host_name = hop.host_name.clone();
         let wrap = |error: SshError| {
@@ -404,6 +428,10 @@ pub async fn connect_route(
                 })
             })?;
         let mut credentials = hop.auth;
+        certificate_expired = credentials
+            .certificate
+            .as_ref()
+            .is_some_and(|c| !certificate_valid_now(c));
         if verifier.first_contact(&hop.address, hop.port) {
             credentials.password = None;
         }
@@ -424,10 +452,16 @@ pub async fn connect_route(
         env: Arc::new(params.options.env),
         forward_agent: params.options.agent_forwarding.is_some(),
         jumps: Arc::new(connected),
+        certificate_expired,
     })
 }
 
 impl Session {
+    /// Whether the target's certificate had expired, so the key signed in alone.
+    pub fn certificate_expired(&self) -> bool {
+        self.certificate_expired
+    }
+
     /// Runs a command on its own channel and returns at most `limit` bytes of its output;
     /// gives up after a few seconds.
     pub async fn exec(&self, command: &str, limit: usize) -> Result<Vec<u8>, SshError> {
