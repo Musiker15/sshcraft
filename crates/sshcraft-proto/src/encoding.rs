@@ -1,14 +1,14 @@
 //! Canonical bytes for signatures, domain constants and Base64 helpers for serde.
 
-pub const DOMAIN_DEVICE_CERT: &str = "stollen/device-cert/v1";
-pub const DOMAIN_LOG_ENTRY: &str = "stollen/device-log/v1";
-pub const DOMAIN_MANIFEST: &str = "stollen/area-manifest/v1";
-pub const DOMAIN_RECORD: &str = "stollen/record/v1";
-pub const DOMAIN_RECORD_AAD: &str = "stollen/record-aad/v1";
-pub const DOMAIN_ENVELOPE_INFO: &str = "stollen/area-key/v1";
-pub const DOMAIN_SAFETY: &str = "stollen/safety-number/v1";
-pub const DOMAIN_LOG_HASH: &str = "stollen/device-log-hash/v1";
-pub const DOMAIN_AUTH: &str = "stollen/server-auth/v1";
+pub const DOMAIN_DEVICE_CERT: &str = "sshcraft/device-cert/v1";
+pub const DOMAIN_LOG_ENTRY: &str = "sshcraft/device-log/v1";
+pub const DOMAIN_MANIFEST: &str = "sshcraft/area-manifest/v1";
+pub const DOMAIN_RECORD: &str = "sshcraft/record/v1";
+pub const DOMAIN_RECORD_AAD: &str = "sshcraft/record-aad/v1";
+pub const DOMAIN_ENVELOPE_INFO: &str = "sshcraft/area-key/v1";
+pub const DOMAIN_SAFETY: &str = "sshcraft/safety-number/v1";
+pub const DOMAIN_LOG_HASH: &str = "sshcraft/device-log-hash/v1";
+pub const DOMAIN_AUTH: &str = "sshcraft/server-auth/v1";
 
 /// The domain, then every field as a big-endian `u32` length followed by its bytes.
 /// Field boundaries stay unambiguous, also for empty fields.

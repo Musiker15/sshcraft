@@ -39,7 +39,7 @@ export function ProtonPassImport({ onImported }: { onImported: () => void }) {
     <>
       <h2>Aus Proton Pass</h2>
       <p className="empty" style={{ margin: 0 }}>
-        Zum Verbinden musst du nichts importieren: Stollen nutzt den Proton-Pass-Agenten direkt. Importieren brauchst du
+        Zum Verbinden musst du nichts importieren: SSHCraft nutzt den Proton-Pass-Agenten direkt. Importieren brauchst du
         nur, wenn der Schlüssel später auch synchronisiert werden soll.
       </p>
       {status === "loading" && <div>Prüfe pass-cli …</div>}

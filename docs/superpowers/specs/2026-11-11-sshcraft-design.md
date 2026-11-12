@@ -1,4 +1,4 @@
-# Stollen: Design
+# SSHCraft: Design
 
 Stand: 11.11.2026. Ergebnis des Brainstormings mit Moritz Kohm (GitHub `musiker15`).
 Entscheidungen von Moritz stehen ohne Zusatz. Was ich (Claude) entschieden habe, weil es
@@ -7,7 +7,7 @@ werden.
 
 ## 1. Worum es geht und warum
 
-Stollen ist ein SSH-Client für Windows, Android und iOS mit eigenem, selbst betriebenem
+SSHCraft ist ein SSH-Client für Windows, Android und iOS mit eigenem, selbst betriebenem
 Sync-Server. Vorbild ist Termius, aber ohne dessen Beiwerk (SFTP, FTP und Ähnliches).
 
 Der Anlass: Termius verlangt monatliche Gebühren, damit Hosts und Schlüssel zwischen Geräten
@@ -20,7 +20,7 @@ Proton-Pass-Desktop-App der SSH-Agent (Named Pipe `\\.\pipe\openssh-ssh-agent`).
 und iOS bietet Proton Pass anderen Apps keine Schnittstelle an. Genau dafür ist der Sync da:
 er bringt die Schlüssel auf die Handys.
 
-Stollen wird ein öffentliches Projekt auf GitHub im Konto `musiker15`, Lizenz **AGPL-3.0**.
+SSHCraft wird ein öffentliches Projekt auf GitHub im Konto `musiker15`, Lizenz **AGPL-3.0**.
 Andere sollen es mit ihrem eigenen Server betreiben können.
 
 ## 2. Ziele, Nicht-Ziele, Anti-Ziele
@@ -84,7 +84,7 @@ der Konflikt zwischen AGPL und App-Store-Bedingungen.
 
 ### Repository
 
-Ein Repository `musiker15/stollen`, lokal unter `G:\GitHub Repositories\Musiker15\stollen`.
+Ein Repository `musiker15/sshcraft`, lokal unter `G:\GitHub Repositories\Musiker15\sshcraft`.
 Aufteilung in Unterordner (Client, Server, gemeinsames Crate) bleibt dem Builder überlassen.
 Code, Kommentare und Bezeichner auf Englisch. README und Doku: Sprache dem Builder überlassen,
 für ein internationales Publikum ist Englisch naheliegend.
@@ -109,7 +109,7 @@ Ob Gruppen verschachtelt werden können, bleibt dem Builder überlassen.
 
 ## 5. Schlüsselquellen
 
-Drei Wege, gleichwertig nebeneinander. Die dritte gibt es immer, damit Stollen auch ganz ohne
+Drei Wege, gleichwertig nebeneinander. Die dritte gibt es immer, damit SSHCraft auch ganz ohne
 Proton Pass nutzbar ist.
 
 | Quelle | Plattform | Wofür | Wie |
@@ -230,7 +230,7 @@ Server zwingend braucht [Claudes Entscheidung].
 
 [Claudes Entscheidung, abgeleitet aus "der Server darf die Schlüssel nie lesen, auch wenn er
 gehackt wird"] Wer den Server übernimmt, kann nicht nur die Datenbank lesen, sondern auch
-verändern, was der Server ausliefert. Stollen schützt deshalb auch dagegen:
+verändern, was der Server ausliefert. SSHCraft schützt deshalb auch dagegen:
 
 - **Öffentliche Schlüssel anderer Nutzer prüfbar machen.** Beim Teilen zeigt der Client den
   Fingerprint des Empfängerschlüssels an, und beide Seiten können ihn vergleichen (wie die
@@ -300,7 +300,7 @@ künftige Änderungen nicht mehr entschlüsseln kann.
   [Claudes Entscheidung].
 - **Sitzungen im Hintergrund:** Auf Android laufen offene Sitzungen über einen
   Vordergrund-Dienst (mit Benachrichtigung) weiter. Auf iOS lässt das System das nicht dauerhaft
-  zu; dort verbindet Stollen beim Zurückkehren neu und sagt das deutlich an
+  zu; dort verbindet SSHCraft beim Zurückkehren neu und sagt das deutlich an
   [Claudes Entscheidung].
 - **Import aus `~/.ssh/config`** auf dem Desktop, damit vorhandene Hosts nicht von Hand neu
   angelegt werden müssen [Claudes Entscheidung]. Einen Import aus Termius gibt es nicht, weil
@@ -311,14 +311,14 @@ künftige Änderungen nicht mehr entschlüsseln kann.
 
 ## 10. Anbindung für KI-Agents (Claude Code, Codex und andere)
 
-Agents sollen über Stollen alles tun können, was im Client möglich ist, aber unter keinen
+Agents sollen über SSHCraft alles tun können, was im Client möglich ist, aber unter keinen
 Umständen einen privaten Schlüssel zu sehen bekommen.
 
 ### Wie Agents andocken
 
-- Der Desktop-Client bringt einen **MCP-Server** mit (`stollen mcp`, Transport stdio), den
+- Der Desktop-Client bringt einen **MCP-Server** mit (`sshcraft mcp`, Transport stdio), den
   Claude Code, Codex und andere MCP-fähige Agents einbinden. Dazu eine **Kommandozeile**
-  `stollen` mit denselben Aktionen für Agents und Skripte ohne MCP [Claudes Entscheidung].
+  `sshcraft` mit denselben Aktionen für Agents und Skripte ohne MCP [Claudes Entscheidung].
 - Beide sind nur dünne Vermittler: Sie sprechen über eine lokale, nur für den eigenen
   Windows-Benutzer zugängliche Verbindung mit dem **laufenden Desktop-Client**. Der Client hält
   die Schlüssel, baut die SSH-Verbindungen auf und prüft die Rechte. Läuft er nicht, bekommt der
@@ -333,8 +333,8 @@ Umständen einen privaten Schlüssel zu sehen bekommen.
   zurück (einmalige Befehle und eine länger offene Sitzung, in die er schreibt und aus der er
   liest; Schnitt dem Builder überlassen).
 - Auch der Kontoschlüssel und Geräteschlüssel sind für Agents unerreichbar.
-- **Grenze, die Stollen nicht schließen kann:** Ein Agent mit eigener Shell läuft als derselbe
-  Windows-Benutzer und könnte an Stollen vorbei `pass-cli` aufrufen. Stollen erschwert den Griff
+- **Grenze, die SSHCraft nicht schließen kann:** Ein Agent mit eigener Shell läuft als derselbe
+  Windows-Benutzer und könnte an SSHCraft vorbei `pass-cli` aufrufen. SSHCraft erschwert den Griff
   auf den eigenen Speicher: Die lokal gespeicherten Schlüssel werden nach dem Start erst nach
   Windows Hello (Fingerabdruck, Gesicht oder PIN) entsperrt [Claudes Entscheidung]. Die Doku
   erklärt die Grenze offen.
@@ -346,7 +346,7 @@ In den Einstellungen des Clients steht **jede Aktion**, die der Client kennt, mi
 - **Erlaubt:** der Agent darf ohne Rückfrage.
 - **Fragen:** der Client zeigt vor der Ausführung ein eigenes Bestätigungsfenster mit Agent,
   Aktion und Ziel (etwa Host und Befehl). Die Bestätigung passiert ausschließlich in der
-  Oberfläche von Stollen, nie im Chat des Agents, damit ein Agent sie nicht selbst geben kann.
+  Oberfläche von SSHCraft, nie im Chat des Agents, damit ein Agent sie nicht selbst geben kann.
 - **Gesperrt:** der Agent bekommt eine Ablehnung.
 
 Vorgaben für eine frische Installation [Claudes Entscheidung]:

@@ -1,6 +1,6 @@
-use stollen_proto::ProtoError;
-use stollen_proto::devicelog::{DeviceLog, LogHead};
-use stollen_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys};
+use sshcraft_proto::ProtoError;
+use sshcraft_proto::devicelog::{DeviceLog, LogHead};
+use sshcraft_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys};
 use uuid::Uuid;
 
 struct Device {

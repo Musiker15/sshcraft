@@ -4628,19 +4628,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stable_deref_trait"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
-
-[[package]]
-name = "static_vcruntime"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
-
-[[package]]
-name = "stollen-app"
+name = "sshcraft-app"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -4649,8 +4637,8 @@ dependencies = [
  "russh",
  "serde",
  "serde_json",
- "stollen-core",
- "stollen-ssh",
+ "sshcraft-core",
+ "sshcraft-ssh",
  "tauri",
  "tauri-build",
  "thiserror 2.0.21",
@@ -4662,7 +4650,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stollen-core"
+name = "sshcraft-core"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
@@ -4679,7 +4667,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stollen-proto"
+name = "sshcraft-proto"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
@@ -4696,7 +4684,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stollen-ssh"
+name = "sshcraft-ssh"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -4704,11 +4692,23 @@ dependencies = [
  "rand",
  "russh",
  "serde",
- "stollen-core",
- "stollen-ssh",
+ "sshcraft-core",
+ "sshcraft-ssh",
  "thiserror 2.0.21",
  "tokio",
 ]
+
+[[package]]
+name = "stable_deref_trait"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "static_vcruntime"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
 
 [[package]]
 name = "string_cache"

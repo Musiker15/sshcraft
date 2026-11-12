@@ -89,7 +89,7 @@ fn import_garbage_is_error() {
 #[test]
 fn database_file_never_contains_plaintext_key() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("stollen.db");
+    let path = dir.path().join("sshcraft.db");
     let key = test_key();
     {
         let store = Store::open(&path).unwrap();

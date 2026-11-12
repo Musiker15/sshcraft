@@ -31,7 +31,7 @@ id_type!(KeyId);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum KeyRef {
-    /// A key held in Stollen's own encrypted vault.
+    /// A key held in SSHCraft's own encrypted vault.
     Stored { id: KeyId },
     /// A key held by an SSH agent (Proton Pass); only its fingerprint is known.
     Agent { fingerprint: String },

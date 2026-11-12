@@ -1,6 +1,6 @@
 [package]
-name = "stollen-core"
-description = "Data model, local store and key vault for Stollen"
+name = "sshcraft-core"
+description = "Data model, local store and key vault for SSHCraft"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

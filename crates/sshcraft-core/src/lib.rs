@@ -1,4 +1,4 @@
-//! Data model, local store and key vault for Stollen.
+//! Data model, local store and key vault for SSHCraft.
 
 pub mod model;
 pub mod policy;

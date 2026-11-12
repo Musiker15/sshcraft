@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use stollen_core::model::HostId;
+use sshcraft_core::model::HostId;
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
 

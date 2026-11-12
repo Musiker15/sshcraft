@@ -6,11 +6,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use stollen_core::model::{HostId, KeyRef, ResolvedHost, resolve};
-use stollen_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
-use stollen_core::store::Store;
-use stollen_core::vault::Vault;
-use stollen_ssh::{ConnectParams, HostKeyVerifier, ShellEvent, ShellWriter, SshError};
+use sshcraft_core::model::{HostId, KeyRef, ResolvedHost, resolve};
+use sshcraft_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
+use sshcraft_core::store::Store;
+use sshcraft_core::vault::Vault;
+use sshcraft_ssh::{ConnectParams, HostKeyVerifier, ShellEvent, ShellWriter, SshError};
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -58,7 +58,7 @@ pub trait HostKeyPrompter: Send + Sync + 'static {
     async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
 }
 
-/// The UI may hold this many unacknowledged output bytes before Stollen stops reading from
+/// The UI may hold this many unacknowledged output bytes before SSHCraft stops reading from
 /// the server. Keeps a runaway `cat` from flooding the webview.
 pub const OUTPUT_HIGH_WATERMARK: usize = 512 * 1024;
 
@@ -130,7 +130,7 @@ pub struct KeyGate {
     hello_missing: std::sync::atomic::AtomicBool,
 }
 
-const HELLO_REASON: &str = "Stollen möchte deine gespeicherten SSH-Schlüssel verwenden.";
+const HELLO_REASON: &str = "SSHCraft möchte deine gespeicherten SSH-Schlüssel verwenden.";
 
 impl KeyGate {
     fn new(presence: Arc<dyn UserPresence>) -> Self {
@@ -166,7 +166,7 @@ impl KeyGate {
 /// Opens a connection to the SSH agent (Proton Pass on Windows, an in-memory agent in tests).
 #[async_trait::async_trait]
 pub trait AgentConnector: Send + Sync + 'static {
-    async fn connect(&self) -> Result<stollen_ssh::DynAgent, SshError>;
+    async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, SshError>;
 }
 
 /// The Windows agent pipe served by the Proton Pass desktop app.
@@ -174,10 +174,10 @@ pub struct WindowsAgent;
 
 #[async_trait::async_trait]
 impl AgentConnector for WindowsAgent {
-    async fn connect(&self) -> Result<stollen_ssh::DynAgent, SshError> {
+    async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, SshError> {
         #[cfg(windows)]
         {
-            stollen_ssh::agent::open_windows_agent().await
+            sshcraft_ssh::agent::open_windows_agent().await
         }
         #[cfg(not(windows))]
         {
@@ -418,9 +418,9 @@ async fn connect_once(
             let key = vault
                 .private_key(&store, *id)
                 .map_err(|e| error(e.to_string()))?;
-            stollen_ssh::Credential::Key(key)
+            sshcraft_ssh::Credential::Key(key)
         }
-        KeyRef::Agent { fingerprint } => stollen_ssh::Credential::Agent {
+        KeyRef::Agent { fingerprint } => sshcraft_ssh::Credential::Agent {
             fingerprint: fingerprint.clone(),
             agent: ctx
                 .agent
@@ -442,7 +442,7 @@ async fn connect_once(
         username: resolved.username.clone(),
         credential,
     };
-    let session = match stollen_ssh::connect(params, verifier.clone()).await {
+    let session = match sshcraft_ssh::connect(params, verifier.clone()).await {
         Ok(s) => s,
         Err(SshError::HostKeyRejected) => {
             let mismatch = verifier.mismatch.lock().expect("mismatch lock").take();

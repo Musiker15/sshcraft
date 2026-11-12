@@ -1,6 +1,6 @@
 [package]
-name = "stollen-ssh"
-description = "SSH session engine for Stollen"
+name = "sshcraft-ssh"
+description = "SSH session engine for SSHCraft"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ license.workspace = true
 testing = ["dep:rand", "dep:futures"]
 
 [dependencies]
-stollen-core = { workspace = true }
+sshcraft-core = { workspace = true }
 russh = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -20,9 +20,9 @@ rand = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
-stollen-ssh = { path = ".", features = ["testing"] }
+sshcraft-ssh = { path = ".", features = ["testing"] }
 rand = { workspace = true }
 russh = { workspace = true }
-stollen-core = { workspace = true }
+sshcraft-core = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }

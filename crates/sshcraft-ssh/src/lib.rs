@@ -1,4 +1,4 @@
-//! SSH session engine for Stollen: connect with a private key, verify the server's host key
+//! SSH session engine for SSHCraft: connect with a private key, verify the server's host key
 //! through the caller, run an interactive shell and stream its raw output bytes.
 
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::time::Duration;
 use russh::client::{self, Msg};
 use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{ChannelMsg, ChannelWriteHalf};
-use stollen_core::policy::Disconnect;
+use sshcraft_core::policy::Disconnect;
 use tokio::sync::mpsc;
 
 #[cfg(windows)]

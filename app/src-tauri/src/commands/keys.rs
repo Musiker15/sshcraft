@@ -1,10 +1,10 @@
 //! Key management. Only public facts (`KeyInfo`) cross into the UI.
 
 use serde::Serialize;
+use sshcraft_core::model::KeyId;
 use std::sync::Arc;
-use stollen_core::model::KeyId;
 
-use stollen_core::vault::{self, KeyInfo, Vault};
+use sshcraft_core::vault::{self, KeyInfo, Vault};
 use tauri::State;
 use zeroize::Zeroizing;
 
@@ -137,13 +137,13 @@ pub fn delete_key(state: State<'_, AppState>, id: KeyId) -> CommandResult<()> {
 
 /// Keys the Proton Pass agent offers. Only public facts, never key material.
 #[tauri::command]
-pub async fn list_agent_keys() -> CommandResult<Vec<stollen_ssh::AgentKey>> {
+pub async fn list_agent_keys() -> CommandResult<Vec<sshcraft_ssh::AgentKey>> {
     use crate::sessions::{AgentConnector, WindowsAgent};
     let mut agent = WindowsAgent
         .connect()
         .await
         .map_err(|e| CommandError::new("agent_unavailable", e))?;
-    stollen_ssh::list_agent_keys(&mut agent)
+    sshcraft_ssh::list_agent_keys(&mut agent)
         .await
         .map_err(|e| CommandError::new("agent_unavailable", e))
 }

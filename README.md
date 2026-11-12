@@ -1,8 +1,8 @@
-# Stollen
+# SSHCraft
 
 Self-hosted SSH client with end-to-end encrypted sync and native Proton Pass support.
 
-Stollen is an SSH client for Windows, Android and iOS. Hosts, groups and keys can be synced
+SSHCraft is an SSH client for Windows, Android and iOS. Hosts, groups and keys can be synced
 through your own server, encrypted on the device so the server never sees them. On the desktop,
 keys can come straight from the Proton Pass SSH agent.
 
@@ -16,16 +16,16 @@ npm install
 npm run tauri dev
 ```
 
-On Windows, Stollen uses the SSH agent of the Proton Pass desktop app directly, so keys stored
-there work without importing them. `pass-cli` is only needed to import a key into Stollen's own
+On Windows, SSHCraft uses the SSH agent of the Proton Pass desktop app directly, so keys stored
+there work without importing them. `pass-cli` is only needed to import a key into SSHCraft's own
 encrypted vault.
 
 ## Documentation
 
 | Topic | Link |
 |---|---|
-| Design (German) | [docs/superpowers/specs/2026-11-11-stollen-design.md](docs/superpowers/specs/2026-11-11-stollen-design.md) |
-| Roadmap (German) | [docs/superpowers/plans/2026-11-11-stollen-roadmap.md](docs/superpowers/plans/2026-11-11-stollen-roadmap.md) |
+| Design (German) | [docs/superpowers/specs/2026-11-11-sshcraft-design.md](docs/superpowers/specs/2026-11-11-sshcraft-design.md) |
+| Roadmap (German) | [docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md](docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md) |
 
 ## Help and contributing
 

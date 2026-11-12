@@ -1,16 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["crates/stollen-core", "crates/stollen-ssh", "crates/stollen-proto", "app/src-tauri"]
+members = ["crates/sshcraft-core", "crates/sshcraft-ssh", "crates/sshcraft-proto", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-repository = "https://github.com/musiker15/stollen"
+repository = "https://github.com/musiker15/sshcraft"
 
 [workspace.dependencies]
-stollen-core = { path = "crates/stollen-core" }
-stollen-ssh = { path = "crates/stollen-ssh" }
+sshcraft-core = { path = "crates/sshcraft-core" }
+sshcraft-ssh = { path = "crates/sshcraft-ssh" }
 russh = "0.65.1"
 rusqlite = { version = "0.42.0", features = ["bundled"] }
 keyring = "4.2.0"

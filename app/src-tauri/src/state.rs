@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use stollen_core::store::Store;
-use stollen_core::vault::{KeyringMasterKey, Vault};
+use sshcraft_core::store::Store;
+use sshcraft_core::vault::{KeyringMasterKey, Vault};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
@@ -22,10 +22,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn init(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
-        let dirs = directories::ProjectDirs::from("de", "musiker15", "Stollen")
+        let dirs = directories::ProjectDirs::from("de", "musiker15", "SSHCraft")
             .ok_or("no home directory")?;
         std::fs::create_dir_all(dirs.data_dir())?;
-        let store = Store::open(&dirs.data_dir().join("stollen.db"))?;
+        let store = Store::open(&dirs.data_dir().join("sshcraft.db"))?;
         let vault = Vault::unlock(&store, Box::new(KeyringMasterKey))
             .map(Arc::new)
             .map_err(|e| e.to_string());

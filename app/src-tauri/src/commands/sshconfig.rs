@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use stollen_core::sshconfig::{self, ImportCandidate};
+use sshcraft_core::sshconfig::{self, ImportCandidate};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
@@ -51,7 +51,7 @@ async fn agent_fingerprints() -> Vec<String> {
     let Ok(mut agent) = WindowsAgent.connect().await else {
         return Vec::new();
     };
-    stollen_ssh::list_agent_keys(&mut agent)
+    sshcraft_ssh::list_agent_keys(&mut agent)
         .await
         .map(|keys| keys.into_iter().map(|k| k.fingerprint).collect())
         .unwrap_or_default()

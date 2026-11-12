@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use stollen_proto::encoding::b64;
+use sshcraft_proto::encoding::b64;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Holder {

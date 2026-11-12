@@ -18,7 +18,7 @@ use zeroize::Zeroizing;
 use crate::ProtoError;
 use crate::encoding::{DOMAIN_AUTH, DOMAIN_DEVICE_CERT, DOMAIN_SAFETY, b64, signing_bytes};
 
-const EXPORT_PREFIX: &str = "stollen-account-1:";
+const EXPORT_PREFIX: &str = "sshcraft-account-1:";
 const CHECKSUM_LEN: usize = 4;
 
 fn random_32() -> Zeroizing<[u8; 32]> {
@@ -60,7 +60,7 @@ impl AccountKey {
         AccountPublic(self.signing.verifying_key().to_bytes())
     }
 
-    /// `stollen-account-1:` + Base32 of `seed || SHA-256(seed)[0..4]`, for Proton Pass or a QR code.
+    /// `sshcraft-account-1:` + Base32 of `seed || SHA-256(seed)[0..4]`, for Proton Pass or a QR code.
     pub fn export(&self) -> Zeroizing<String> {
         let seed = Zeroizing::new(self.signing.to_bytes());
         let mut body = Zeroizing::new(Vec::with_capacity(32 + CHECKSUM_LEN));

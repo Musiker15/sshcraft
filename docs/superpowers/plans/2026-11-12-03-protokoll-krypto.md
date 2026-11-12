@@ -1,14 +1,14 @@
-# Stollen Teilplan 3: Protokoll- und Krypto-Crate Implementation Plan
+# SSHCraft Teilplan 3: Protokoll- und Krypto-Crate Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Eine reine Rust-Bibliothek `stollen-proto`, die Konto- und Geräteschlüssel, das signierte Geräteprotokoll, Bereichsschlüssel, verschlüsselte und signierte Datensätze und den Schutz gegen Rückfall auf alte Stände umsetzt, so dass ein übernommener Sync-Server weder mitlesen noch unbemerkt etwas unterschieben kann.
+**Goal:** Eine reine Rust-Bibliothek `sshcraft-proto`, die Konto- und Geräteschlüssel, das signierte Geräteprotokoll, Bereichsschlüssel, verschlüsselte und signierte Datensätze und den Schutz gegen Rückfall auf alte Stände umsetzt, so dass ein übernommener Sync-Server weder mitlesen noch unbemerkt etwas unterschieben kann.
 
-**Architecture:** Ohne Ein- und Ausgabe, ohne Datenbank, ohne Netz: nur Typen, die sich serialisieren lassen, und Funktionen, die prüfen. Client (Teilplan 5 und 6) und Server (Teilplan 4) nutzen dieselben Typen. Der Server sieht nur Kopfdaten (IDs, Versionen, öffentliche Schlüssel), die Inhalte nur als Chiffrat. `stollen-proto` hängt nicht von `stollen-core` ab, damit der Server ohne SQLite und Tresor auskommt; der Inhalt eines Datensatzes ist für die Bibliothek nur Bytes.
+**Architecture:** Ohne Ein- und Ausgabe, ohne Datenbank, ohne Netz: nur Typen, die sich serialisieren lassen, und Funktionen, die prüfen. Client (Teilplan 5 und 6) und Server (Teilplan 4) nutzen dieselben Typen. Der Server sieht nur Kopfdaten (IDs, Versionen, öffentliche Schlüssel), die Inhalte nur als Chiffrat. `sshcraft-proto` hängt nicht von `sshcraft-core` ab, damit der Server ohne SQLite und Tresor auskommt; der Inhalt eines Datensatzes ist für die Bibliothek nur Bytes.
 
 **Tech Stack:** Rust 1.99, ed25519-dalek 3.0.0 (Signaturen), hpke 0.15.1 mit `default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"]` (RFC 9180, Suite DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / ChaCha20Poly1305, Modus Base), chacha20poly1305 0.11.0 (XChaCha20-Poly1305 für Datensätze), sha2 0.11.1, data-encoding 2.11.1 (Base32 und Base64), rand 0.10.3, uuid, serde, serde_json, thiserror, zeroize (Feature `serde`).
 
-**Spec:** `docs/superpowers/specs/2026-11-11-stollen-design.md`, Abschnitte 6 (Konten, Geräte, Geräte-Sperre) und 7 (Ende-zu-Ende-Verschlüsselung, Angreifermodell), Fahrplan `docs/superpowers/plans/2026-11-11-stollen-roadmap.md`.
+**Spec:** `docs/superpowers/specs/2026-11-11-sshcraft-design.md`, Abschnitte 6 (Konten, Geräte, Geräte-Sperre) und 7 (Ende-zu-Ende-Verschlüsselung, Angreifermodell), Fahrplan `docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md`.
 
 ## Global Constraints
 
@@ -33,7 +33,7 @@
 ## Dateistruktur
 
 ```
-crates/stollen-proto/
+crates/sshcraft-proto/
   Cargo.toml
   src/lib.rs          Module, ProtoError
   src/encoding.rs     signing_bytes(), Domain-Konstanten, b64-serde-Hilfe
@@ -50,14 +50,14 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 ### Task 1: Crate-Gerüst, Kodierung und Fehler
 
 **Files:**
-- Create: `crates/stollen-proto/Cargo.toml`, `src/lib.rs`, `src/encoding.rs`, `tests/encoding.rs`
+- Create: `crates/sshcraft-proto/Cargo.toml`, `src/lib.rs`, `src/encoding.rs`, `tests/encoding.rs`
 - Modify: `Cargo.toml` (Workspace-Mitglied, neue Abhängigkeiten unter `[workspace.dependencies]`)
 
 **Interfaces:**
 - Produces:
   - `pub enum ProtoError` (`thiserror`): `BadAccountKeyFormat`, `BadChecksum`, `BadSignature`, `UnknownDevice`, `DeviceRevoked`, `LogBroken(String)`, `Rollback`, `Fork`, `NotAllowed`, `Decrypt`, `Malformed(String)`.
   - `pub(crate) fn signing_bytes(domain: &str, fields: &[&[u8]]) -> Vec<u8>`: `domain` als UTF-8, dann je Feld `u32` Länge (Big Endian) und Bytes. Damit ist die Zuordnung eindeutig, auch bei leeren Feldern.
-  - Domänen-Konstanten: `DOMAIN_DEVICE_CERT = "stollen/device-cert/v1"`, `DOMAIN_LOG_ENTRY = "stollen/device-log/v1"`, `DOMAIN_MANIFEST = "stollen/area-manifest/v1"`, `DOMAIN_RECORD = "stollen/record/v1"`, `DOMAIN_RECORD_AAD = "stollen/record-aad/v1"`, `DOMAIN_ENVELOPE_INFO = "stollen/area-key/v1"`, `DOMAIN_SAFETY = "stollen/safety-number/v1"`, `DOMAIN_LOG_HASH = "stollen/device-log-hash/v1"`, `DOMAIN_AUTH = "stollen/server-auth/v1"`.
+  - Domänen-Konstanten: `DOMAIN_DEVICE_CERT = "sshcraft/device-cert/v1"`, `DOMAIN_LOG_ENTRY = "sshcraft/device-log/v1"`, `DOMAIN_MANIFEST = "sshcraft/area-manifest/v1"`, `DOMAIN_RECORD = "sshcraft/record/v1"`, `DOMAIN_RECORD_AAD = "sshcraft/record-aad/v1"`, `DOMAIN_ENVELOPE_INFO = "sshcraft/area-key/v1"`, `DOMAIN_SAFETY = "sshcraft/safety-number/v1"`, `DOMAIN_LOG_HASH = "sshcraft/device-log-hash/v1"`, `DOMAIN_AUTH = "sshcraft/server-auth/v1"`.
   - `pub mod b64`: serde-`with`-Modul für `Vec<u8>` und `[u8; N]` als Base64 ohne Polsterung.
 
 - [ ] **Step 1: Failing tests:**
@@ -73,20 +73,20 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 
 - [ ] **Step 2:** Tests schlagen fehl.
 - [ ] **Step 3:** Umsetzen; aktuelle Versionen prüfen und in `[workspace.dependencies]` eintragen.
-- [ ] **Step 4:** `cargo test -p stollen-proto` grün.
-- [ ] **Step 5:** Commit `stollen-proto: Gerüst, kanonische Signaturbytes, Base64`.
+- [ ] **Step 4:** `cargo test -p sshcraft-proto` grün.
+- [ ] **Step 5:** Commit `sshcraft-proto: Gerüst, kanonische Signaturbytes, Base64`.
 
 ---
 
 ### Task 2: Kontoschlüssel und Geräte
 
 **Files:**
-- Create: `crates/stollen-proto/src/identity.rs`, `tests/identity.rs`
+- Create: `crates/sshcraft-proto/src/identity.rs`, `tests/identity.rs`
 
 **Interfaces:**
 - Produces:
   - `pub struct AccountKey` (Ed25519-Signaturschlüssel, kein `Debug`-Inhalt): `generate() -> Self`, `public(&self) -> AccountPublic`, `export(&self) -> Zeroizing<String>`, `import(text: &str) -> Result<Self, ProtoError>`.
-  - **Exportformat** `stollen-account-1:` + Base32 (RFC 4648, Großbuchstaben, ohne Polsterung) von `seed (32 Bytes) || SHA-256(seed)[0..4]`. Beim Import: alle Leerzeichen und Zeilenumbrüche entfernen, Groß- und Kleinschreibung egal; falscher Präfix oder falsche Länge → `BadAccountKeyFormat`, falsche Prüfsumme → `BadChecksum`.
+  - **Exportformat** `sshcraft-account-1:` + Base32 (RFC 4648, Großbuchstaben, ohne Polsterung) von `seed (32 Bytes) || SHA-256(seed)[0..4]`. Beim Import: alle Leerzeichen und Zeilenumbrüche entfernen, Groß- und Kleinschreibung egal; falscher Präfix oder falsche Länge → `BadAccountKeyFormat`, falsche Prüfsumme → `BadChecksum`.
   - `pub struct AccountPublic([u8; 32])` (`Serialize`, `Deserialize` über `b64`, `Eq`, `Hash`, `Copy`): `verify(&self, msg: &[u8], sig: &[u8; 64]) -> Result<(), ProtoError>`.
   - `pub fn safety_number(account: &AccountPublic) -> String`: `SHA-256(DOMAIN_SAFETY || bytes)`, die ersten 30 Bytes in sechs Blöcke zu je 5 Bytes, jeder Block als Big-Endian-Zahl modulo 100000, fünfstellig mit führenden Nullen, durch Leerzeichen getrennt (Beispiel `"04213 99120 00017 53381 72004 10855"`).
   - `pub struct DeviceKeys` (Ed25519-Signaturschlüssel und HPKE-X25519-Schlüssel): `generate() -> Self`, `public(&self) -> DevicePublic`, `to_bytes(&self) -> Zeroizing<[u8; 64]>`, `from_bytes(&[u8; 64]) -> Result<Self, ProtoError>`, `sign(&self, msg: &[u8]) -> [u8; 64]` (crate-intern).
@@ -115,14 +115,14 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 - [ ] **Step 3:** Umsetzen.
 - [ ] **Step 4:** Tests grün.
 - [ ] **Step 5: Gegenproben:** Prüfsumme beim Import nicht prüfen → `one_changed_character_fails_the_checksum` rot. In `verify` das Feld `name` nicht mitsignieren → `certificate_with_changed_field_fails` rot.
-- [ ] **Step 6:** Commit `stollen-proto: Kontoschlüssel, Sicherheitsnummer, Geräte-Zertifikate`.
+- [ ] **Step 6:** Commit `sshcraft-proto: Kontoschlüssel, Sicherheitsnummer, Geräte-Zertifikate`.
 
 ---
 
 ### Task 3: Geräteprotokoll
 
 **Files:**
-- Create: `crates/stollen-proto/src/devicelog.rs`, `tests/devicelog.rs`
+- Create: `crates/sshcraft-proto/src/devicelog.rs`, `tests/devicelog.rs`
 
 **Interfaces:**
 - Consumes: Task 2.
@@ -161,14 +161,14 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 - [ ] **Step 3:** Umsetzen.
 - [ ] **Step 4:** Tests grün.
 - [ ] **Step 5: Gegenproben:** Prüfung "Signierer ist zu diesem Zeitpunkt aktiv" entfernen → `revoked_device_cannot_sign_afterwards` rot. Prüfung von `prev_hash` entfernen → `changed_prev_hash_is_rejected` rot. Vergleich mit `known.hash` entfernen → `different_entry_at_known_seq_is_a_fork` rot.
-- [ ] **Step 6:** Commit `stollen-proto: signiertes Geräteprotokoll mit Sperren`.
+- [ ] **Step 6:** Commit `sshcraft-proto: signiertes Geräteprotokoll mit Sperren`.
 
 ---
 
 ### Task 4: Bereichsschlüssel und Umschläge
 
 **Files:**
-- Create: `crates/stollen-proto/src/area.rs` (erster Teil), `tests/envelope.rs`
+- Create: `crates/sshcraft-proto/src/area.rs` (erster Teil), `tests/envelope.rs`
 
 **Interfaces:**
 - Consumes: Task 2.
@@ -193,15 +193,15 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 - [ ] **Step 3:** Umsetzen.
 - [ ] **Step 4:** Tests grün.
 - [ ] **Step 5: Gegenprobe:** `aad` ohne `area_id` bilden → `envelope_moved_to_other_area_or_version_fails` rot.
-- [ ] **Step 6:** Commit `stollen-proto: Bereichsschlüssel per HPKE an Geräte`.
+- [ ] **Step 6:** Commit `sshcraft-proto: Bereichsschlüssel per HPKE an Geräte`.
 
 ---
 
 ### Task 5: Bereichsbeschreibung, Datensätze und Rückfallschutz
 
 **Files:**
-- Modify: `crates/stollen-proto/src/area.rs`
-- Create: `crates/stollen-proto/src/record.rs`, `tests/manifest.rs`, `tests/record.rs`
+- Modify: `crates/sshcraft-proto/src/area.rs`
+- Create: `crates/sshcraft-proto/src/record.rs`, `tests/manifest.rs`, `tests/record.rs`
 
 **Interfaces:**
 - Consumes: Tasks 2 bis 4.
@@ -243,7 +243,7 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 - [ ] **Step 3:** Umsetzen.
 - [ ] **Step 4:** Tests grün.
 - [ ] **Step 5: Gegenproben:** `can_write` immer `true` → `reader_member_record_is_rejected` rot. Prüfung "Gerät gehört zu `author_account`" entfernen → `record_claiming_another_account_is_rejected` rot. `version` aus dem `aad` nehmen → `header_tampering_is_rejected` rot. `Fork`-Fall als `Unchanged` behandeln → `tracker_rejects_fork` rot.
-- [ ] **Step 6:** Commit `stollen-proto: Bereichsbeschreibung, signierte Datensätze, Rückfallschutz`.
+- [ ] **Step 6:** Commit `sshcraft-proto: Bereichsbeschreibung, signierte Datensätze, Rückfallschutz`.
 
 ---
 
@@ -255,4 +255,4 @@ docs/protocol.md      Formate und Prüfregeln für Leute, die einen eigenen Clie
 
 - [ ] **Step 1:** `docs/protocol.md` beschreibt für Leute, die einen eigenen Client oder Server schreiben: Schlüsselarten und wer was signiert; Exportformat des Kontoschlüssels; Sicherheitsnummer; `signing_bytes` mit allen Domänen; Geräteprotokoll mit Prüfregeln; HPKE-Suite und `aad` der Umschläge; Datensatz-Kopf, `aad`, Signatur und Reihenfolge der Prüfungen; Rückfallschutz; was der Server sieht und was nicht; offene Grenzen (Metadaten wie Anzahl, Größe und Zeitpunkt von Datensätzen sind für den Server sichtbar).
 - [ ] **Step 2:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check` grün.
-- [ ] **Step 3:** Commit `Protokollbeschreibung für stollen-proto`.
+- [ ] **Step 3:** Commit `Protokollbeschreibung für sshcraft-proto`.

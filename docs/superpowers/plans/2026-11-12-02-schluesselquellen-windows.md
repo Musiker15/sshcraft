@@ -1,20 +1,20 @@
-# Stollen Teilplan 2: Schlüsselquellen und Windows-Anbindung Implementation Plan
+# SSHCraft Teilplan 2: Schlüsselquellen und Windows-Anbindung Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Die Windows-App verbindet sich mit Schlüsseln aus dem Proton-Pass-Agenten, importiert Schlüssel über `pass-cli` und Hosts aus `~/.ssh/config`, und gespeicherte Schlüssel werden nach dem Start erst nach Windows Hello benutzt.
 
-**Architecture:** `KeyRef` bekommt die Variante `Agent { fingerprint }`. `stollen-ssh` meldet sich wahlweise mit einem privaten Schlüssel oder über einen russh-`AgentClient` an; der Agent kommt über ein Trait, damit Tests einen russh-Agent-Server im Speicher nutzen. `pass-cli` und Windows Hello stecken hinter Traits in der App, `~/.ssh/config` wird in `stollen-core` als reine Funktion geparst. Die Sitzungsverwaltung fragt Windows Hello einmal pro App-Lauf, bevor sie einen gespeicherten Schlüssel aus dem Tresor holt.
+**Architecture:** `KeyRef` bekommt die Variante `Agent { fingerprint }`. `sshcraft-ssh` meldet sich wahlweise mit einem privaten Schlüssel oder über einen russh-`AgentClient` an; der Agent kommt über ein Trait, damit Tests einen russh-Agent-Server im Speicher nutzen. `pass-cli` und Windows Hello stecken hinter Traits in der App, `~/.ssh/config` wird in `sshcraft-core` als reine Funktion geparst. Die Sitzungsverwaltung fragt Windows Hello einmal pro App-Lauf, bevor sie einen gespeicherten Schlüssel aus dem Tresor holt.
 
 **Tech Stack:** wie Teilplan 1, dazu `windows` 0.62.2 (Features `Security_Credentials_UI`, `Foundation`, `Win32_Foundation`, `Win32_System_WinRT`), `pass-cli` 2.7.0 (Proton Pass, nicht mitgeliefert).
 
-**Spec:** `docs/superpowers/specs/2026-11-11-stollen-design.md` (Abschnitte 5, 9, 10, 11), Fahrplan `docs/superpowers/plans/2026-11-11-stollen-roadmap.md`, Vorgänger `docs/superpowers/plans/2026-11-11-01-desktop-grundlage.md`.
+**Spec:** `docs/superpowers/specs/2026-11-11-sshcraft-design.md` (Abschnitte 5, 9, 10, 11), Fahrplan `docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md`, Vorgänger `docs/superpowers/plans/2026-11-11-01-desktop-grundlage.md`.
 
 ## Global Constraints
 
 - Alle Regeln aus Teilplan 1 gelten weiter (Arbeitsbäume unter `G:\Claude\worktrees`, Code Englisch, Commits Deutsch ohne KI-Zuschreibung und ohne Gedankenstriche, UTF-8, neueste stabile Versionen, Gegenproben für Regeln, Rechte und Datenwege).
-- Agent-Pipe: `\\.\pipe\openssh-ssh-agent`. Ein privater Schlüssel aus dem Agenten verlässt Proton Pass nie; Stollen speichert nur den Fingerprint (`SHA256:…`).
-- `pass-cli`: zuerst `%LOCALAPPDATA%\Programs\ProtonPass\pass-cli.exe`, sonst `pass-cli` aus dem `PATH`. `item view` immer mit `PROTON_PASS_AGENT_REASON="Stollen: import an SSH key into the encrypted local key vault"`. Die Ausgabe von `item view` wird nie geloggt, nie in eine Datei geschrieben, nie in eine Fehlermeldung übernommen und liegt nur in `Zeroizing`-Puffern.
+- Agent-Pipe: `\\.\pipe\openssh-ssh-agent`. Ein privater Schlüssel aus dem Agenten verlässt Proton Pass nie; SSHCraft speichert nur den Fingerprint (`SHA256:…`).
+- `pass-cli`: zuerst `%LOCALAPPDATA%\Programs\ProtonPass\pass-cli.exe`, sonst `pass-cli` aus dem `PATH`. `item view` immer mit `PROTON_PASS_AGENT_REASON="SSHCraft: import an SSH key into the encrypted local key vault"`. Die Ausgabe von `item view` wird nie geloggt, nie in eine Datei geschrieben, nie in eine Fehlermeldung übernommen und liegt nur in `Zeroizing`-Puffern.
 - Feldpfade (geprüft am 12.11.2026 mit pass-cli 2.7.0): Liste `items[].{id, share_id, title, item_type}`, SSH-Schlüssel haben `item_type == "ssh_key"`; Einzelansicht `item.content.content.SshKey.private_key`.
 - Windows Hello schützt nur Schlüssel aus dem Tresor (`KeyRef::Stored`). Agent-Schlüssel brauchen es nicht, Proton Pass schützt sie selbst.
 - Keine Gruppe und kein Host wird beim ssh-config-Import ohne Bestätigung in der Vorschau angelegt.
@@ -32,11 +32,11 @@
 ## Dateistruktur
 
 ```
-crates/stollen-core/src/
+crates/sshcraft-core/src/
   model.rs            + KeyRef::Agent { fingerprint }
   sshconfig.rs (neu)  parse(), ConfigHost, plan_import(), ImportCandidate
   sshconfig_tests.rs (neu)
-crates/stollen-ssh/src/
+crates/sshcraft-ssh/src/
   lib.rs              Credential, DynAgent, list_agent_keys(), AgentKey, neue SshError-Varianten
   agent.rs (neu)      open_windows_agent()
   testing.rs          + spawn_agent()
@@ -53,16 +53,16 @@ app/src/
 
 ---
 
-### Task 1: Anmeldung über einen SSH-Agenten in `stollen-ssh`
+### Task 1: Anmeldung über einen SSH-Agenten in `sshcraft-ssh`
 
 **Files:**
-- Modify: `crates/stollen-core/src/model.rs`, `crates/stollen-ssh/src/lib.rs`, `crates/stollen-ssh/src/testing.rs`, `crates/stollen-ssh/tests/session.rs`
-- Create: `crates/stollen-ssh/src/agent.rs`
+- Modify: `crates/sshcraft-core/src/model.rs`, `crates/sshcraft-ssh/src/lib.rs`, `crates/sshcraft-ssh/src/testing.rs`, `crates/sshcraft-ssh/tests/session.rs`
+- Create: `crates/sshcraft-ssh/src/agent.rs`
 
 **Interfaces:**
 - Consumes: `connect`, `ConnectParams`, `HostKeyVerifier`, `SshError` aus Teilplan 1.
 - Produces:
-  - `stollen_core::model::KeyRef::Agent { fingerprint: String }` (serde `{ "kind": "agent", "fingerprint": "SHA256:…" }`); `resolve` behandelt sie wie `Stored`.
+  - `sshcraft_core::model::KeyRef::Agent { fingerprint: String }` (serde `{ "kind": "agent", "fingerprint": "SHA256:…" }`); `resolve` behandelt sie wie `Stored`.
   - `pub type DynAgent = russh::keys::agent::client::AgentClient<Box<dyn russh::keys::agent::client::AgentStream + Send + Unpin + 'static>>;`
   - `pub enum Credential { Key(PrivateKey), Agent { fingerprint: String, agent: DynAgent } }`; `ConnectParams.key` wird zu `ConnectParams.credential: Credential`.
   - `pub struct AgentKey { pub fingerprint: String, pub algorithm: String, pub comment: String, pub public_key: String }` (`Serialize`, `Clone`, `PartialEq`).
@@ -82,7 +82,7 @@ app/src/
 
 und in `model.rs`: `agent_key_ref_roundtrips_json` (`{"kind":"agent","fingerprint":"SHA256:x"}`), `host_inherits_agent_key_from_group`.
 
-- [ ] **Step 2:** `cargo test -p stollen-ssh -p stollen-core` schlägt fehl.
+- [ ] **Step 2:** `cargo test -p sshcraft-ssh -p sshcraft-core` schlägt fehl.
 - [ ] **Step 3:** Umsetzen. Anmeldung mit Agent: Identität per Fingerprint aus `request_identities()` suchen, dann `authenticate_publickey_with(user, identity.public_key().into_owned(), best_supported_rsa_hash, &mut agent)`; ein Signaturfehler des Agenten wird `AgentRefused`, eine fehlende Identität `AgentKeyMissing`.
 - [ ] **Step 4:** Tests grün, die bestehenden Tests aus Teilplan 1 bleiben grün (`ConnectParams` in den Tests auf `Credential::Key` umstellen).
 - [ ] **Step 5: Gegenprobe:** in der Identitätssuche den ersten Schlüssel nehmen statt per Fingerprint zu suchen: `agent_without_that_key_fails` muss rot werden.
@@ -121,7 +121,7 @@ test("fingerprints containing colons survive the round trip", () => {});
 
 - [ ] **Step 2:** Tests schlagen fehl.
 - [ ] **Step 3:** Umsetzen. `SettingsFields` zeigt zwei `<optgroup>`: "Proton Pass" (aus `listAgentKeys`, bei Fehler ein deaktivierter Eintrag "Proton Pass nicht erreichbar") und "Gespeichert". Ein Host, dessen Agent-Fingerprint nicht in der Liste ist, behält seinen Wert und zeigt "nicht gefunden".
-- [ ] **Step 4:** `cargo test -p stollen-app --lib`, `npm run typecheck && npm test` grün.
+- [ ] **Step 4:** `cargo test -p sshcraft-app --lib`, `npm run typecheck && npm test` grün.
 - [ ] **Step 5: Gegenprobe:** Agent-Fehler als `Lost` statt `Error` abbilden: `agent_unavailable_ends_with_error_and_no_retry` muss rot werden.
 - [ ] **Step 6:** Commit `Schlüssel aus dem Proton-Pass-Agenten in Hosts und Gruppen`.
 
@@ -161,7 +161,7 @@ test("fingerprints containing colons survive the round trip", () => {});
 ```
 
 - [ ] **Step 2:** Tests schlagen fehl.
-- [ ] **Step 3:** Umsetzen. `KeyManager` bekommt einen Bereich "Aus Proton Pass": Status (nicht installiert mit Link-Text auf die Installationsanleitung, abgemeldet mit Hinweis `pass-cli login`), Liste der Titel, Knopf "Importieren" je Eintrag (Name vorbelegt mit dem Titel). Neben dem Bereich der Hinweis, dass Schlüssel, die nur zum Verbinden gebraucht werden, nicht importiert werden müssen, weil Stollen den Proton-Pass-Agenten direkt nutzt.
+- [ ] **Step 3:** Umsetzen. `KeyManager` bekommt einen Bereich "Aus Proton Pass": Status (nicht installiert mit Link-Text auf die Installationsanleitung, abgemeldet mit Hinweis `pass-cli login`), Liste der Titel, Knopf "Importieren" je Eintrag (Name vorbelegt mit dem Titel). Neben dem Bereich der Hinweis, dass Schlüssel, die nur zum Verbinden gebraucht werden, nicht importiert werden müssen, weil SSHCraft den Proton-Pass-Agenten direkt nutzt.
 - [ ] **Step 4:** Tests grün.
 - [ ] **Step 5: Gegenprobe:** in `PassCliError::Failed` stdout statt stderr übernehmen: `errors_never_contain_the_private_key` muss rot werden.
 - [ ] **Step 6:** Commit `Schlüssel aus Proton Pass über pass-cli importieren`.
@@ -171,11 +171,11 @@ test("fingerprints containing colons survive the round trip", () => {});
 ### Task 4: Import aus `~/.ssh/config`
 
 **Files:**
-- Create: `crates/stollen-core/src/sshconfig.rs`, `crates/stollen-core/src/sshconfig_tests.rs`, `app/src/components/SshConfigImport.tsx`
-- Modify: `crates/stollen-core/src/lib.rs`, `app/src-tauri/src/commands/data.rs`, `app/src-tauri/src/lib.rs`, `app/src/api.ts`, `app/src/App.tsx`, `app/src/components/Sidebar.tsx`
+- Create: `crates/sshcraft-core/src/sshconfig.rs`, `crates/sshcraft-core/src/sshconfig_tests.rs`, `app/src/components/SshConfigImport.tsx`
+- Modify: `crates/sshcraft-core/src/lib.rs`, `app/src-tauri/src/commands/data.rs`, `app/src-tauri/src/lib.rs`, `app/src/api.ts`, `app/src/App.tsx`, `app/src/components/Sidebar.tsx`
 
 **Interfaces:**
-- Produces (`stollen_core::sshconfig`):
+- Produces (`sshcraft_core::sshconfig`):
   - `pub struct ConfigHost { pub alias: String, pub hostname: Option<String>, pub port: Option<u16>, pub user: Option<String>, pub identity_files: Vec<String> }`
   - `pub struct ParsedConfig { pub hosts: Vec<ConfigHost>, pub skipped: Vec<String> }` (`skipped`: Zeilen mit `Include`/`Match`, je als kurzer Text)
   - `pub fn parse(text: &str) -> ParsedConfig`: OpenSSH-Regel "der erste gefundene Wert gilt", Werte aus passenden Muster-Blöcken (`Host *`, `Host *.example.org`) füllen nur, was der Alias selbst nicht setzt; Aliase mit `*`, `?` oder `!` werden selbst nicht importiert; Schlüsselwörter ohne Rücksicht auf Groß- und Kleinschreibung, `Key Value` und `Key=Value`, Anführungszeichen, BOM und CRLF.
@@ -216,11 +216,11 @@ test("fingerprints containing colons survive the round trip", () => {});
   - `pub enum Presence { Verified, Declined, Unavailable }`
   - `#[async_trait] pub trait UserPresence: Send + Sync + 'static { async fn verify(&self, reason: &str) -> Presence; }`
   - `WindowsHello { hwnd }`: `IUserConsentVerifierInterop::RequestVerificationForWindowAsync` mit dem Fenster-Handle des Hauptfensters (sonst erscheint der Dialog hinter dem Fenster). `UserConsentVerifierAvailability` ungleich `Available` → `Unavailable`.
-  - `KeyGate` in `sessions.rs`: hält den Zustand pro App-Lauf (`tokio::sync::Mutex<bool>`); `async fn ensure(&self) -> Result<(), String>`: schon verifiziert → Ok; sonst `verify("Stollen möchte deine gespeicherten SSH-Schlüssel verwenden.")`; `Verified` merkt sich das; `Unavailable` lässt durch und setzt `hello_missing = true`; `Declined` → `Err("Windows Hello wurde abgebrochen.")`, beim nächsten Versuch wird wieder gefragt. Gleichzeitige Aufrufe teilen sich eine Abfrage.
+  - `KeyGate` in `sessions.rs`: hält den Zustand pro App-Lauf (`tokio::sync::Mutex<bool>`); `async fn ensure(&self) -> Result<(), String>`: schon verifiziert → Ok; sonst `verify("SSHCraft möchte deine gespeicherten SSH-Schlüssel verwenden.")`; `Verified` merkt sich das; `Unavailable` lässt durch und setzt `hello_missing = true`; `Declined` → `Err("Windows Hello wurde abgebrochen.")`, beim nächsten Versuch wird wieder gefragt. Gleichzeitige Aufrufe teilen sich eine Abfrage.
   - `SessionManager::new` und `with_delay_scale` bekommen nach `agent` den Parameter `presence: Arc<dyn UserPresence>`; die Tests aus Teilplan 1 und Task 2 nutzen eine `FakePresence` mit `Verified`.
   - `connect_once` ruft `ensure` nur für `KeyRef::Stored`, vor `vault.private_key`. Abbruch → `Ended { reason: Error, … }`, kein Wiederverbinden.
   - Befehl `hello_status() -> { missing: bool }`; `App.tsx` zeigt bei `missing` einmal einen Hinweis: "Windows Hello ist auf diesem PC nicht eingerichtet. Gespeicherte Schlüssel sind dann nur durch dein Windows-Konto geschützt."
-  - **[Claudes Entscheidung]** Ohne eingerichtetes Windows Hello wird nicht gesperrt, sondern gewarnt; sonst wäre Stollen auf solchen PCs und in Remotedesktop-Sitzungen unbenutzbar.
+  - **[Claudes Entscheidung]** Ohne eingerichtetes Windows Hello wird nicht gesperrt, sondern gewarnt; sonst wäre SSHCraft auf solchen PCs und in Remotedesktop-Sitzungen unbenutzbar.
 
 - [ ] **Step 1: Failing tests** in `sessions_tests.rs` mit einer `FakePresence` (Antwort und Zähler):
 

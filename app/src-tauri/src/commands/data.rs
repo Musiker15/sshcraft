@@ -1,12 +1,12 @@
 //! Groups, hosts and stored host keys.
 
-use stollen_core::model::{DEFAULT_PORT, Group, GroupId, Host, HostId};
+use sshcraft_core::model::{DEFAULT_PORT, Group, GroupId, Host, HostId};
 use tauri::State;
 
 use super::{CommandError, CommandResult};
 use crate::state::AppState;
 
-fn store(state: &AppState) -> std::sync::MutexGuard<'_, stollen_core::store::Store> {
+fn store(state: &AppState) -> std::sync::MutexGuard<'_, sshcraft_core::store::Store> {
     state.store.lock().expect("store lock")
 }
 

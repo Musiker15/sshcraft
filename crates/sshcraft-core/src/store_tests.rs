@@ -94,7 +94,7 @@ fn key_records_roundtrip() {
 #[test]
 fn data_survives_reopen() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("stollen.db");
+    let path = dir.path().join("sshcraft.db");
     let g = group("srv");
     {
         let store = Store::open(&path).unwrap();

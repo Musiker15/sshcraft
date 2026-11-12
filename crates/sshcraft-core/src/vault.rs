@@ -17,7 +17,7 @@ use crate::store::{KeyRecord, Store, StoreError};
 
 const FORMAT_VERSION: u8 = 1;
 const NONCE_LEN: usize = 24;
-const KEYRING_SERVICE: &str = "de.musiker15.stollen";
+const KEYRING_SERVICE: &str = "de.musiker15.sshcraft";
 const KEYRING_ACCOUNT: &str = "vault-master-key";
 
 #[derive(Debug, thiserror::Error)]

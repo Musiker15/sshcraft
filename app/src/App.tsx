@@ -112,8 +112,8 @@ function App() {
         {vaultError && (
           <div className="banner">
             Die gespeicherten Schlüssel lassen sich nicht entschlüsseln: Der Hauptschlüssel fehlt in der
-            Windows-Anmeldeinformationsverwaltung (Eintrag „de.musiker15.stollen“). Stellst du ihn wieder her und
-            startest Stollen neu, sind alle Schlüssel wieder da. ({vaultError})
+            Windows-Anmeldeinformationsverwaltung (Eintrag „de.musiker15.sshcraft“). Stellst du ihn wieder her und
+            startest SSHCraft neu, sind alle Schlüssel wieder da. ({vaultError})
           </div>
         )}
         {loadError && <div className="banner">{loadError}</div>}

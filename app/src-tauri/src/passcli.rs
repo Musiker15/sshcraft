@@ -9,11 +9,11 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use serde_json::Value;
-use stollen_core::store::Store;
-use stollen_core::vault::{self, KeyInfo, Vault, VaultError};
+use sshcraft_core::store::Store;
+use sshcraft_core::vault::{self, KeyInfo, Vault, VaultError};
 use zeroize::Zeroizing;
 
-const VIEW_REASON: &str = "Stollen: import an SSH key into the encrypted local key vault";
+const VIEW_REASON: &str = "SSHCraft: import an SSH key into the encrypted local key vault";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PassKey {

@@ -2,8 +2,8 @@ use std::sync::Mutex;
 
 use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
-use stollen_core::store::Store;
-use stollen_core::vault::{MemoryMasterKey, Vault};
+use sshcraft_core::store::Store;
+use sshcraft_core::vault::{MemoryMasterKey, Vault};
 use zeroize::Zeroizing;
 
 use super::*;

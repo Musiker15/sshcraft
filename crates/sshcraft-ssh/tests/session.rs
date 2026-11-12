@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey};
-use stollen_core::policy::Disconnect;
-use stollen_ssh::testing::{TestServer, flood_pattern, spawn_agent, spawn_stalled_agent};
-use stollen_ssh::{
+use sshcraft_core::policy::Disconnect;
+use sshcraft_ssh::testing::{TestServer, flood_pattern, spawn_agent, spawn_stalled_agent};
+use sshcraft_ssh::{
     ConnectParams, Credential, HostKeyVerifier, Shell, ShellEvent, SshError, connect,
     list_agent_keys,
 };

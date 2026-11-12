@@ -22,15 +22,15 @@ impl CommandError {
     }
 }
 
-impl From<stollen_core::store::StoreError> for CommandError {
-    fn from(e: stollen_core::store::StoreError) -> Self {
+impl From<sshcraft_core::store::StoreError> for CommandError {
+    fn from(e: sshcraft_core::store::StoreError) -> Self {
         Self::new("store", e)
     }
 }
 
-impl From<stollen_core::vault::VaultError> for CommandError {
-    fn from(e: stollen_core::vault::VaultError) -> Self {
-        use stollen_core::vault::VaultError as V;
+impl From<sshcraft_core::vault::VaultError> for CommandError {
+    fn from(e: sshcraft_core::vault::VaultError) -> Self {
+        use sshcraft_core::vault::VaultError as V;
         let code = match e {
             V::MasterKeyMissing => "master_key_missing",
             V::InvalidKey(_) => "invalid_key",

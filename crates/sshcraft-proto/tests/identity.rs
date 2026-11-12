@@ -1,5 +1,5 @@
-use stollen_proto::ProtoError;
-use stollen_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys, safety_number};
+use sshcraft_proto::ProtoError;
+use sshcraft_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys, safety_number};
 use uuid::Uuid;
 
 fn cert(account: &AccountKey, keys: &DeviceKeys) -> DeviceCertificate {
@@ -17,7 +17,7 @@ fn cert(account: &AccountKey, keys: &DeviceKeys) -> DeviceCertificate {
 fn account_key_export_import_roundtrip() {
     let key = AccountKey::generate();
     let text = key.export();
-    assert!(text.starts_with("stollen-account-1:"));
+    assert!(text.starts_with("sshcraft-account-1:"));
     assert_eq!(AccountKey::import(&text).unwrap().public(), key.public());
 }
 
@@ -58,7 +58,7 @@ fn wrong_prefix_or_length_is_a_format_error() {
     let text = AccountKey::generate().export().to_string();
     let body = text.split_once(':').unwrap().1;
     assert_eq!(
-        AccountKey::import(&format!("stollen-account-2:{body}")).err(),
+        AccountKey::import(&format!("sshcraft-account-2:{body}")).err(),
         Some(ProtoError::BadAccountKeyFormat)
     );
     assert_eq!(

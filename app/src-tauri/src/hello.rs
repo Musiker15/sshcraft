@@ -1,4 +1,4 @@
-//! Windows Hello as a gate in front of the keys stored in Stollen's own vault.
+//! Windows Hello as a gate in front of the keys stored in SSHCraft's own vault.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Presence {
@@ -13,7 +13,7 @@ pub trait UserPresence: Send + Sync + 'static {
     async fn verify(&self, reason: &str) -> Presence;
 }
 
-/// Asks Windows Hello (fingerprint, face or PIN), with the dialog owned by Stollen's window.
+/// Asks Windows Hello (fingerprint, face or PIN), with the dialog owned by SSHCraft's window.
 pub struct WindowsHello {
     /// Raw handle of the main window, kept as an integer so the struct stays `Send`.
     pub hwnd: isize,
@@ -45,7 +45,7 @@ fn verify_blocking(hwnd: isize, reason: &str) -> Presence {
     }
     let result =
         factory::<UserConsentVerifier, IUserConsentVerifierInterop>().and_then(|interop| {
-            // SAFETY: `hwnd` is the handle of Stollen's own main window, valid while the app runs.
+            // SAFETY: `hwnd` is the handle of SSHCraft's own main window, valid while the app runs.
             let op: IAsyncOperation<UserConsentVerificationResult> = unsafe {
                 interop.RequestVerificationForWindowAsync(
                     HWND(hwnd as *mut core::ffi::c_void),

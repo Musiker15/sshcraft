@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, PrivateKey};
-use stollen_core::model::{ConnectionSettings, Host, KeyRef};
-use stollen_core::vault::MemoryMasterKey;
-use stollen_ssh::testing::TestServer;
+use sshcraft_core::model::{ConnectionSettings, Host, KeyRef};
+use sshcraft_core::vault::MemoryMasterKey;
+use sshcraft_ssh::testing::TestServer;
 
 use super::*;
 use crate::hello::{Presence, UserPresence};
@@ -64,11 +64,11 @@ struct TestAgents {
 
 #[async_trait::async_trait]
 impl AgentConnector for TestAgents {
-    async fn connect(&self) -> Result<stollen_ssh::DynAgent, SshError> {
+    async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, SshError> {
         if !self.reachable {
             return Err(SshError::AgentUnavailable("pipe not found".into()));
         }
-        Ok(stollen_ssh::testing::spawn_agent(&self.keys, true).await)
+        Ok(sshcraft_ssh::testing::spawn_agent(&self.keys, true).await)
     }
 }
 
@@ -514,7 +514,7 @@ async fn output_waits_for_acknowledgement() {
         unacked <= OUTPUT_HIGH_WATERMARK + 64 * 1024,
         "{unacked} bytes delivered without acknowledgement"
     );
-    let total = stollen_ssh::testing::flood_pattern().len();
+    let total = sshcraft_ssh::testing::flood_pattern().len();
     let mut acked = 0;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
