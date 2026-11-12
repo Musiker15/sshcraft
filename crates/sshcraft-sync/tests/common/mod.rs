@@ -291,3 +291,45 @@ pub fn sample_host(name: &str) -> Host {
         location: None,
     }
 }
+
+pub fn account(dev: &Dev) -> sshcraft_proto::identity::AccountPublic {
+    sshcraft_proto::identity::AccountPublic(dev.row().account)
+}
+
+pub async fn engine(dev: &Dev) -> sshcraft_sync::engine::Engine {
+    sshcraft_sync::engine::Engine::load(&dev.store, &dev.vault, dev.row().id)
+        .await
+        .unwrap()
+}
+
+/// Pull, then push.
+pub async fn sync(dev: &Dev) {
+    let mut e = engine(dev).await;
+    e.pull(&dev.store, &dev.vault).await.unwrap();
+    e.push(&dev.store, &dev.vault, 0).await.unwrap();
+}
+
+/// The stored manifest and key of one area on `dev`.
+pub fn stored_area(dev: &Dev, area: Uuid) -> (AreaManifest, AreaKey) {
+    let row = dev.row();
+    let state = dev
+        .store
+        .lock()
+        .unwrap()
+        .areas(row.id)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.area_id == area)
+        .expect("area stored");
+    let manifest: AreaManifest = serde_json::from_str(&state.manifest).unwrap();
+    let envelope: KeyEnvelope = serde_json::from_str(&state.envelope).unwrap();
+    let key = open_area_key(&envelope, row.device_id, &dev.keys(), &manifest).unwrap();
+    (manifest, key)
+}
+
+/// Runs SQL against the test server's SQLite database, as a compromised server could.
+pub fn server_sql(server: &TestServer, sql: &str, params: impl rusqlite::Params) {
+    let path = server.database_url.trim_start_matches("sqlite://");
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute(sql, params).unwrap();
+}

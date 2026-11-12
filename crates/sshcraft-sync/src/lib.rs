@@ -4,6 +4,7 @@
 //! is verified before it touches the local store.
 
 pub mod account;
+pub mod areas;
 pub mod client;
 pub mod devices;
 pub mod engine;

@@ -77,11 +77,11 @@ pub(crate) fn lock(store: &Mutex<Store>) -> Result<MutexGuard<'_, Store>, SyncEr
     store.lock().map_err(|e| SyncError::Store(e.to_string()))
 }
 
-fn to_json(value: &impl serde::Serialize) -> Result<String, SyncError> {
+pub(crate) fn to_json(value: &impl serde::Serialize) -> Result<String, SyncError> {
     serde_json::to_string(value).map_err(|e| SyncError::Store(e.to_string()))
 }
 
-fn from_json<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, SyncError> {
+pub(crate) fn from_json<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, SyncError> {
     serde_json::from_str(text).map_err(|e| SyncError::Store(e.to_string()))
 }
 
@@ -158,6 +158,72 @@ impl Engine {
         Ok((set, log))
     }
 
+    /// Another account's device log, verified against the head this device accepted before
+    /// for that account (a server cannot roll it back); this account's own goes through
+    /// `own_devices`.
+    pub async fn account_devices(
+        &self,
+        store: &Mutex<Store>,
+        account: &AccountPublic,
+    ) -> Result<DeviceSet, SyncError> {
+        if *account == self.account {
+            return Ok(self.own_devices(store).await?.0);
+        }
+        let entries = self.revoked_check(store, self.client.log(account, 0).await)?;
+        let log = DeviceLog { entries };
+        let setting = format!(
+            "sync.head.{}.{}",
+            self.server.0,
+            data_encoding::BASE64URL_NOPAD.encode(&account.0)
+        );
+        let known: Option<LogHead> = match lock(store)?.get_setting(&setting)? {
+            Some(text) if !text.is_empty() => Some(from_json(&text)?),
+            _ => None,
+        };
+        let set = log.verify_extends(account, known.as_ref())?;
+        if let Some(head) = set.head() {
+            lock(store)?.put_setting(&setting, &to_json(&head)?)?;
+        }
+        Ok(set)
+    }
+
+    /// The stored, verified manifest of an area and its key, opened with this device's envelope.
+    pub(crate) fn stored_area(
+        &self,
+        store: &Mutex<Store>,
+        area: Uuid,
+    ) -> Result<(AreaManifest, AreaKey), SyncError> {
+        let state = lock(store)?
+            .areas(self.server)?
+            .into_iter()
+            .find(|a| a.area_id == area)
+            .ok_or(SyncError::NotSetUp)?;
+        let manifest: AreaManifest = from_json(&state.manifest)?;
+        let envelope: KeyEnvelope = from_json(&state.envelope)?;
+        let key = open_area_key(&envelope, self.device_id, &self.keys, &manifest)?;
+        Ok((manifest, key))
+    }
+
+    /// Every stored area this account owns, with its key.
+    pub(crate) fn owned_areas(
+        &self,
+        store: &Mutex<Store>,
+    ) -> Result<Vec<(AreaManifest, AreaKey)>, SyncError> {
+        let ids: Vec<Uuid> = lock(store)?
+            .areas(self.server)?
+            .into_iter()
+            .map(|a| a.area_id)
+            .collect();
+        let mut owned = Vec::new();
+        for id in ids {
+            let (manifest, key) = self.stored_area(store, id)?;
+            if manifest.owner == self.account {
+                owned.push((manifest, key));
+            }
+        }
+        Ok(owned)
+    }
+
     pub(crate) fn tracker(&self, store: &Mutex<Store>) -> Result<VersionTracker, SyncError> {
         Ok(lock(store)?
             .server(self.server)?
@@ -214,7 +280,7 @@ impl Engine {
     ) -> Result<PullReport, SyncError> {
         let mut report = PullReport::default();
         // A key rotation that was interrupted is finished before anything else.
-        crate::devices::resume_rotation(self, store, vault, now_secs()).await?;
+        crate::areas::resume_rotation(self, store, vault, now_secs()).await?;
         let (devices, _) = self.own_devices(store).await?;
         let mut tracker = self.tracker(store)?;
         let listings = self.revoked_check(store, self.client.areas().await)?;
@@ -300,21 +366,16 @@ impl Engine {
         Ok(report)
     }
 
-    /// This account's own area with its key, from what this device verified and stored.
+    /// This account's personal area with its key: the own area without members (a share always
+    /// has some).
     pub(crate) fn personal_area(
         &self,
         store: &Mutex<Store>,
     ) -> Result<(AreaManifest, AreaKey), SyncError> {
-        for area in lock(store)?.areas(self.server)? {
-            let manifest: AreaManifest = from_json(&area.manifest)?;
-            if manifest.owner != self.account {
-                continue;
-            }
-            let envelope: KeyEnvelope = from_json(&area.envelope)?;
-            let key = open_area_key(&envelope, self.device_id, &self.keys, &manifest)?;
-            return Ok((manifest, key));
-        }
-        Err(SyncError::NotSetUp)
+        self.owned_areas(store)?
+            .into_iter()
+            .find(|(manifest, _)| manifest.members.is_empty())
+            .ok_or(SyncError::NotSetUp)
     }
 
     /// Sends every queued local change. A conflict (someone wrote first) is settled by
