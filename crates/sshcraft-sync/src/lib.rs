@@ -58,6 +58,9 @@ pub enum SyncError {
     /// Sharing needs a contact whose safety number the user confirmed.
     #[error("the recipient's safety number is not confirmed")]
     ContactUnconfirmed,
+    /// The group is already shared with all its hosts; add recipients to that share instead.
+    #[error("already shared")]
+    AlreadyShared,
 }
 
 impl SyncError {

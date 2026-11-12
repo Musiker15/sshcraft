@@ -125,14 +125,26 @@ pub fn apply(
     server: ServerId,
     item: &SyncItem,
 ) -> Result<(), SyncError> {
+    apply_in(store, vault, server, item, None, None)
+}
+
+/// [`apply`] for a record of `area` (`personal`: this account's personal area). A record
+/// carries no key for a key that is not in its area; the local assignment then stays.
+pub fn apply_in(
+    store: &Store,
+    vault: &Vault,
+    server: ServerId,
+    item: &SyncItem,
+    area: Option<Uuid>,
+    personal: Option<Uuid>,
+) -> Result<(), SyncError> {
+    let local_key = |local| local_key(store, server, local, area, personal);
     match &item.body {
         ItemBody::Group { group } => {
             let mut group = group.clone();
             group.location = Some(server);
             if group.defaults.key.is_none() {
                 group.defaults.key = local_key(
-                    store,
-                    server,
                     store
                         .list_groups()?
                         .into_iter()
@@ -150,8 +162,6 @@ pub fn apply(
             host.location = Some(server);
             if host.settings.key.is_none() {
                 host.settings.key = local_key(
-                    store,
-                    server,
                     store
                         .list_hosts()?
                         .into_iter()
@@ -185,18 +195,31 @@ pub fn apply(
 }
 
 /// The local key assignment to keep when a record carries none: a stored key that does not
-/// live at this server was never sent, so the record's "no key" does not mean "remove it".
+/// live at this server, or not in the record's area, was never sent, and an agent key never
+/// goes into a share, so the record's "no key" does not mean "remove it".
 fn local_key(
     store: &Store,
     server: ServerId,
     local: Option<sshcraft_core::model::KeyRef>,
+    area: Option<Uuid>,
+    personal: Option<Uuid>,
 ) -> Result<Option<sshcraft_core::model::KeyRef>, SyncError> {
+    use sshcraft_core::model::KeyRef;
+    let shared_area = area.is_some() && area != personal;
     match local {
-        Some(sshcraft_core::model::KeyRef::Stored { id })
-            if store.location_of(ItemKind::Key, &id.0.to_string())? != Some(server) =>
-        {
-            Ok(Some(sshcraft_core::model::KeyRef::Stored { id }))
+        Some(KeyRef::Stored { id }) => {
+            let key = id.0.to_string();
+            let elsewhere = store.location_of(ItemKind::Key, &key)? != Some(server);
+            let other_area = match area {
+                Some(area) => {
+                    store.area_for(server, ItemKind::Key, &key, personal.unwrap_or_default())?
+                        != area
+                }
+                None => false,
+            };
+            Ok((elsewhere || other_area).then_some(KeyRef::Stored { id }))
         }
+        Some(agent @ KeyRef::Agent { .. }) if shared_area => Ok(Some(agent)),
         _ => Ok(None),
     }
 }

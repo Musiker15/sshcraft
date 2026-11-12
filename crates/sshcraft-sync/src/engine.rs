@@ -7,7 +7,7 @@
 use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
-use crate::items::{ItemBody, SyncItem, apply, decode, encode, local_item, newer};
+use crate::items::{ItemBody, SyncItem, apply_in, decode, encode, local_item, newer};
 use crate::shares::{ShareInfo, decode_share_info};
 use sshcraft_core::model::ServerId;
 use sshcraft_core::store::{
@@ -536,7 +536,6 @@ impl Engine {
                         break;
                     };
                     let mut item = local_item(&guard, vault, kind, &id, queued)?;
-                    strip_unsynced_keys(&guard, self.server, &mut item)?;
                     // Moved to another place (this device only, or another server): for this
                     // server it is gone.
                     if guard.location_of(kind, &id)? != Some(self.server) {
@@ -557,6 +556,7 @@ impl Engine {
                         (Some(entry), true) => entry.area_id,
                         _ => guard.area_for(self.server, kind, &id, personal)?,
                     };
+                    strip_unsynced_keys(&guard, self.server, &mut item, target, personal)?;
                     if let Some(warning) =
                         refusal(&guard, self.server, target, deleted, known.is_none())?
                     {
@@ -715,6 +715,14 @@ impl Engine {
             modified_at: item.modified_at,
         };
         let deleted = matches!(item.body, ItemBody::Deleted { .. });
+        // On the owner's devices a copy in an own share is not an item of its own.
+        if store
+            .share(self.server, area)?
+            .is_some_and(|s| s.owned && s.kind != ShareKind::GroupAll)
+        {
+            store.put_record_entry(self.server, &entry, kind, &item_id)?;
+            return Ok(false);
+        }
         // A deletion from an area the item has left (it moved into or out of a share) is not
         // about the item any more.
         if deleted
@@ -743,7 +751,7 @@ impl Engine {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Ok(false);
         }
-        apply(&store, vault, self.server, &item)?;
+        apply_in(&store, vault, self.server, &item, Some(area), personal)?;
         if deleted || Some(area) == personal {
             store.clear_item_area(self.server, kind, &item_id)?;
         } else if store.effective_area(self.server, kind, &item_id)? != Some(area) {
@@ -819,21 +827,32 @@ fn is_key_record(
         .is_some_and(|item| item.item().0 == ItemKind::Key)
 }
 
-/// A host or group that points to a stored key which does not live at this server sends no key:
-/// each device assigns its own (design, section 7). `apply` keeps the local assignment.
+/// A host or group that points to a stored key which does not live at this server, or not in
+/// the area the record goes to, sends no key: each device (each member) assigns its own
+/// (design, sections 7 and 8). Agent keys never go into a share. `apply_in` keeps the local
+/// assignment.
 fn strip_unsynced_keys(
     store: &Store,
     server: ServerId,
     item: &mut crate::items::SyncItem,
+    target: Uuid,
+    personal: Uuid,
 ) -> Result<(), SyncError> {
     let key = match &mut item.body {
         ItemBody::Host { host } => &mut host.settings.key,
         ItemBody::Group { group } => &mut group.defaults.key,
         _ => return Ok(()),
     };
-    if let Some(sshcraft_core::model::KeyRef::Stored { id }) = key
-        && store.location_of(ItemKind::Key, &id.0.to_string())? != Some(server)
-    {
+    let keep = match key {
+        Some(sshcraft_core::model::KeyRef::Stored { id }) => {
+            let id = id.0.to_string();
+            store.location_of(ItemKind::Key, &id)? == Some(server)
+                && store.area_for(server, ItemKind::Key, &id, personal)? == target
+        }
+        Some(sshcraft_core::model::KeyRef::Agent { .. }) => target == personal,
+        None => true,
+    };
+    if !keep {
         *key = None;
     }
     Ok(())
