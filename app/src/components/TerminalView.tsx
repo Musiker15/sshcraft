@@ -6,6 +6,7 @@ import { sessionAck, sessionClose, sessionOpen, sessionResize, sessionWrite, typ
 import { errorDetail } from "../i18n/errors";
 import { useSettings } from "../settings/SettingsProvider";
 import { terminalTheme } from "../settings/themes";
+import { syncTerminalFocus } from "../shell/focus";
 import { matchShortcut } from "../shell/shortcuts";
 import type { SessionTab } from "../state/tabs";
 
@@ -107,6 +108,7 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
 
   useEffect(() => {
     if (active && host.current && host.current.offsetWidth > 0) fit.current?.fit();
+    if (term.current) syncTerminalFocus(term.current, active);
   }, [active]);
 
   // Font and colours follow the settings while the session keeps running.

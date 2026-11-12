@@ -137,11 +137,19 @@ pub struct KeyGate {
     on_unavailable: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
 }
 
-/// Text in the Windows Hello dialog. The dialog belongs to the system, so it follows the
-/// system language rather than the app setting.
-fn hello_reason() -> &'static str {
-    let german = sys_locale::get_locale()
-        .is_some_and(|l| l.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("de")));
+/// Text in the Windows Hello dialog, in the app's language (AUTO follows the system).
+pub fn hello_reason(
+    language: crate::settings::LanguageSetting,
+    system_locale: Option<&str>,
+) -> &'static str {
+    use crate::settings::LanguageSetting as L;
+    let german = match language {
+        L::De => true,
+        L::En => false,
+        L::Auto => {
+            system_locale.is_some_and(|l| l.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("de")))
+        }
+    };
     if german {
         "SSHCraft möchte deine gespeicherten SSH-Schlüssel verwenden."
     } else {
@@ -160,12 +168,12 @@ impl KeyGate {
     }
 
     /// Concurrent callers wait on the same lock, so one prompt serves them all.
-    async fn ensure(&self) -> Result<(), ErrorCode> {
+    async fn ensure(&self, reason: &str) -> Result<(), ErrorCode> {
         let mut verified = self.verified.lock().await;
         if *verified {
             return Ok(());
         }
-        match self.presence.verify(hello_reason()).await {
+        match self.presence.verify(reason).await {
             Presence::Verified => {
                 *verified = true;
                 Ok(())
@@ -463,7 +471,15 @@ async fn connect_once(
                 .vault
                 .as_ref()
                 .ok_or_else(|| error(ErrorCode::VaultLocked, None))?;
-            ctx.gate.ensure().await.map_err(|code| error(code, None))?;
+            let reason = {
+                let store = ctx.store.lock().expect("store lock");
+                let language = crate::settings::load(&store).language;
+                hello_reason(language, sys_locale::get_locale().as_deref())
+            };
+            ctx.gate
+                .ensure(reason)
+                .await
+                .map_err(|code| error(code, None))?;
             let store = ctx.store.lock().expect("store lock");
             let key = vault.private_key(&store, *id).map_err(|e| {
                 let e = crate::errors::CommandError::from(e);

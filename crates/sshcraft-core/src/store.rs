@@ -61,11 +61,11 @@ CREATE TABLE keys (
 
 /// Version 2: app settings and the hosts connected to most recently.
 const SCHEMA_V2: &str = "
-CREATE TABLE settings (
+CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-CREATE TABLE recent_hosts (
+CREATE TABLE IF NOT EXISTS recent_hosts (
     host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
     connected_at INTEGER NOT NULL
 );
@@ -85,13 +85,19 @@ impl Store {
     fn init(conn: rusqlite::Connection) -> Result<Self, StoreError> {
         conn.pragma_update(None, "foreign_keys", true)?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        // Each step runs in one transaction with its version bump, so a crash in between
+        // leaves the database at the previous version instead of half upgraded.
         if version < 1 {
-            conn.execute_batch(SCHEMA_V1)?;
-            conn.pragma_update(None, "user_version", 1)?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V1)?;
+            tx.pragma_update(None, "user_version", 1)?;
+            tx.commit()?;
         }
         if version < 2 {
-            conn.execute_batch(SCHEMA_V2)?;
-            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V2)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
         }
         Ok(Self { conn })
     }

@@ -99,3 +99,34 @@ test("a withdrawn host key question disappears", async () => {
   act(() => state.handlers["host-key-prompt-withdrawn"]({ payload: { prompt_id: 7 } }));
   expect(screen.queryByText("SHA256:abc")).toBeNull();
 });
+
+const question = (id: number, fingerprint: string) => ({
+  payload: { prompt_id: id, host_name: `h${id}`, address: "10.0.0.1", port: 22, fingerprint },
+});
+
+test("the next host key question starts with the focus on reject", async () => {
+  await renderShell();
+  act(() => {
+    state.handlers["host-key-prompt"](question(7, "SHA256:seven"));
+    state.handlers["host-key-prompt"](question(8, "SHA256:eight"));
+  });
+  const trust = screen.getByRole("button", { name: en["hostKey.trust"] });
+  trust.focus();
+  fireEvent.click(trust);
+  expect(screen.getByText("SHA256:eight")).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: en["hostKey.reject"] }));
+});
+
+test("a question withdrawn while it is answered does not take the next one with it", async () => {
+  await renderShell();
+  act(() => {
+    state.handlers["host-key-prompt"](question(7, "SHA256:seven"));
+    state.handlers["host-key-prompt"](question(8, "SHA256:eight"));
+  });
+  const reject = screen.getByRole("button", { name: en["hostKey.reject"] });
+  act(() => {
+    state.handlers["host-key-prompt-withdrawn"]({ payload: { prompt_id: 7 } });
+    fireEvent.click(reject);
+  });
+  expect(screen.getByText("SHA256:eight")).toBeTruthy();
+});

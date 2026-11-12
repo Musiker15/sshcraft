@@ -668,3 +668,15 @@ async fn connected_session_is_recent() {
         vec![f.host_id]
     );
 }
+
+#[test]
+fn hello_reason_follows_the_app_language() {
+    use crate::settings::LanguageSetting;
+    let english = hello_reason(LanguageSetting::En, Some("de-DE"));
+    let german = hello_reason(LanguageSetting::De, Some("en-US"));
+    assert!(english.contains("wants to use"), "{english}");
+    assert!(german.contains("möchte"), "{german}");
+    assert_eq!(hello_reason(LanguageSetting::Auto, Some("de-AT")), german);
+    assert_eq!(hello_reason(LanguageSetting::Auto, Some("fr-FR")), english);
+    assert_eq!(hello_reason(LanguageSetting::Auto, None), english);
+}

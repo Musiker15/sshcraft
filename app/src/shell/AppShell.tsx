@@ -295,11 +295,14 @@ export function AppShell() {
       )}
 
       {prompts[0] && (
+        // A new key per question remounts the dialog, so the focus starts on "reject" again.
         <HostKeyDialog
+          key={prompts[0].prompt_id}
           prompt={prompts[0]}
           onAnswer={(accept) => {
-            void answerHostKey(prompts[0].prompt_id, accept);
-            setPrompts((queue) => queue.slice(1));
+            const answered = prompts[0].prompt_id;
+            void answerHostKey(answered, accept);
+            setPrompts((queue) => queue.filter((p) => p.prompt_id !== answered));
           }}
         />
       )}

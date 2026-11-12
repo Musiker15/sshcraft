@@ -204,3 +204,20 @@ fn deleting_host_removes_recent() {
     store.delete_host(h.id).unwrap();
     assert!(store.recent_hosts(10).unwrap().is_empty());
 }
+
+#[test]
+fn half_done_upgrade_to_v2_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("half.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        // The process died after the first table of version 2 was created.
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    store.put_setting("app", "{}").unwrap();
+    assert!(store.recent_hosts(1).unwrap().is_empty());
+}

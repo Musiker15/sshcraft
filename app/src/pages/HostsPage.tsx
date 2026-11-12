@@ -100,9 +100,9 @@ export function HostsPage(props: HostsPageProps) {
     </div>
   );
 
-  const section = (title: string, items: Host[]) =>
+  const section = (key: string, title: string, items: Host[]) =>
     items.length > 0 && (
-      <div className="group-block" key={title}>
+      <div className="group-block" key={key}>
         <h2 className="group-title">{title}</h2>
         <div className={view === "grid" ? "cards" : "rows"}>{items.map(hostItem)}</div>
       </div>
@@ -170,11 +170,13 @@ export function HostsPage(props: HostsPageProps) {
             </div>
           )}
           {section(
+            "ungrouped",
             t("hosts.ungrouped"),
             hosts.filter((h) => !h.group_id),
           )}
           {groups.map((g) =>
             section(
+              g.id,
               g.name,
               hosts.filter((h) => h.group_id === g.id),
             ),

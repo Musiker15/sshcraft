@@ -257,3 +257,33 @@ fn private_key_with_escapes_is_decoded() {
     let key = parse_private_key(view_json("line1\nline2\n").as_bytes()).unwrap();
     assert_eq!(key.as_str(), "line1\nline2\n");
 }
+
+#[test]
+fn run_with_timeout_does_not_wait_for_a_grandchild_holding_the_pipe() {
+    // The child exits at once but leaves a grandchild that keeps stdout open.
+    let mut command = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args([
+            "/C",
+            "start",
+            "/b",
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Start-Sleep 8",
+        ]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", "sleep 8 &"]);
+        c
+    };
+    command.stdin(std::process::Stdio::null());
+    let started = std::time::Instant::now();
+    let _ = run_with_timeout(command, std::time::Duration::from_millis(1500));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "took {:?}",
+        started.elapsed()
+    );
+}

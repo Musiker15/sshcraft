@@ -23,6 +23,8 @@ test.each([
   ["Alt+F", key("f", { alt: true })],
   ["plain letter", key("a")],
   ["Tab", key("Tab")],
+  ["Ctrl+PageUp", key("PageUp", { ctrl: true })],
+  ["Ctrl+PageDown", key("PageDown", { ctrl: true })],
 ])("%s reaches the shell untouched", (_name, event) => {
   expect(matchShortcut(event, "terminal")).toBeNull();
 });
@@ -33,9 +35,7 @@ test.each([
   ["Ctrl+Shift+W", key("W", { ctrl: true, shift: true }), "closeTab"],
   ["Ctrl+Shift+P", key("P", { ctrl: true, shift: true }), "palette"],
   ["Ctrl+Tab", key("Tab", { ctrl: true }), "nextTab"],
-  ["Ctrl+PageDown", key("PageDown", { ctrl: true }), "nextTab"],
   ["Ctrl+Shift+Tab", key("Tab", { ctrl: true, shift: true }), "prevTab"],
-  ["Ctrl+PageUp", key("PageUp", { ctrl: true }), "prevTab"],
 ])("%s is %s in the terminal", (_name, event, action) => {
   expect(matchShortcut(event, "terminal")).toBe(action);
 });
@@ -48,4 +48,9 @@ test("Ctrl+K opens the palette outside the terminal only", () => {
 test("extra modifiers do not trigger a shortcut", () => {
   expect(matchShortcut(key("T", { ctrl: true, shift: true, alt: true }), "app")).toBeNull();
   expect(matchShortcut(key("k", { ctrl: true, meta: true }), "app")).toBeNull();
+});
+
+test("Ctrl+PageUp and Ctrl+PageDown switch tabs outside the terminal only", () => {
+  expect(matchShortcut(key("PageDown", { ctrl: true }), "app")).toBe("nextTab");
+  expect(matchShortcut(key("PageUp", { ctrl: true }), "app")).toBe("prevTab");
 });

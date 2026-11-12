@@ -57,5 +57,19 @@ test("the font size shows what Rust stored", async () => {
   await renderPage();
   const size = screen.getByLabelText(de["settings.fontSize"]) as HTMLInputElement;
   fireEvent.change(size, { target: { value: "500" } });
+  fireEvent.blur(size);
   await vi.waitFor(() => expect(size.value).toBe("32"));
+});
+
+test("typing a font size saves the whole number once", async () => {
+  await renderPage();
+  calls.saved.length = 0;
+  const size = screen.getByLabelText(de["settings.fontSize"]) as HTMLInputElement;
+  fireEvent.change(size, { target: { value: "1" } });
+  fireEvent.change(size, { target: { value: "16" } });
+  expect(calls.saved).toHaveLength(0);
+  fireEvent.keyDown(size, { key: "Enter" });
+  await vi.waitFor(() => expect(calls.saved[calls.saved.length - 1]?.font_size).toBe(16));
+  expect(calls.saved).toHaveLength(1);
+  expect(size.value).toBe("16");
 });

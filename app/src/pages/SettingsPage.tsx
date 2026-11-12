@@ -21,11 +21,25 @@ export function SettingsPage() {
   const { settings, update } = useSettings();
   const [version, setVersion] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState(settings.font_family);
+  // Drafts are saved on Enter or when leaving the field: saving every keystroke would clamp
+  // "1" (on the way to "16") to 8 and resize the running terminals with each partial value.
+  const [fontSize, setFontSize] = useState(String(settings.font_size));
 
   useEffect(() => {
     getVersion().then(setVersion, () => setVersion(null));
   }, []);
   useEffect(() => setFontFamily(settings.font_family), [settings.font_family]);
+  useEffect(() => setFontSize(String(settings.font_size)), [settings.font_size]);
+
+  const saveFontFamily = () => {
+    if (fontFamily !== settings.font_family) void update({ font_family: fontFamily });
+  };
+  const saveFontSize = () => {
+    const size = Math.round(Number(fontSize));
+    if (fontSize.trim() === "" || !Number.isFinite(size)) setFontSize(String(settings.font_size));
+    else if (size !== settings.font_size) void update({ font_size: size });
+    else setFontSize(String(size));
+  };
   const preview = terminalTheme(settings.terminal_theme).colors;
 
   return (
@@ -85,7 +99,8 @@ export function SettingsPage() {
             list="font-presets"
             value={fontFamily}
             onChange={(e) => setFontFamily(e.target.value)}
-            onBlur={() => fontFamily !== settings.font_family && void update({ font_family: fontFamily })}
+            onBlur={saveFontFamily}
+            onKeyDown={(e) => e.key === "Enter" && saveFontFamily()}
           />
           <datalist id="font-presets">
             {FONT_PRESETS.map((font) => (
@@ -99,11 +114,10 @@ export function SettingsPage() {
             type="number"
             min={8}
             max={32}
-            value={settings.font_size}
-            onChange={(e) => {
-              const size = Number(e.target.value);
-              if (Number.isFinite(size) && e.target.value !== "") void update({ font_size: size });
-            }}
+            value={fontSize}
+            onChange={(e) => setFontSize(e.target.value)}
+            onBlur={saveFontSize}
+            onKeyDown={(e) => e.key === "Enter" && saveFontSize()}
           />
         </label>
       </div>

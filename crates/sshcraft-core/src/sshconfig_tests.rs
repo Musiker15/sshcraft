@@ -287,3 +287,13 @@ fn candidate_without_warnings_field_still_deserializes() {
     let c: ImportCandidate = serde_json::from_str(json).unwrap();
     assert!(c.warnings.is_empty());
 }
+
+#[test]
+fn proxy_none_is_not_a_proxy() {
+    let parsed = parse(
+        "Host a\n  HostName a.org\n  ProxyCommand none\nHost b\n  HostName b.org\n  ProxyJump NONE\nHost *\n  ProxyJump bastion\n",
+    );
+    let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
+    assert!(plan[0].warnings.is_empty(), "{:?}", plan[0].warnings);
+    assert!(plan[1].warnings.is_empty(), "{:?}", plan[1].warnings);
+}

@@ -161,21 +161,29 @@ pub fn classify_failure(code: Option<i32>, stderr: &[u8]) -> PassCliError {
 }
 
 /// Runs a command and kills it once `limit` has passed. stdout and stderr are drained on
-/// their own threads, so a full pipe cannot stall the wait.
+/// their own threads, so a full pipe cannot stall the wait; the whole call, reading included,
+/// stays within `limit` even if a left-over grandchild keeps a pipe open. Partial output that
+/// is thrown away is zeroed, because stdout may hold a private key.
 pub fn run_with_timeout(mut command: Command, limit: Duration) -> Result<Output, PassCliError> {
+    use std::sync::mpsc;
+    use std::time::Instant;
     use wait_timeout::ChildExt;
+
+    let started = Instant::now();
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command
         .spawn()
         .map_err(|e| PassCliError::Failed(e.kind().to_string()))?;
-    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Zeroizing<Vec<u8>>> {
+        let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let mut buffer = Vec::new();
+            let mut buffer = Zeroizing::new(Vec::new());
             if let Some(mut pipe) = pipe {
                 let _ = pipe.read_to_end(&mut buffer);
             }
-            buffer
-        })
+            let _ = tx.send(buffer);
+        });
+        rx
     }
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
@@ -188,13 +196,20 @@ pub fn run_with_timeout(mut command: Command, limit: Duration) -> Result<Output,
         }
         Err(e) => {
             let _ = child.kill();
+            let _ = child.wait();
             return Err(PassCliError::Failed(e.kind().to_string()));
         }
     };
+    let collect = |rx: mpsc::Receiver<Zeroizing<Vec<u8>>>| {
+        let left = limit.saturating_sub(started.elapsed());
+        rx.recv_timeout(left).map_err(|_| PassCliError::Timeout)
+    };
+    let mut stdout = collect(stdout)?;
+    let mut stderr = collect(stderr)?;
     Ok(Output {
         status,
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
+        stdout: std::mem::take(&mut *stdout),
+        stderr: std::mem::take(&mut *stderr),
     })
 }
 

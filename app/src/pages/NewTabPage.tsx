@@ -26,10 +26,13 @@ export function NewTabPage({ hosts, groups, recent, onPick }: Props) {
   const sections = useMemo(() => {
     const loose = sortByName(hosts.filter((h) => !h.group_id), lang);
     const grouped = sortByName(groups, lang).map((g) => ({
+      key: g.id,
       title: g.name,
       hosts: sortByName(hosts.filter((h) => h.group_id === g.id), lang),
     }));
-    return [{ title: t("hosts.ungrouped"), hosts: loose }, ...grouped].filter((s) => s.hosts.length > 0);
+    return [{ key: "ungrouped", title: t("hosts.ungrouped"), hosts: loose }, ...grouped].filter(
+      (s) => s.hosts.length > 0,
+    );
   }, [hosts, groups, lang, t]);
 
   const row = (host: Host, icon: "recent" | "host" = "host") => (
@@ -72,7 +75,7 @@ export function NewTabPage({ hosts, groups, recent, onPick }: Props) {
             </div>
           )}
           {sections.map((s) => (
-            <div key={s.title} className="group-block">
+            <div key={s.key} className="group-block">
               <h2 className="group-title">{s.title}</h2>
               <div className="list">{s.hosts.map((host) => row(host))}</div>
             </div>

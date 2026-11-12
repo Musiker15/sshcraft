@@ -24,10 +24,12 @@ export function matchShortcut(e: KeyLike, context: "terminal" | "app"): Shortcut
   }
   switch (key) {
     case "tab":
-    case "pagedown":
       return "nextTab";
+    // Ctrl+PageUp/PageDown are common bindings in vim, tmux and others: not in the terminal.
+    case "pagedown":
+      return context === "app" ? "nextTab" : null;
     case "pageup":
-      return "prevTab";
+      return context === "app" ? "prevTab" : null;
     case "k":
       return context === "app" ? "palette" : null;
     default:

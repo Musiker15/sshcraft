@@ -137,6 +137,8 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
         proxies: Vec::new(),
     };
     let mut port_seen = false;
+    // First proxy directive wins, including an explicit `none`.
+    let mut proxy_seen = false;
     for block in blocks.iter().filter(|b| !b.skip && applies(b, &host.alias)) {
         for (keyword, value) in &block.entries {
             if value.is_empty() {
@@ -150,13 +152,17 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
                     host.port = value.parse().ok().filter(|p| *p != 0);
                 }
                 "identityfile" => host.identity_files.push(value.clone()),
-                "proxyjump" | "proxycommand" if host.proxies.is_empty() => {
-                    let name = if keyword == "proxyjump" {
-                        "ProxyJump"
-                    } else {
-                        "ProxyCommand"
-                    };
-                    host.proxies.push(format!("{name} {value}"));
+                "proxyjump" | "proxycommand" if !proxy_seen => {
+                    proxy_seen = true;
+                    // `none` switches the proxy off, so there is nothing to warn about.
+                    if !value.eq_ignore_ascii_case("none") {
+                        let name = if keyword == "proxyjump" {
+                            "ProxyJump"
+                        } else {
+                            "ProxyCommand"
+                        };
+                        host.proxies.push(format!("{name} {value}"));
+                    }
                 }
                 _ => {}
             }
