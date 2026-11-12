@@ -151,18 +151,19 @@ impl Vault {
         openssh_private_key: &str,
         passphrase: Option<&str>,
     ) -> Result<KeyInfo, VaultError> {
-        let normalized = Zeroizing::new(openssh_private_key.replace("\r\n", "\n"));
-        let parsed = PrivateKey::from_openssh(normalized.trim())
-            .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
-        let key = if parsed.is_encrypted() {
-            let passphrase = passphrase.ok_or(VaultError::WrongPassphrase)?;
-            parsed
-                .decrypt(passphrase)
-                .map_err(|_| VaultError::WrongPassphrase)?
-        } else {
-            parsed
-        };
-        self.seal_and_store(store, name, &key)
+        let key = parse_private_key(openssh_private_key, passphrase)?;
+        self.store_key(store, name, &key)
+    }
+
+    /// Seals and stores an already parsed key. Lets callers do the slow parsing (bcrypt for
+    /// passphrase-protected keys) before they lock the store.
+    pub fn store_key(
+        &self,
+        store: &Store,
+        name: &str,
+        key: &PrivateKey,
+    ) -> Result<KeyInfo, VaultError> {
+        self.seal_and_store(store, name, key)
     }
 
     pub fn generate_ed25519(&self, store: &Store, name: &str) -> Result<KeyInfo, VaultError> {
@@ -246,6 +247,25 @@ impl Vault {
             )
             .map(Zeroizing::new)
             .map_err(|_| VaultError::Corrupt)
+    }
+}
+
+/// Parses an OpenSSH private key, decrypting it with `passphrase` if it is protected.
+/// Accepts Windows line endings and surrounding whitespace.
+pub fn parse_private_key(
+    openssh_private_key: &str,
+    passphrase: Option<&str>,
+) -> Result<PrivateKey, VaultError> {
+    let normalized = Zeroizing::new(openssh_private_key.replace("\r\n", "\n"));
+    let parsed = PrivateKey::from_openssh(normalized.trim())
+        .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
+    if parsed.is_encrypted() {
+        let passphrase = passphrase.ok_or(VaultError::WrongPassphrase)?;
+        parsed
+            .decrypt(passphrase)
+            .map_err(|_| VaultError::WrongPassphrase)
+    } else {
+        Ok(parsed)
     }
 }
 

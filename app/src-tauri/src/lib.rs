@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod passcli;
 pub mod sessions;
 pub mod state;
 
@@ -23,10 +24,12 @@ pub fn run() {
             commands::keys::vault_status,
             commands::keys::list_keys,
             commands::keys::import_key,
-            commands::keys::import_key_file,
             commands::keys::generate_key,
             commands::keys::delete_key,
             commands::keys::list_agent_keys,
+            commands::keys::pass_cli_status,
+            commands::keys::pass_cli_list_keys,
+            commands::keys::import_from_pass_cli,
             commands::sessions::session_open,
             commands::sessions::session_write,
             commands::sessions::session_resize,

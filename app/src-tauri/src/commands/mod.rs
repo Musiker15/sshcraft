@@ -42,3 +42,17 @@ impl From<stollen_core::vault::VaultError> for CommandError {
 }
 
 pub type CommandResult<T> = Result<T, CommandError>;
+
+impl From<crate::passcli::PassCliError> for CommandError {
+    fn from(e: crate::passcli::PassCliError) -> Self {
+        use crate::passcli::PassCliError as P;
+        let code = match e {
+            P::NotInstalled => "pass_cli_missing",
+            P::LoggedOut => "pass_cli_logged_out",
+            P::NoPrivateKey => "no_private_key",
+            P::Encrypted => "encrypted",
+            _ => "pass_cli",
+        };
+        Self::new(code, e)
+    }
+}

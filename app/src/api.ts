@@ -70,11 +70,16 @@ export const vaultStatus = () => invoke<{ ok: boolean; error: string | null }>("
 export const listKeys = () => invoke<KeyInfo[]>("list_keys");
 export const importKey = (name: string, text: string, passphrase: string | null) =>
   invoke<KeyInfo>("import_key", { name, text, passphrase });
-export const importKeyFile = (name: string, path: string, passphrase: string | null) =>
-  invoke<KeyInfo>("import_key_file", { name, path, passphrase });
 export const generateKey = (name: string) => invoke<KeyInfo>("generate_key", { name });
 export const deleteKey = (id: string) => invoke<void>("delete_key", { id });
 export const listAgentKeys = () => invoke<AgentKey[]>("list_agent_keys");
+
+export type PassCliStatus = "not_installed" | "logged_out" | "ready";
+export type PassKey = { share_id: string; item_id: string; title: string };
+export const passCliStatus = () => invoke<PassCliStatus>("pass_cli_status");
+export const passCliListKeys = () => invoke<PassKey[]>("pass_cli_list_keys");
+export const importFromPassCli = (shareId: string, itemId: string, name: string) =>
+  invoke<KeyInfo>("import_from_pass_cli", { shareId, itemId, name });
 
 export async function sessionOpen(
   hostId: string,

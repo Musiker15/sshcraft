@@ -1,11 +1,15 @@
 //! Key management. Only public facts (`KeyInfo`) cross into the UI.
 
 use serde::Serialize;
+use std::sync::Arc;
 use stollen_core::model::KeyId;
+
 use stollen_core::vault::{self, KeyInfo, Vault};
 use tauri::State;
+use zeroize::Zeroizing;
 
 use super::{CommandError, CommandResult};
+use crate::passcli::{self, PassCli, PassCliError, PassCliProcess, PassCliStatus, PassKey};
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -28,11 +32,20 @@ pub fn vault_status(state: State<'_, AppState>) -> VaultStatus {
     }
 }
 
-fn unlocked(state: &AppState) -> CommandResult<&Vault> {
+fn unlocked(state: &AppState) -> CommandResult<Arc<Vault>> {
     state
         .vault
-        .as_deref()
+        .clone()
         .map_err(|e| CommandError::new("vault_locked", e))
+}
+
+/// Runs blocking key work off the main thread, so the window and terminals stay responsive.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> CommandResult<T> + Send + 'static,
+) -> CommandResult<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| CommandError::new("internal", e))?
 }
 
 #[tauri::command]
@@ -41,37 +54,65 @@ pub fn list_keys(state: State<'_, AppState>) -> CommandResult<Vec<KeyInfo>> {
 }
 
 #[tauri::command]
-pub fn import_key(
+pub async fn import_key(
     state: State<'_, AppState>,
     name: String,
     text: String,
     passphrase: Option<String>,
 ) -> CommandResult<KeyInfo> {
     let vault = unlocked(&state)?;
-    let store = state.store.lock().expect("store lock");
-    Ok(vault.import_key(&store, &name, &text, passphrase.as_deref())?)
+    let store = state.store.clone();
+    let text = Zeroizing::new(text);
+    let passphrase = passphrase.map(Zeroizing::new);
+    blocking(move || {
+        let key = vault::parse_private_key(&text, passphrase.as_deref().map(String::as_str))?;
+        let store = store.lock().expect("store lock");
+        Ok(vault.store_key(&store, &name, &key)?)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn import_key_file(
+pub async fn generate_key(state: State<'_, AppState>, name: String) -> CommandResult<KeyInfo> {
+    let vault = unlocked(&state)?;
+    let store = state.store.clone();
+    blocking(move || {
+        let store = store.lock().expect("store lock");
+        Ok(vault.generate_ed25519(&store, &name)?)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn pass_cli_status() -> CommandResult<PassCliStatus> {
+    blocking(|| Ok(passcli::local_status())).await
+}
+
+#[tauri::command]
+pub async fn pass_cli_list_keys() -> CommandResult<Vec<PassKey>> {
+    blocking(|| {
+        let cli = PassCliProcess::locate().ok_or(PassCliError::NotInstalled)?;
+        Ok(cli.list_ssh_keys()?)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn import_from_pass_cli(
     state: State<'_, AppState>,
+    share_id: String,
+    item_id: String,
     name: String,
-    path: String,
-    passphrase: Option<String>,
 ) -> CommandResult<KeyInfo> {
-    let text = zeroize::Zeroizing::new(
-        std::fs::read_to_string(&path).map_err(|e| CommandError::new("io", e))?,
-    );
     let vault = unlocked(&state)?;
-    let store = state.store.lock().expect("store lock");
-    Ok(vault.import_key(&store, &name, &text, passphrase.as_deref())?)
-}
-
-#[tauri::command]
-pub fn generate_key(state: State<'_, AppState>, name: String) -> CommandResult<KeyInfo> {
-    let vault = unlocked(&state)?;
-    let store = state.store.lock().expect("store lock");
-    Ok(vault.generate_ed25519(&store, &name)?)
+    let store = state.store.clone();
+    blocking(move || {
+        let cli = PassCliProcess::locate().ok_or(PassCliError::NotInstalled)?;
+        Ok(passcli::import_from_pass_cli(
+            &cli, &vault, &store, &share_id, &item_id, &name,
+        )?)
+    })
+    .await
 }
 
 #[tauri::command]

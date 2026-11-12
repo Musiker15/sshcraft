@@ -24,6 +24,7 @@ async-trait = { workspace = true }
 directories = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 stollen-ssh = { workspace = true, features = ["testing"] }

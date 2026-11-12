@@ -4633,6 +4633,7 @@ dependencies = [
  "stollen-ssh",
  "tauri",
  "tauri-build",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
  "zeroize",

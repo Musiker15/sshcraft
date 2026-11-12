@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { deleteKey, errorMessage, generateKey, importKey, type KeyInfo } from "../api";
+import { ProtonPassImport } from "./ProtonPassImport";
 
 type Props = { keys: KeyInfo[]; onChanged: () => void; onClose: () => void };
 
@@ -63,6 +64,8 @@ export function KeyManager({ keys, onChanged, onClose }: Props) {
           <span className="mono">{k.fingerprint}</span>
         </div>
       ))}
+
+      <ProtonPassImport onImported={onChanged} />
 
       <h2>Schlüssel hinzufügen</h2>
       <label>
