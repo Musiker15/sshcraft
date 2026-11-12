@@ -1363,3 +1363,321 @@ async fn forwarding_without_an_agent_is_noted() {
         notice: Some(ErrorCode::AgentForwardingUnavailable)
     }));
 }
+
+// ---- Teilplan 10: keys with passphrase, security keys, certificates, authorized_keys ----
+
+/// Answers each question with the next prepared answer (`None`: cancel) and keeps them.
+struct ScriptedAuth {
+    answers: Mutex<Vec<Option<String>>>,
+    seen: Mutex<Vec<sshcraft_ssh::AuthRequest>>,
+}
+
+impl ScriptedAuth {
+    fn new(answers: &[Option<&str>]) -> Arc<Self> {
+        Arc::new(Self {
+            answers: Mutex::new(answers.iter().map(|a| a.map(str::to_owned)).collect()),
+            seen: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn seen(&self) -> Vec<sshcraft_ssh::AuthRequest> {
+        self.seen.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl sshcraft_ssh::AuthPrompter for ScriptedAuth {
+    async fn answer(&self, request: sshcraft_ssh::AuthRequest) -> Option<Vec<Zeroizing<String>>> {
+        self.seen.lock().unwrap().push(request);
+        let mut answers = self.answers.lock().unwrap();
+        let next = if answers.is_empty() {
+            None
+        } else {
+            answers.remove(0)
+        };
+        next.map(|a| vec![Zeroizing::new(a)])
+    }
+}
+
+impl Fixture {
+    fn key_id(&self) -> KeyId {
+        self.store.lock().unwrap().list_key_records().unwrap()[0].id
+    }
+
+    fn manager_with_auth(
+        &self,
+        auth: Arc<dyn sshcraft_ssh::AuthPrompter>,
+        presence: Arc<FakePresence>,
+    ) -> SessionManager {
+        SessionManager::with_delay_scale(
+            self.store.clone(),
+            Some(self.vault.clone()),
+            self.prompter.clone(),
+            auth,
+            Arc::new(TestAgents {
+                keys: vec![self.key.clone()],
+                reachable: true,
+            }),
+            presence,
+            0.01,
+        )
+    }
+
+    /// A host on `port` as user `tester` with `key`.
+    fn host_on(&self, port: u16, key: KeyRef, jumps: Option<Vec<HostId>>) -> HostId {
+        let host = Host {
+            location: None,
+            id: HostId::new(),
+            name: "other".into(),
+            group_id: None,
+            settings: ConnectionSettings {
+                address: Some("127.0.0.1".into()),
+                port: Some(port),
+                username: Some("tester".into()),
+                key: Some(key),
+                jump_hosts: jumps,
+                ..Default::default()
+            },
+            tags: Vec::new(),
+            os: None,
+        };
+        self.store.lock().unwrap().upsert_host(&host).unwrap();
+        host.id
+    }
+}
+
+async fn open_and_wait(manager: &SessionManager, host_id: HostId) -> Vec<SessionStatus> {
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected(s) || ended(s).is_some()).await;
+    sink.statuses()
+}
+
+#[tokio::test]
+async fn protected_key_asks_for_passphrase_once_and_connects() {
+    let f = fixture(true).await;
+    {
+        let id = f.key_id();
+        let store = f.store.lock().unwrap();
+        f.vault.protect_key(&store, id, "pw").unwrap();
+    }
+    let auth = ScriptedAuth::new(&[Some("pw")]);
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = f.manager_with_auth(auth.clone(), presence.clone());
+    let statuses = open_and_wait(&manager, f.host_id).await;
+    assert!(connected(&statuses), "{statuses:?}");
+    let seen = auth.seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].passphrase_for.as_deref(), Some("test"));
+    assert_eq!(
+        presence.asked(),
+        0,
+        "no Windows Hello for a key with a passphrase"
+    );
+}
+
+#[tokio::test]
+async fn wrong_passphrase_three_times_ends_with_wrong_passphrase() {
+    let f = fixture(true).await;
+    {
+        let id = f.key_id();
+        let store = f.store.lock().unwrap();
+        f.vault.protect_key(&store, id, "pw").unwrap();
+    }
+    let auth = ScriptedAuth::new(&[Some("a"), Some("b"), Some("c"), Some("pw")]);
+    let manager = f.manager_with_auth(
+        auth.clone(),
+        Arc::new(FakePresence::new(&[Presence::Verified])),
+    );
+    let statuses = open_and_wait(&manager, f.host_id).await;
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::WrongPassphrase));
+    assert_eq!(auth.seen().len(), 3);
+    let id = f.key_id();
+    let record = f.store.lock().unwrap().key_record(id).unwrap().unwrap();
+    assert!(
+        record.protected,
+        "a wrong passphrase changes nothing stored"
+    );
+}
+
+#[tokio::test]
+async fn cancelled_passphrase_ends_with_auth_cancelled() {
+    let f = fixture(true).await;
+    {
+        let id = f.key_id();
+        let store = f.store.lock().unwrap();
+        f.vault.protect_key(&store, id, "pw").unwrap();
+    }
+    let auth = ScriptedAuth::new(&[None]);
+    let manager = f.manager_with_auth(auth, Arc::new(FakePresence::new(&[Presence::Verified])));
+    let statuses = open_and_wait(&manager, f.host_id).await;
+    assert_eq!(ended(&statuses), Some(EndReason::AuthCancelled));
+}
+
+#[tokio::test]
+async fn passphrase_prompt_names_the_jump_host_key() {
+    let f = fixture(true).await;
+    let target_key = f.key_id();
+    let jump_key = {
+        let store = f.store.lock().unwrap();
+        f.vault
+            .store_protected(&store, "jump-key", &f.key, "jpw")
+            .unwrap()
+            .id
+    };
+    let jump = f.host_on(
+        f.server.port,
+        KeyRef::Stored { id: jump_key },
+        Some(Vec::new()),
+    );
+    let target = f.host_on(
+        f.server.port,
+        KeyRef::Stored { id: target_key },
+        Some(vec![jump]),
+    );
+    let auth = ScriptedAuth::new(&[Some("jpw")]);
+    let manager = f.manager_with_auth(
+        auth.clone(),
+        Arc::new(FakePresence::new(&[Presence::Verified])),
+    );
+    let statuses = open_and_wait(&manager, target).await;
+    assert!(connected(&statuses), "{statuses:?}");
+    let seen = auth.seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].passphrase_for.as_deref(), Some("jump-key"));
+}
+
+#[tokio::test]
+async fn security_key_signs_without_key_gate() {
+    use sshcraft_fido::soft::SoftAuthenticator;
+    use sshcraft_fido::{Attachment, CreateOptions, SkAlgorithm, create_key};
+    let f = fixture(true).await;
+    let token = Arc::new(SoftAuthenticator::new(Attachment::CrossPlatform));
+    let options = CreateOptions {
+        algorithm: SkAlgorithm::EcdsaP256,
+        attachment: Attachment::CrossPlatform,
+        verify_user: true,
+        user_name: "tester".into(),
+    };
+    let sk = create_key(token.as_ref(), &options, "yubikey")
+        .await
+        .unwrap();
+    let server = TestServer::start(sk.public_key().clone()).await;
+    let id = {
+        let store = f.store.lock().unwrap();
+        f.vault.store_key(&store, "yubikey", &sk).unwrap().id
+    };
+    let host = f.host_on(server.port, KeyRef::Stored { id }, None);
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = f
+        .manager_with_presence(presence.clone())
+        .with_security_keys(token.clone());
+    let statuses = open_and_wait(&manager, host).await;
+    assert!(connected(&statuses), "{statuses:?}");
+    assert_eq!(presence.asked(), 0);
+    assert_eq!(token.assertions(), 1);
+}
+
+#[tokio::test]
+async fn cancelled_security_key_ends_without_reconnecting() {
+    use sshcraft_fido::soft::SoftAuthenticator;
+    use sshcraft_fido::{Attachment, CreateOptions, SkAlgorithm, create_key};
+    let f = fixture(true).await;
+    let token = Arc::new(SoftAuthenticator::new(Attachment::CrossPlatform));
+    let options = CreateOptions {
+        algorithm: SkAlgorithm::Ed25519,
+        attachment: Attachment::CrossPlatform,
+        verify_user: false,
+        user_name: "tester".into(),
+    };
+    let sk = create_key(token.as_ref(), &options, "yubikey")
+        .await
+        .unwrap();
+    let server = TestServer::start(sk.public_key().clone()).await;
+    let id = {
+        let store = f.store.lock().unwrap();
+        f.vault.store_key(&store, "yubikey", &sk).unwrap().id
+    };
+    token.set_cancel(true);
+    let host = f.host_on(server.port, KeyRef::Stored { id }, None);
+    let manager = f
+        .manager_with_presence(Arc::new(FakePresence::new(&[Presence::Verified])))
+        .with_security_keys(token);
+    let statuses = open_and_wait(&manager, host).await;
+    assert_eq!(ended(&statuses), Some(EndReason::AuthCancelled));
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::SecurityKeyCancelled));
+}
+
+#[tokio::test]
+async fn expired_certificate_notice_reaches_status() {
+    use sshcraft_ssh::testing::{TestAuth, user_certificate};
+    let f = fixture(true).await;
+    let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let server = TestServer::start_with(TestAuth {
+        key: Some(f.key.public_key().clone()),
+        ca: Some(ca.public_key().clone()),
+        ..Default::default()
+    })
+    .await;
+    let cert = user_certificate(f.key.public_key(), &ca, "tester", 0, 1);
+    {
+        let id = f.key_id();
+        let store = f.store.lock().unwrap();
+        f.vault
+            .attach_certificate(&store, id, &cert.to_openssh().unwrap())
+            .unwrap();
+    }
+    let host = f.host_on(server.port, KeyRef::Stored { id: f.key_id() }, None);
+    let statuses = open_and_wait(&f.manager, host).await;
+    assert!(
+        statuses.iter().any(|s| matches!(
+            s,
+            SessionStatus::Connected {
+                notice: Some(ErrorCode::CertificateExpired)
+            }
+        )),
+        "{statuses:?}"
+    );
+}
+
+#[tokio::test]
+async fn install_key_adds_line_via_exec() {
+    let f = fixture(true).await;
+    f.server.set_exec_output("SSHCRAFT_ADDED\n");
+    let outcome = f
+        .manager
+        .install_key(f.host_id, KeyRef::Stored { id: f.key_id() })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        sshcraft_core::authorized_keys::InstallOutcome::Added
+    );
+    let commands = f.server.received_commands();
+    assert_eq!(commands.len(), 1);
+    let line = {
+        let mut public = f.key.public_key().clone();
+        public.set_comment("");
+        public.to_openssh().unwrap()
+    };
+    assert!(commands[0].contains(line.trim()));
+}
+
+#[tokio::test]
+async fn install_key_reports_unsupported_on_unknown_output() {
+    let f = fixture(true).await;
+    let err = f
+        .manager
+        .install_key(f.host_id, KeyRef::Stored { id: f.key_id() })
+        .await
+        .unwrap_err();
+    assert_eq!(err.0, ErrorCode::InstallKeyUnsupported);
+}
+
+#[tokio::test]
+async fn key_from_other_device_reports_key_not_on_device() {
+    let f = fixture(true).await;
+    let host = f.host_on(f.server.port, KeyRef::Stored { id: KeyId::new() }, None);
+    let statuses = open_and_wait(&f.manager, host).await;
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::KeyNotOnDevice));
+}

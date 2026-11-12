@@ -20,6 +20,8 @@ pub struct AppState {
     pub sessions: SessionManager,
     pub prompter: Arc<PromptRegistry<TauriEmitter>>,
     pub sync: SyncManager,
+    /// FIDO2 tokens and Windows Hello; `None` where there is no WebAuthn.
+    pub security: Option<Arc<dyn sshcraft_fido::Authenticator>>,
 }
 
 impl AppState {
@@ -33,6 +35,7 @@ impl AppState {
             .map_err(crate::errors::CommandError::from);
         let store = Arc::new(Mutex::new(store));
         let prompter = Arc::new(PromptRegistry::new(TauriEmitter(app.clone())));
+        let security = security_keys(app);
         let sessions = SessionManager::new(
             store.clone(),
             vault.clone().ok(),
@@ -43,6 +46,10 @@ impl AppState {
                 hwnd: main_window_handle(app),
             }),
         );
+        let sessions = match &security {
+            Some(auth) => sessions.with_security_keys(auth.clone()),
+            None => sessions,
+        };
         let events = app.clone();
         sessions.on_hello_unavailable(Box::new(move || {
             let _ = events.emit("hello-unavailable", ());
@@ -58,8 +65,24 @@ impl AppState {
             sessions,
             prompter,
             sync,
+            security,
         })
     }
+}
+
+/// WebAuthn (FIDO2 tokens and Windows Hello), with its dialogs owned by the main window.
+#[cfg(windows)]
+fn security_keys(app: &AppHandle) -> Option<Arc<dyn sshcraft_fido::Authenticator>> {
+    sshcraft_fido::webauthn::webauthn_available().then(|| {
+        Arc::new(sshcraft_fido::webauthn::WebAuthn {
+            hwnd: main_window_handle(app),
+        }) as Arc<dyn sshcraft_fido::Authenticator>
+    })
+}
+
+#[cfg(not(windows))]
+fn security_keys(_app: &AppHandle) -> Option<Arc<dyn sshcraft_fido::Authenticator>> {
+    None
 }
 
 /// Raw handle of the main window, so the Windows Hello dialog belongs to it.

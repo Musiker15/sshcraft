@@ -5533,6 +5533,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sshcraft-core",
+ "sshcraft-fido",
  "sshcraft-local",
  "sshcraft-proto",
  "sshcraft-ssh",

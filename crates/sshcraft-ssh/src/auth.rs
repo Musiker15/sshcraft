@@ -112,6 +112,9 @@ pub struct AuthRequest {
     pub name: String,
     pub instructions: String,
     pub prompts: Vec<AuthPromptLine>,
+    /// Set when SSHCraft itself asks: the passphrase of the key with this name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passphrase_for: Option<String>,
 }
 
 /// Asks the user. `None` means the user cancelled.
@@ -168,6 +171,7 @@ impl Flow<'_> {
                 name,
                 instructions,
                 prompts,
+                passphrase_for: None,
             })
             .await
             .ok_or(SshError::AuthCancelled)?;

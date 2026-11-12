@@ -249,6 +249,7 @@ pub(crate) mod tests {
                 text: "Code: ".into(),
                 echo: true,
             }],
+            passphrase_for: None,
         }
     }
 

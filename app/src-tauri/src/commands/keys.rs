@@ -1,7 +1,11 @@
 //! Key management. Only public facts (`KeyInfo`) cross into the UI.
 
-use serde::Serialize;
-use sshcraft_core::model::KeyId;
+use serde::{Deserialize, Serialize};
+use sshcraft_core::authorized_keys::InstallOutcome;
+use sshcraft_core::keytypes::{KeyKind, KeySpec};
+use sshcraft_core::model::{HostId, KeyId, KeyRef};
+use sshcraft_core::store::ItemKind;
+use sshcraft_fido::{Attachment, CreateOptions, SkAlgorithm};
 use std::sync::Arc;
 
 use sshcraft_core::vault::{self, KeyInfo, Vault};
@@ -68,34 +72,204 @@ pub fn list_keys(state: State<'_, AppState>) -> CommandResult<Vec<KeyInfo>> {
     Ok(vault::list_keys(&state.store.lock().expect("store lock"))?)
 }
 
+/// Imports a key. With `save_passphrase == false` an encrypted key stays encrypted with its
+/// passphrase, which is then asked on each use.
 #[tauri::command]
 pub async fn import_key(
     state: State<'_, AppState>,
     name: String,
     text: String,
     passphrase: Option<String>,
+    save_passphrase: Option<bool>,
 ) -> CommandResult<KeyInfo> {
     let vault = unlocked(&state)?;
     let store = state.store.clone();
     let text = Zeroizing::new(text);
-    let passphrase = passphrase.map(Zeroizing::new);
+    let passphrase = passphrase.map(Zeroizing::new).filter(|p| !p.is_empty());
     blocking(move || {
         let key = vault::parse_private_key(&text, passphrase.as_deref().map(String::as_str))?;
         let store = store.lock().expect("store lock");
-        Ok(vault.store_key(&store, &name, &key)?)
+        match passphrase {
+            Some(p) if save_passphrase == Some(false) => {
+                Ok(vault.store_protected(&store, &name, &key, &p)?)
+            }
+            _ => Ok(vault.store_key(&store, &name, &key)?),
+        }
     })
     .await
 }
 
 #[tauri::command]
-pub async fn generate_key(state: State<'_, AppState>, name: String) -> CommandResult<KeyInfo> {
+pub async fn generate_key(
+    state: State<'_, AppState>,
+    name: String,
+    spec: KeySpec,
+    passphrase: Option<String>,
+) -> CommandResult<KeyInfo> {
     let vault = unlocked(&state)?;
     let store = state.store.clone();
+    let passphrase = passphrase.map(Zeroizing::new);
     blocking(move || {
         let store = store.lock().expect("store lock");
-        Ok(vault.generate_ed25519(&store, &name)?)
+        Ok(vault.generate(
+            &store,
+            &name,
+            &spec,
+            passphrase.as_deref().map(String::as_str),
+        )?)
     })
     .await
+}
+
+#[derive(Serialize)]
+pub struct SecuritySupport {
+    fido2: bool,
+    hello: bool,
+}
+
+/// Which security keys this device can create.
+#[tauri::command]
+pub async fn security_key_support(state: State<'_, AppState>) -> CommandResult<SecuritySupport> {
+    let fido2 = state.security.is_some();
+    #[cfg(windows)]
+    let hello = fido2 && blocking(|| Ok(sshcraft_fido::webauthn::platform_available())).await?;
+    #[cfg(not(windows))]
+    let hello = false;
+    Ok(SecuritySupport { fido2, hello })
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityKeyKind {
+    /// A token you plug in (YubiKey and the like). Synced like any key.
+    Fido2,
+    /// Windows Hello: bound to this device, never synced.
+    Hello,
+}
+
+/// Creates a key on a FIDO2 token or in Windows Hello. Windows shows its own dialog.
+#[tauri::command]
+pub async fn create_security_key(
+    state: State<'_, AppState>,
+    name: String,
+    kind: SecurityKeyKind,
+    algorithm: SkAlgorithm,
+    verify_user: bool,
+) -> CommandResult<KeyInfo> {
+    let vault = unlocked(&state)?;
+    let auth = state
+        .security
+        .clone()
+        .ok_or_else(|| CommandError::code(ErrorCode::NotSupported))?;
+    let options = match kind {
+        SecurityKeyKind::Fido2 => CreateOptions {
+            algorithm,
+            attachment: Attachment::CrossPlatform,
+            verify_user,
+            user_name: name.clone(),
+        },
+        // Windows Hello holds only P-256 keys and always checks the user.
+        SecurityKeyKind::Hello => CreateOptions {
+            algorithm: SkAlgorithm::EcdsaP256,
+            attachment: Attachment::Platform,
+            verify_user: true,
+            user_name: name.clone(),
+        },
+    };
+    let key = sshcraft_fido::create_key(auth.as_ref(), &options, &name).await?;
+    let store = state.store.lock().expect("store lock");
+    Ok(match kind {
+        SecurityKeyKind::Fido2 => vault.store_key(&store, &name, &key)?,
+        SecurityKeyKind::Hello => vault.store_device_key(&store, &name, &key)?,
+    })
+}
+
+/// A key changed: queue it for its server, if it has one.
+fn key_changed(
+    store: &sshcraft_core::store::Store,
+    id: KeyId,
+) -> CommandResult<Vec<sshcraft_core::model::ServerId>> {
+    let key = id.0.to_string();
+    let location = store.location_of(ItemKind::Key, &key)?;
+    crate::sync::note_change(store, ItemKind::Key, &key, location, crate::sync::now_ms())
+}
+
+/// Runs `change` on a key the user owns, then queues it for sync.
+fn change_key(
+    state: &AppState,
+    id: KeyId,
+    change: impl FnOnce(&Vault, &sshcraft_core::store::Store) -> Result<KeyInfo, vault::VaultError>,
+) -> CommandResult<KeyInfo> {
+    let vault = unlocked(state)?;
+    let (info, servers) = {
+        let store = state.store.lock().expect("store lock");
+        if let Some(server) = store.location_of(ItemKind::Key, &id.0.to_string())? {
+            crate::sync::share_rights_for_key(&store, server, id)?;
+        }
+        let info = change(&vault, &store)?;
+        let servers = key_changed(&store, id)?;
+        (info, servers)
+    };
+    state.sync.nudge(&servers);
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn attach_certificate(
+    state: State<'_, AppState>,
+    id: KeyId,
+    text: String,
+) -> CommandResult<KeyInfo> {
+    change_key(&state, id, |vault, store| {
+        vault.attach_certificate(store, id, &text)
+    })
+}
+
+#[tauri::command]
+pub fn detach_certificate(state: State<'_, AppState>, id: KeyId) -> CommandResult<KeyInfo> {
+    change_key(&state, id, |vault, store| {
+        vault.detach_certificate(store, id)
+    })
+}
+
+/// Saves the passphrase from now on (the key is kept decrypted inside the vault).
+#[tauri::command]
+pub async fn remember_passphrase(
+    state: State<'_, AppState>,
+    id: KeyId,
+    passphrase: String,
+) -> CommandResult<KeyInfo> {
+    let passphrase = Zeroizing::new(passphrase);
+    change_key(&state, id, |vault, store| {
+        vault.remember_passphrase(store, id, &passphrase)
+    })
+}
+
+/// Stops saving the passphrase: the key is kept encrypted with `passphrase`.
+#[tauri::command]
+pub async fn protect_key(
+    state: State<'_, AppState>,
+    id: KeyId,
+    passphrase: String,
+) -> CommandResult<KeyInfo> {
+    let passphrase = Zeroizing::new(passphrase);
+    change_key(&state, id, |vault, store| {
+        vault.protect_key(store, id, &passphrase)
+    })
+}
+
+/// Puts the public half of `key` into `authorized_keys` on the host.
+#[tauri::command]
+pub async fn install_key(
+    state: State<'_, AppState>,
+    host_id: HostId,
+    key: KeyRef,
+) -> CommandResult<InstallOutcome> {
+    state
+        .sessions
+        .install_key(host_id, key)
+        .await
+        .map_err(|(code, detail)| CommandError { code, detail })
 }
 
 #[tauri::command]
@@ -141,6 +315,25 @@ pub fn delete_key(state: State<'_, AppState>, id: KeyId) -> CommandResult<()> {
             crate::sync::share_rights_for_key(&store, server, id)?;
         }
         let servers = crate::sync::note_change(&store, kind, &key, before, crate::sync::now_ms())?;
+        // A Windows Hello key also goes from Windows Hello; if that fails, it goes from here.
+        #[cfg(windows)]
+        if let Some(record) = store.key_record(id)?
+            && record.kind == KeyKind::Device
+            && let Ok(vault) = unlocked(&state)
+            && let Ok(text) = vault.stored_openssh(&store, id)
+            && let Ok(stored) = russh::keys::PrivateKey::from_openssh(text.as_str())
+        {
+            let handle = match stored.key_data() {
+                russh::keys::ssh_key::private::KeypairData::SkEcdsaSha2NistP256(sk) => {
+                    sk.key_handle().to_vec()
+                }
+                russh::keys::ssh_key::private::KeypairData::SkEd25519(sk) => {
+                    sk.key_handle().to_vec()
+                }
+                _ => Vec::new(),
+            };
+            let _ = sshcraft_fido::webauthn::delete_platform_credential(&handle);
+        }
         vault::delete_key(&store, id)?;
         servers
     };
