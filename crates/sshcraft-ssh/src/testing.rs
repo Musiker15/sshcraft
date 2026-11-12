@@ -1,14 +1,17 @@
-//! An in-process SSH server for tests. Accepts exactly one client key.
+//! An in-process SSH server for tests. Accepts one client key, a password and rounds of
+//! keyboard-interactive questions, as [`TestAuth`] says, and records what clients sent.
 //!
 //! The shell echoes every input chunk, except two commands sent as their own chunk:
 //! `exit\n` ends the shell with exit status 0, `flood\n` sends [`flood_pattern`].
 
-use std::sync::Arc;
+use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
 
 use russh::keys::ssh_encoding::bytes::Bytes;
 use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Server as _, Session, VerifiedPublicKey};
 use russh::{Channel, ChannelId};
+use russh::{MethodKind, MethodSet};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
@@ -24,26 +27,59 @@ pub fn flood_pattern() -> Vec<u8> {
     block.iter().copied().cycle().take(FLOOD_LEN).collect()
 }
 
+/// What the test server accepts.
+#[derive(Clone, Default)]
+pub struct TestAuth {
+    pub key: Option<PublicKey>,
+    pub password: Option<String>,
+    /// Rounds of keyboard-interactive questions: (question, echo, expected answer).
+    pub kbd: Vec<Vec<(String, bool, String)>>,
+    /// The key alone is not enough: keyboard-interactive follows it.
+    pub key_then_kbd: bool,
+}
+
+/// What clients sent to the test server.
+#[derive(Default)]
+struct Records {
+    /// Passwords and keyboard-interactive answers, in the order they came.
+    passwords: Mutex<Vec<String>>,
+}
+
 pub struct TestServer {
     pub port: u16,
     pub host_fingerprint: String,
-    authorized: PublicKey,
+    auth: TestAuth,
+    records: Arc<Records>,
     host_key: PrivateKey,
     running: Option<(server::RunningServerHandle, JoinHandle<()>)>,
 }
 
 impl TestServer {
     pub async fn start(authorized: PublicKey) -> TestServer {
+        Self::start_with(TestAuth {
+            key: Some(authorized),
+            ..Default::default()
+        })
+        .await
+    }
+
+    pub async fn start_with(auth: TestAuth) -> TestServer {
         let host_key = random_host_key();
         let mut server = TestServer {
             port: 0,
             host_fingerprint: fingerprint(&host_key),
-            authorized,
+            auth,
+            records: Arc::new(Records::default()),
             host_key,
             running: None,
         };
         server.listen().await;
         server
+    }
+
+    /// Passwords and keyboard-interactive answers clients sent, in order.
+    pub fn received_passwords(&self) -> Vec<String> {
+        self.records.passwords.lock().unwrap().clone()
     }
 
     /// Drops every connection and stops listening.
@@ -76,16 +112,28 @@ impl TestServer {
             .await
             .expect("bind test server");
         self.port = socket.local_addr().expect("local addr").port();
+        let mut methods: Vec<MethodKind> = Vec::new();
+        if self.auth.key.is_some() {
+            methods.push(MethodKind::PublicKey);
+        }
+        if self.auth.password.is_some() {
+            methods.push(MethodKind::Password);
+        }
+        if !self.auth.kbd.is_empty() && !self.auth.key_then_kbd {
+            methods.push(MethodKind::KeyboardInteractive);
+        }
         let config = Arc::new(server::Config {
             keys: vec![self.host_key.clone()],
             auth_rejection_time: std::time::Duration::from_millis(10),
             auth_rejection_time_initial: Some(std::time::Duration::ZERO),
+            methods: MethodSet::from(&methods[..]),
             ..Default::default()
         });
-        let authorized = self.authorized.clone();
+        let auth = self.auth.clone();
+        let records = self.records.clone();
         let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
-            let mut factory = Factory { authorized };
+            let mut factory = Factory { auth, records };
             let running = factory.run_on_socket(config, &socket);
             let _ = handle_tx.send(running.handle());
             let _ = running.await;
@@ -111,7 +159,8 @@ fn fingerprint(key: &PrivateKey) -> String {
 
 #[derive(Clone)]
 struct Factory {
-    authorized: PublicKey,
+    auth: TestAuth,
+    records: Arc<Records>,
 }
 
 impl server::Server for Factory {
@@ -119,13 +168,35 @@ impl server::Server for Factory {
 
     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Handler {
         Handler {
-            authorized: self.authorized.clone(),
+            auth: self.auth.clone(),
+            records: self.records.clone(),
+            key_ok: false,
+            kbd_round: 0,
         }
     }
 }
 
 struct Handler {
-    authorized: PublicKey,
+    auth: TestAuth,
+    records: Arc<Records>,
+    /// The key was accepted and keyboard-interactive must follow.
+    key_ok: bool,
+    kbd_round: usize,
+}
+
+impl Handler {
+    fn kbd_question(&self) -> Auth {
+        let round = &self.auth.kbd[self.kbd_round];
+        let prompts: Vec<(Cow<'static, str>, bool)> = round
+            .iter()
+            .map(|(q, echo, _)| (Cow::Owned(q.clone()), *echo))
+            .collect();
+        Auth::Partial {
+            name: Cow::Borrowed(""),
+            instructions: Cow::Borrowed(""),
+            prompts: Cow::Owned(prompts),
+        }
+    }
 }
 
 impl server::Handler for Handler {
@@ -136,10 +207,71 @@ impl server::Handler for Handler {
         _user: &str,
         key: VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
-        if key.public_key.key_data() == self.authorized.key_data() {
+        let matches = self
+            .auth
+            .key
+            .as_ref()
+            .is_some_and(|k| key.public_key.key_data() == k.key_data());
+        if !matches {
+            return Ok(Auth::reject());
+        }
+        if self.auth.key_then_kbd {
+            self.key_ok = true;
+            return Ok(Auth::Reject {
+                proceed_with_methods: Some(MethodSet::from(&[MethodKind::KeyboardInteractive][..])),
+                partial_success: true,
+            });
+        }
+        Ok(Auth::Accept)
+    }
+
+    async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
+        self.records
+            .passwords
+            .lock()
+            .unwrap()
+            .push(password.to_owned());
+        if self.auth.password.as_deref() == Some(password) {
             Ok(Auth::Accept)
         } else {
             Ok(Auth::reject())
+        }
+    }
+
+    async fn auth_keyboard_interactive<'a>(
+        &'a mut self,
+        _user: &str,
+        _submethods: &str,
+        response: Option<server::Response<'a>>,
+    ) -> Result<Auth, Self::Error> {
+        if self.auth.kbd.is_empty() || (self.auth.key_then_kbd && !self.key_ok) {
+            return Ok(Auth::reject());
+        }
+        let Some(response) = response else {
+            self.kbd_round = 0;
+            return Ok(self.kbd_question());
+        };
+        let answers: Vec<String> = response
+            .map(|a| String::from_utf8_lossy(&a).into_owned())
+            .collect();
+        self.records
+            .passwords
+            .lock()
+            .unwrap()
+            .extend(answers.iter().cloned());
+        let expected: Vec<&String> = self.auth.kbd[self.kbd_round]
+            .iter()
+            .map(|(_, _, a)| a)
+            .collect();
+        if answers.iter().collect::<Vec<_>>() != expected {
+            self.kbd_round = 0;
+            return Ok(Auth::reject());
+        }
+        self.kbd_round += 1;
+        if self.kbd_round == self.auth.kbd.len() {
+            Ok(Auth::Accept)
+        } else {
+            Ok(self.kbd_question())
         }
     }
 

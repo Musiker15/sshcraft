@@ -1,18 +1,21 @@
-//! SSH session engine for SSHCraft: connect with a private key, verify the server's host key
-//! through the caller, run an interactive shell and stream its raw output bytes.
+//! SSH session engine for SSHCraft: connect with a key, a password or keyboard-interactive
+//! answers, verify the server's host key through the caller, run an interactive shell and stream
+//! its raw output bytes.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use russh::client::{self, Msg};
-use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{HashAlg, PrivateKey, PublicKeyOrCertificate};
 use russh::{ChannelMsg, ChannelWriteHalf};
 use sshcraft_core::policy::Disconnect;
 use tokio::sync::mpsc;
 
 #[cfg(windows)]
 pub mod agent;
+mod auth;
+pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter};
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -44,9 +47,9 @@ pub struct AgentKey {
 /// How long the agent may take to list its keys.
 const AGENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a signature may take; generous, because the user may have to confirm it.
-const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
 
-async fn agent_identities(
+pub(crate) async fn agent_identities(
     agent: &mut DynAgent,
 ) -> Result<Vec<russh::keys::agent::AgentIdentity>, SshError> {
     tokio::time::timeout(AGENT_REQUEST_TIMEOUT, agent.request_identities())
@@ -84,7 +87,7 @@ pub struct ConnectParams {
     pub address: String,
     pub port: u16,
     pub username: String,
-    pub credential: Credential,
+    pub auth: Auth,
 }
 
 /// Decides whether to trust the server's host key. Fingerprints look like `SHA256:…`.
@@ -111,6 +114,10 @@ pub enum SshError {
     AgentRefused,
     #[error("the command did not finish in time")]
     Timeout,
+    #[error("sign-in was cancelled")]
+    AuthCancelled,
+    #[error("the server rejected the password")]
+    PasswordRejected,
 }
 
 impl From<&SshError> for Disconnect {
@@ -120,14 +127,16 @@ impl From<&SshError> for Disconnect {
             SshError::AuthFailed
             | SshError::AgentUnavailable(_)
             | SshError::AgentKeyMissing
-            | SshError::AgentRefused => Disconnect::AuthFailed,
+            | SshError::AgentRefused
+            | SshError::AuthCancelled
+            | SshError::PasswordRejected => Disconnect::AuthFailed,
             SshError::Connect(m) | SshError::Protocol(m) => Disconnect::Lost(m.clone()),
             SshError::Timeout => Disconnect::Lost("timed out".into()),
         }
     }
 }
 
-fn protocol(e: impl std::fmt::Display) -> SshError {
+pub(crate) fn protocol(e: impl std::fmt::Display) -> SshError {
     SshError::Protocol(e.to_string())
 }
 
@@ -188,6 +197,7 @@ pub struct ShellWriter {
 pub async fn connect(
     params: ConnectParams,
     verifier: Arc<dyn HostKeyVerifier>,
+    prompter: Arc<dyn AuthPrompter>,
 ) -> Result<Session, SshError> {
     let config = Arc::new(client::Config {
         keepalive_interval: Some(KEEPALIVE_INTERVAL),
@@ -210,51 +220,15 @@ pub async fn connect(
                 SshError::Connect(e.to_string())
             }
         })?;
-    let hash = handle
-        .best_supported_rsa_hash()
-        .await
-        .map_err(protocol)?
-        .flatten();
-    let auth = match params.credential {
-        Credential::Key(key) => handle
-            .authenticate_publickey(
-                params.username,
-                PrivateKeyWithHashAlg::new(Arc::new(key), hash),
-            )
-            .await
-            .map_err(protocol)?,
-        Credential::Agent {
-            fingerprint,
-            mut agent,
-        } => {
-            let identities = agent_identities(&mut agent).await?;
-            let identity = identities
-                .into_iter()
-                .find(|i| i.public_key().fingerprint(HashAlg::Sha256).to_string() == fingerprint)
-                .ok_or(SshError::AgentKeyMissing)?;
-            let signed = handle.authenticate_publickey_with(
-                params.username,
-                identity.public_key().into_owned(),
-                hash,
-                &mut agent,
-            );
-            tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
-                .await
-                .map_err(|_| SshError::AgentUnavailable("no answer while signing".into()))?
-                .map_err(|e| match e {
-                    russh::AgentAuthError::Key(russh::keys::Error::AgentFailure) => {
-                        SshError::AgentRefused
-                    }
-                    russh::AgentAuthError::Key(other) => {
-                        SshError::AgentUnavailable(other.to_string())
-                    }
-                    other => protocol(other),
-                })?
-        }
-    };
-    if !auth.success() {
-        return Err(SshError::AuthFailed);
-    }
+    let host_name = params.address.clone();
+    auth::authenticate(
+        &mut handle,
+        &params.username,
+        &host_name,
+        params.auth,
+        prompter.as_ref(),
+    )
+    .await?;
     Ok(Session {
         handle: Arc::new(handle),
     })

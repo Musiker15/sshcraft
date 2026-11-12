@@ -521,33 +521,36 @@ async fn connect_once(
         address: resolved.address.clone(),
         port: resolved.port,
         username: resolved.username.clone(),
-        credential,
+        auth: sshcraft_ssh::Auth::key(credential),
     };
-    let session = match sshcraft_ssh::connect(params, verifier.clone()).await {
-        Ok(s) => s,
-        Err(SshError::HostKeyRejected) => {
-            let mismatch = verifier.mismatch.lock().expect("mismatch lock").take();
-            return Err(match mismatch {
-                Some(detail) => Failure::End(EndReason::HostKeyMismatch, None, Some(detail)),
-                None => Failure::End(EndReason::HostKeyRejected, None, None),
-            });
-        }
-        Err(SshError::AuthFailed) => {
-            return Err(Failure::End(EndReason::AuthFailed, None, None));
-        }
-        Err(SshError::AgentUnavailable(e)) => {
-            return Err(error(ErrorCode::AgentUnavailable, Some(e)));
-        }
-        Err(SshError::AgentKeyMissing) => return Err(error(ErrorCode::AgentKeyMissing, None)),
-        Err(SshError::AgentRefused) => {
-            return Err(Failure::End(
-                EndReason::AuthFailed,
-                Some(ErrorCode::AgentRefused),
-                None,
-            ));
-        }
-        Err(e) => return Err(Failure::Lost(e.to_string())),
-    };
+    let session =
+        match sshcraft_ssh::connect(params, verifier.clone(), Arc::new(sshcraft_ssh::NoPrompter))
+            .await
+        {
+            Ok(s) => s,
+            Err(SshError::HostKeyRejected) => {
+                let mismatch = verifier.mismatch.lock().expect("mismatch lock").take();
+                return Err(match mismatch {
+                    Some(detail) => Failure::End(EndReason::HostKeyMismatch, None, Some(detail)),
+                    None => Failure::End(EndReason::HostKeyRejected, None, None),
+                });
+            }
+            Err(SshError::AuthFailed | SshError::AuthCancelled | SshError::PasswordRejected) => {
+                return Err(Failure::End(EndReason::AuthFailed, None, None));
+            }
+            Err(SshError::AgentUnavailable(e)) => {
+                return Err(error(ErrorCode::AgentUnavailable, Some(e)));
+            }
+            Err(SshError::AgentKeyMissing) => return Err(error(ErrorCode::AgentKeyMissing, None)),
+            Err(SshError::AgentRefused) => {
+                return Err(Failure::End(
+                    EndReason::AuthFailed,
+                    Some(ErrorCode::AgentRefused),
+                    None,
+                ));
+            }
+            Err(e) => return Err(Failure::Lost(e.to_string())),
+        };
     let (cols, rows) = *size.lock().expect("size lock");
     let shell = session
         .open_shell(cols, rows)
