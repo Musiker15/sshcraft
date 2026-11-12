@@ -22,6 +22,9 @@ CREATE TABLE passwords (
 );
 ";
 
+/// A sealed password and where it lives.
+pub type PasswordRecord = (Vec<u8>, Option<ServerId>);
+
 /// What an identity holds besides its id, name and location.
 #[derive(Serialize, Deserialize)]
 struct IdentityBody {
@@ -105,10 +108,7 @@ impl Store {
     }
 
     /// The sealed password and where it lives.
-    pub fn password_record(
-        &self,
-        id: PasswordId,
-    ) -> Result<Option<(Vec<u8>, Option<ServerId>)>, StoreError> {
+    pub fn password_record(&self, id: PasswordId) -> Result<Option<PasswordRecord>, StoreError> {
         let row: Option<(Vec<u8>, Option<String>)> = self
             .conn
             .query_row(

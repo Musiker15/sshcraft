@@ -595,6 +595,7 @@ mod credential_store;
 mod share_store;
 #[path = "sync_store.rs"]
 mod sync_store;
+pub use credential_store::PasswordRecord;
 use credential_store::carry_passwords;
 pub use share_store::{Contact, ShareKind, ShareRole, ShareRow, copy_id};
 pub use sync_store::{AreaState, ItemKind, RecordEntry, ServerRow};
