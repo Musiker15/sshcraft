@@ -11,6 +11,7 @@ type Props = {
   onNewHost: () => void;
   onNewGroup: () => void;
   onKeys: () => void;
+  onSshConfig: () => void;
 };
 
 export function Sidebar(props: Props) {
@@ -44,6 +45,7 @@ export function Sidebar(props: Props) {
         <button onClick={props.onNewHost}>Neuer Host</button>
         <button onClick={props.onNewGroup}>Neue Gruppe</button>
         <button onClick={props.onKeys}>Schlüssel</button>
+        <button onClick={props.onSshConfig}>Aus ssh-config</button>
       </div>
       {props.groups.map((group) => (
         <details key={group.id} className="sidebar-group" open>

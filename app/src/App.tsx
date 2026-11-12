@@ -19,10 +19,16 @@ import { HostForm } from "./components/HostForm";
 import { HostKeyDialog } from "./components/HostKeyDialog";
 import { KeyManager } from "./components/KeyManager";
 import { Sidebar } from "./components/Sidebar";
+import { SshConfigImport } from "./components/SshConfigImport";
 import { TerminalTabs } from "./components/TerminalTabs";
 import { initialTabs, tabsReducer } from "./state/tabs";
 
-type Editor = { kind: "host"; host?: Host } | { kind: "group"; group?: Group } | { kind: "keys" } | null;
+type Editor =
+  | { kind: "host"; host?: Host }
+  | { kind: "group"; group?: Group }
+  | { kind: "keys" }
+  | { kind: "sshconfig" }
+  | null;
 
 function App() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -91,6 +97,7 @@ function App() {
         onNewHost={() => setEditor({ kind: "host" })}
         onNewGroup={() => setEditor({ kind: "group" })}
         onKeys={() => setEditor({ kind: "keys" })}
+        onSshConfig={() => setEditor({ kind: "sshconfig" })}
       />
       <main className="main">
         {vaultError && (
@@ -112,6 +119,7 @@ function App() {
           {editor.kind === "group" && (
             <GroupForm group={editor.group} keys={keys} onDone={done} onCancel={() => setEditor(null)} />
           )}
+          {editor.kind === "sshconfig" && <SshConfigImport onDone={done} onCancel={() => setEditor(null)} />}
           {editor.kind === "keys" && <KeyManager keys={keys} onChanged={reload} onClose={() => setEditor(null)} />}
         </div>
       )}

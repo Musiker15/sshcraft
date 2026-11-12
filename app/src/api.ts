@@ -74,6 +74,16 @@ export const generateKey = (name: string) => invoke<KeyInfo>("generate_key", { n
 export const deleteKey = (id: string) => invoke<void>("delete_key", { id });
 export const listAgentKeys = () => invoke<AgentKey[]>("list_agent_keys");
 
+export type ImportCandidate = {
+  alias: string;
+  group: string | null;
+  settings: ConnectionSettings;
+  key_note: string | null;
+};
+export type SshConfigPreview = { candidates: ImportCandidate[]; skipped: string[] };
+export const sshConfigPreview = () => invoke<SshConfigPreview>("ssh_config_preview");
+export const sshConfigImport = (aliases: string[]) => invoke<{ created: number }>("ssh_config_import", { aliases });
+
 export type PassCliStatus = "not_installed" | "logged_out" | "ready";
 export type PassKey = { share_id: string; item_id: string; title: string };
 export const passCliStatus = () => invoke<PassCliStatus>("pass_cli_status");

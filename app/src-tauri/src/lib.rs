@@ -21,6 +21,8 @@ pub fn run() {
             commands::data::save_host,
             commands::data::delete_host,
             commands::data::forget_host_key,
+            commands::sshconfig::ssh_config_preview,
+            commands::sshconfig::ssh_config_import,
             commands::keys::vault_status,
             commands::keys::list_keys,
             commands::keys::import_key,

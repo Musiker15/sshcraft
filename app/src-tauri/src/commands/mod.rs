@@ -3,6 +3,7 @@
 pub mod data;
 pub mod keys;
 pub mod sessions;
+pub mod sshconfig;
 
 use serde::Serialize;
 
