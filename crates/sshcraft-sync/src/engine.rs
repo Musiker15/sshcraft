@@ -61,6 +61,13 @@ pub struct Engine {
     pub(crate) account: AccountPublic,
 }
 
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_default()
+}
+
 pub(crate) fn lock(store: &Mutex<Store>) -> Result<MutexGuard<'_, Store>, SyncError> {
     store.lock().map_err(|e| SyncError::Store(e.to_string()))
 }
@@ -198,6 +205,8 @@ impl Engine {
         vault: &Vault,
     ) -> Result<PullReport, SyncError> {
         let mut report = PullReport::default();
+        // A key rotation that was interrupted is finished before anything else.
+        crate::devices::resume_rotation(self, store, vault, now_secs()).await?;
         let (devices, _) = self.own_devices(store).await?;
         let mut tracker = self.tracker(store)?;
         let listings = self.revoked_check(store, self.client.areas().await)?;

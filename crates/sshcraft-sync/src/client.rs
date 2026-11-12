@@ -90,6 +90,13 @@ impl ServerClient {
         })
     }
 
+    fn fail(&self, op: &str) -> Result<(), SyncError> {
+        if failpoints::hit(&self.origin, op) {
+            return Err(SyncError::Network(format!("injected failure: {op}")));
+        }
+        Ok(())
+    }
+
     pub fn origin(&self) -> &str {
         &self.origin
     }
@@ -169,6 +176,7 @@ impl ServerClient {
         email: &str,
         log: &DeviceLog,
     ) -> Result<(), SyncError> {
+        self.fail("register")?;
         let body = json!({ "account": account, "name": name, "email": email, "log": log });
         let _: Value = self
             .send(self.request(Method::POST, "/v1/accounts", true).json(&body))
@@ -183,6 +191,7 @@ impl ServerClient {
         device_id: Uuid,
         keys: &DeviceKeys,
     ) -> Result<Session, SyncError> {
+        self.fail("login")?;
         #[derive(Deserialize)]
         struct Challenge {
             challenge: String,
@@ -271,6 +280,7 @@ impl ServerClient {
         entries: &[LogEntry],
         via_api_key: bool,
     ) -> Result<u64, SyncError> {
+        self.fail("append_log")?;
         #[derive(Deserialize)]
         struct Len {
             len: u64,
@@ -297,6 +307,7 @@ impl ServerClient {
     }
 
     pub async fn put_manifest(&self, manifest: &AreaManifest) -> Result<u64, SyncError> {
+        self.fail("put_manifest")?;
         #[derive(Deserialize)]
         struct Version {
             version: u64,
@@ -321,6 +332,7 @@ impl ServerClient {
         area: AreaId,
         envelopes: &[KeyEnvelope],
     ) -> Result<(), SyncError> {
+        self.fail("put_envelopes")?;
         let path = format!("/v1/areas/{}/envelopes", area.0);
         let _: Value = self
             .send(
@@ -345,6 +357,7 @@ impl ServerClient {
 
     /// Writes a record; returns the area's change number.
     pub async fn put_record(&self, record: &SealedRecord) -> Result<u64, SyncError> {
+        self.fail("put_record")?;
         #[derive(Deserialize)]
         struct Seq {
             seq: u64,
@@ -366,6 +379,7 @@ impl ServerClient {
         since: u64,
         limit: u32,
     ) -> Result<(Vec<(u64, SealedRecord)>, bool), SyncError> {
+        self.fail("records")?;
         #[derive(Deserialize)]
         struct Entry {
             seq: u64,
@@ -390,5 +404,42 @@ impl ServerClient {
                 .collect(),
             page.more,
         ))
+    }
+}
+
+/// Injected failures for tests: a request named `op` to `origin` fails with a network error
+/// after `skip` successful ones. Keyed by origin, so tests on different servers do not meet.
+#[doc(hidden)]
+pub mod failpoints {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    fn armed() -> &'static Mutex<HashMap<(String, String), usize>> {
+        static ARMED: OnceLock<Mutex<HashMap<(String, String), usize>>> = OnceLock::new();
+        ARMED.get_or_init(Mutex::default)
+    }
+
+    pub fn arm(origin: &str, op: &str, skip: usize) {
+        if let Ok(mut map) = armed().lock() {
+            map.insert((origin.to_owned(), op.to_owned()), skip);
+        }
+    }
+
+    pub(crate) fn hit(origin: &str, op: &str) -> bool {
+        let Ok(mut map) = armed().lock() else {
+            return false;
+        };
+        let key = (origin.to_owned(), op.to_owned());
+        match map.get_mut(&key) {
+            Some(0) => {
+                map.remove(&key);
+                true
+            }
+            Some(skip) => {
+                *skip -= 1;
+                false
+            }
+            None => false,
+        }
     }
 }

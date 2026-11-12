@@ -48,6 +48,15 @@ impl AreaKey {
     pub(crate) fn bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// The key's bytes, for storing it sealed on the device (an unfinished key rotation).
+    pub fn to_bytes(&self) -> Zeroizing<[u8; 32]> {
+        self.0.clone()
+    }
+
+    pub fn from_bytes(bytes: &[u8; 32]) -> Self {
+        Self(Zeroizing::new(*bytes))
+    }
 }
 
 /// An area key sealed to one device.

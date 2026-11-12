@@ -141,3 +141,10 @@ fn envelope_survives_json() {
         serde_json::from_str(&serde_json::to_string(&envelope).unwrap()).unwrap();
     assert!(open(&s, &back, &s.b).unwrap().same_key_as(&s.key));
 }
+
+#[test]
+fn area_key_round_trips_through_bytes() {
+    let key = sshcraft_proto::area::AreaKey::generate();
+    let again = sshcraft_proto::area::AreaKey::from_bytes(&key.to_bytes());
+    assert!(again.same_key_as(&key));
+}

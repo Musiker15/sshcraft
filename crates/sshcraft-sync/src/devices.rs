@@ -5,7 +5,7 @@ use crate::engine::{Engine, PAGE, lock};
 use serde::Serialize;
 use sshcraft_core::store::{RecordEntry, Store};
 use sshcraft_core::vault::Vault;
-use sshcraft_proto::area::{AreaKey, AreaManifest, seal_area_key};
+use sshcraft_proto::area::{AreaKey, AreaManifest, key_commitment, seal_area_key};
 use sshcraft_proto::devicelog::LogAction;
 use sshcraft_proto::identity::is_recovery;
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
@@ -55,17 +55,88 @@ pub async fn list_devices(
         .collect())
 }
 
+/// An unfinished key rotation, stored sealed until every step on the server is done, so a
+/// failure at any step (network, app closed) is finished by the next sync.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PendingRotation {
+    target: Uuid,
+    old_manifest: AreaManifest,
+    #[serde(with = "sshcraft_proto::encoding::b64")]
+    old_key: Vec<u8>,
+    #[serde(with = "sshcraft_proto::encoding::b64")]
+    new_key: Vec<u8>,
+}
+
+fn setting_key(engine: &Engine) -> String {
+    format!("sync.rotation.{}", engine.server.0)
+}
+
+fn seal_label(engine: &Engine) -> String {
+    format!("sync-rotation:{}", engine.server.0)
+}
+
+fn area_key(bytes: &[u8]) -> Result<AreaKey, SyncError> {
+    let array: &[u8; 32] = bytes
+        .try_into()
+        .map_err(|_| SyncError::Store("area key length".into()))?;
+    Ok(AreaKey::from_bytes(array))
+}
+
+fn save_pending(
+    engine: &Engine,
+    store: &Mutex<Store>,
+    vault: &Vault,
+    pending: &PendingRotation,
+) -> Result<(), SyncError> {
+    let json =
+        Zeroizing::new(serde_json::to_vec(pending).map_err(|e| SyncError::Store(e.to_string()))?);
+    let sealed = vault.seal_secret(&seal_label(engine), &json)?;
+    lock(store)?.put_setting(
+        &setting_key(engine),
+        &data_encoding::BASE64URL_NOPAD.encode(&sealed),
+    )?;
+    Ok(())
+}
+
+fn load_pending(
+    engine: &Engine,
+    store: &Mutex<Store>,
+    vault: &Vault,
+) -> Result<Option<PendingRotation>, SyncError> {
+    let Some(text) = lock(store)?.get_setting(&setting_key(engine))? else {
+        return Ok(None);
+    };
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let sealed = data_encoding::BASE64URL_NOPAD
+        .decode(text.as_bytes())
+        .map_err(|e| SyncError::Store(e.to_string()))?;
+    let json = vault.open_secret(&seal_label(engine), &sealed)?;
+    Ok(Some(
+        serde_json::from_slice(&json).map_err(|e| SyncError::Store(e.to_string()))?,
+    ))
+}
+
+fn clear_pending(engine: &Engine, store: &Mutex<Store>) -> Result<(), SyncError> {
+    lock(store)?.put_setting(&setting_key(engine), "")?;
+    Ok(())
+}
+
 /// Revokes `target`, signed by this device, then rotates the personal area: new key, new key
-/// version, envelopes only for the devices still active, every record sealed again. The
-/// records are read before the revocation, while their author devices still count as active.
+/// version, envelopes only for the devices still active, every record sealed again. The plan is
+/// stored (sealed) before the first step, and every step can be repeated, so an interruption is
+/// finished by the next sync instead of leaving the account without a usable key.
 pub async fn revoke_device(
     engine: &mut Engine,
     store: &Mutex<Store>,
-    _vault: &Vault,
+    vault: &Vault,
     target: Uuid,
     now: i64,
 ) -> Result<(), SyncError> {
-    let (set, mut log) = engine.own_devices(store).await?;
+    // An earlier rotation that did not finish goes first.
+    resume_rotation(engine, store, vault, now).await?;
+    let (_, log) = engine.own_devices(store).await?;
     let known = log.entries.iter().find_map(|entry| match &entry.action {
         LogAction::Add { certificate } if certificate.device_id == target => Some(certificate),
         _ => None,
@@ -76,105 +147,164 @@ pub async fn revoke_device(
     if target == engine.device_id() || is_recovery(target_cert) {
         return Err(SyncError::NotAllowed);
     }
-    // Already revoked (a revocation whose rotation failed): rotate again without a new entry,
-    // so a retry always ends with a key the revoked device does not know.
-    let already_revoked = set.get_active(target).is_none();
+    let (old_manifest, old_key) = engine.personal_area(store)?;
+    let pending = PendingRotation {
+        target,
+        old_manifest,
+        old_key: old_key.to_bytes().to_vec(),
+        new_key: AreaKey::generate().to_bytes().to_vec(),
+    };
+    save_pending(engine, store, vault, &pending)?;
+    finish(engine, store, pending, now).await
+}
 
-    let (manifest, key) = engine.personal_area(store)?;
-    let mut bodies: Vec<(SealedRecord, Zeroizing<Vec<u8>>)> = Vec::new();
-    let mut since = 0;
-    loop {
-        let (page, more) = engine.revoked_check(
-            store,
-            engine.client().records(manifest.area_id, since, PAGE).await,
-        )?;
-        for (seq, record) in page {
-            since = since.max(seq);
-            // A record that no longer opens (an author revoked earlier) is not carried over.
-            if let Ok(body) = record.open(&key, &manifest, &set) {
-                bodies.push((record, body));
-            }
-        }
-        if !more {
-            break;
-        }
+/// Finishes a stored, unfinished rotation; does nothing if there is none.
+pub async fn resume_rotation(
+    engine: &mut Engine,
+    store: &Mutex<Store>,
+    vault: &Vault,
+    now: i64,
+) -> Result<(), SyncError> {
+    match load_pending(engine, store, vault)? {
+        Some(pending) => finish(engine, store, pending, now).await,
+        None => Ok(()),
     }
+}
 
-    if !already_revoked {
-        log.append_revoke_by_device(engine.device_id(), &engine.keys, target, now);
+async fn finish(
+    engine: &mut Engine,
+    store: &Mutex<Store>,
+    pending: PendingRotation,
+    now: i64,
+) -> Result<(), SyncError> {
+    let old = &pending.old_manifest;
+    let area = old.area_id;
+    let old_key = area_key(&pending.old_key)?;
+    let new_key = area_key(&pending.new_key)?;
+    let new_version = old.key_version + 1;
+
+    // 1. The revocation in the log (skipped when it is already there).
+    let (set, mut log) = engine.own_devices(store).await?;
+    let readers = if set.get_active(pending.target).is_some() {
+        log.append_revoke_by_device(engine.device_id(), &engine.keys, pending.target, now);
         let entry = log.entries.last().cloned().expect("just appended");
         let appended = engine
             .client()
             .append_log(&engine.account, &[entry], false)
             .await;
         engine.revoked_check(store, appended)?;
-    }
-    let remaining = log.verify(&engine.account)?;
+        log.verify(&engine.account)?
+    } else {
+        set
+    };
 
-    let new_key = AreaKey::generate();
-    let key_version = manifest.key_version + 1;
-    let rotated = AreaManifest::sign(
-        manifest.area_id,
-        manifest.version + 1,
-        key_version,
-        &new_key,
-        engine.account,
-        manifest.members.clone(),
-        engine.device_id(),
-        &engine.keys,
-    );
-    engine.client().put_manifest(&rotated).await?;
-    let envelopes = remaining
+    // 2. The new manifest, unless the server already has it.
+    let listings = engine.revoked_check(store, engine.client().areas().await)?;
+    let current = listings
+        .into_iter()
+        .find(|l| l.manifest.area_id == area)
+        .ok_or(SyncError::NotSetUp)?
+        .manifest;
+    let committed = key_commitment(area, new_version, &new_key);
+    let manifest = if current.key_version == new_version && current.key_commitment == committed {
+        current
+    } else if current.key_version == old.key_version {
+        let rotated = AreaManifest::sign(
+            area,
+            current.version + 1,
+            new_version,
+            &new_key,
+            engine.account,
+            current.members.clone(),
+            engine.device_id(),
+            &engine.keys,
+        );
+        engine.client().put_manifest(&rotated).await?;
+        rotated
+    } else {
+        // Someone else rotated in between; this plan is out of date.
+        clear_pending(engine, store)?;
+        return Err(SyncError::NotAllowed);
+    };
+
+    // 3. Envelopes for every device still active (the upload replaces, so repeating is fine).
+    let envelopes = readers
         .active()
-        .map(|cert| seal_area_key(&new_key, manifest.area_id, key_version, cert))
+        .map(|cert| seal_area_key(&new_key, area, new_version, cert))
         .collect::<Result<Vec<_>, _>>()?;
-    engine
-        .client()
-        .put_envelopes(manifest.area_id, &envelopes)
-        .await?;
+    engine.client().put_envelopes(area, &envelopes).await?;
     let own = envelopes
         .iter()
         .find(|e| e.device_id == engine.device_id())
         .cloned()
         .ok_or(SyncError::NotSetUp)?;
-    {
-        let guard = lock(store)?;
-        guard.put_area(
-            engine.server,
-            manifest.area_id.0,
-            &serde_json::to_string(&rotated).map_err(|e| SyncError::Store(e.to_string()))?,
-            &serde_json::to_string(&own).map_err(|e| SyncError::Store(e.to_string()))?,
-        )?;
-    }
+    lock(store)?.put_area(
+        engine.server,
+        area.0,
+        &serde_json::to_string(&manifest).map_err(|e| SyncError::Store(e.to_string()))?,
+        &serde_json::to_string(&own).map_err(|e| SyncError::Store(e.to_string()))?,
+    )?;
 
-    for (record, body) in bodies {
-        let header = RecordHeader {
-            record_id: record.header.record_id,
-            area_id: manifest.area_id,
-            version: record.header.version + 1,
-            key_version,
-            author_account: engine.account,
-            author_device: engine.device_id(),
-        };
-        let sealed = SealedRecord::seal(header.clone(), &body, &new_key, &engine.keys);
-        engine.client().put_record(&sealed).await?;
-        let guard = lock(store)?;
-        if let Some((kind, item_id)) = guard.item_for_record(engine.server, header.record_id)? {
-            let modified_at = guard
-                .record_entry(engine.server, kind, &item_id)?
-                .map_or(0, |e| e.modified_at);
-            guard.put_record_entry(
-                engine.server,
-                &RecordEntry {
-                    record_id: header.record_id,
-                    area_id: manifest.area_id.0,
-                    version: header.version,
-                    modified_at,
-                },
-                kind,
-                &item_id,
-            )?;
+    // 4. Every record still under the old key, sealed again under the new one.
+    let mut since = 0;
+    loop {
+        let page = engine.client().records(area, since, PAGE).await;
+        let (records, more) = engine.revoked_check(store, page)?;
+        for (seq, record) in records {
+            since = since.max(seq);
+            if record.header.key_version != old.key_version {
+                continue;
+            }
+            // Records of devices revoked before do not open any more and are not carried over.
+            let Ok(body) = record.open(&old_key, old, &readers) else {
+                continue;
+            };
+            let known = {
+                let guard = lock(store)?;
+                match guard.item_for_record(engine.server, record.header.record_id)? {
+                    Some((kind, item)) => guard
+                        .record_entry(engine.server, kind, &item)?
+                        .map(|entry| (kind, item, entry)),
+                    None => None,
+                }
+            };
+            // An older version than this device saw is a rollback: do not sign it again.
+            if known
+                .as_ref()
+                .is_some_and(|(_, _, entry)| record.header.version < entry.version)
+            {
+                continue;
+            }
+            let header = RecordHeader {
+                record_id: record.header.record_id,
+                area_id: area,
+                version: record.header.version + 1,
+                key_version: new_version,
+                author_account: engine.account,
+                author_device: engine.device_id(),
+            };
+            let sealed = SealedRecord::seal(header.clone(), &body, &new_key, &engine.keys);
+            match engine.client().put_record(&sealed).await {
+                Ok(_) => {}
+                // Someone with the new key wrote a newer version first.
+                Err(SyncError::Server { status: 409, .. }) => continue,
+                Err(err) => return Err(err),
+            }
+            if let Some((kind, item, entry)) = known {
+                lock(store)?.put_record_entry(
+                    engine.server,
+                    &RecordEntry {
+                        version: header.version,
+                        ..entry
+                    },
+                    kind,
+                    &item,
+                )?;
+            }
+        }
+        if !more {
+            break;
         }
     }
-    Ok(())
+    clear_pending(engine, store)
 }

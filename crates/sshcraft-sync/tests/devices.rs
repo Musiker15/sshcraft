@@ -155,3 +155,60 @@ async fn retry_after_a_failed_rotation_still_rotates() {
         Err(SyncError::NotAllowed)
     );
 }
+
+/// A revoke that fails at `op` (after `skip` successful calls) and is finished by the next pull.
+async fn interrupted_rotation(op: &str, skip: usize) {
+    let server = TestServer::start().await;
+    let (a, b, c) = (Dev::new(), Dev::new(), Dev::new());
+    let export = create(&server, &a, "a@example.org").await;
+    join(&server, &b, &export).await;
+    for name in ["one", "two", "three"] {
+        save(&a, &sample_host(name), 100);
+    }
+    sync(&a).await;
+
+    sshcraft_sync::client::failpoints::arm(&server.origin, op, skip);
+    let mut e = engine(&a).await.unwrap();
+    let failed = revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10).await;
+    assert!(
+        matches!(failed, Err(SyncError::Network(_))),
+        "{op}: {failed:?}"
+    );
+
+    // The next sync on A finishes the rotation.
+    sync(&a).await;
+    assert_eq!(a.area().0.key_version, 2, "{op}");
+    assert_eq!(engine(&b).await.err(), Some(SyncError::Revoked), "{op}");
+    join(&server, &c, &export).await;
+    sync(&c).await;
+    assert_eq!(
+        c.hosts().len(),
+        3,
+        "{op}: every host readable under the new key"
+    );
+    // A keeps writing under the new key.
+    save(&a, &sample_host("four"), 200);
+    sync(&a).await;
+    sync(&c).await;
+    assert_eq!(c.hosts().len(), 4, "{op}");
+}
+
+#[tokio::test]
+async fn rotation_resumes_after_a_failed_log_append() {
+    interrupted_rotation("append_log", 0).await;
+}
+
+#[tokio::test]
+async fn rotation_resumes_after_a_failed_manifest() {
+    interrupted_rotation("put_manifest", 0).await;
+}
+
+#[tokio::test]
+async fn rotation_resumes_after_failed_envelopes() {
+    interrupted_rotation("put_envelopes", 0).await;
+}
+
+#[tokio::test]
+async fn rotation_resumes_midway_through_resealing() {
+    interrupted_rotation("put_record", 1).await;
+}
