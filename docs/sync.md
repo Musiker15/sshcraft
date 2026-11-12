@@ -97,12 +97,14 @@ share, and hosts added to it later go along. Or with *only these hosts*: the sha
 copies of the group and the picked hosts, and a single host is shared the same way. The owner's
 devices keep each copy in step with its original in both directions, last change wins. Keys go
 along only when asked for, and keys from the SSH agent (Proton Pass) never do; the recipient then
-assigns a key of their own, which stays on their device.
+assigns a key of their own, which stays on their device. The key the owner uses for a shared
+item without its key stays private to the owner but follows to the owner's other devices.
 
 **Roles.** *Read* shows the items; changes the recipient makes are not sent and are reset to the
 owner's state. *Read and change* sends changes back. In a share of some hosts or of one host,
 changing is all a recipient may do: adding and removing hosts needs a group shared with all
-hosts. Recipients can never share further, move or delete a shared group.
+hosts. Recipients can never share further, move or delete a shared group, and never change or
+delete a shared key. A group of an own share is deleted only after its share is ended.
 
 **Safety number.** Recipients are found by e-mail, but the e-mail is only a search term: what
 counts is the account key. Before the first share the app shows the recipient's safety number
