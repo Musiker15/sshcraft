@@ -979,3 +979,178 @@ async fn members_ignore_additions_and_deletions_of_other_members_in_a_selection(
     let names: Vec<String> = c.hosts().into_iter().map(|h| h.name).collect();
     assert_eq!(names, vec!["web".to_owned()]);
 }
+
+// ---------- Teilplan 8: subgroups in shares
+
+/// A puts group "team" (address) > "inner" (username deploy) > host "deep" on the server.
+fn nested_group(
+    a: &Dev,
+) -> (
+    sshcraft_core::model::Group,
+    sshcraft_core::model::Group,
+    Host,
+) {
+    let server = a.row().id;
+    let mut team = sample_group("team");
+    team.location = Some(server);
+    team.defaults.address = Some("team.example.org".into());
+    let mut inner = sample_group("inner");
+    inner.parent_id = Some(team.id);
+    inner.defaults.username = Some("deploy".into());
+    let mut deep = sample_host("deep");
+    deep.settings.address = None;
+    deep.settings.username = None;
+    deep.group_id = Some(inner.id);
+    let store = a.store.lock().unwrap();
+    store.upsert_group(&team).unwrap();
+    store.upsert_group(&inner).unwrap();
+    store.upsert_host(&deep).unwrap();
+    record_local_change(&store, ItemKind::Group, &team.id.0.to_string(), 1).unwrap();
+    record_local_change(&store, ItemKind::Group, &inner.id.0.to_string(), 1).unwrap();
+    record_local_change(&store, ItemKind::Host, &deep.id.0.to_string(), 1).unwrap();
+    (team, inner, deep)
+}
+
+#[tokio::test]
+async fn group_share_takes_subgroups() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let groups = b.store.lock().unwrap().list_groups().unwrap();
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.id == inner.id && g.parent_id == Some(team.id))
+    );
+    assert!(b.hosts().iter().any(|h| h.id == deep.id));
+    // A later subgroup goes along.
+    let server_a = a.row().id;
+    let mut later = sample_group("later");
+    later.parent_id = Some(inner.id);
+    later.location = Some(server_a);
+    {
+        let store = a.store.lock().unwrap();
+        store.upsert_group(&later).unwrap();
+        record_local_change(&store, ItemKind::Group, &later.id.0.to_string(), 10).unwrap();
+    }
+    sync(&a).await;
+    sync(&b).await;
+    assert!(
+        b.store
+            .lock()
+            .unwrap()
+            .list_groups()
+            .unwrap()
+            .iter()
+            .any(|g| g.id == later.id)
+    );
+}
+
+#[tokio::test]
+async fn selection_copies_inherit_intermediate_settings() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, _inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let what = ShareWhat::Selection {
+        group: team.id,
+        hosts: vec![deep.id],
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Write)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let copy = b.hosts().pop().unwrap();
+    let groups = b.store.lock().unwrap().list_groups().unwrap();
+    assert_eq!(groups.len(), 1, "a flat copy of the shared group");
+    assert_eq!(copy.group_id, Some(groups[0].id));
+    assert_eq!(
+        copy.settings.username.as_deref(),
+        Some("deploy"),
+        "baked in from the subgroup"
+    );
+    assert_eq!(
+        groups[0].defaults.address.as_deref(),
+        Some("team.example.org")
+    );
+    // A change by B does not write the inherited value into the original.
+    rename(&b, copy.id, "deep-new", 100);
+    sync(&b).await;
+    sync(&a).await;
+    let original = a.hosts().into_iter().find(|h| h.id == deep.id).unwrap();
+    assert_eq!(original.name, "deep-new");
+    assert_eq!(original.settings.username, None);
+    assert_eq!(original.group_id, deep.group_id);
+}
+
+#[tokio::test]
+async fn reader_cannot_add_a_subgroup() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, _, _) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let server_b = b.row().id;
+    let mut mine = sample_group("mine");
+    mine.parent_id = Some(team.id);
+    mine.location = Some(server_b);
+    {
+        let store = b.store.lock().unwrap();
+        store.upsert_group(&mine).unwrap();
+        record_local_change(&store, ItemKind::Group, &mine.id.0.to_string(), 20).unwrap();
+    }
+    let mut eb = engine(&b).await;
+    eb.push(&b.store, &b.vault, 20).await.unwrap();
+    assert!(
+        eb.warnings().iter().any(|w| w == "share_read_only"),
+        "{:?}",
+        eb.warnings()
+    );
+    assert!(
+        b.store
+            .lock()
+            .unwrap()
+            .list_groups()
+            .unwrap()
+            .iter()
+            .all(|g| g.id != mine.id)
+    );
+}

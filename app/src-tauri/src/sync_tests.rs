@@ -352,3 +352,44 @@ fn a_shared_group_is_ended_before_it_is_deleted() {
         ErrorCode::ShareEndFirst
     );
 }
+
+#[test]
+fn moving_a_group_into_a_received_group_is_refused() {
+    use sshcraft_core::store::ShareRole;
+    let (store, server) = store_with_server();
+    let theirs = Group {
+        id: GroupId::new(),
+        name: "theirs".into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
+    };
+    store.upsert_group(&theirs).unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(server, &share_row(area, false, Some(ShareRole::Write)))
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &theirs.id.0.to_string(), area)
+        .unwrap();
+    let mine = Group {
+        id: GroupId::new(),
+        name: "mine".into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
+    };
+    store.upsert_group(&mine).unwrap();
+    let moved = Group {
+        parent_id: Some(theirs.id),
+        ..mine.clone()
+    };
+    assert_eq!(
+        share_rights(&store, Change::SaveGroup(&moved))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareReadOnly
+    );
+}

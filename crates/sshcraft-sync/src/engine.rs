@@ -894,7 +894,24 @@ impl Engine {
             .server(self.server)?
             .ok_or(SyncError::NotSetUp)?
             .sync_keys;
-        let outbox = lock(store)?.outbox(self.server)?;
+        let mut outbox = lock(store)?.outbox(self.server)?;
+        // Keys before what uses them, a group before its subgroups, groups before hosts, so a
+        // device fetching in order can apply each record as it comes.
+        {
+            let groups = lock(store)?.list_groups()?;
+            let rank = |(kind, id): &(ItemKind, String)| match kind {
+                ItemKind::Key => (0, 0),
+                ItemKind::Group => (
+                    1,
+                    Uuid::parse_str(id).map_or(0, |u| {
+                        sshcraft_core::model::group_chain(&groups, sshcraft_core::model::GroupId(u))
+                            .len()
+                    }),
+                ),
+                ItemKind::Host => (2, 0),
+            };
+            outbox.sort_by_key(rank);
+        }
         let mut sent = 0;
         for (kind, id) in outbox {
             if kind == ItemKind::Key && !sync_keys {
@@ -1301,7 +1318,25 @@ fn take_into_original(
             next.id = mine.id;
             next.group_id = mine.group_id;
             next.location = mine.location;
-            next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key);
+            next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key.clone());
+            // What the copy only carried because the original inherits it stays inherited.
+            let shared = store.share(server, area)?.and_then(|s| s.group_id);
+            let baked =
+                crate::shares::intermediate_defaults(store, mine.group_id, shared.as_deref())?;
+            let own = &mine.settings;
+            let settings = &mut next.settings;
+            if own.address.is_none() && settings.address == baked.address {
+                settings.address = None;
+            }
+            if own.port.is_none() && settings.port == baked.port {
+                settings.port = None;
+            }
+            if own.username.is_none() && settings.username == baked.username {
+                settings.username = None;
+            }
+            if own.key.is_none() && settings.key == baked.key {
+                settings.key = None;
+            }
             store.upsert_host(&next)?;
         }
         // The group, keys and deletions of copies are the owner's alone (a selection only lets

@@ -123,9 +123,12 @@ fn plan(
             let Some(group) = group_of(*id) else {
                 return not_allowed();
             };
+            // The group's hosts at every level.
+            let mut tree = store.subgroups(*id)?;
+            tree.push(*id);
             let members = hosts
                 .iter()
-                .filter(|h| h.group_id == Some(*id))
+                .filter(|h| h.group_id.is_some_and(|g| tree.contains(&g)))
                 .cloned()
                 .collect();
             if let Some(area) = store.item_area(server, ItemKind::Group, &id.0.to_string())?
@@ -139,10 +142,14 @@ fn plan(
             let Some(group) = group_of(*group) else {
                 return not_allowed();
             };
+            let mut tree = store.subgroups(group.id)?;
+            tree.push(group.id);
             let mut picked = Vec::new();
             for id in ids {
                 match host_of(*id) {
-                    Some(host) if host.group_id == Some(group.id) => picked.push(host),
+                    Some(host) if host.group_id.is_some_and(|g| tree.contains(&g)) => {
+                        picked.push(host)
+                    }
                     _ => return not_allowed(),
                 }
             }
@@ -270,22 +277,70 @@ pub(crate) fn copy_item(
             group.defaults.key = copy_key(store, server, area, group.defaults.key.take())?;
         }
         ItemBody::Host { host } => {
+            // A host from a subgroup lands flat in the copy of the shared group, with what it
+            // inherits from the groups in between written into it.
+            let shared = store.share(server, area)?.and_then(|s| s.group_id);
+            let baked = intermediate_defaults(store, host.group_id, shared.as_deref())?;
+            let settings = &mut host.settings;
+            settings.address = settings.address.take().or(baked.address);
+            settings.port = settings.port.or(baked.port);
+            settings.username = settings.username.take().or(baked.username);
+            let key = settings.key.take().or(baked.key);
             host.id = HostId(copy_uuid);
-            host.settings.key = copy_key(store, server, area, host.settings.key.take())?;
-            host.group_id = match host.group_id {
-                Some(group) => store
-                    .copies_of(server, ItemKind::Group, &group.0.to_string())?
+            host.settings.key = copy_key(store, server, area, key)?;
+            host.group_id = match (host.group_id, shared) {
+                (Some(_), Some(group)) => store
+                    .copies_of(server, ItemKind::Group, &group)?
                     .into_iter()
                     .find(|(a, _)| *a == area)
                     .and_then(|(_, c)| Uuid::parse_str(&c).ok())
                     .map(GroupId),
-                None => None,
+                _ => None,
             };
         }
         ItemBody::Key { id, .. } => *id = KeyId(copy_uuid),
         ItemBody::Deleted { item_id, .. } => *item_id = copy,
     }
     Ok(item)
+}
+
+/// What a host inherits from the groups between its own group and the shared group `shared`
+/// (both excluded from nothing: its own group counts, the shared group does not). Empty when the
+/// host sits right in the shared group or nothing is shared as a group.
+pub(crate) fn intermediate_defaults(
+    store: &Store,
+    host_group: Option<GroupId>,
+    shared: Option<&str>,
+) -> Result<sshcraft_core::model::ConnectionSettings, SyncError> {
+    let mut out = sshcraft_core::model::ConnectionSettings::default();
+    let (Some(start), Some(shared)) = (host_group, shared) else {
+        return Ok(out);
+    };
+    let groups = store.list_groups()?;
+    for group in sshcraft_core::model::group_chain(&groups, start) {
+        if group.id.0.to_string() == shared {
+            break;
+        }
+        let set = |v: &Option<String>| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        if out.address.is_none() {
+            out.address = set(&group.defaults.address);
+        }
+        if out.port.is_none() {
+            out.port = group.defaults.port;
+        }
+        if out.username.is_none() {
+            out.username = set(&group.defaults.username);
+        }
+        if out.key.is_none() {
+            out.key = group.defaults.key.clone();
+        }
+    }
+    Ok(out)
 }
 
 /// Shares a group or hosts with other accounts of this server: a new area with the grants as
@@ -353,11 +408,14 @@ pub async fn share(
             let group_id = group.id.0.to_string();
             guard.set_item_area(server, ItemKind::Group, &group_id, area)?;
             record_local_change(&guard, ItemKind::Group, &group_id, now_ms)?;
-            for host in &hosts {
-                let id = host.id.0.to_string();
-                guard.clear_item_area(server, ItemKind::Host, &id)?;
-                record_local_change(&guard, ItemKind::Host, &id, now_ms)?;
+            // Subgroups and all hosts below follow the group into the share.
+            for sub in guard.subgroups(group.id)? {
+                guard.clear_item_area(server, ItemKind::Group, &sub.0.to_string())?;
             }
+            for host in &hosts {
+                guard.clear_item_area(server, ItemKind::Host, &host.id.0.to_string())?;
+            }
+            crate::engine::record_group_hosts(&guard, &group_id, now_ms)?;
             if with_keys {
                 for key_id in &keys {
                     let id = key_id.0.to_string();
@@ -515,20 +573,16 @@ pub async fn unshare(
     if share.kind == ShareKind::GroupAll {
         {
             let guard = lock(store)?;
-            let mut items = guard.items_in_area(server, area)?;
-            for host in guard.list_hosts()? {
-                if host
-                    .group_id
-                    .is_some_and(|g| Some(g.0.to_string()) == share.group_id)
-                {
-                    items.push((ItemKind::Host, host.id.0.to_string()));
-                }
-            }
+            let items = guard.items_in_area(server, area)?;
             for (kind, id) in &items {
                 guard.clear_item_area(server, *kind, id)?;
             }
             for (kind, id) in &items {
                 record_local_change(&guard, *kind, id, now_ms)?;
+            }
+            // Everything below the group goes back with it.
+            if let Some(group) = &share.group_id {
+                crate::engine::record_group_hosts(&guard, group, now_ms)?;
             }
         }
         engine.push(store, vault, now_ms).await?;

@@ -302,7 +302,33 @@ pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandEr
             }
         }
         Change::SaveGroup(group) => {
-            let Some(share) = received(store, ItemKind::Group, &group.id.0.to_string())? else {
+            let id = group.id.0.to_string();
+            let existing = store.list_groups()?.into_iter().find(|g| g.id == group.id);
+            let moved = existing.as_ref().map_or(group.parent_id.is_some(), |old| {
+                old.parent_id != group.parent_id
+            });
+            if moved {
+                // Nesting into a group that came in a share adds to that share.
+                if let Some(parent) = group.parent_id {
+                    let target = received(store, ItemKind::Group, &parent.0.to_string())?;
+                    if target.is_some_and(|t| {
+                        t.role != Some(ShareRole::Write) || t.kind != ShareKind::GroupAll
+                    }) {
+                        return Err(read_only());
+                    }
+                }
+                if existing.is_some() && received(store, ItemKind::Group, &id)?.is_some() {
+                    return Err(CommandError::code(ErrorCode::ShareNotOwner));
+                }
+                // A group that is itself an own share stays where it is until the share ends.
+                if let Some(server) = store.location_of(ItemKind::Group, &id)?
+                    && let Some(area) = store.item_area(server, ItemKind::Group, &id)?
+                    && store.share(server, area)?.is_some_and(|s| s.owned)
+                {
+                    return Err(CommandError::code(ErrorCode::ShareEndFirst));
+                }
+            }
+            let Some(share) = received(store, ItemKind::Group, &id)? else {
                 return Ok(true);
             };
             if share.role == Some(ShareRole::Write) {
