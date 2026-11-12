@@ -28,7 +28,7 @@ fn import_tolerates_whitespace_newlines_and_case() {
     let (prefix, body) = text.split_once(':').unwrap();
     let mangled = format!(
         "  {prefix}:\n{}\r\n {}  ",
-        &body[..10].to_lowercase(),
+        body[..10].to_lowercase(),
         &body[10..]
     );
     assert_eq!(AccountKey::import(&mangled).unwrap().public(), key.public());
