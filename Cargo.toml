@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/sshcraft-core", "crates/sshcraft-ssh", "crates/sshcraft-proto", "app/src-tauri"]
+members = ["crates/sshcraft-core", "crates/sshcraft-ssh", "crates/sshcraft-proto", "crates/sshcraft-server", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,6 +30,17 @@ hpke = { version = "0.15.1", default-features = false, features = ["alloc", "get
 sha2 = "0.11.1"
 data-encoding = "2.11.1"
 tempfile = "3.27.0"
+sshcraft-proto = { path = "crates/sshcraft-proto" }
+axum = { version = "0.8.9", features = ["ws"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+subtle = "2.6.1"
+tokio-postgres = "0.7.18"
+deadpool-postgres = "0.14.2"
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1.5"
+tokio-tungstenite = "0.30.0"
 
 [profile.release]
 codegen-units = 1
