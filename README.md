@@ -16,6 +16,10 @@ npm install
 npm run tauri dev
 ```
 
+On Windows, Stollen uses the SSH agent of the Proton Pass desktop app directly, so keys stored
+there work without importing them. `pass-cli` is only needed to import a key into Stollen's own
+encrypted vault.
+
 ## Documentation
 
 | Topic | Link |
