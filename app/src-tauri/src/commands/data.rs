@@ -6,7 +6,7 @@ use tauri::State;
 use super::{CommandError, CommandResult, ErrorCode};
 use crate::settings::{self, AppSettings};
 use crate::state::AppState;
-use crate::sync::{note_change, now_ms};
+use crate::sync::{Change, note_change, now_ms, share_rights};
 use sshcraft_core::store::ItemKind;
 use sshcraft_sync::engine::record_group_hosts;
 
@@ -40,15 +40,38 @@ fn changed(
     Ok(())
 }
 
+/// Checks the change against shares this account received; a change that stays on this device
+/// (a key assigned to a read-only item) is written without queueing.
+fn checked(
+    state: &AppState,
+    change: Change<'_>,
+    kind: ItemKind,
+    id: String,
+    write: impl FnOnce(&sshcraft_core::store::Store) -> Result<(), CommandError>,
+) -> CommandResult<()> {
+    let send = share_rights(&store(state), change)?;
+    if send {
+        changed(state, kind, id, write)
+    } else {
+        write(&store(state))
+    }
+}
+
 #[tauri::command]
 pub fn save_group(state: State<'_, AppState>, group: Group) -> CommandResult<()> {
-    changed(&state, ItemKind::Group, group.id.0.to_string(), |s| {
-        Ok(s.upsert_group(&group)?)
-    })
+    let id = group.id.0.to_string();
+    checked(
+        &state,
+        Change::SaveGroup(&group),
+        ItemKind::Group,
+        id,
+        |s| Ok(s.upsert_group(&group)?),
+    )
 }
 
 #[tauri::command]
 pub fn delete_group(state: State<'_, AppState>, id: GroupId) -> CommandResult<()> {
+    share_rights(&store(&state), Change::DeleteGroup(id))?;
     changed(&state, ItemKind::Group, id.0.to_string(), |s| {
         // Its hosts go with it; queue them while they still exist.
         record_group_hosts(s, &id.0.to_string(), now_ms()).map_err(crate::sync::sync_error)?;
@@ -63,13 +86,15 @@ pub fn list_hosts(state: State<'_, AppState>) -> CommandResult<Vec<Host>> {
 
 #[tauri::command]
 pub fn save_host(state: State<'_, AppState>, host: Host) -> CommandResult<()> {
-    changed(&state, ItemKind::Host, host.id.0.to_string(), |s| {
+    let id = host.id.0.to_string();
+    checked(&state, Change::SaveHost(&host), ItemKind::Host, id, |s| {
         Ok(s.upsert_host(&host)?)
     })
 }
 
 #[tauri::command]
 pub fn delete_host(state: State<'_, AppState>, id: HostId) -> CommandResult<()> {
+    share_rights(&store(&state), Change::DeleteHost(id))?;
     changed(&state, ItemKind::Host, id.0.to_string(), |s| {
         Ok(s.delete_host(id)?)
     })

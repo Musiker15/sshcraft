@@ -800,3 +800,52 @@ button.icon:hover {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Sharing */
+.safety-number {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 6px 14px;
+  justify-content: start;
+  margin: 8px 0;
+}
+.safety-group {
+  font-family: var(--font-mono, monospace);
+  font-size: 1.25rem;
+  letter-spacing: 0.08em;
+}
+.warning-box {
+  border: 1px solid var(--danger, #e5484d);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.share-dialog .row-form {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+.share-dialog .row-form label {
+  flex: 1;
+}
+.share-dialog .recipient {
+  display: flex;
+  flex-direction: column;
+  margin: 10px 0 4px;
+}
+.share-dialog .choices {
+  border: none;
+  padding: 0;
+  margin: 8px 0;
+}
+.check.indent {
+  margin-left: 22px;
+}
+.share-card .grant {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.share-card .grant .card-sub {
+  flex: 1;
+}

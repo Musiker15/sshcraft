@@ -8,6 +8,7 @@ import {
   helloStatus,
   listGroups,
   listHosts,
+  itemShares,
   listKeys,
   listRecent,
   listServers,
@@ -18,6 +19,7 @@ import {
   type HostKeyPrompt,
   type ItemKind,
   type KeyInfo,
+  type ItemShare,
   type ServerView,
   type VaultStatus,
 } from "../api";
@@ -36,6 +38,7 @@ import { CommandPalette } from "../palette/CommandPalette";
 import type { PaletteActionId } from "../palette/rank";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { ShareDialog, type ShareTarget } from "../pages/sync/ShareDialog";
 import { HOME_ID, initialTabs, tabsReducer } from "../state/tabs";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Drawer } from "./Drawer";
@@ -53,6 +56,8 @@ export function AppShell() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
   const [servers, setServers] = useState<ServerView[]>([]);
+  const [shares, setShares] = useState<ItemShare[]>([]);
+  const [sharing, setSharing] = useState<{ target: ShareTarget; server: ServerView } | null>(null);
   const [vault, setVault] = useState<VaultStatus | null>(null);
   const [problem, setProblem] = useState<unknown>(null);
   const [editor, setEditor] = useState<Editor>(null);
@@ -71,7 +76,14 @@ export function AppShell() {
 
   const reload = useCallback(async () => {
     try {
-      const [g, h, k, s] = await Promise.all([listGroups(), listHosts(), listKeys(), listServers()]);
+      const [g, h, k, s, sh] = await Promise.all([
+        listGroups(),
+        listHosts(),
+        listKeys(),
+        listServers(),
+        itemShares(),
+      ]);
+      setShares(sh ?? []);
       setGroups(g);
       setHosts(h);
       setKeys(k);
@@ -239,6 +251,8 @@ export function AppShell() {
                   onMove={(kind: ItemKind, id: string, location: string | null) =>
                     void moveItem(kind, id, location).then(() => reload(), setProblem)
                   }
+                  shares={shares}
+                  onShare={(target, server) => setSharing({ target, server })}
                 />
               )}
               {page === "keys" && (
@@ -293,6 +307,21 @@ export function AppShell() {
             <GroupForm group={editor.group} keys={keys} onDone={done} onCancel={() => setEditor(null)} />
           )}
           {editor.kind === "sshconfig" && <SshConfigImport onDone={done} onCancel={() => setEditor(null)} />}
+        </Drawer>
+      )}
+
+      {sharing && (
+        <Drawer onClose={() => setSharing(null)}>
+          <ShareDialog
+            server={sharing.server}
+            target={sharing.target}
+            hosts={hosts}
+            onDone={() => {
+              setSharing(null);
+              void reload();
+            }}
+            onCancel={() => setSharing(null)}
+          />
         </Drawer>
       )}
 

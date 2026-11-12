@@ -71,6 +71,13 @@ pub fn run() {
             commands::sync::remove_server,
             commands::sync::list_sync_devices,
             commands::sync::revoke_sync_device,
+            commands::shares::find_recipient,
+            commands::shares::confirm_recipient,
+            commands::shares::share_items,
+            commands::shares::list_shares,
+            commands::shares::set_share_grants,
+            commands::shares::unshare,
+            commands::shares::item_shares,
             commands::sync::move_item,
             commands::sync::account_key_qr,
         ])

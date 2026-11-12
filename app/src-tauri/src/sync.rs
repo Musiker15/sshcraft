@@ -219,6 +219,106 @@ pub fn note_change(
     Ok(servers)
 }
 
+/// A change the window wants to make, checked against shares this account received.
+pub enum Change<'a> {
+    SaveHost(&'a sshcraft_core::model::Host),
+    SaveGroup(&'a sshcraft_core::model::Group),
+    DeleteHost(sshcraft_core::model::HostId),
+    DeleteGroup(sshcraft_core::model::GroupId),
+    Move(ItemKind, &'a str),
+}
+
+/// The received share an item is in, if any.
+fn received(
+    store: &Store,
+    kind: ItemKind,
+    id: &str,
+) -> Result<Option<sshcraft_core::store::ShareRow>, CommandError> {
+    let Some(server) = store.location_of(kind, id)? else {
+        return Ok(None);
+    };
+    Ok(store.received_share_of(server, kind, id)?)
+}
+
+/// Whether the change may be made to an item that came in a share (design, section 8): only
+/// with write, a selection or one host only changed, never deleted, moved or shared on. `Ok`
+/// says whether to send it: a key assigned to a read-only item stays on this device.
+pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandError> {
+    use sshcraft_core::store::{ShareKind, ShareRole};
+    let read_only = || CommandError::code(ErrorCode::ShareReadOnly);
+    match change {
+        Change::SaveHost(host) => {
+            let id = host.id.0.to_string();
+            let existing = store.list_hosts()?.into_iter().find(|h| h.id == host.id);
+            let share = match (&existing, host.group_id) {
+                (Some(_), _) => received(store, ItemKind::Host, &id)?,
+                (None, Some(group)) => received(store, ItemKind::Group, &group.0.to_string())?,
+                (None, None) => None,
+            };
+            let Some(share) = share else {
+                return Ok(true);
+            };
+            if let Some(old) = &existing
+                && old.group_id != host.group_id
+            {
+                return Err(CommandError::code(ErrorCode::ShareNotOwner));
+            }
+            match (share.role, existing) {
+                (Some(ShareRole::Write), Some(_)) => Ok(true),
+                (Some(ShareRole::Write), None) if share.kind == ShareKind::GroupAll => Ok(true),
+                (Some(ShareRole::Read), Some(mut old)) => {
+                    old.settings.key = host.settings.key.clone();
+                    old.location = host.location;
+                    if old == *host {
+                        Ok(false)
+                    } else {
+                        Err(read_only())
+                    }
+                }
+                _ => Err(read_only()),
+            }
+        }
+        Change::SaveGroup(group) => {
+            let Some(share) = received(store, ItemKind::Group, &group.id.0.to_string())? else {
+                return Ok(true);
+            };
+            if share.role == Some(ShareRole::Write) {
+                return Ok(true);
+            }
+            let old = store.list_groups()?.into_iter().find(|g| g.id == group.id);
+            match old {
+                Some(mut old) => {
+                    old.defaults.key = group.defaults.key.clone();
+                    old.location = group.location;
+                    if old == *group {
+                        Ok(false)
+                    } else {
+                        Err(read_only())
+                    }
+                }
+                None => Err(read_only()),
+            }
+        }
+        Change::DeleteHost(id) => match received(store, ItemKind::Host, &id.0.to_string())? {
+            None => Ok(true),
+            Some(share)
+                if share.role == Some(ShareRole::Write) && share.kind == ShareKind::GroupAll =>
+            {
+                Ok(true)
+            }
+            Some(_) => Err(read_only()),
+        },
+        Change::DeleteGroup(id) => match received(store, ItemKind::Group, &id.0.to_string())? {
+            None => Ok(true),
+            Some(_) => Err(CommandError::code(ErrorCode::ShareNotOwner)),
+        },
+        Change::Move(kind, id) => match received(store, kind, id)? {
+            None => Ok(true),
+            Some(_) => Err(CommandError::code(ErrorCode::ShareNotOwner)),
+        },
+    }
+}
+
 /// Error codes of the sync server (docs/server-api.md).
 const KNOWN_SERVER_CODES: &[&str] = &[
     "bad_api_key",
@@ -261,7 +361,8 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::Blocked => ErrorCode::SyncBlocked,
         SyncError::NotSetUp => ErrorCode::NotFound,
         SyncError::NotAllowed => ErrorCode::SyncNotAllowed,
-        SyncError::ContactUnconfirmed | SyncError::AlreadyShared => ErrorCode::SyncNotAllowed,
+        SyncError::ContactUnconfirmed => ErrorCode::ShareContactUnconfirmed,
+        SyncError::AlreadyShared => ErrorCode::ShareAlreadyShared,
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,
     };
     let detail = match err {

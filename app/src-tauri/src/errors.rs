@@ -48,6 +48,10 @@ pub enum ErrorCode {
     SyncProtocol,
     SyncServer,
     SyncNotAllowed,
+    ShareContactUnconfirmed,
+    ShareReadOnly,
+    ShareNotOwner,
+    ShareAlreadyShared,
 }
 
 impl From<&ResolveError> for ErrorCode {

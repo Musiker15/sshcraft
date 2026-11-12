@@ -1,10 +1,11 @@
 import { ChevronDown, Folder, LayoutGrid, List, Search, Server } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Group, Host, ItemKind, KeyInfo, ServerView } from "../api";
+import type { Group, Host, ItemKind, ItemShare, KeyInfo, ServerView } from "../api";
 import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { filterHosts, hostSubtitle, sortByName } from "./hostsView";
+import type { ShareTarget } from "./sync/ShareDialog";
 import { missingKey } from "./sync/syncView";
 
 export type HostsPageProps = {
@@ -23,6 +24,9 @@ export type HostsPageProps = {
   /** Keys on this device, to point out hosts whose key is missing here. */
   keys?: KeyInfo[];
   onMove?: (kind: ItemKind, id: string, location: string | null) => void;
+  /** Which items are shared or came in a share. */
+  shares?: ItemShare[];
+  onShare?: (target: ShareTarget, server: ServerView) => void;
 };
 
 type Menu = { items: MenuItem[]; at: { x: number; y: number } };
@@ -61,6 +65,24 @@ export function HostsPage(props: HostsPageProps) {
       }));
   };
 
+  const shareOf = (kind: ItemKind, id: string) => props.shares?.find((s) => s.kind === kind && s.id === id);
+  const shareBadge = (share: ItemShare | undefined) =>
+    share && (
+      <span className="badge share">
+        {share.owned
+          ? t("share.sharedBadge")
+          : share.owner_name
+            ? t("share.fromBadge", { name: share.owner_name })
+            : t("share.fromSomeone")}
+      </span>
+    );
+  /** "Share" for an item at a server that this account owns. */
+  const shareItems = (target: ShareTarget, location: string | null | undefined, share: ItemShare | undefined): MenuItem[] => {
+    const server = servers.find((s) => s.id === location);
+    if (!props.onShare || !server || server.revoked || (share && !share.owned)) return [];
+    return [{ label: t("share.menu"), onSelect: () => props.onShare?.(target, server) }];
+  };
+
   const openMenu = (items: MenuItem[], e: React.MouseEvent) => {
     e.preventDefault();
     setMenu({ items, at: { x: e.clientX, y: e.clientY } });
@@ -71,6 +93,9 @@ export function HostsPage(props: HostsPageProps) {
       ? t("hosts.keyMissing")
       : hostSubtitle(host, host.group_id ? groupsById.get(host.group_id) : undefined);
     const place = serverName(host.location);
+    const share = shareOf("host", host.id);
+    const received = share !== undefined && !share.owned;
+    const readOnly = received && share.role !== "write";
     return (
       <div
         key={host.id}
@@ -82,9 +107,11 @@ export function HostsPage(props: HostsPageProps) {
           openMenu(
             [
               { label: t("hosts.connect"), onSelect: () => props.onConnect(host) },
+              // A read-only host can still be edited to assign an own key.
               { label: t("hosts.edit"), onSelect: () => props.onEditHost(host) },
-              ...moveItems("host", host.id, host.location, host.group_id !== null),
-              { label: t("common.delete"), onSelect: () => props.onDeleteHost(host), danger: true },
+              ...shareItems({ kind: "host", host }, host.location, share),
+              ...(received ? [] : moveItems("host", host.id, host.location, host.group_id !== null)),
+              ...(readOnly ? [] : [{ label: t("common.delete"), onSelect: () => props.onDeleteHost(host), danger: true }]),
             ],
             e,
           )
@@ -97,6 +124,7 @@ export function HostsPage(props: HostsPageProps) {
           <span className="card-title">
             {host.name}
             {place && <span className="badge">{place}</span>}
+            {shareBadge(share)}
           </span>
           <span className="card-sub">{subtitle ?? t("hosts.noAddress")}</span>
         </span>
@@ -104,7 +132,10 @@ export function HostsPage(props: HostsPageProps) {
     );
   };
 
-  const groupCard = (group: Group) => (
+  const groupCard = (group: Group) => {
+    const share = shareOf("group", group.id);
+    const received = share !== undefined && !share.owned;
+    return (
     <div
       key={group.id}
       className={view === "grid" ? "card" : "card row"}
@@ -114,8 +145,9 @@ export function HostsPage(props: HostsPageProps) {
         openMenu(
           [
             { label: t("hosts.edit"), onSelect: () => props.onEditGroup(group) },
-            ...moveItems("group", group.id, group.location, false),
-            { label: t("common.delete"), onSelect: () => props.onDeleteGroup(group), danger: true },
+            ...shareItems({ kind: "group", group }, group.location, share),
+            ...(received ? [] : moveItems("group", group.id, group.location, false)),
+            ...(received ? [] : [{ label: t("common.delete"), onSelect: () => props.onDeleteGroup(group), danger: true }]),
           ],
           e,
         )
@@ -128,13 +160,15 @@ export function HostsPage(props: HostsPageProps) {
         <span className="card-title">
           {group.name}
           {serverName(group.location) && <span className="badge">{serverName(group.location)}</span>}
+          {shareBadge(share)}
         </span>
         <span className="card-sub">
           {t("hosts.count", { count: props.hosts.filter((h) => h.group_id === group.id).length })}
         </span>
       </span>
     </div>
-  );
+    );
+  };
 
   const section = (key: string, title: string, items: Host[]) =>
     items.length > 0 && (

@@ -77,7 +77,9 @@ pub struct AccountCreated {
     pub unfinished: Option<CommandError>,
 }
 
-fn vault(state: &AppState) -> CommandResult<std::sync::Arc<sshcraft_core::vault::Vault>> {
+pub(crate) fn vault(
+    state: &AppState,
+) -> CommandResult<std::sync::Arc<sshcraft_core::vault::Vault>> {
     state.vault.clone()
 }
 
@@ -237,6 +239,7 @@ pub fn move_item(
 ) -> CommandResult<()> {
     let servers = {
         let store = state.store.lock().expect("store lock");
+        crate::sync::share_rights(&store, crate::sync::Change::Move(kind, &item_id))?;
         let before = store.location_of(kind, &item_id)?;
         store.set_location(kind, &item_id, location)?;
         note_change(&store, kind, &item_id, before, now_ms())?

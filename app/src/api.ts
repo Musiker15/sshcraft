@@ -209,3 +209,43 @@ export const revokeSyncDevice = (id: string, deviceId: string) =>
 export const moveItem = (kind: ItemKind, itemId: string, location: string | null) =>
   invoke<void>("move_item", { kind, itemId, location });
 export const accountKeyQr = (text: string) => invoke<string>("account_key_qr", { text });
+
+export type KnownState =
+  | { state: "new" }
+  | { state: "confirmed" }
+  | { state: "unconfirmed" }
+  | { state: "changed"; previous_safety_number: string };
+export type Recipient = { account: string; name: string; email: string; safety_number: string; known: KnownState };
+export type Role = "read" | "write";
+export type ShareKind = "group_all" | "selection" | "host";
+export type ShareWhatInput =
+  | { kind: "group_all"; group: string }
+  | { kind: "selection"; group: string; hosts: string[] }
+  | { kind: "host"; host: string };
+export type GrantInput = { account: string; role: Role };
+export type ShareOutcome = { area: string; agent_keys_skipped: number };
+export type RevokeOutcome = { keys_were_shared: boolean };
+export type GrantView = { account: string; role: Role; email: string | null; name: string | null };
+export type ShareView = {
+  area: string;
+  kind: ShareKind;
+  group: string | null;
+  hosts: string[];
+  grants: GrantView[];
+  with_keys: boolean;
+  owned: boolean;
+  owner: string;
+  role: Role | null;
+};
+export type ItemShare = { kind: ItemKind; id: string; owned: boolean; owner_name: string | null; role: Role | null };
+
+export const findRecipient = (server: string, email: string) => invoke<Recipient>("find_recipient", { server, email });
+export const confirmRecipient = (server: string, email: string, account: string) =>
+  invoke<void>("confirm_recipient", { server, email, account });
+export const shareItems = (server: string, what: ShareWhatInput, grants: GrantInput[], withKeys: boolean) =>
+  invoke<ShareOutcome>("share_items", { server, what, grants, withKeys });
+export const listShares = (server: string) => invoke<ShareView[]>("list_shares", { server });
+export const setShareGrants = (server: string, area: string, grants: GrantInput[]) =>
+  invoke<RevokeOutcome>("set_share_grants", { server, area, grants });
+export const unshare = (server: string, area: string) => invoke<RevokeOutcome>("unshare", { server, area });
+export const itemShares = () => invoke<ItemShare[]>("item_shares");

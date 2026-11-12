@@ -9,12 +9,14 @@ import { AccountKeyDialog } from "./AccountKeyDialog";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { AddServerForm } from "./AddServerForm";
 import { DevicesPanel } from "./DevicesPanel";
+import { SharesPanel } from "./SharesPanel";
 import { statusTone } from "./syncView";
 
 type Panel =
   | { kind: "add" }
   | { kind: "created"; created: AccountCreated }
   | { kind: "devices"; server: ServerView }
+  | { kind: "shares"; server: ServerView }
   | { kind: "addDevice" };
 
 /** Sync servers of this device, in the settings. */
@@ -112,6 +114,9 @@ export function SyncSection({ onChanged }: { onChanged: () => void }) {
             <button disabled={server.revoked} onClick={() => setPanel({ kind: "devices", server })}>
               {t("sync.devices")}
             </button>
+            <button disabled={server.revoked} onClick={() => setPanel({ kind: "shares", server })}>
+              {t("share.panel")}
+            </button>
             <button className="danger" onClick={() => setRemoving(server)}>
               {t("sync.remove")}
             </button>
@@ -138,6 +143,7 @@ export function SyncSection({ onChanged }: { onChanged: () => void }) {
           )}
           {panel.kind === "created" && <AccountKeyDialog created={panel.created} onClose={closePanel} />}
           {panel.kind === "devices" && <DevicesPanel server={panel.server} onClose={closePanel} />}
+          {panel.kind === "shares" && <SharesPanel server={panel.server} onClose={closePanel} />}
           {panel.kind === "addDevice" && <AddDeviceDialog onClose={() => setPanel(null)} />}
         </Drawer>
       )}

@@ -194,3 +194,63 @@ fn inputs_never_show_their_secrets() {
         "{shown}"
     );
 }
+
+#[test]
+fn editing_a_read_only_item_is_refused() {
+    use sshcraft_core::model::{KeyId, KeyRef};
+    use sshcraft_core::store::{ShareKind, ShareRole, ShareRow};
+    let (store, server) = store_with_server();
+    let mut h = host(None);
+    h.location = Some(server);
+    store.upsert_host(&h).unwrap();
+    let id = h.id.0.to_string();
+    // Not shared: anything goes and is queued.
+    assert!(share_rights(&store, Change::SaveHost(&h)).unwrap());
+    let area = Uuid::new_v4();
+    let received = |role, kind| ShareRow {
+        area_id: area,
+        kind,
+        group_id: None,
+        with_keys: false,
+        owned: false,
+        role: Some(role),
+        owner: [9; 32],
+    };
+    store
+        .put_share(server, &received(ShareRole::Read, ShareKind::Host))
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Host, &id, area)
+        .unwrap();
+    let mut renamed = h.clone();
+    renamed.name = "mine".into();
+    let refused = share_rights(&store, Change::SaveHost(&renamed)).unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ShareReadOnly);
+    assert_eq!(
+        share_rights(&store, Change::DeleteHost(h.id))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareReadOnly
+    );
+    assert_eq!(
+        share_rights(&store, Change::Move(ItemKind::Host, &id))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareNotOwner
+    );
+    // Assigning an own key stays on this device.
+    let mut keyed = h.clone();
+    keyed.settings.key = Some(KeyRef::Stored { id: KeyId::new() });
+    assert!(!share_rights(&store, Change::SaveHost(&keyed)).unwrap());
+    // With write in a single-host share: changing yes, deleting no.
+    store
+        .put_share(server, &received(ShareRole::Write, ShareKind::Host))
+        .unwrap();
+    assert!(share_rights(&store, Change::SaveHost(&renamed)).unwrap());
+    assert_eq!(
+        share_rights(&store, Change::DeleteHost(h.id))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareReadOnly
+    );
+}
