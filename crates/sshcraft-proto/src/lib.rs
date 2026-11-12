@@ -3,6 +3,7 @@
 //! Pure library: no I/O, no clock, no database. The client and the server share these types;
 //! the server only ever sees headers (ids, versions, public keys) and ciphertext.
 
+pub mod area;
 pub mod devicelog;
 pub mod encoding;
 pub mod identity;
