@@ -2,6 +2,7 @@
 //! checked by `tests/store_contract.rs`. Protocol objects are stored as their JSON; only the
 //! header fields the server needs are columns.
 
+pub mod postgres;
 pub mod sqlite;
 
 use sshcraft_proto::area::{AreaId, AreaManifest, KeyEnvelope, Role};
@@ -181,6 +182,9 @@ pub trait Store: Send + Sync {
 pub async fn open(url: &str) -> Result<Arc<dyn Store>, StoreError> {
     if let Some(path) = url.strip_prefix("sqlite://") {
         return Ok(Arc::new(sqlite::SqliteStore::open(path).await?));
+    }
+    if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+        return Ok(Arc::new(postgres::PostgresStore::connect(url).await?));
     }
     Err(StoreError::Backend(format!(
         "unsupported database url scheme: {}",

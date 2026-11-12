@@ -18,6 +18,8 @@ tracing = { workspace = true }
 rusqlite = { workspace = true }
 rand = { workspace = true }
 data-encoding = { workspace = true }
+tokio-postgres = { workspace = true }
+deadpool-postgres = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

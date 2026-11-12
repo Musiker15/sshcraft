@@ -60,7 +60,37 @@ macro_rules! all_contract_tests {
     };
 }
 
+/// A fresh database on the server named by `SSHCRAFT_TEST_POSTGRES_URL`, or `None` (skipped).
+async fn fresh_postgres() -> Option<Fresh> {
+    let Ok(url) = std::env::var("SSHCRAFT_TEST_POSTGRES_URL") else {
+        eprintln!("skipped: SSHCRAFT_TEST_POSTGRES_URL not set");
+        return None;
+    };
+    let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+        .await
+        .expect("connect to the test server");
+    tokio::spawn(connection);
+    let name = format!("sshcraft_test_{}", Uuid::new_v4().simple());
+    client
+        .batch_execute(&format!("CREATE DATABASE {name}"))
+        .await
+        .expect("create test database");
+    let (base, query) = match url.split_once('?') {
+        Some((base, query)) => (base, format!("?{query}")),
+        None => (url.as_str(), String::new()),
+    };
+    let (server, _) = base.rsplit_once('/').expect("database in url");
+    let store = sshcraft_server::store::open(&format!("{server}/{name}{query}"))
+        .await
+        .expect("open postgres store");
+    Some(Fresh {
+        store,
+        _guard: Box::new(()),
+    })
+}
+
 all_contract_tests!(sqlite, super::fresh_sqlite);
+all_contract_tests!(postgres, super::fresh_postgres);
 
 fn manifest(
     owner: &Person,
