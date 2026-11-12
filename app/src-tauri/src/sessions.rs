@@ -557,19 +557,34 @@ async fn connect_once(
     Ok(shell.split())
 }
 
-/// Whether a host still has no operating system for its symbol.
-fn needs_os(store: &Mutex<Store>, host_id: HostId) -> bool {
-    store
-        .lock()
-        .expect("store lock")
-        .list_hosts()
-        .is_ok_and(|hosts| hosts.iter().any(|h| h.id == host_id && h.os.is_none()))
+fn probed_setting(host_id: HostId) -> String {
+    format!("os.probed.{}", host_id.0)
+}
+
+/// Notes on this device that a host was asked for its system, recognized or not.
+pub(crate) fn mark_probed(store: &Store, host_id: HostId) {
+    let _ = store.put_setting(&probed_setting(host_id), "1");
+}
+
+/// Whether a host has no symbol yet and was never asked from this device.
+pub(crate) fn needs_os(store: &Mutex<Store>, host_id: HostId) -> bool {
+    let store = store.lock().expect("store lock");
+    let asked = store
+        .get_setting(&probed_setting(host_id))
+        .is_ok_and(|v| v.is_some());
+    !asked
+        && store
+            .list_hosts()
+            .is_ok_and(|hosts| hosts.iter().any(|h| h.id == host_id && h.os.is_none()))
 }
 
 /// Asks the server once which operating system it runs and stores it on the host (sent like
 /// any change, unless the host came in a share that may only be read). Failures are ignored:
 /// the symbol simply stays neutral.
 async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_ssh::Session) {
+    // Asked once: a server whose system is not recognized (or that runs a forced command for
+    // every session) is not asked again on each connection.
+    mark_probed(&store.lock().expect("store lock"), host_id);
     let Ok(output) = session
         .exec(sshcraft_core::os_detect::OS_PROBE, 16 * 1024)
         .await
@@ -602,11 +617,22 @@ async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    // Just after the version this device knows: a change made meanwhile on another device
+    // (a rename) is newer and wins over this background update.
+    let at = host
+        .location
+        .and_then(|server| {
+            store
+                .record_entry(server, sshcraft_core::store::ItemKind::Host, &id)
+                .ok()
+                .flatten()
+        })
+        .map_or(now_ms, |entry| entry.modified_at.saturating_add(1));
     let _ = sshcraft_sync::engine::record_local_change(
         &store,
         sshcraft_core::store::ItemKind::Host,
         &id,
-        now_ms,
+        at,
     );
 }
 

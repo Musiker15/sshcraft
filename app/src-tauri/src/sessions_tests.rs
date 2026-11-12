@@ -713,3 +713,24 @@ async fn a_key_not_on_this_device_ends_before_hello() {
         "no Windows Hello prompt for a key that is not here"
     );
 }
+
+#[test]
+fn os_probe_runs_once() {
+    let store = std::sync::Mutex::new(sshcraft_core::store::Store::open_in_memory().unwrap());
+    let host = sshcraft_core::model::Host {
+        id: sshcraft_core::model::HostId::new(),
+        name: "h".into(),
+        group_id: None,
+        settings: Default::default(),
+        location: None,
+        tags: Vec::new(),
+        os: None,
+    };
+    store.lock().unwrap().upsert_host(&host).unwrap();
+    assert!(needs_os(&store, host.id));
+    mark_probed(&store.lock().unwrap(), host.id);
+    assert!(
+        !needs_os(&store, host.id),
+        "a host whose system was not recognized is asked once"
+    );
+}

@@ -47,6 +47,55 @@ fn os_from(text: &str) -> Option<HostOs> {
         .flatten()
 }
 
+/// A cell the export guarded against spreadsheet formulas (`'=`, `'+`, `'-`, `'@`).
+pub(crate) fn unguard(cell: &str) -> &str {
+    match cell.strip_prefix('\'') {
+        Some(rest) if rest.starts_with(['=', '+', '-', '@', '\t', '\r']) => rest,
+        _ => cell,
+    }
+}
+
+/// Guards a cell that a spreadsheet would run as a formula.
+pub(crate) fn guard(cell: &str) -> String {
+    if cell.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{cell}")
+    } else {
+        cell.to_owned()
+    }
+}
+
+/// A group path written with `/` between groups; `\/` and `\\` stand for a slash or a
+/// backslash inside a name.
+pub(crate) fn split_path(path: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = path.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            '/' => parts.push(std::mem::take(&mut current)),
+            _ => current.push(c),
+        }
+    }
+    parts.push(current);
+    parts
+        .iter()
+        .map(|p| clean(p))
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+pub(crate) fn join_path<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    names
+        .map(|n| n.replace('\\', "\\\\").replace('/', "\\/"))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 pub fn parse(text: &str) -> ImportPlan {
     let text = text.trim_start_matches('\u{feff}');
     let header_line = text.lines().next().unwrap_or_default();
@@ -81,7 +130,7 @@ pub fn parse(text: &str) -> ImportPlan {
         let field = |column: Option<usize>| -> String {
             column
                 .and_then(|c| record.get(c))
-                .map(clean)
+                .map(|v| clean(unguard(v)))
                 .unwrap_or_default()
         };
         let protocol = field(columns.protocol);
@@ -106,7 +155,7 @@ pub fn parse(text: &str) -> ImportPlan {
         let group_path = columns
             .group
             .and_then(|c| record.get(c))
-            .map(|g| g.split('/').map(clean).filter(|p| !p.is_empty()).collect())
+            .map(|g| split_path(unguard(g)))
             .unwrap_or_default();
         let tags = columns
             .tags

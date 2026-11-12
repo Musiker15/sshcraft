@@ -125,6 +125,22 @@ pub fn import(
 ) -> Result<KeyInfo, VaultError> {
     let text = read_small(path).ok_or_else(|| VaultError::InvalidKey("unreadable".into()))?;
     let key = parse_private_key(&text, passphrase)?;
+    let fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
+    if let Some(known) = store
+        .list_key_records()
+        .map_err(|e| VaultError::InvalidKey(e.to_string()))?
+        .into_iter()
+        .find(|r| r.fingerprint == fingerprint)
+    {
+        return Ok(KeyInfo {
+            id: known.id,
+            name: known.name,
+            algorithm: known.algorithm,
+            fingerprint: known.fingerprint,
+            public_key: known.public_key,
+            location: known.location,
+        });
+    }
     let name = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())

@@ -184,8 +184,12 @@ fn plain_and_bracketed_hosts() {
         fingerprint: fingerprint(&k2),
     }));
     let names: Vec<_> = parsed.candidates.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, vec!["example.org", "10.0.0.1", "example.org:2222"]);
-    assert_eq!(parsed.candidates[2].settings.port, Some(2222));
+    assert_eq!(
+        names,
+        vec!["example.org", "example.org:2222"],
+        "one host per line"
+    );
+    assert_eq!(parsed.candidates[1].settings.port, Some(2222));
 }
 
 #[test]
@@ -436,4 +440,119 @@ fn user_at_host_is_split() {
             path: r"C:\Users\me\web.ppk".into()
         })
     );
+}
+
+// ---------- review fixes
+
+#[test]
+fn putty_name_with_multibyte_does_not_panic() {
+    assert_eq!(putty::decode_name("x%aü"), "x%aü");
+    assert_eq!(putty::decode_name("a%20b%"), "a b%");
+}
+
+#[test]
+fn known_hosts_line_is_one_host() {
+    let k = ed25519();
+    let parsed = knownhosts::parse(&format!(
+        "web.example.org,203.0.113.5 {}\n",
+        public_line(&k)
+    ));
+    assert_eq!(parsed.candidates.len(), 1);
+    assert_eq!(parsed.entries.len(), 2, "both names keep their host key");
+}
+
+#[test]
+fn same_server_from_two_sources_is_one_host() {
+    let store = Store::open_in_memory().unwrap();
+    apply_import(&store, &[host("web", &["G"], Some("web.org"))], None).unwrap();
+    let from_known_hosts = ImportCandidate {
+        name: "web.org".into(),
+        settings: ConnectionSettings {
+            address: Some("web.org".into()),
+            ..Default::default()
+        },
+        ..ImportCandidate::default()
+    };
+    let outcome = apply_import(&store, &[from_known_hosts], None).unwrap();
+    assert_eq!((outcome.created, outcome.duplicates), (0, 1));
+}
+
+#[test]
+fn import_skips_received_read_only_groups() {
+    use crate::store::{ItemKind, ShareKind, ShareRole, ShareRow};
+    let store = Store::open_in_memory().unwrap();
+    let server = crate::model::ServerId::new();
+    store
+        .add_server(&crate::store::ServerRow {
+            id: server,
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [7; 32],
+            device_id: uuid::Uuid::new_v4(),
+            sealed_device: vec![1],
+            sync_enabled: true,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    apply_import(
+        &store,
+        &[host("a", &["Kunden"], Some("a.org"))],
+        Some(server),
+    )
+    .unwrap();
+    let theirs = store.list_groups().unwrap().pop().unwrap();
+    let area = uuid::Uuid::new_v4();
+    store
+        .put_share(
+            server,
+            &ShareRow {
+                area_id: area,
+                kind: ShareKind::GroupAll,
+                group_id: Some(theirs.id.0.to_string()),
+                with_keys: false,
+                owned: false,
+                role: Some(ShareRole::Read),
+                owner: [9; 32],
+            },
+        )
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &theirs.id.0.to_string(), area)
+        .unwrap();
+    apply_import(
+        &store,
+        &[host("b", &["Kunden"], Some("b.org"))],
+        Some(server),
+    )
+    .unwrap();
+    let kunden = store
+        .list_groups()
+        .unwrap()
+        .into_iter()
+        .filter(|g| g.name == "Kunden")
+        .count();
+    assert_eq!(kunden, 2, "a group shared to read only is not written into");
+}
+
+#[test]
+fn importing_a_key_file_twice_keeps_one_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("id_ed25519");
+    std::fs::write(
+        &path,
+        ed25519().to_openssh(LineEnding::LF).unwrap().as_bytes(),
+    )
+    .unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let vault =
+        crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default()))
+            .unwrap();
+    let first = keyfiles::import(&vault, &store, &path, None).unwrap();
+    let second = keyfiles::import(&vault, &store, &path, None).unwrap();
+    assert_eq!(first.id, second.id);
+    assert_eq!(store.list_key_records().unwrap().len(), 1);
 }

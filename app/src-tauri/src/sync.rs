@@ -359,8 +359,16 @@ pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandEr
         },
         Change::DeleteGroup(id) => {
             let group = id.0.to_string();
-            if received(store, ItemKind::Group, &group)?.is_some() {
-                return Err(CommandError::code(ErrorCode::ShareNotOwner));
+            if let Some(share) = received(store, ItemKind::Group, &group)? {
+                // The shared group itself is the owner's; below it, write in a group shared
+                // with all hosts allows removing.
+                if share.group_id.as_deref() == Some(group.as_str()) {
+                    return Err(CommandError::code(ErrorCode::ShareNotOwner));
+                }
+                if share.role == Some(ShareRole::Write) && share.kind == ShareKind::GroupAll {
+                    return Ok(true);
+                }
+                return Err(read_only());
             }
             // A group of an own share goes with its share: end that first.
             if let Some(server) = store.location_of(ItemKind::Group, &group)?

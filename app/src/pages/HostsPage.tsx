@@ -5,7 +5,7 @@ import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { HostIcon } from "../components/HostIcon";
-import { allTags, chain, childGroups, hasTags } from "./hostsTree";
+import { allTags, chain, childGroups, hasTags, hostTags } from "./hostsTree";
 import { filterHosts, hostSubtitle, sortByName } from "./hostsView";
 import type { ShareTarget } from "./sync/ShareDialog";
 import { missingKey } from "./sync/syncView";
@@ -52,7 +52,7 @@ export function HostsPage(props: HostsPageProps) {
   const hosts = useMemo(() => sortByName(props.hosts, lang), [props.hosts, lang]);
   const tagChoices = useMemo(() => allTags([...props.hosts, ...props.groups]), [props.hosts, props.groups]);
   const found = useMemo(
-    () => filterHosts(hosts, props.groups, query).filter((h) => hasTags(h, tags)),
+    () => filterHosts(hosts, props.groups, query).filter((h) => hasTags({ tags: hostTags(h, props.groups) }, tags)),
     [hosts, props.groups, query, tags],
   );
   const searching = query.trim() !== "" || tags.length > 0;
@@ -267,7 +267,11 @@ export function HostsPage(props: HostsPageProps) {
                 key={tag}
                 className={on ? "chip active" : "chip"}
                 aria-pressed={on}
-                onClick={() => setTags(on ? tags.filter((x) => x !== tag) : [...tags, tag])}
+                onClick={() =>
+                  setTags(
+                    on ? tags.filter((x) => x.toLocaleLowerCase() !== tag.toLocaleLowerCase()) : [...tags, tag],
+                  )
+                }
               >
                 {tag}
               </button>

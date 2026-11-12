@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Group, Host } from "../api";
-import { allTags, chain, childGroups, descendants, groupLabel, hasTags, inheritedDefaults } from "./hostsTree";
+import { allTags, chain, childGroups, descendants, groupLabel, hasTags, hostTags, inheritedDefaults } from "./hostsTree";
 import { filterHosts, hostSubtitle } from "./hostsView";
 
 const empty = { address: null, port: null, username: null, key: null };
@@ -57,4 +57,10 @@ test("tag filter needs every chosen tag", () => {
   expect(hasTags(h, ["prod", "web"])).toBe(true);
   expect(hasTags(h, ["prod", "db"])).toBe(false);
   expect(allTags([h, host("b", null, ["db", "PROD"])])).toEqual(["db", "Prod", "web"]);
+});
+
+test("a host carries the tags of its groups for the filter", () => {
+  const h = host("a", "low", ["web"]);
+  expect(hasTags({ tags: hostTags(h, groups) }, ["vip"])).toBe(true);
+  expect(hasTags({ tags: hostTags(h, groups) }, ["vip", "web"])).toBe(true);
 });

@@ -393,3 +393,46 @@ fn moving_a_group_into_a_received_group_is_refused() {
         ErrorCode::ShareReadOnly
     );
 }
+
+#[test]
+fn writer_may_delete_a_subgroup_in_a_group_share() {
+    use sshcraft_core::store::{ShareKind, ShareRole, ShareRow};
+    let (store, server) = store_with_server();
+    let group = |name: &str, parent: Option<GroupId>| Group {
+        id: GroupId::new(),
+        name: name.into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+        parent_id: parent,
+        tags: Vec::new(),
+    };
+    let root = group("root", None);
+    let sub = group("sub", Some(root.id));
+    store.upsert_group(&root).unwrap();
+    store.upsert_group(&sub).unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(
+            server,
+            &ShareRow {
+                area_id: area,
+                kind: ShareKind::GroupAll,
+                group_id: Some(root.id.0.to_string()),
+                with_keys: false,
+                owned: false,
+                role: Some(ShareRole::Write),
+                owner: [9; 32],
+            },
+        )
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &root.id.0.to_string(), area)
+        .unwrap();
+    assert!(share_rights(&store, Change::DeleteGroup(sub.id)).unwrap());
+    assert_eq!(
+        share_rights(&store, Change::DeleteGroup(root.id))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareNotOwner
+    );
+}

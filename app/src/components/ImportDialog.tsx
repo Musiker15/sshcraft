@@ -38,7 +38,13 @@ type Props = {
   onCancel: () => void;
 };
 
-type Result = { created: number; duplicates: number; known?: KnownOutcome; keys?: number; failedKeys?: number };
+type Result = {
+  created: number;
+  duplicates: number;
+  known?: KnownOutcome;
+  keys?: number;
+  failedKeys?: { name: string; reason: string }[];
+};
 
 function defaultPath(kind: SourceKind, defaults: ImportDefaults | null): string {
   if (!defaults) return "";
@@ -139,14 +145,14 @@ export function ImportDialog({ servers, initial = "ssh_config", onDone, onCancel
     try {
       if (kind === "key_files" && keyFiles) {
         let keys = 0;
-        let failedKeys = 0;
+        const failedKeys: { name: string; reason: string }[] = [];
         for (const file of keyFiles) {
           if (!selected.has(keyFiles.indexOf(file))) continue;
           try {
             await importKeyFile(file.path, file.encrypted ? (passphrases[file.path] ?? "") : null);
             keys++;
-          } catch {
-            failedKeys++;
+          } catch (e) {
+            failedKeys.push({ name: file.name, reason: errorText(t, e) });
           }
         }
         setResult({ created: 0, duplicates: 0, keys, failedKeys });
@@ -206,7 +212,11 @@ export function ImportDialog({ servers, initial = "ssh_config", onDone, onCancel
           <p>{t("import.created", { count: result.created })}</p>
         )}
         {result.duplicates > 0 && <p>{t("import.duplicates", { count: result.duplicates })}</p>}
-        {(result.failedKeys ?? 0) > 0 && <p className="warning-text">{t("import.keysFailed", { count: result.failedKeys ?? 0 })}</p>}
+        {(result.failedKeys ?? []).map((f) => (
+          <p key={f.name} className="warning-text">
+            {f.name}: {f.reason}
+          </p>
+        ))}
         {result.known && <p>{t("import.hostKeys", { count: result.known.added })}</p>}
         {result.known && result.known.conflicts.length > 0 && (
           <p className="warning-text">

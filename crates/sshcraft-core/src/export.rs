@@ -152,12 +152,23 @@ pub fn export_json(store: &Store, filter: &ExportFilter) -> Result<String, Store
             .groups
             .iter()
             .map(|g| {
+                // The top of an exported part carries what it inherits from above it.
+                let mut defaults = g.defaults.clone();
+                if !g.parent_id.is_some_and(|p| in_export(&p)) {
+                    for above in group_chain(&selection.all_groups, g.id).iter().skip(1) {
+                        let d = &above.defaults;
+                        defaults.address = defaults.address.or_else(|| d.address.clone());
+                        defaults.port = defaults.port.or(d.port);
+                        defaults.username = defaults.username.or_else(|| d.username.clone());
+                        defaults.key = defaults.key.or_else(|| d.key.clone());
+                    }
+                }
                 Ok(GroupOut {
                     id: g.id.0.to_string(),
                     name: g.name.clone(),
                     parent_id: g.parent_id.filter(in_export).map(|p| p.0.to_string()),
                     tags: g.tags.clone(),
-                    defaults: settings_out(store, &g.defaults)?,
+                    defaults: settings_out(store, &defaults)?,
                 })
             })
             .collect::<Result<_, StoreError>>()?,
@@ -191,7 +202,7 @@ pub fn export_csv(store: &Store, filter: &ExportFilter) -> Result<String, StoreE
             .group_id
             .map(|g| group_chain(&selection.all_groups, g))
             .unwrap_or_default();
-        let path: Vec<&str> = chain.iter().rev().map(|g| g.name.as_str()).collect();
+        let path = crate::import::csv::join_path(chain.iter().rev().map(|g| g.name.as_str()));
         let text = |own: &Option<String>, get: fn(&ConnectionSettings) -> &Option<String>| {
             own.clone()
                 .or_else(|| chain.iter().find_map(|g| get(&g.defaults).clone()))
@@ -218,16 +229,20 @@ pub fn export_csv(store: &Store, filter: &ExportFilter) -> Result<String, StoreE
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default();
         writer
-            .write_record([
-                host.name.as_str(),
-                &path.join("/"),
-                &host.tags.join(";"),
-                &text(&host.settings.address, |d| &d.address),
-                &port.to_string(),
-                &text(&host.settings.username, |d| &d.username),
-                &key,
-                &os,
-            ])
+            .write_record(
+                [
+                    host.name.clone(),
+                    path,
+                    host.tags.join(";"),
+                    text(&host.settings.address, |d| &d.address),
+                    port.to_string(),
+                    text(&host.settings.username, |d| &d.username),
+                    key,
+                    os,
+                ]
+                .iter()
+                .map(|cell| crate::import::csv::guard(cell)),
+            )
             .map_err(bad)?;
     }
     let bytes = writer

@@ -230,3 +230,27 @@ fn old_host_json_without_tags_reads() {
     .unwrap();
     assert_eq!(g.parent_id, None);
 }
+
+#[test]
+fn too_deep_is_refused() {
+    let store = Store::open_in_memory().unwrap();
+    let mut parent: Option<GroupId> = None;
+    for i in 0..crate::model::MAX_GROUP_DEPTH {
+        let g = group(&format!("g{i}"), parent, ConnectionSettings::default());
+        store.upsert_group(&g).unwrap();
+        parent = Some(g.id);
+    }
+    let one_more = group("deep", parent, ConnectionSettings::default());
+    assert!(matches!(
+        store.upsert_group(&one_more),
+        Err(StoreError::TooDeep)
+    ));
+}
+
+#[test]
+fn unknown_os_reads_as_other() {
+    let text = r#"{"id":"0b1c5d8a-6b8e-4e5e-9f0a-1a2b3c4d5e6f","name":"h","group_id":null,
+        "settings":{"address":null,"port":null,"username":null,"key":null},"os":"plan9"}"#;
+    let h: Host = serde_json::from_str(text).unwrap();
+    assert_eq!(h.os, Some(crate::model::HostOs::Other));
+}

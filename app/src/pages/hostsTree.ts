@@ -79,3 +79,8 @@ export function hasTags(item: { tags?: string[] }, wanted: string[]): boolean {
   const own = new Set((item.tags ?? []).map(lower));
   return wanted.every((t) => own.has(lower(t)));
 }
+
+/** A host's own tags and those of every group above it. */
+export function hostTags(host: { tags?: string[]; group_id: string | null }, groups: Group[]): string[] {
+  return [...(host.tags ?? []), ...chain(groups, host.group_id).flatMap((g) => g.tags ?? [])];
+}

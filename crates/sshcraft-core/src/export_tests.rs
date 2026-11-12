@@ -141,3 +141,33 @@ fn filter_by_subtree() {
     let csv = export_csv(&store, &filter).unwrap();
     assert!(!csv.contains("lone"));
 }
+
+#[test]
+fn csv_neutralizes_formulas_and_keeps_slashes() {
+    let store = Store::open_in_memory().unwrap();
+    let g = group("a/b", None, Some("x.org"));
+    store.upsert_group(&g).unwrap();
+    store
+        .upsert_host(&host("=cmd()", Some(g.id), None))
+        .unwrap();
+    let text = export_csv(&store, &ExportFilter::default()).unwrap();
+    assert!(text.contains("'=cmd()"), "{text}");
+    let plan = crate::import::csv::parse(&text);
+    assert_eq!(plan.candidates[0].name, "=cmd()");
+    assert_eq!(plan.candidates[0].group_path, vec!["a/b".to_owned()]);
+}
+
+#[test]
+fn json_subtree_keeps_inherited_values() {
+    let (store, _vault, _, mueller) = sample();
+    let filter = ExportFilter {
+        group: Some(mueller.id),
+        ..ExportFilter::default()
+    };
+    let json: serde_json::Value =
+        serde_json::from_str(&export_json(&store, &filter).unwrap()).unwrap();
+    assert_eq!(
+        json["groups"][0]["defaults"]["address"],
+        "kunden.example.org"
+    );
+}

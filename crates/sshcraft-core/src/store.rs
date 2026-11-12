@@ -15,6 +15,9 @@ pub enum StoreError {
     /// A group would end up inside itself.
     #[error("a group cannot be inside itself")]
     GroupCycle,
+    /// Groups would nest deeper than `MAX_GROUP_DEPTH`.
+    #[error("groups nest too deep")]
+    TooDeep,
 }
 
 /// A key as stored on disk. `sealed_secret` is the vault's ciphertext, never plaintext.
@@ -196,6 +199,32 @@ impl Store {
         if let Some(parent) = group.parent_id {
             if parent == group.id || subgroups_of(&tx, &id)?.contains(&parent.0.to_string()) {
                 return Err(StoreError::GroupCycle);
+            }
+            // Levels above the parent, the parent, this group and the deepest level below it.
+            let above: i64 = tx.query_row(
+                "WITH RECURSIVE up(id, depth) AS (
+                     SELECT ?1, 1
+                     UNION ALL
+                     SELECT g.parent_id, up.depth + 1 FROM groups g JOIN up ON g.id = up.id
+                     WHERE g.parent_id IS NOT NULL AND up.depth <= ?2
+                 )
+                 SELECT MAX(depth) FROM up",
+                rusqlite::params![parent.0.to_string(), crate::model::MAX_GROUP_DEPTH as i64],
+                |r| r.get(0),
+            )?;
+            let below: i64 = tx.query_row(
+                "WITH RECURSIVE down(id, depth) AS (
+                     SELECT ?1, 0
+                     UNION ALL
+                     SELECT g.id, down.depth + 1 FROM groups g JOIN down ON g.parent_id = down.id
+                     WHERE down.depth <= ?2
+                 )
+                 SELECT MAX(depth) FROM down",
+                rusqlite::params![id, crate::model::MAX_GROUP_DEPTH as i64],
+                |r| r.get(0),
+            )?;
+            if above + 1 + below > crate::model::MAX_GROUP_DEPTH as i64 {
+                return Err(StoreError::TooDeep);
             }
             let exists: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?1)",

@@ -46,11 +46,14 @@ pub fn decode_name(name: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
+        // Only `%` followed by two ASCII hex digits is an escape; anything else stays.
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&name[i + 1..i + 3], 16)
+            && bytes[i + 1].is_ascii_hexdigit()
+            && bytes[i + 2].is_ascii_hexdigit()
         {
-            out.push(byte);
+            let hex = |b: u8| (b as char).to_digit(16).unwrap_or(0) as u8;
+            out.push(hex(bytes[i + 1]) * 16 + hex(bytes[i + 2]));
             i += 3;
             continue;
         }

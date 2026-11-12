@@ -45,6 +45,16 @@ pub fn record_local_change(
         return Ok(());
     };
     store.queue(server, kind, id, now_ms)?;
+    // A group that changed area (hung into or out of a share) takes everything below along.
+    if kind == ItemKind::Group
+        && let Some(personal) = store
+            .get_setting(&crate::account::personal_setting(server))?
+            .and_then(|t| Uuid::parse_str(&t).ok())
+        && let Some(entry) = store.record_entry(server, ItemKind::Group, id)?
+        && entry.area_id != store.area_for(server, ItemKind::Group, id, personal)?
+    {
+        record_group_hosts(store, id, now_ms)?;
+    }
     // Its copies in shares follow it.
     for (_, copy) in store.copies_of(server, kind, id)? {
         store.queue(server, kind, &copy, now_ms)?;
@@ -1192,7 +1202,7 @@ impl Engine {
         body: &[u8],
         personal: Option<Uuid>,
     ) -> Result<bool, SyncError> {
-        let item = decode(body)?;
+        let mut item = decode(body)?;
         let (kind, item_id) = item.item();
         let store = lock(store)?;
         let area = header.area_id.0;
@@ -1203,6 +1213,45 @@ impl Engine {
             modified_at: item.modified_at,
         };
         let deleted = matches!(item.body, ItemBody::Deleted { .. });
+        // In an own share with all hosts, a member neither moves nor deletes the shared group,
+        // nor hangs anything into groups outside the share.
+        if header.author_account != self.account
+            && let Some(share) = store
+                .share(self.server, area)?
+                .filter(|s| s.owned && s.kind == ShareKind::GroupAll)
+        {
+            let is_root = |id: &str| share.group_id.as_deref() == Some(id);
+            let outside =
+                |group: Option<sshcraft_core::model::GroupId>| -> Result<bool, SyncError> {
+                    Ok(match group {
+                        Some(g) => {
+                            store.effective_area(self.server, ItemKind::Group, &g.0.to_string())?
+                                != Some(area)
+                        }
+                        None => false,
+                    })
+                };
+            let refuse = match &mut item.body {
+                ItemBody::Deleted { item_kind, item_id } => {
+                    *item_kind == ItemKind::Group && is_root(item_id)
+                }
+                ItemBody::Group { group } if is_root(&group.id.0.to_string()) => {
+                    group.parent_id = store
+                        .list_groups()?
+                        .into_iter()
+                        .find(|g| g.id == group.id)
+                        .and_then(|g| g.parent_id);
+                    false
+                }
+                ItemBody::Group { group } => outside(group.parent_id)?,
+                ItemBody::Host { host } => outside(host.group_id)?,
+                ItemBody::Key { .. } => false,
+            };
+            if refuse {
+                store.put_record_entry(self.server, &entry, kind, &item_id)?;
+                return Ok(false);
+            }
+        }
         // On the owner's devices a copy in an own share is not an item of its own: a member's
         // change goes into the original (and from there into every other copy).
         if store
@@ -1476,6 +1525,8 @@ fn settle_cycle(
     detached.parent_id = None;
     store.upsert_group(&detached)?;
     record_local_change(store, ItemKind::Group, &id, modified_at)?;
+    // Moved to the top level, it may have left a share: everything below follows.
+    record_group_hosts(store, &id, modified_at)?;
     Ok(true)
 }
 

@@ -139,8 +139,17 @@ pub struct Host {
     pub location: Option<ServerId>,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
+    /// A system a newer client knows reads as `Other` here.
+    #[serde(default, deserialize_with = "os_or_other")]
     pub os: Option<HostOs>,
+}
+
+fn os_or_other<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<HostOs>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(match value {
+        None | Some(serde_json::Value::Null) => None,
+        Some(v) => Some(serde_json::from_value(v).unwrap_or(HostOs::Other)),
+    })
 }
 
 /// A host with every setting filled in, ready to connect.

@@ -86,11 +86,16 @@ pub fn parse(text: &str) -> KnownHostsImport {
                 .push(format!("line {number}: no usable host name"));
             continue;
         }
+        // One host per line: further names of the same line are the same machine.
+        let mut first = true;
         for (address, port) in usable {
-            if !out.candidates.iter().any(|c| {
-                c.settings.address.as_deref() == Some(address.as_str())
-                    && c.settings.port.unwrap_or(DEFAULT_PORT) == port
-            }) {
+            let fresh = std::mem::take(&mut first);
+            if fresh
+                && !out.candidates.iter().any(|c| {
+                    c.settings.address.as_deref() == Some(address.as_str())
+                        && c.settings.port.unwrap_or(DEFAULT_PORT) == port
+                })
+            {
                 let name = if port == DEFAULT_PORT {
                     address.clone()
                 } else {

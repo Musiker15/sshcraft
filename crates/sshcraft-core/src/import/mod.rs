@@ -127,8 +127,30 @@ fn group_for(
         if name.is_empty() {
             continue;
         }
+        let writable = |g: &Group| -> bool {
+            // A group that came in someone else's share is only written into where that share
+            // allows adding (write, all hosts).
+            match location {
+                Some(server) => match store.received_share_of(
+                    server,
+                    crate::store::ItemKind::Group,
+                    &g.id.0.to_string(),
+                ) {
+                    Ok(Some(share)) => {
+                        share.role == Some(crate::store::ShareRole::Write)
+                            && share.kind == crate::store::ShareKind::GroupAll
+                    }
+                    Ok(None) => true,
+                    Err(_) => false,
+                },
+                None => true,
+            }
+        };
         let found = groups.iter().find(|g| {
-            g.name == name && g.parent_id == parent && (parent.is_some() || g.location == location)
+            g.name == name
+                && g.parent_id == parent
+                && (parent.is_some() || g.location == location)
+                && writable(g)
         });
         let id = match found {
             Some(group) => group.id,
@@ -168,6 +190,7 @@ pub fn apply_import(
 ) -> Result<ImportOutcome, StoreError> {
     let mut groups = store.list_groups()?;
     let mut hosts = store.list_hosts()?;
+    let before = hosts.len();
     let mut outcome = ImportOutcome::default();
     for candidate in candidates {
         let group_id = group_for(
@@ -197,8 +220,8 @@ pub fn apply_import(
                     .or_else(|| chain.iter().find_map(|g| get(&g.defaults).clone()))
             };
             (
-                h.name.clone(),
-                h.group_id,
+                h.name.to_lowercase(),
+                h.location,
                 pick(&h.settings.address, |d| &d.address),
                 h.settings
                     .port
@@ -207,7 +230,15 @@ pub fn apply_import(
                 pick(&h.settings.username, |d| &d.username),
             )
         };
-        if hosts.iter().any(|h| key(h) == key(&host)) {
+        // The same machine (address and port at this place): with the same name and user, or
+        // from a source that knows no user (known_hosts) when it was there before this import.
+        let new = key(&host);
+        let duplicate = hosts.iter().enumerate().any(|(i, h)| {
+            let old = key(h);
+            let machine = old.1 == new.1 && old.2 == new.2 && old.3 == new.3;
+            machine && ((old.0 == new.0 && old.4 == new.4) || (new.4.is_none() && i < before))
+        });
+        if duplicate {
             outcome.duplicates += 1;
             continue;
         }
