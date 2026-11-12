@@ -111,7 +111,7 @@ impl Default for Backoff {
 
 impl Backoff {
     /// The pause to wait now; the next one is twice as long.
-    pub fn next(&mut self) -> u64 {
+    pub fn pause(&mut self) -> u64 {
         let now = self.0;
         self.0 = (self.0 * 2).min(MAX_BACKOFF_SECS);
         now
@@ -134,7 +134,7 @@ impl Worker {
         let mut backoff = Backoff::default();
         loop {
             let ended = self.connected(&mut backoff).await;
-            let pause = backoff.next();
+            let pause = backoff.pause();
             match ended {
                 Ended::Revoked => {
                     self.observer.status(self.server, SyncStatus::Revoked);
@@ -265,9 +265,9 @@ mod tests {
     #[test]
     fn backoff_grows_to_the_limit_and_resets() {
         let mut b = Backoff::default();
-        let waits: Vec<u64> = (0..8).map(|_| b.next()).collect();
+        let waits: Vec<u64> = (0..8).map(|_| b.pause()).collect();
         assert_eq!(waits, vec![1, 2, 4, 8, 16, 32, 60, 60]);
         b.reset();
-        assert_eq!(b.next(), 1);
+        assert_eq!(b.pause(), 1);
     }
 }
