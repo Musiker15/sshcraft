@@ -24,15 +24,21 @@ mit dem Wissen aus den vorherigen.
 | 13 | Snippets und Autovervollständigung | Snippets in Paketen, auf mehreren Hosts ausführen, Seitenleiste mit Verlauf, Autovervollständigung aus Verlauf, Pfaden, Snippets und Befehlen (ohne KI) | offen |
 | 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | offen |
 | 15 | Agent-Anbindung | `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | offen |
-| 16 | Releases für Windows und Server | GitHub-Actions-Releases: Windows-Installer, Server-Programm für Linux, Docker-Image | offen |
-| 17 | Android-Spike (Wegwerf) | Urteil zur Handytastatur mit xterm.js im Webview | angefangen, Zweig `spike/android` |
-| 18 | Android vollständig | Keystore, Zusatzleiste, Gesten, Lautstärketasten, Vordergrund-Dienst, App-Sperre, gerätegebundene Schlüssel, APK in den Releases | offen |
-| 19 | iOS | Keychain, Face ID, Secure Enclave, Wiederverbinden beim Zurückkehren, IPA-Bau auf macOS-Runner, Anleitung zum Sideloading | offen |
+| 16 | Desktop-Plattformen | macOS, Linux und FreeBSD: Agent über `SSH_AUTH_SOCK`, Keychain und Secret Service, Touch ID, Login-Shell als lokales Terminal, `pass-cli`-Pfade; CI-Matrix für alle Desktop-Ziele | offen |
+| 17 | Releases für Desktop und Server | GitHub-Actions-Releases: Windows x64, x86, arm64; macOS universal; Linux x86_64 und aarch64; FreeBSD x86_64; Server-Programm für Linux; Docker-Image | offen |
+| 18 | Android-Spike (Wegwerf) | Urteil zur Handytastatur mit xterm.js im Webview | angefangen, Zweig `spike/android` |
+| 19 | Android vollständig | Keystore, Zusatzleiste, Gesten, Lautstärketasten, Vordergrund-Dienst, App-Sperre, gerätegebundene Schlüssel, APK in den Releases | offen |
+| 20 | iOS und iPadOS | Keychain, Face ID, Secure Enclave, Wiederverbinden beim Zurückkehren, iPad-Layout mit Seitenleiste, Hardwaretastatur und Split View, IPA-Bau auf macOS-Runner, Anleitung zum Sideloading | offen |
 
-**Reihenfolge** (Moritz, 12.11.2026): erst Windows und Server, danach Android und iOS. Teilplan 4
+**Zielplattformen** (Moritz, 12.11.2026): Desktop Windows x64, x86, arm64, macOS universal,
+Linux x86_64 und aarch64, FreeBSD x86_64; mobil Android, iOS und iPadOS. Teilplan 16 ist dafür
+neu eingefügt [Claudes Entscheidung]; die bisherigen Teilpläne 16 bis 19 heißen jetzt 17 bis 20.
+
+**Reihenfolge** (Moritz, 12.11.2026): erst Windows und Server, danach die übrigen
+Desktop-Plattformen, dann Android, iOS und iPadOS. Teilplan 4
 steht vorn [Claudes Entscheidung]: Der neue Aufbau und die Übersetzung kommen, bevor die vielen
 neuen Bildschirme der Teilpläne 8 bis 14 entstehen, sonst müsste jeder davon zweimal angefasst
-werden. Bewusst in Kauf genommen: Das Risiko der Handytastatur klärt sich erst mit Teilplan 17;
+werden. Bewusst in Kauf genommen: Das Risiko der Handytastatur klärt sich erst mit Teilplan 18;
 die Android-Werkzeuge (SDK, NDK 30.0.16248370, Rust-Ziele) sind schon installiert,
 `ANDROID_HOME` ist `G:\Android\Sdk`.
 

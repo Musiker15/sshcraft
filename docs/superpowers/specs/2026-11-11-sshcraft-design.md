@@ -8,8 +8,8 @@ werden.
 
 ## 1. Worum es geht und warum
 
-SSHCraft ist ein SSH-Client für Windows, Android und iOS mit eigenem, selbst betriebenem
-Sync-Server. Vorbild ist Termius: SSHCraft soll ihm in Aussehen und Funktionen weitgehend
+SSHCraft ist ein SSH-Client für den Desktop (Windows, macOS, Linux, FreeBSD) und für
+Mobilgeräte (Android, iOS, iPadOS) mit eigenem, selbst betriebenem Sync-Server. Vorbild ist Termius: SSHCraft soll ihm in Aussehen und Funktionen weitgehend
 entsprechen, nur verbessert und angepasst. Der Name folgt den vielen Nachbauten auf GitHub, die
 "Craft" im Namen tragen (Moritz, 12.11.2026; vorher hieß das Projekt "Stollen").
 
@@ -30,7 +30,7 @@ Andere sollen es mit ihrem eigenen Server betreiben können.
 
 ### Ziele (alles davon gehört in die erste Version)
 
-- SSH-Terminal auf Windows, Android und iOS.
+- SSH-Terminal auf allen Zielplattformen (Abschnitt 3, "Zielplattformen").
 - Hosts und Gruppen verwalten.
 - Schlüssel aus drei Quellen: Proton-Pass-Agent, Proton Pass über `pass-cli`, eigener Schlüssel.
 - Anbindung für KI-Agents über MCP und Kommandozeile, mit Rechten pro Aktion und ohne Zugriff
@@ -151,8 +151,36 @@ eigener Cloud hängt, ersetzt der selbst betriebene Sync-Server.
 
 ### Client: Tauri 2
 
-- Eine Codebasis für Windows, Android und iOS (macOS und Linux entstehen nebenbei, sind aber
-  kein Ziel der ersten Version).
+- Eine Codebasis für alle Zielplattformen.
+
+### Zielplattformen
+
+Moritz, 12.11.2026 (ersetzt "Windows, Android und iOS"):
+
+| Art | Plattform | Architekturen |
+|---|---|---|
+| Desktop | Windows | x64, x86, arm64 |
+| Desktop | macOS | universal (Apple Silicon und Intel in einem Paket) |
+| Desktop | Linux | x86_64, aarch64 |
+| Desktop | FreeBSD | x86_64 |
+| Mobil | Android | arm64, armv7, x86_64 (Emulator) |
+| Mobil | iOS | arm64 |
+| Mobil | iPadOS | arm64, eigenes Layout für große Bildschirme und Hardwaretastatur |
+
+Was je Desktop-Plattform anders ist [Claudes Entscheidung, wo nicht anders vermerkt]:
+
+- **Proton-Pass-Agent:** Windows über die Named Pipe, macOS und Linux über den Unix-Socket aus
+  `SSH_AUTH_SOCK` (dort läuft jeder Agent, auch der von Proton Pass). Auf FreeBSD gibt es keine
+  Proton-Pass-App, dort gilt nur der allgemeine Agent aus `SSH_AUTH_SOCK`.
+- **Schlüsselspeicher für den Hauptschlüssel:** Windows Credential Manager, macOS Keychain,
+  Linux und FreeBSD Secret Service (über `keyring`).
+- **Prüfung vor gespeicherten Schlüsseln:** Windows Hello, auf macOS Touch ID oder das
+  Kennwort des Benutzers. Linux und FreeBSD haben keine einheitliche Schnittstelle; dort
+  verhält sich SSHCraft wie ein Windows ohne eingerichtetes Hello (Hinweis, keine Sperre).
+- **Lokales Terminal:** Windows PowerShell, cmd oder WSL; sonst die Login-Shell des Benutzers.
+- **FreeBSD:** Tauri unterstützt FreeBSD nicht offiziell. Gebaut wird in einer FreeBSD-VM in
+  GitHub Actions gegen `webkit2-gtk` aus den Ports; ausgeliefert als Archiv mit Programm und
+  `.desktop`-Datei, weil der Tauri-Bundler kein FreeBSD-Paket erzeugt.
 - **Oberfläche:** React und TypeScript, Terminal mit xterm.js.
 - **Kern in Rust:** SSH (`russh`), Verschlüsselung, Anbindung an den Proton-Pass-Agent über
   `russh::keys::agent::client::AgentClient::connect_named_pipe` (geprüft am 11.11.2026, die
@@ -168,8 +196,9 @@ eigener Cloud hängt, ersetzt der selbst betriebene Sync-Server.
 ### Verteilung
 
 Nicht über App Stores. Alle Apps und der Server werden aus den **GitHub Releases** geladen:
-Windows-Installer, Android-APK, iOS-IPA (siehe Abschnitt 13), Server-Programm für Linux, dazu
-das Docker-Image. Gebaut wird alles in GitHub Actions bei einem Release-Tag. Damit entfällt auch
+Windows-Installer (x64, x86, arm64), macOS-DMG (universal), Linux-Pakete (AppImage, `.deb`,
+`.rpm`, je x86_64 und aarch64), FreeBSD-Archiv (x86_64), Android-APK, IPA für iOS und iPadOS
+(siehe Abschnitt 13), Server-Programm für Linux, dazu das Docker-Image. Gebaut wird alles in GitHub Actions bei einem Release-Tag. Damit entfällt auch
 der Konflikt zwischen AGPL und App-Store-Bedingungen.
 
 ### Repository
@@ -464,8 +493,8 @@ abgelehnt, bei Befehlen der Befehl) [Claudes Entscheidung].
   Auf dem Desktop keine eigene Sperre in der ersten Version [Claudes Entscheidung].
 - **Lokaler Speicher:** Private Schlüssel, Kontoschlüssel und Sitzungs-Token liegen nie im
   Klartext auf der Platte. Geschützt über den Schlüsselspeicher des Betriebssystems (Windows
-  Credential Manager bzw. DPAPI, Android Keystore, iOS Keychain); Umsetzung dem Builder
-  überlassen.
+  Credential Manager bzw. DPAPI, macOS Keychain, Secret Service unter Linux und FreeBSD,
+  Android Keystore, iOS und iPadOS Keychain); Umsetzung dem Builder überlassen.
 - Nichts Geheimes in Logs.
 
 ## 12. Server-Verwaltung
@@ -503,6 +532,12 @@ Apache-Beispiel [Claudes Entscheidung].
   nach Windows und Android [Claudes Entscheidung].
 - **Windows ohne Codesignatur** löst beim ersten Start die SmartScreen-Warnung aus; ob ein
   Signaturzertifikat angeschafft wird, ist für die erste Version nicht nötig.
+- **macOS ohne Notarisierung** wird von Gatekeeper beim ersten Start blockiert (Rechtsklick,
+  Öffnen). Ein Apple-Entwicklerkonto ist für die erste Version nicht vorgesehen.
+- **FreeBSD** ist für Tauri keine offizielle Plattform; Bau und Test in einer VM können
+  an Abhängigkeiten scheitern. Fällt das schlecht aus, kommt FreeBSD nach Version 1.
+- **Windows x86 und Windows arm64** werden in der CI gebaut, aber mangels Gerät nur durch
+  die Tests auf dem Runner geprüft.
 - **`pass-cli`** muss installiert und angemeldet sein; der Client erkennt, wenn nicht, und erklärt
   den Weg.
 

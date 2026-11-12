@@ -2,7 +2,7 @@
 
 Self-hosted SSH client with end-to-end encrypted sync and native Proton Pass support.
 
-SSHCraft is an SSH client for Windows, Android and iOS. Hosts, groups and keys can be synced
+SSHCraft is an SSH client for Windows, macOS, Linux, FreeBSD, Android, iOS and iPadOS. Hosts, groups and keys can be synced
 through your own server, encrypted on the device so the server never sees them. On the desktop,
 keys can come straight from the Proton Pass SSH agent.
 

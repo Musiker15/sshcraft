@@ -20,6 +20,7 @@
 - Globale Tastenkürzel nehmen der Shell keine Taste weg: im Terminal nur Kombinationen mit Strg+Umschalt oder Strg+Tab.
 - Snippets, Portweiterleitung und Protokolle bekommen in diesem Teilplan nur ihren Platz in der Navigation und eine Hinweisseite; gefüllt werden sie in den Teilplänen 12 bis 14.
 - Ein Schnellverbinden mit `user@host` aus dem Suchfeld gehört nicht in diesen Teilplan (kommt mit Teilplan 8).
+- Zielplattformen seit 12.11.2026: Windows x64, x86, arm64, macOS universal, Linux x86_64 und aarch64, FreeBSD x86_64, dazu Android, iOS und iPadOS. Neuer Code in diesem Teilplan bleibt plattformneutral; Windows-Eigenes steht hinter `cfg(windows)` mit einem Rückfall für die übrigen Systeme. Gebaut und geprüft wird hier nur unter Windows x64; die CI-Matrix für alle Desktop-Ziele kommt mit Teilplan 16.
 
 ## Review Focus
 
