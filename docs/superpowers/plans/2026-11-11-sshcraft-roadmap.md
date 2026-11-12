@@ -25,7 +25,7 @@ mit dem Wissen aus den vorherigen.
 | 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | offen |
 | 15 | Agent-Anbindung | `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | offen |
 | 16 | Desktop-Plattformen | macOS, Linux und FreeBSD: Agent über `SSH_AUTH_SOCK`, Keychain und Secret Service, Touch ID, Login-Shell als lokales Terminal, `pass-cli`-Pfade; CI-Matrix für alle Desktop-Ziele | offen |
-| 17 | Releases für Desktop und Server | GitHub-Actions-Releases: Windows x64, x86, arm64; macOS universal; Linux x86_64 und aarch64; FreeBSD x86_64; Server-Programm für Linux; Docker-Image | offen |
+| 17 | Releases für Desktop und Server | GitHub-Actions-Releases: Windows x64, x86, arm64; macOS universal; Linux x86_64 und aarch64; FreeBSD x86_64; Server-Programm für Linux; Docker-Image; Windows-Pakete bei winget eingetragen und bei jedem neuen Release per Workflow automatisch auf winget aktualisiert | offen |
 | 18 | Android-Spike (Wegwerf) | Urteil zur Handytastatur mit xterm.js im Webview | angefangen, Zweig `spike/android` |
 | 19 | Android vollständig | Keystore, Zusatzleiste, Gesten, Lautstärketasten, Vordergrund-Dienst, App-Sperre, gerätegebundene Schlüssel, APK in den Releases | offen |
 | 20 | iOS und iPadOS | Keychain, Face ID, Secure Enclave, Wiederverbinden beim Zurückkehren, iPad-Layout mit Seitenleiste, Hardwaretastatur und Split View, IPA-Bau auf macOS-Runner, Anleitung zum Sideloading | offen |
@@ -44,6 +44,10 @@ die Android-Werkzeuge (SDK, NDK 30.0.16248370, Rust-Ziele) sind schon installier
 
 Der Zweig `spike/android` enthält einen Tresor-Ersatz für Android, der den Hauptschlüssel als
 Klartext-Datei ablegt. Er ist nur für den Spike gedacht und darf so nie nach `main`.
+
+**winget** (Moritz, 12.11.2026): Die Windows-Versionen werden bei winget (Paketquelle
+`microsoft/winget-pkgs`) eingetragen. Ein Workflow reicht bei jedem neuen Release das
+aktualisierte Manifest automatisch ein; das gehört zu Teilplan 17.
 
 **Nach Version 1** (Moritz, 12.11.2026): SFTP, Multiplayer, Import aus AWS, DigitalOcean und
 Azure, KI-Funktionen, Mosh, Telnet.
