@@ -1,10 +1,11 @@
 import { ChevronDown, Folder, LayoutGrid, List, Search, Server } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Group, Host } from "../api";
+import type { Group, Host, ItemKind, KeyInfo, ServerView } from "../api";
 import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { filterHosts, hostSubtitle, sortByName } from "./hostsView";
+import { missingKey } from "./sync/syncView";
 
 export type HostsPageProps = {
   groups: Group[];
@@ -17,6 +18,11 @@ export type HostsPageProps = {
   onNewHost: () => void;
   onNewGroup: () => void;
   onImportSshConfig: () => void;
+  /** Sync servers, for the location badge and "Move to". */
+  servers?: ServerView[];
+  /** Keys on this device, to point out hosts whose key is missing here. */
+  keys?: KeyInfo[];
+  onMove?: (kind: ItemKind, id: string, location: string | null) => void;
 };
 
 type Menu = { items: MenuItem[]; at: { x: number; y: number } };
@@ -36,13 +42,35 @@ export function HostsPage(props: HostsPageProps) {
   const found = useMemo(() => filterHosts(hosts, props.groups, query), [hosts, props.groups, query]);
   const searching = query.trim() !== "";
 
+  const servers = props.servers ?? [];
+  const serverName = (id: string | null | undefined) => servers.find((s) => s.id === id)?.name;
+  /** "Move to" entries: this device only and every server, except where the item is now. */
+  const moveItems = (kind: ItemKind, id: string, location: string | null | undefined, followsGroup: boolean): MenuItem[] => {
+    if (!props.onMove || servers.length === 0) return [];
+    const places: { id: string | null; name: string }[] = [
+      { id: null, name: t("sync.localOnly") },
+      ...servers.map((s) => ({ id: s.id, name: s.name })),
+    ];
+    return places
+      .filter((p) => p.id !== (location ?? null))
+      .map((p) => ({
+        label: t("sync.moveTo", { place: p.name }),
+        onSelect: () => props.onMove?.(kind, id, p.id),
+        disabled: followsGroup,
+        title: followsGroup ? t("sync.followsGroup") : undefined,
+      }));
+  };
+
   const openMenu = (items: MenuItem[], e: React.MouseEvent) => {
     e.preventDefault();
     setMenu({ items, at: { x: e.clientX, y: e.clientY } });
   };
 
   const hostItem = (host: Host) => {
-    const subtitle = hostSubtitle(host, host.group_id ? groupsById.get(host.group_id) : undefined);
+    const subtitle = missingKey(host, props.keys ?? [])
+      ? t("hosts.keyMissing")
+      : hostSubtitle(host, host.group_id ? groupsById.get(host.group_id) : undefined);
+    const place = serverName(host.location);
     return (
       <div
         key={host.id}
@@ -55,6 +83,7 @@ export function HostsPage(props: HostsPageProps) {
             [
               { label: t("hosts.connect"), onSelect: () => props.onConnect(host) },
               { label: t("hosts.edit"), onSelect: () => props.onEditHost(host) },
+              ...moveItems("host", host.id, host.location, host.group_id !== null),
               { label: t("common.delete"), onSelect: () => props.onDeleteHost(host), danger: true },
             ],
             e,
@@ -65,7 +94,10 @@ export function HostsPage(props: HostsPageProps) {
           <Server size={18} aria-hidden="true" />
         </span>
         <span className="card-text">
-          <span className="card-title">{host.name}</span>
+          <span className="card-title">
+            {host.name}
+            {place && <span className="badge">{place}</span>}
+          </span>
           <span className="card-sub">{subtitle ?? t("hosts.noAddress")}</span>
         </span>
       </div>
@@ -82,6 +114,7 @@ export function HostsPage(props: HostsPageProps) {
         openMenu(
           [
             { label: t("hosts.edit"), onSelect: () => props.onEditGroup(group) },
+            ...moveItems("group", group.id, group.location, false),
             { label: t("common.delete"), onSelect: () => props.onDeleteGroup(group), danger: true },
           ],
           e,
@@ -92,7 +125,10 @@ export function HostsPage(props: HostsPageProps) {
         <Folder size={18} aria-hidden="true" />
       </span>
       <span className="card-text">
-        <span className="card-title">{group.name}</span>
+        <span className="card-title">
+          {group.name}
+          {serverName(group.location) && <span className="badge">{serverName(group.location)}</span>}
+        </span>
         <span className="card-sub">
           {t("hosts.count", { count: props.hosts.filter((h) => h.group_id === group.id).length })}
         </span>

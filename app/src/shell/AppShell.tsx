@@ -10,11 +10,15 @@ import {
   listHosts,
   listKeys,
   listRecent,
+  listServers,
+  moveItem,
   vaultStatus,
   type Group,
   type Host,
   type HostKeyPrompt,
+  type ItemKind,
   type KeyInfo,
+  type ServerView,
   type VaultStatus,
 } from "../api";
 import { GroupForm } from "../components/GroupForm";
@@ -48,6 +52,7 @@ export function AppShell() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
+  const [servers, setServers] = useState<ServerView[]>([]);
   const [vault, setVault] = useState<VaultStatus | null>(null);
   const [problem, setProblem] = useState<unknown>(null);
   const [editor, setEditor] = useState<Editor>(null);
@@ -66,10 +71,11 @@ export function AppShell() {
 
   const reload = useCallback(async () => {
     try {
-      const [g, h, k] = await Promise.all([listGroups(), listHosts(), listKeys()]);
+      const [g, h, k, s] = await Promise.all([listGroups(), listHosts(), listKeys(), listServers()]);
       setGroups(g);
       setHosts(h);
       setKeys(k);
+      setServers(s ?? []);
       setProblem(null);
     } catch (e) {
       setProblem(e);
@@ -89,6 +95,8 @@ export function AppShell() {
         setPrompts((queue) => queue.filter((p) => p.prompt_id !== event.payload.prompt_id)),
       ),
       listen("hello-unavailable", () => setHelloMissing(true)),
+      // Another device changed something: show it.
+      listen("data-changed", () => void reload()),
     ];
     return () => {
       for (const unlisten of listeners) void unlisten.then((stop) => stop());
@@ -226,10 +234,15 @@ export function AppShell() {
                   onNewHost={() => setEditor({ kind: "host" })}
                   onNewGroup={() => setEditor({ kind: "group" })}
                   onImportSshConfig={() => setEditor({ kind: "sshconfig" })}
+                  servers={servers}
+                  keys={keys}
+                  onMove={(kind: ItemKind, id: string, location: string | null) =>
+                    void moveItem(kind, id, location).then(() => reload(), setProblem)
+                  }
                 />
               )}
               {page === "keys" && <KeysPage keys={keys} onChanged={() => void reload()} />}
-              {page === "settings" && <SettingsPage />}
+              {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
               {(page === "snippets" || page === "forwarding" || page === "logs") && <PlaceholderPage page={page} />}
             </main>
           </div>

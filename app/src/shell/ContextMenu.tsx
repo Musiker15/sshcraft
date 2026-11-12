@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-export type MenuItem = { label: string; onSelect: () => void; danger?: boolean };
+export type MenuItem = { label: string; onSelect: () => void; danger?: boolean; disabled?: boolean; title?: string };
 
 /** Right-click menu at the pointer; any click elsewhere or Escape closes it. */
 export function ContextMenu({ items, at, onClose }: { items: MenuItem[]; at: { x: number; y: number }; onClose: () => void }) {
@@ -23,6 +23,8 @@ export function ContextMenu({ items, at, onClose }: { items: MenuItem[]; at: { x
           <button
             role="menuitem"
             className={item.danger ? "danger" : undefined}
+            disabled={item.disabled}
+            title={item.title}
             onClick={() => {
               onClose();
               item.onSelect();

@@ -4,6 +4,7 @@ import type { AppSettings, AppTheme } from "../api";
 import { useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { FONT_PRESETS, TERMINAL_THEMES, terminalTheme } from "../settings/themes";
+import { SyncSection } from "./sync/SyncSection";
 
 const LANGUAGES: { value: AppSettings["language"]; name: string | null }[] = [
   { value: "auto", name: null },
@@ -16,7 +17,7 @@ const APP_THEMES: AppTheme[] = ["system", "dark", "light"];
 const SAMPLE_PROMPT = "user@host:~$";
 
 /** Language, look and terminal font of this device; every change is saved at once. */
-export function SettingsPage() {
+export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } = {}) {
   const t = useT();
   const { settings, update } = useSettings();
   const [version, setVersion] = useState<string | null>(null);
@@ -64,6 +65,8 @@ export function SettingsPage() {
           </select>
         </label>
       </div>
+
+      <SyncSection onChanged={() => onDataChanged?.()} />
 
       <div className="settings-block">
         <h2 className="group-title">{t("settings.appearance")}</h2>
