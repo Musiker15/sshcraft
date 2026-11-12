@@ -117,6 +117,34 @@ impl TestEnv {
         body["token"].as_str().expect("token").to_owned()
     }
 
+    /// `POST /v1/accounts/{account}/log` with a session token, the API key, or nothing.
+    pub async fn append(
+        &self,
+        person: &Person,
+        entries: &[LogEntry],
+        auth: Auth<'_>,
+    ) -> (StatusCode, serde_json::Value) {
+        let path = format!("/v1/accounts/{}/log", account_path(&person.public()));
+        let body = serde_json::json!({ "entries": entries });
+        match auth {
+            Auth::Token(token) => self.authed(token, Method::POST, &path, Some(body)).await,
+            Auth::ApiKey => {
+                let key = self.api_key().await;
+                self.request(Method::POST, &path, &[("x-api-key", &key)], Some(body))
+                    .await
+            }
+            Auth::None => self.request(Method::POST, &path, &[], Some(body)).await,
+        }
+    }
+
+    /// Adds a new device to the person's log through the API key, as a new device would.
+    pub async fn enroll_new_device(&self, person: &mut Person) -> usize {
+        let (index, entry) = person.add_device();
+        let (status, body) = self.append(person, &[entry], Auth::ApiKey).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        index
+    }
+
     /// A request with `Authorization: Bearer <token>`.
     pub async fn authed(
         &self,
@@ -266,4 +294,16 @@ impl Person {
             .await
             .expect("create account");
     }
+}
+
+/// How a test request proves who it is.
+pub enum Auth<'a> {
+    Token(&'a str),
+    ApiKey,
+    None,
+}
+
+/// The account's public key as it appears in URL paths.
+pub fn account_path(account: &AccountPublic) -> String {
+    BASE64URL_NOPAD.encode(&account.0)
 }
