@@ -316,3 +316,71 @@ fn encrypted_key_needs_the_passphrase() {
     keyfiles::import(&vault, &store, &pem_path, None).unwrap();
     assert_eq!(store.list_key_records().unwrap().len(), 2);
 }
+
+// ---------- CSV
+
+#[test]
+fn own_export_round_trips() {
+    let text = format!(
+        "{}\nweb,Kunden/Müller,prod;web,web.example.org,2222,deploy,,debian\n",
+        csv::CSV_HEADER
+    );
+    let plan = csv::parse(&text);
+    assert!(plan.skipped.is_empty(), "{:?}", plan.skipped);
+    let c = &plan.candidates[0];
+    assert_eq!(c.name, "web");
+    assert_eq!(c.group_path, vec!["Kunden".to_owned(), "Müller".to_owned()]);
+    assert_eq!(c.tags, vec!["prod".to_owned(), "web".to_owned()]);
+    assert_eq!(c.settings.address.as_deref(), Some("web.example.org"));
+    assert_eq!(c.settings.port, Some(2222));
+    assert_eq!(c.settings.username.as_deref(), Some("deploy"));
+    assert_eq!(c.os, Some(crate::model::HostOs::Debian));
+}
+
+#[test]
+fn semicolon_separated() {
+    let plan = csv::parse("name;address;user\nweb;w.org;root\n");
+    assert_eq!(plan.candidates.len(), 1);
+    assert_eq!(
+        plan.candidates[0].settings.username.as_deref(),
+        Some("root")
+    );
+}
+
+#[test]
+fn termius_style_columns() {
+    let plan = csv::parse(
+        "\u{feff}Groups,Label,Tags,Hostname/IP,Protocol,Port\nProd,db,\"a,b\",10.0.0.5,ssh,22\nProd,rdp,,10.0.0.6,rdp,3389\n",
+    );
+    assert_eq!(plan.candidates.len(), 1);
+    let c = &plan.candidates[0];
+    assert_eq!(
+        (c.name.as_str(), c.group_path.clone()),
+        ("db", vec!["Prod".to_owned()])
+    );
+    assert_eq!(c.tags, vec!["a".to_owned(), "b".to_owned()]);
+    assert_eq!(plan.skipped.len(), 1, "the RDP row");
+}
+
+#[test]
+fn missing_address_skips_the_row() {
+    let plan = csv::parse("name,address,port\nnone,,22\nbad,b.org,99999\n");
+    assert_eq!(plan.candidates.len(), 1);
+    assert_eq!(plan.candidates[0].settings.port, None);
+    assert_eq!(plan.candidates[0].warnings, vec![ImportWarning::BadPort]);
+    assert_eq!(plan.skipped.len(), 1);
+    assert!(plan.skipped[0].contains("row 2"));
+}
+
+#[test]
+fn quoted_fields_with_separators() {
+    let plan = csv::parse("name,address\n\"web, the first\",\"w.org\"\n");
+    assert_eq!(plan.candidates[0].name, "web, the first");
+}
+
+#[test]
+fn not_a_csv_is_harmless() {
+    let plan = csv::parse("this is not\u{0} a table at all");
+    assert!(plan.candidates.is_empty());
+    assert!(!plan.skipped.is_empty());
+}

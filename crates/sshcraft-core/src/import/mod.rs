@@ -219,6 +219,7 @@ pub fn apply_import(
     Ok(outcome)
 }
 
+pub mod csv;
 pub mod keyfiles;
 pub mod knownhosts;
 

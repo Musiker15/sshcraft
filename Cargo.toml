@@ -9,6 +9,7 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/musiker15/sshcraft"
 
 [workspace.dependencies]
+csv = "1.4.0"
 sshcraft-core = { path = "crates/sshcraft-core" }
 sshcraft-ssh = { path = "crates/sshcraft-ssh" }
 russh = "0.65.1"
