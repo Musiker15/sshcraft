@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { forgetHostKey, saveHost, type Group, type Host, type KeyInfo } from "../api";
-import { errorText } from "../i18n/errors";
+import { errorText, FormError } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { fromConnectionSettings, toConnectionSettings } from "../forms/hostForm";
 import { SettingsFields } from "./SettingsFields";
@@ -20,7 +20,7 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
 
   async function submit() {
     try {
-      if (!name.trim()) throw new Error("Bitte einen Namen eingeben.");
+      if (!name.trim()) throw new FormError("name_required");
       await saveHost({
         id: host?.id ?? crypto.randomUUID(),
         name: name.trim(),
@@ -37,7 +37,7 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
     if (!host) return;
     try {
       await forgetHostKey(host.id);
-      setNotice("Der gespeicherte Fingerprint ist vergessen. Beim nächsten Verbinden wirst du gefragt.");
+      setNotice(t("hostForm.forgotten"));
     } catch (e) {
       setError(errorText(t, e));
     }
@@ -45,15 +45,15 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
 
   return (
     <div className="dialog">
-      <h2>{host ? "Host bearbeiten" : "Neuer Host"}</h2>
+      <h2>{host ? t("hostForm.editTitle") : t("hostForm.newTitle")}</h2>
       <label>
-        Name
+        {t("form.name")}
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
       <label>
-        Gruppe
+        {t("hostForm.group")}
         <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-          <option value="">Keine Gruppe</option>
+          <option value="">{t("hostForm.noGroup")}</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -64,15 +64,15 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
       <SettingsFields values={values} onChange={setValues} keys={keys} inherited={group?.defaults} />
       {host && (
         <div>
-          <button onClick={forget}>Fingerprint vergessen</button>
+          <button onClick={forget}>{t("hostForm.forget")}</button>
         </div>
       )}
       {notice && <div>{notice}</div>}
       {error && <div className="error">{error}</div>}
       <div className="buttons">
-        <button onClick={onCancel}>Abbrechen</button>
+        <button onClick={onCancel}>{t("common.cancel")}</button>
         <button className="primary" onClick={submit}>
-          Speichern
+          {t("common.save")}
         </button>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { saveGroup, type Group, type KeyInfo } from "../api";
-import { errorText } from "../i18n/errors";
+import { errorText, FormError } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { fromConnectionSettings, toConnectionSettings } from "../forms/hostForm";
 import { SettingsFields } from "./SettingsFields";
@@ -17,7 +17,7 @@ export function GroupForm({ group, keys, onDone, onCancel }: Props) {
 
   async function submit() {
     try {
-      if (!name.trim()) throw new Error("Bitte einen Namen eingeben.");
+      if (!name.trim()) throw new FormError("name_required");
       await saveGroup({ id: group?.id ?? crypto.randomUUID(), name: name.trim(), defaults: toConnectionSettings(values) });
       onDone();
     } catch (e) {
@@ -27,20 +27,18 @@ export function GroupForm({ group, keys, onDone, onCancel }: Props) {
 
   return (
     <div className="dialog">
-      <h2>{group ? "Gruppe bearbeiten" : "Neue Gruppe"}</h2>
+      <h2>{group ? t("groupForm.editTitle") : t("groupForm.newTitle")}</h2>
       <label>
-        Name
+        {t("form.name")}
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
-      <p className="empty" style={{ margin: 0 }}>
-        Diese Werte gelten für alle Hosts der Gruppe, solange ein Host sie nicht selbst setzt.
-      </p>
+      <p className="hint">{t("groupForm.hint")}</p>
       <SettingsFields values={values} onChange={setValues} keys={keys} />
       {error && <div className="error">{error}</div>}
       <div className="buttons">
-        <button onClick={onCancel}>Abbrechen</button>
+        <button onClick={onCancel}>{t("common.cancel")}</button>
         <button className="primary" onClick={submit}>
-          Speichern
+          {t("common.save")}
         </button>
       </div>
     </div>

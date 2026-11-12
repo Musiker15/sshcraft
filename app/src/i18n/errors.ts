@@ -3,6 +3,16 @@ import type { Translate } from "./i18n";
 
 export type CommandError = { code: string; detail: string | null };
 
+/** A check in the UI failed; `code` is translated like a code from Rust (`errors.<code>`). */
+export class FormError extends Error {
+  readonly code: string;
+  readonly detail = null;
+  constructor(code: string) {
+    super(code);
+    this.code = code;
+  }
+}
+
 function asCommandError(e: unknown): CommandError | null {
   if (e && typeof e === "object" && "code" in e && typeof (e as CommandError).code === "string") {
     const detail = (e as { detail?: unknown }).detail;

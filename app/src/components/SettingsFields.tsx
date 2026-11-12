@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listAgentKeys, type AgentKey, type ConnectionSettings, type KeyInfo } from "../api";
 import { keyChoice, type SettingsFormValues } from "../forms/hostForm";
+import { useT } from "../i18n/i18n";
 
 type Props = {
   values: SettingsFormValues;
@@ -12,6 +13,7 @@ type Props = {
 
 /** Address, port, user and key fields, shared by the host and group forms. */
 export function SettingsFields({ values, onChange, keys, inherited }: Props) {
+  const t = useT();
   const [agentKeys, setAgentKeys] = useState<AgentKey[] | null>(null);
   useEffect(() => {
     listAgentKeys().then(setAgentKeys, () => setAgentKeys(null));
@@ -22,18 +24,18 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
     const stored = keys.find((k) => `stored:${k.id}` === choice);
     if (stored) return stored.name;
     const agent = agentKeys?.find((k) => `agent:${k.fingerprint}` === choice);
-    if (agent) return `${agent.comment || agent.fingerprint} (Proton Pass)`;
+    if (agent) return t("settingsFields.agentKey", { name: agent.comment || agent.fingerprint });
     return null;
   };
   const inheritedChoice = keyChoice(inherited?.key ?? null);
-  const inheritedLabel = inheritedChoice ? (label(inheritedChoice) ?? "nicht gefunden") : null;
+  const inheritedLabel = inheritedChoice ? (label(inheritedChoice) ?? t("settingsFields.notFound")) : null;
   const currentMissing = values.keyChoice !== "" && label(values.keyChoice) === null;
 
   return (
     <>
       <div className="grid-2">
         <label>
-          Adresse
+          {t("settingsFields.address")}
           <input
             value={values.address}
             placeholder={inherited?.address ?? "server.example.org"}
@@ -41,7 +43,7 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
           />
         </label>
         <label>
-          Port
+          {t("settingsFields.port")}
           <input
             value={values.port}
             placeholder={String(inherited?.port ?? 22)}
@@ -51,7 +53,7 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
         </label>
       </div>
       <label>
-        Benutzer
+        {t("settingsFields.user")}
         <input
           value={values.username}
           placeholder={inherited?.username ?? "root"}
@@ -59,19 +61,19 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
         />
       </label>
       <label>
-        Schlüssel
+        {t("settingsFields.key")}
         <select value={values.keyChoice} onChange={(e) => set("keyChoice")(e.target.value)}>
-          <option value="">{inheritedLabel ? `Von der Gruppe: ${inheritedLabel}` : "Keiner"}</option>
-          {currentMissing && <option value={values.keyChoice}>Nicht gefunden: {values.keyChoice}</option>}
-          <optgroup label="Proton Pass">
-            {agentKeys === null && <option disabled>Proton Pass nicht erreichbar</option>}
+          <option value="">{inheritedLabel ? t("settingsFields.fromGroup", { name: inheritedLabel }) : t("settingsFields.none")}</option>
+          {currentMissing && <option value={values.keyChoice}>{t("settingsFields.missing", { choice: values.keyChoice })}</option>}
+          <optgroup label={t("settingsFields.groupAgent")}>
+            {agentKeys === null && <option disabled>{t("settingsFields.agentUnavailable")}</option>}
             {agentKeys?.map((k) => (
               <option key={k.fingerprint} value={`agent:${k.fingerprint}`}>
                 {k.comment || k.fingerprint} ({k.algorithm})
               </option>
             ))}
           </optgroup>
-          <optgroup label="Gespeichert">
+          <optgroup label={t("settingsFields.groupStored")}>
             {keys.map((k) => (
               <option key={k.id} value={`stored:${k.id}`}>
                 {k.name} ({k.algorithm})

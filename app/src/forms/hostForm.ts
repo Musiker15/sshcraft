@@ -1,5 +1,6 @@
 // Converts between form text fields and ConnectionSettings. Empty means "inherit from group".
 import type { ConnectionSettings, KeyRef } from "../api";
+import { FormError } from "../i18n/errors";
 
 export type SettingsFormValues = {
   address: string;
@@ -17,9 +18,9 @@ function text(value: string): string | null {
 export function parsePort(value: string): number | null {
   const trimmed = value.trim();
   if (trimmed === "") return null;
-  if (!/^\d+$/.test(trimmed)) throw new Error("Der Port muss eine Zahl sein.");
+  if (!/^\d+$/.test(trimmed)) throw new FormError("port_not_number");
   const port = Number(trimmed);
-  if (port < 1 || port > 65535) throw new Error("Der Port muss zwischen 1 und 65535 liegen.");
+  if (port < 1 || port > 65535) throw new FormError("port_range");
   return port;
 }
 
@@ -38,7 +39,7 @@ export function parseKeyChoice(choice: string): KeyRef | null {
     if (kind === "stored") return { kind: "stored", id: value };
     if (kind === "agent") return { kind: "agent", fingerprint: value };
   }
-  throw new Error("Unbekannte Schlüsselauswahl.");
+  throw new FormError("unknown_key_choice");
 }
 
 export function toConnectionSettings(form: SettingsFormValues): ConnectionSettings {

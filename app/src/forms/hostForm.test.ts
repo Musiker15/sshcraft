@@ -18,9 +18,9 @@ describe("toConnectionSettings", () => {
   });
 
   test("port outside 1..65535 is rejected", () => {
-    expect(() => toConnectionSettings({ ...empty, port: "0" })).toThrow();
-    expect(() => toConnectionSettings({ ...empty, port: "70000" })).toThrow();
-    expect(() => toConnectionSettings({ ...empty, port: "22a" })).toThrow();
+    expect(codeOf(() => toConnectionSettings({ ...empty, port: "0" }))).toBe("port_range");
+    expect(codeOf(() => toConnectionSettings({ ...empty, port: "70000" }))).toBe("port_range");
+    expect(codeOf(() => toConnectionSettings({ ...empty, port: "22a" }))).toBe("port_not_number");
   });
 
   test("agent choice maps to an agent key ref", () => {
@@ -35,7 +35,7 @@ describe("toConnectionSettings", () => {
   });
 
   test("an unknown choice is rejected", () => {
-    expect(() => toConnectionSettings({ ...empty, keyChoice: "bogus" })).toThrow();
+    expect(codeOf(() => toConnectionSettings({ ...empty, keyChoice: "bogus" }))).toBe("unknown_key_choice");
   });
 });
 
@@ -49,3 +49,13 @@ test("fingerprints containing colons survive the round trip", () => {
   const values = { ...empty, keyChoice: "agent:SHA256:a:b/c+d" };
   expect(fromConnectionSettings(toConnectionSettings(values))).toEqual(values);
 });
+
+/** The translation code of what `run` throws, or null if it does not throw. */
+function codeOf(run: () => unknown): string | null {
+  try {
+    run();
+    return null;
+  } catch (e) {
+    return (e as { code?: string }).code ?? "no code";
+  }
+}

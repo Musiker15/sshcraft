@@ -542,3 +542,89 @@ button.icon:hover {
 .warning-text {
   color: var(--warning);
 }
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: inherit;
+}
+
+.search input {
+  border: none;
+  background: none;
+  padding: 8px 0;
+}
+
+.search input:focus {
+  outline: none;
+}
+
+.segmented {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.segmented button.icon {
+  border-radius: 0;
+  padding: 6px 8px;
+}
+
+.segmented button.icon.active {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.rows {
+  display: grid;
+  gap: 4px;
+}
+
+.card.row {
+  padding: 8px 12px;
+}
+
+.card-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--accent);
+  flex: none;
+}
+
+.card.row .card-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.card-icon.group {
+  color: var(--text-muted);
+}
+
+.card-text {
+  display: grid;
+  min-width: 0;
+}
+
+.card-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-muted);
+}
