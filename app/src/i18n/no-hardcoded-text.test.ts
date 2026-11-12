@@ -9,14 +9,11 @@ const sources = import.meta.glob(["../**/*.tsx", "!../**/*.test.tsx"], {
 
 /** Files that still carry fixed texts; each UI task removes the files it migrates. */
 const PENDING = new Set<string>([
-  "../App.tsx",
   "../components/GroupForm.tsx",
   "../components/HostForm.tsx",
   "../components/HostKeyDialog.tsx",
   "../components/KeyManager.tsx",
   "../components/SettingsFields.tsx",
-  "../components/Sidebar.tsx",
-  "../components/TerminalTabs.tsx",
 ]);
 
 const ALLOWED = new Set(["SSHCraft"]);

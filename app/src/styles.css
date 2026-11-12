@@ -110,113 +110,324 @@ label {
   font-size: 12px;
 }
 
-.app {
-  display: grid;
-  grid-template-columns: 260px 1fr;
+.shell {
+  display: flex;
+  flex-direction: column;
   height: 100%;
 }
 
-.sidebar {
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
+/* Tab strip */
+.tabstrip {
   display: flex;
-  flex-direction: column;
-  overflow: auto;
-}
-
-.sidebar-actions {
-  display: flex;
-  gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.sidebar-group > summary {
-  list-style: none;
-  padding: 8px 10px;
-  cursor: pointer;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-}
-
-.sidebar-row {
-  display: flex;
-  align-items: center;
-  padding: 6px 10px 6px 22px;
-  cursor: default;
-}
-
-.sidebar-row.loose {
-  padding-left: 10px;
-}
-
-.sidebar-row:hover,
-.sidebar-group > summary:hover {
-  background: var(--bg-hover);
-}
-
-.sidebar-row .name,
-.sidebar-group .name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-actions {
-  visibility: hidden;
-}
-
-.sidebar-row:hover .row-actions,
-.sidebar-group > summary:hover .row-actions {
-  visibility: visible;
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-.tabbar {
-  display: flex;
+  align-items: stretch;
   gap: 2px;
+  padding: 4px 6px 0;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  flex: none;
 }
 
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   background: none;
   color: var(--text-muted);
   white-space: nowrap;
+  min-width: 0;
 }
 
-.tab.active {
+.tab.home img {
+  width: 18px;
+  height: 18px;
+}
+
+.tab.home {
+  font-weight: 600;
+}
+
+.tab.active,
+.tab-item.active {
+  background: var(--bg);
   color: var(--text);
-  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-.terminal-area {
+.tab-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius) var(--radius) 0 0;
+  max-width: 220px;
+}
+
+.tab-item .tab {
+  background: none;
+  padding-right: 4px;
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.icon {
+  display: inline-grid;
+  place-items: center;
+  padding: 4px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+}
+
+button.icon:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tab-new {
+  margin: 4px 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.dot.ok {
+  background: #3fb950;
+}
+
+.dot.busy {
+  background: var(--warning);
+}
+
+.dot.bad {
+  background: var(--danger);
+}
+
+/* Content below the strip */
+.content {
   flex: 1;
+  min-height: 0;
   position: relative;
+  display: flex;
+}
+
+.home {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  flex: 1;
   min-height: 0;
 }
 
-.terminal-pane {
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.nav-item.active {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.nav-spacer {
+  flex: 1;
+}
+
+.home-main {
+  overflow: auto;
+  min-width: 0;
+}
+
+.page {
+  padding: 20px 24px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: 20px;
+  flex: 1;
+}
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.group-block {
+  display: grid;
+  gap: 8px;
+}
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: default;
+  min-width: 0;
+  user-select: none;
+}
+
+.card:hover,
+.card:focus-visible {
+  background: var(--bg-raised);
+  outline: none;
+  border-color: var(--accent);
+}
+
+.card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list {
+  display: grid;
+  gap: 2px;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  text-align: left;
+}
+
+.list-row:hover {
+  background: var(--bg-hover);
+}
+
+.newtab {
+  width: min(640px, 100%);
+  margin: 0 auto;
+  padding-top: 48px;
+}
+
+/* Sessions stay mounted; a hidden one keeps its size so xterm does not reflow. */
+.session-pane {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
+}
+
+.session-pane.hidden {
+  visibility: hidden;
+}
+
+/* Side panel and context menu */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 10;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.drawer {
+  width: min(440px, 100%);
+  height: 100%;
+  overflow: auto;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.drawer .dialog {
+  width: auto;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 160px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.context-menu button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+}
+
+.context-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.detail {
+  display: block;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  opacity: 0.8;
 }
 
 .terminal-host {

@@ -6,10 +6,11 @@ import { sessionAck, sessionClose, sessionOpen, sessionResize, sessionWrite, typ
 import { errorDetail } from "../i18n/errors";
 import { useSettings } from "../settings/SettingsProvider";
 import { terminalTheme } from "../settings/themes";
-import type { Tab } from "../state/tabs";
+import { matchShortcut } from "../shell/shortcuts";
+import type { SessionTab } from "../state/tabs";
 
 type Props = {
-  tab: Tab;
+  tab: SessionTab;
   active: boolean;
   onAttach: (sessionId: string) => void;
   onStatus: (status: SessionStatus) => void;
@@ -38,6 +39,8 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
       scrollback: 10000,
     });
     term.current = terminal;
+    // Window shortcuts are handled by the shell; xterm must not also send them to the server.
+    terminal.attachCustomKeyEventHandler((e) => matchShortcut(e, "terminal") === null);
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(element);

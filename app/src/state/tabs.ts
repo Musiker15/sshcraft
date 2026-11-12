@@ -1,51 +1,81 @@
-// Terminal tabs: which are open, which is active, and each one's session status.
+// Tabs of the window: the start page (always first), new-tab pages and terminal sessions.
 import type { SessionStatus } from "../api";
 
-export type Tab = {
+export const HOME_ID = "home";
+
+export type HomeTab = { kind: "home"; id: typeof HOME_ID };
+export type NewTab = { kind: "new"; id: string };
+export type SessionTab = {
+  kind: "session";
   id: string;
   hostId: string;
   title: string;
   sessionId?: string;
   status: SessionStatus;
 };
+export type Tab = HomeTab | NewTab | SessionTab;
 
-export type TabsState = { tabs: Tab[]; activeId: string | null };
+export type TabsState = { tabs: Tab[]; activeId: string };
 
 export type TabsAction =
-  | { type: "open"; tab: Omit<Tab, "status" | "sessionId"> }
+  | { type: "open"; tab: { id: string; hostId: string; title: string } }
+  | { type: "openNew"; id: string }
+  | { type: "pick"; id: string; hostId: string; title: string }
   | { type: "attach"; id: string; sessionId: string }
   | { type: "status"; id: string; status: SessionStatus }
   | { type: "close"; id: string }
-  | { type: "activate"; id: string };
+  | { type: "activate"; id: string }
+  | { type: "next" }
+  | { type: "prev" };
 
-export const initialTabs: TabsState = { tabs: [], activeId: null };
+export const initialTabs: TabsState = { tabs: [{ kind: "home", id: HOME_ID }], activeId: HOME_ID };
+
+function updateSession(state: TabsState, id: string, change: (tab: SessionTab) => SessionTab): TabsState {
+  return { ...state, tabs: state.tabs.map((t) => (t.id === id && t.kind === "session" ? change(t) : t)) };
+}
+
+function step(state: TabsState, by: number): TabsState {
+  const index = state.tabs.findIndex((t) => t.id === state.activeId);
+  const next = (index + by + state.tabs.length) % state.tabs.length;
+  return { ...state, activeId: state.tabs[next].id };
+}
 
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   switch (action.type) {
     case "open":
       return {
-        tabs: [...state.tabs, { ...action.tab, status: { state: "connecting" } }],
+        tabs: [...state.tabs, { kind: "session", ...action.tab, status: { state: "connecting" } }],
         activeId: action.tab.id,
       };
+    case "openNew":
+      return { tabs: [...state.tabs, { kind: "new", id: action.id }], activeId: action.id };
+    case "pick":
+      return {
+        tabs: state.tabs.map((t) =>
+          t.id === action.id && t.kind === "new"
+            ? { kind: "session", id: t.id, hostId: action.hostId, title: action.title, status: { state: "connecting" } }
+            : t,
+        ),
+        activeId: action.id,
+      };
     case "attach":
-      return {
-        ...state,
-        tabs: state.tabs.map((t) => (t.id === action.id ? { ...t, sessionId: action.sessionId } : t)),
-      };
+      return updateSession(state, action.id, (t) => ({ ...t, sessionId: action.sessionId }));
     case "status":
-      return {
-        ...state,
-        tabs: state.tabs.map((t) => (t.id === action.id ? { ...t, status: action.status } : t)),
-      };
+      return updateSession(state, action.id, (t) => ({ ...t, status: action.status }));
     case "activate":
       return state.tabs.some((t) => t.id === action.id) ? { ...state, activeId: action.id } : state;
+    case "next":
+      return step(state, 1);
+    case "prev":
+      return step(state, -1);
     case "close": {
       const index = state.tabs.findIndex((t) => t.id === action.id);
-      if (index < 0) return state;
+      if (index < 0 || state.tabs[index].kind === "home") return state;
       const tabs = state.tabs.filter((t) => t.id !== action.id);
       if (state.activeId !== action.id) return { tabs, activeId: state.activeId };
-      const neighbour = tabs[index] ?? tabs[index - 1] ?? null;
-      return { tabs, activeId: neighbour ? neighbour.id : null };
+      // Prefer the tab to the right, then the one to the left (which is at least home).
+      const neighbour = tabs[index] ?? tabs[index - 1];
+      return { tabs, activeId: neighbour.id };
     }
   }
 }

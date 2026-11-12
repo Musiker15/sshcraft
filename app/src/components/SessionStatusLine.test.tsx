@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import en from "../i18n/en.json";
-import { EndedLine } from "./TerminalTabs";
+import { EndedLine } from "./SessionStatusLine";
 
 afterEach(cleanup);
 
