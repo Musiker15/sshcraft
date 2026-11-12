@@ -110,14 +110,54 @@ fn save_server(
     Ok(id)
 }
 
-/// Creates an account on the server and returns the server's local id and the account key
-/// export, which is shown to the user once and never stored.
+/// How far setting up an account got.
+#[derive(Debug)]
+pub enum Setup {
+    /// Ready to sync on this device.
+    Ready(ServerId),
+    /// The account exists on the server, but a later step failed. Nothing is stored on this
+    /// device; joining with the account key finishes the setup (here or on another device).
+    Unfinished(SyncError),
+}
+
+/// A personal area with envelopes for this device and the recovery device.
+async fn personal_area(
+    client: &ServerClient,
+    account: &AccountKey,
+    device_id: Uuid,
+    keys: &DeviceKeys,
+    own: &DeviceCertificate,
+    recovery: &DeviceCertificate,
+) -> Result<(AreaManifest, KeyEnvelope), SyncError> {
+    let area = AreaId(Uuid::new_v4());
+    let area_key = AreaKey::generate();
+    let manifest = AreaManifest::sign(
+        area,
+        1,
+        1,
+        &area_key,
+        account.public(),
+        vec![],
+        device_id,
+        keys,
+    );
+    client.put_manifest(&manifest).await?;
+    let mine = seal_area_key(&area_key, area, 1, own)?;
+    let for_recovery = seal_area_key(&area_key, area, 1, recovery)?;
+    client
+        .put_envelopes(area, &[mine.clone(), for_recovery])
+        .await?;
+    Ok((manifest, mine))
+}
+
+/// Creates an account on the server. Returns how far it got and the account key export, which
+/// is shown to the user once and never stored. An error means nothing exists on the server.
 pub async fn create_account(
     store: &Mutex<Store>,
     vault: &Vault,
     input: NewAccount,
     now: i64,
-) -> Result<(ServerId, Zeroizing<String>), SyncError> {
+) -> Result<(Setup, Zeroizing<String>), SyncError> {
     let client = ServerClient::new(&input.origin)?.with_api_key(input.api_key.clone());
     check_origin(&client).await?;
     let account = AccountKey::generate();
@@ -143,60 +183,39 @@ pub async fn create_account(
     let mut log = DeviceLog::default();
     log.append_add(&account, cert.clone(), now);
     log.append_add(&account, recovery.clone(), now);
-
+    // From here on the account exists: whatever fails later, the user gets the key.
     client
-        .register(
-            &account.public(),
-            &input.name,
-            &input.email,
-            &DeviceLog {
-                entries: vec![log.entries[0].clone()],
-            },
+        .register(&account.public(), &input.name, &input.email, &log)
+        .await?;
+    let export = account.export();
+
+    let finish = async {
+        let mut client = client;
+        client.login(device_id, &keys).await?;
+        let area = personal_area(&client, &account, device_id, &keys, &cert, &recovery).await?;
+        save_server(
+            store,
+            vault,
+            input.server_name,
+            client.origin(),
+            account.public().0,
+            device_id,
+            &keys,
+            &[area],
+            now,
         )
-        .await?;
-    client
-        .append_log(&account.public(), &log.entries[1..], true)
-        .await?;
-    let mut client = client;
-    client.login(device_id, &keys).await?;
-
-    // The personal area: no members, envelopes for this device and the recovery device.
-    let area = AreaId(Uuid::new_v4());
-    let area_key = AreaKey::generate();
-    let manifest = AreaManifest::sign(
-        area,
-        1,
-        1,
-        &area_key,
-        account.public(),
-        vec![],
-        device_id,
-        &keys,
-    );
-    client.put_manifest(&manifest).await?;
-    let own = seal_area_key(&area_key, area, 1, &cert)?;
-    let for_recovery = seal_area_key(&area_key, area, 1, &recovery)?;
-    client
-        .put_envelopes(area, &[own.clone(), for_recovery])
-        .await?;
-
-    let id = save_server(
-        store,
-        vault,
-        input.server_name,
-        client.origin(),
-        account.public().0,
-        device_id,
-        &keys,
-        &[(manifest, own)],
-        now,
-    )?;
-    Ok((id, account.export()))
+    };
+    let setup = match finish.await {
+        Ok(id) => Setup::Ready(id),
+        Err(err) => Setup::Unfinished(err),
+    };
+    Ok((setup, export))
 }
 
 /// Sets this device up on an existing account with its account key. Works without any other
 /// device online: it logs in as the account's recovery device to read the log and the area
-/// keys, adds itself, and seals the area keys to itself.
+/// keys, adds itself, and seals the area keys to itself. If a later step fails, the half-added
+/// device is revoked again, so retries leave no stray devices.
 pub async fn join_account(
     store: &Mutex<Store>,
     vault: &Vault,
@@ -221,6 +240,18 @@ pub async fn join_account(
         entries: recovery_client.log(&account.public(), 0).await?,
     };
     log.verify(&account.public())?;
+    let recovery = log
+        .entries
+        .iter()
+        .find_map(|entry| match &entry.action {
+            sshcraft_proto::devicelog::LogAction::Add { certificate }
+                if certificate.device_id == recovery_id =>
+            {
+                Some((**certificate).clone())
+            }
+            _ => None,
+        })
+        .ok_or(SyncError::AccountNotFound)?;
     let keys = DeviceKeys::generate();
     let device_id = Uuid::new_v4();
     let cert = DeviceCertificate::issue(
@@ -236,39 +267,57 @@ pub async fn join_account(
     recovery_client
         .append_log(&account.public(), &[entry], false)
         .await?;
-    let owner_devices = log.verify(&account.public())?;
 
-    let mut client = ServerClient::new(&input.origin)?.with_api_key(input.api_key);
-    client.login(device_id, &keys).await?;
-    let mut areas = Vec::new();
-    for listing in client.areas().await? {
-        if listing.owner != account.public() {
-            continue;
+    let finish = async {
+        let owner_devices = log.verify(&account.public())?;
+        let mut client = ServerClient::new(&input.origin)?.with_api_key(input.api_key.clone());
+        client.login(device_id, &keys).await?;
+        let mut areas = Vec::new();
+        for listing in client.areas().await? {
+            if listing.owner != account.public() {
+                continue;
+            }
+            let manifest = listing.manifest;
+            manifest.verify(&owner_devices)?;
+            let Some(envelope) = recovery_client.my_envelope(manifest.area_id).await? else {
+                continue;
+            };
+            let area_key = open_area_key(&envelope, recovery_id, &recovery_keys, &manifest)?;
+            let own = seal_area_key(&area_key, manifest.area_id, manifest.key_version, &cert)?;
+            client
+                .put_envelopes(manifest.area_id, std::slice::from_ref(&own))
+                .await?;
+            areas.push((manifest, own));
         }
-        let manifest = listing.manifest;
-        manifest.verify(&owner_devices)?;
-        let Some(envelope) = recovery_client.my_envelope(manifest.area_id).await? else {
-            continue;
-        };
-        let area_key = open_area_key(&envelope, recovery_id, &recovery_keys, &manifest)?;
-        let own = seal_area_key(&area_key, manifest.area_id, manifest.key_version, &cert)?;
-        client
-            .put_envelopes(manifest.area_id, std::slice::from_ref(&own))
-            .await?;
-        areas.push((manifest, own));
+        // An account whose setup never got that far has no personal area yet.
+        if areas.is_empty() {
+            areas.push(personal_area(&client, &account, device_id, &keys, &cert, &recovery).await?);
+        }
+        save_server(
+            store,
+            vault,
+            input.server_name.clone(),
+            client.origin(),
+            account.public().0,
+            device_id,
+            &keys,
+            &areas,
+            now,
+        )
+    };
+    match finish.await {
+        Ok(id) => Ok(id),
+        Err(err) => {
+            // Best effort: take the half-added device out again (signed by the recovery device).
+            log.append_revoke_by_device(recovery_id, &recovery_keys, device_id, now);
+            if let Some(entry) = log.entries.last().cloned() {
+                let _ = recovery_client
+                    .append_log(&account.public(), &[entry], false)
+                    .await;
+            }
+            Err(err)
+        }
     }
-
-    save_server(
-        store,
-        vault,
-        input.server_name,
-        client.origin(),
-        account.public().0,
-        device_id,
-        &keys,
-        &areas,
-        now,
-    )
 }
 
 /// The account key as a QR code (SVG), for a phone to scan.

@@ -5,14 +5,14 @@ use sshcraft_core::model::ServerId;
 use sshcraft_core::store::ItemKind;
 use sshcraft_proto::identity::AccountKey;
 use sshcraft_sync::account::{
-    JoinAccount, NewAccount, account_key_qr_svg, create_account, join_account,
+    JoinAccount, NewAccount, Setup, account_key_qr_svg, create_account, join_account,
 };
 use sshcraft_sync::devices::{DeviceInfo, list_devices, revoke_device};
 use sshcraft_sync::engine::Engine;
 use tauri::State;
 use uuid::Uuid;
 
-use super::CommandResult;
+use super::{CommandError, CommandResult};
 use crate::state::AppState;
 use crate::sync::{StatusView, note_change, now_ms, server_status, sync_error};
 
@@ -49,9 +49,13 @@ pub struct JoinInput {
 /// Shown once after an account was created; the key is not stored anywhere.
 #[derive(Debug, Clone, Serialize)]
 pub struct AccountCreated {
-    pub server_id: ServerId,
+    /// `None` when the account exists but setting it up here did not finish: the user keeps
+    /// the key and finishes by joining with it.
+    pub server_id: Option<ServerId>,
     pub account_key: String,
     pub qr_svg: String,
+    /// Why the setup did not finish, if it did not.
+    pub unfinished: Option<CommandError>,
 }
 
 fn vault(state: &AppState) -> CommandResult<std::sync::Arc<sshcraft_core::vault::Vault>> {
@@ -94,14 +98,21 @@ pub async fn create_sync_account(
         device_name: input.device_name,
         platform: platform().to_owned(),
     };
-    let (server_id, export) = create_account(&state.store, &vault, new, now_ms() / 1000)
+    let (setup, export) = create_account(&state.store, &vault, new, now_ms() / 1000)
         .await
         .map_err(sync_error)?;
-    state.sync.start(server_id);
+    let (server_id, unfinished) = match setup {
+        Setup::Ready(id) => {
+            state.sync.start(id);
+            (Some(id), None)
+        }
+        Setup::Unfinished(err) => (None, Some(sync_error(err))),
+    };
     Ok(AccountCreated {
         server_id,
         qr_svg: account_key_qr_svg(&export),
         account_key: export.to_string(),
+        unfinished,
     })
 }
 

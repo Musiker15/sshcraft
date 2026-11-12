@@ -71,14 +71,21 @@ pub async fn register(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let name = check_name(&body.name)?;
     let (email, email_norm) = check_email(&body.email)?;
-    let [first] = body.log.entries.as_slice() else {
-        return Err(invalid("a new account starts with exactly one device"));
+    // The first device, and optionally the recovery device with it, so a client never ends up
+    // with an account it cannot recover.
+    let (first, rest) = match body.log.entries.as_slice() {
+        [first, rest @ ..] if rest.len() <= 1 => (first, rest),
+        _ => return Err(invalid("a new account starts with one or two devices")),
     };
     body.log.verify(&body.account)?;
-    let LogAction::Add { certificate } = &first.action else {
-        return Err(invalid("a new account starts with adding a device"));
-    };
-    check_certificate(certificate)?;
+    let mut certificates = Vec::new();
+    for entry in body.log.entries.iter() {
+        let LogAction::Add { certificate } = &entry.action else {
+            return Err(invalid("a new account starts with adding devices"));
+        };
+        check_certificate(certificate)?;
+        certificates.push((**certificate).clone());
+    }
     let row = AccountRow {
         account: body.account,
         name,
@@ -88,8 +95,18 @@ pub async fn register(
     };
     state
         .store
-        .create_account(&row, &email_norm, first, certificate)
+        .create_account(&row, &email_norm, first, &certificates[0])
         .await?;
+    if !rest.is_empty() {
+        let changes = crate::store::DeviceChanges {
+            added: certificates[1..].to_vec(),
+            revoked: vec![],
+        };
+        state
+            .store
+            .append_log(&body.account, 1, rest, &changes)
+            .await?;
+    }
     Ok((
         StatusCode::CREATED,
         Json(json!({ "account": body.account })),

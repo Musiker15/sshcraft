@@ -6,7 +6,7 @@ import { AccountKeyDialog } from "./AccountKeyDialog";
 
 afterEach(cleanup);
 
-const created = { server_id: "s1", account_key: "sshcraft-account-1:ABCDEF", qr_svg: "<svg></svg>" };
+const created = { server_id: "s1", account_key: "sshcraft-account-1:ABCDEF", qr_svg: "<svg></svg>", unfinished: null };
 
 test("closing needs the confirmation that the key was saved", () => {
   const onClose = vi.fn();
@@ -34,4 +34,17 @@ test("copy puts the key on the clipboard", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: en["sync.copy"] }));
   expect(writeText).toHaveBeenCalledWith(created.account_key);
+});
+
+test("an unfinished setup says how to finish it", () => {
+  render(
+    <I18nProvider language="en">
+      <AccountKeyDialog
+        created={{ ...created, server_id: null, unfinished: { code: "sync_network", detail: "x" } }}
+        onClose={() => {}}
+      />
+    </I18nProvider>,
+  );
+  expect(screen.getByText(en["sync.unfinished"])).toBeTruthy();
+  expect(screen.getByText(created.account_key)).toBeTruthy();
 });

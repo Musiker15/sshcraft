@@ -229,6 +229,7 @@
   "sync.syncOn": "Sync",
   "sync.thisDevice": "dieses Gerät",
   "sync.title": "Sync",
+  "sync.unfinished": "Das Konto ist angelegt, aber das Einrichten auf diesem Gerät wurde nicht fertig. Bewahre den Kontoschlüssel auf und füge den Server erneut mit \"Mit Kontoschlüssel beitreten\" hinzu.",
   "sync.warning": "Etwas von diesem Server hat die Sicherheitsprüfung nicht bestanden und wurde übergangen.",
   "sync.working": "Wird eingerichtet",
   "tabs.close": "Tab schließen",

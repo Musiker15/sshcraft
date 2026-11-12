@@ -1,5 +1,6 @@
 // Typed wrappers around the Tauri commands. Field names mirror the Rust serde output.
 import { Channel, invoke } from "@tauri-apps/api/core";
+import type { CommandError } from "./i18n/errors";
 
 export type KeyRef = { kind: "stored"; id: string } | { kind: "agent"; fingerprint: string };
 
@@ -173,7 +174,13 @@ export type JoinAccountInput = {
   device_name: string;
 };
 
-export type AccountCreated = { server_id: string; account_key: string; qr_svg: string };
+export type AccountCreated = {
+  /** null: the account exists, but setting it up here did not finish; join with the key. */
+  server_id: string | null;
+  account_key: string;
+  qr_svg: string;
+  unfinished: CommandError | null;
+};
 
 export type SyncDevice = {
   device_id: string;

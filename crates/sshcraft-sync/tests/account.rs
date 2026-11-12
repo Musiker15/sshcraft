@@ -214,3 +214,71 @@ async fn a_different_address_for_the_server_is_refused_early() {
     );
     assert!(d.store.lock().unwrap().servers().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn an_interrupted_create_hands_out_the_key_to_finish_by_joining() {
+    use sshcraft_sync::account::Setup;
+    for op in ["login", "put_manifest", "put_envelopes"] {
+        let server = TestServer::start().await;
+        let d = device();
+        sshcraft_sync::client::failpoints::arm(&server.origin, op, 0);
+        let (setup, export) =
+            create_account(&d.store, &d.vault, new_account(&server, "a@example.org"), 1)
+                .await
+                .unwrap();
+        assert!(
+            matches!(setup, Setup::Unfinished(SyncError::Network(_))),
+            "{op}"
+        );
+        assert!(
+            d.store.lock().unwrap().servers().unwrap().is_empty(),
+            "{op}"
+        );
+        // The account exists; the key lets this or another device finish the setup.
+        let again = device();
+        join_account(&again.store, &again.vault, join(&server, &export), 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            area_keys(&again).len(),
+            1,
+            "{op}: a personal area to sync into"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_failed_join_revokes_its_half_added_device() {
+    let server = TestServer::start().await;
+    let a = device();
+    let (_, export) = create_account(&a.store, &a.vault, new_account(&server, "a@example.org"), 1)
+        .await
+        .unwrap();
+    let b = device();
+    sshcraft_sync::client::failpoints::arm(&server.origin, "put_envelopes", 0);
+    assert!(
+        join_account(&b.store, &b.vault, join(&server, &export), 2)
+            .await
+            .is_err()
+    );
+    join_account(&b.store, &b.vault, join(&server, &export), 3)
+        .await
+        .unwrap();
+    let row = b.store.lock().unwrap().servers().unwrap().pop().unwrap();
+    let mut client = ServerClient::new(&server.origin).unwrap();
+    client
+        .login(row.device_id, &device_keys(&b.vault, &row).unwrap())
+        .await
+        .unwrap();
+    let active = client
+        .my_devices()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|d| d.active)
+        .count();
+    assert_eq!(
+        active, 3,
+        "first device, recovery device and the joined one; no ghost"
+    );
+}

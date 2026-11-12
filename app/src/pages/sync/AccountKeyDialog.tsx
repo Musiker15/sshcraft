@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AccountCreated } from "../../api";
 import { useT } from "../../i18n/i18n";
+import { ErrorMessage } from "../../shell/ErrorMessage";
 import { svgDataUrl } from "./syncView";
 
 /**
@@ -16,6 +17,12 @@ export function AccountKeyDialog({ created, onClose }: { created: AccountCreated
     <div className="dialog account-key">
       <h2>{t("sync.keyTitle")}</h2>
       <p className="hint">{t("sync.keyHint")}</p>
+      {created.unfinished && (
+        <>
+          <p className="error">{t("sync.unfinished")}</p>
+          <ErrorMessage error={created.unfinished} />
+        </>
+      )}
       <code className="account-key-text">{created.account_key}</code>
       <div className="buttons">
         <button

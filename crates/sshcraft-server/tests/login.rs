@@ -46,7 +46,9 @@ async fn register_validates_input() {
     let one = |p: &Person| DeviceLog {
         entries: vec![p.log.entries[0].clone()],
     };
+    // The first device and the recovery device may come together; a third may not.
     let mut two = Person::new("two");
+    two.add_device();
     two.add_device();
     let mut long_device = Person::new("long");
     long_device.devices.clear();
@@ -360,4 +362,23 @@ async fn oversized_body_is_too_large() {
         (status, err["code"].as_str()),
         (StatusCode::BAD_REQUEST, Some("invalid"))
     );
+}
+
+#[tokio::test]
+async fn register_takes_the_first_device_and_the_recovery_device_together() {
+    let env = TestEnv::new().await;
+    let key = env.api_key().await;
+    let mut a = Person::new("alice");
+    a.add_device();
+    let body =
+        json!({"account": a.public(), "name": "alice", "email": "a@example.org", "log": a.log});
+    let (status, err) = env
+        .request(
+            Method::POST,
+            "/v1/accounts",
+            &[("x-api-key", &key)],
+            Some(body),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{err}");
 }

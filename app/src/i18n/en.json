@@ -229,6 +229,7 @@
   "sync.syncOn": "Sync",
   "sync.thisDevice": "this device",
   "sync.title": "Sync",
+  "sync.unfinished": "The account was created, but setting it up on this device did not finish. Keep the account key and add the server again with \"Join with account key\".",
   "sync.warning": "Something from this server did not pass the security checks and was skipped.",
   "sync.working": "Setting up",
   "tabs.close": "Close tab",
