@@ -1,12 +1,15 @@
-//! Host key questions to the UI. A question whose session goes away is withdrawn, so no
-//! dialog is left behind for a closed tab.
+//! Questions to the UI: whether to trust a host key, and sign-in questions (a password, codes
+//! from keyboard-interactive). A question whose session goes away is withdrawn, so no dialog is
+//! left behind for a closed tab.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
+use sshcraft_ssh::{AuthPromptLine, AuthPrompter, AuthRequest};
 use tokio::sync::oneshot;
+use zeroize::Zeroizing;
 
 use crate::sessions::HostKeyPrompter;
 
@@ -19,19 +22,39 @@ pub struct HostKeyPrompt {
     pub fingerprint: String,
 }
 
+/// A sign-in question. Carries the questions only, never an answer.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthPrompt {
+    pub prompt_id: u64,
+    pub host_name: String,
+    pub username: String,
+    pub name: String,
+    pub instructions: String,
+    pub prompts: Vec<AuthPromptLine>,
+}
+
 /// Delivers questions to the UI (Tauri events in the app, a recorder in tests).
 pub trait PromptEmitter: Send + Sync + 'static {
     /// Shows the question; `false` if it could not be delivered.
     fn asked(&self, prompt: &HostKeyPrompt) -> bool;
-    /// Takes back a question nobody waits for anymore.
+    /// Shows a sign-in question; `false` if it could not be delivered.
+    fn asked_auth(&self, prompt: &AuthPrompt) -> bool;
+    /// Takes back a question nobody waits for anymore (ids are unique across both kinds).
     fn withdrawn(&self, prompt_id: u64);
 }
 
-/// Open questions and their answer channels. No answer counts as "no".
+type Answers = Option<Vec<Zeroizing<String>>>;
+
+enum Pending {
+    HostKey(oneshot::Sender<bool>),
+    Auth(oneshot::Sender<Answers>),
+}
+
+/// Open questions and their answer channels. No answer counts as "no" (or "cancel").
 pub struct PromptRegistry<E: PromptEmitter> {
     emitter: E,
     next_id: AtomicU64,
-    pending: Mutex<HashMap<u64, oneshot::Sender<bool>>>,
+    pending: Mutex<HashMap<u64, Pending>>,
 }
 
 /// Removes and withdraws a question when `ask` is dropped before it was answered.
@@ -72,24 +95,47 @@ impl<E: PromptEmitter> PromptRegistry<E> {
         self.pending.lock().expect("pending lock").len()
     }
 
-    pub fn answer(&self, prompt_id: u64, accept: bool) {
-        let sender = self
-            .pending
+    fn take(&self, prompt_id: u64) -> Option<Pending> {
+        self.pending
             .lock()
             .expect("pending lock")
-            .remove(&prompt_id);
-        if let Some(tx) = sender {
-            let _ = tx.send(accept);
+            .remove(&prompt_id)
+    }
+
+    fn put_back(&self, prompt_id: u64, pending: Pending) {
+        self.pending
+            .lock()
+            .expect("pending lock")
+            .insert(prompt_id, pending);
+    }
+
+    pub fn answer(&self, prompt_id: u64, accept: bool) {
+        match self.take(prompt_id) {
+            Some(Pending::HostKey(tx)) => {
+                let _ = tx.send(accept);
+            }
+            // Not a host key question: it stays open.
+            Some(other) => self.put_back(prompt_id, other),
+            None => {}
+        }
+    }
+
+    /// The user's answers to a sign-in question; `None` cancels.
+    pub fn answer_auth(&self, prompt_id: u64, answers: Option<Vec<String>>) {
+        let answers = answers.map(|a| a.into_iter().map(Zeroizing::new).collect());
+        match self.take(prompt_id) {
+            Some(Pending::Auth(tx)) => {
+                let _ = tx.send(answers);
+            }
+            Some(other) => self.put_back(prompt_id, other),
+            None => {}
         }
     }
 
     pub async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
         let prompt_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .expect("pending lock")
-            .insert(prompt_id, tx);
+        self.put_back(prompt_id, Pending::HostKey(tx));
         let prompt = HostKeyPrompt {
             prompt_id,
             host_name: host_name.to_owned(),
@@ -98,10 +144,7 @@ impl<E: PromptEmitter> PromptRegistry<E> {
             fingerprint: fingerprint.to_owned(),
         };
         if !self.emitter.asked(&prompt) {
-            self.pending
-                .lock()
-                .expect("pending lock")
-                .remove(&prompt_id);
+            self.take(prompt_id);
             return false;
         }
         let _withdraw = Withdraw {
@@ -109,6 +152,29 @@ impl<E: PromptEmitter> PromptRegistry<E> {
             prompt_id,
         };
         rx.await.unwrap_or(false)
+    }
+
+    pub async fn ask_auth(&self, request: AuthRequest) -> Answers {
+        let prompt_id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = oneshot::channel();
+        self.put_back(prompt_id, Pending::Auth(tx));
+        let prompt = AuthPrompt {
+            prompt_id,
+            host_name: request.host_name,
+            username: request.username,
+            name: request.name,
+            instructions: request.instructions,
+            prompts: request.prompts,
+        };
+        if !self.emitter.asked_auth(&prompt) {
+            self.take(prompt_id);
+            return None;
+        }
+        let _withdraw = Withdraw {
+            registry: self,
+            prompt_id,
+        };
+        rx.await.unwrap_or(None)
     }
 }
 
@@ -119,21 +185,33 @@ impl<E: PromptEmitter> HostKeyPrompter for PromptRegistry<E> {
     }
 }
 
+#[async_trait::async_trait]
+impl<E: PromptEmitter> AuthPrompter for PromptRegistry<E> {
+    async fn answer(&self, request: AuthRequest) -> Answers {
+        self.ask_auth(request).await
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Arc;
     use std::time::Duration;
 
     #[derive(Default)]
-    struct FakeEmitter {
-        asked: Mutex<Vec<u64>>,
-        withdrawn: Mutex<Vec<u64>>,
+    pub(crate) struct FakeEmitter {
+        pub asked: Mutex<Vec<u64>>,
+        pub auth: Mutex<Vec<AuthPrompt>>,
+        pub withdrawn: Mutex<Vec<u64>>,
     }
 
     impl PromptEmitter for FakeEmitter {
         fn asked(&self, prompt: &HostKeyPrompt) -> bool {
             self.asked.lock().unwrap().push(prompt.prompt_id);
+            true
+        }
+        fn asked_auth(&self, prompt: &AuthPrompt) -> bool {
+            self.auth.lock().unwrap().push(prompt.clone());
             true
         }
         fn withdrawn(&self, prompt_id: u64) {
@@ -149,6 +227,29 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         panic!("no question was asked");
+    }
+
+    pub(crate) async fn first_auth_question(registry: &PromptRegistry<FakeEmitter>) -> AuthPrompt {
+        for _ in 0..2000 {
+            if let Some(p) = registry.emitter().auth.lock().unwrap().first() {
+                return p.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("no sign-in question was asked");
+    }
+
+    fn request() -> AuthRequest {
+        AuthRequest {
+            host_name: "web".into(),
+            username: "root".into(),
+            name: String::new(),
+            instructions: String::new(),
+            prompts: vec![AuthPromptLine {
+                text: "Code: ".into(),
+                echo: true,
+            }],
+        }
     }
 
     #[tokio::test]
@@ -174,5 +275,43 @@ mod tests {
         assert!(task.await.unwrap());
         assert!(registry.emitter().withdrawn.lock().unwrap().is_empty());
         assert_eq!(registry.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn auth_answers_arrive() {
+        let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+        let asking = registry.clone();
+        let task = tokio::spawn(async move { asking.ask_auth(request()).await });
+        let prompt = first_auth_question(&registry).await;
+        assert_eq!(prompt.prompts[0].text, "Code: ");
+        registry.answer_auth(prompt.prompt_id, Some(vec!["42".into()]));
+        let answers = task.await.unwrap().unwrap();
+        assert_eq!(answers[0].as_str(), "42");
+    }
+
+    #[tokio::test]
+    async fn host_key_answer_does_not_answer_auth() {
+        let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+        let asking = registry.clone();
+        let task = tokio::spawn(async move { asking.ask_auth(request()).await });
+        let prompt = first_auth_question(&registry).await;
+        registry.answer(prompt.prompt_id, true);
+        assert_eq!(registry.pending_count(), 1);
+        registry.answer_auth(prompt.prompt_id, None);
+        assert!(task.await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn dropped_auth_question_is_withdrawn() {
+        let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+        let asking = registry.clone();
+        let task = tokio::spawn(async move { asking.ask_auth(request()).await });
+        let prompt = first_auth_question(&registry).await;
+        task.abort();
+        let _ = task.await;
+        assert_eq!(
+            *registry.emitter().withdrawn.lock().unwrap(),
+            vec![prompt.prompt_id]
+        );
     }
 }

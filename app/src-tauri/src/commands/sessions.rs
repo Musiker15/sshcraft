@@ -83,3 +83,9 @@ pub fn session_close(state: State<'_, AppState>, id: SessionId) {
 pub fn answer_host_key(state: State<'_, AppState>, prompt_id: u64, accept: bool) {
     state.prompter.answer(prompt_id, accept);
 }
+
+/// The user's answers to a sign-in question; `null` cancels the sign-in.
+#[tauri::command]
+pub fn answer_auth(state: State<'_, AppState>, prompt_id: u64, answers: Option<Vec<String>>) {
+    state.prompter.answer_auth(prompt_id, answers);
+}

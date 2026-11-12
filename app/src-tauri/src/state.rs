@@ -8,7 +8,7 @@ use sshcraft_core::vault::{KeyringMasterKey, Vault};
 use tauri::{AppHandle, Emitter};
 
 use crate::hello::WindowsHello;
-use crate::prompts::{HostKeyPrompt, PromptEmitter, PromptRegistry};
+use crate::prompts::{AuthPrompt, HostKeyPrompt, PromptEmitter, PromptRegistry};
 use crate::sessions::{SessionManager, WindowsAgent};
 use crate::sync::{StatusView, SyncManager};
 use sshcraft_core::model::ServerId;
@@ -36,6 +36,7 @@ impl AppState {
         let sessions = SessionManager::new(
             store.clone(),
             vault.clone().ok(),
+            prompter.clone(),
             prompter.clone(),
             Arc::new(WindowsAgent),
             Arc::new(WindowsHello {
@@ -75,8 +76,9 @@ fn main_window_handle(_app: &AppHandle) -> isize {
     0
 }
 
-/// Sends host key questions to the window as `host-key-prompt` and takes them back with
-/// `host-key-prompt-withdrawn` when their tab is closed.
+/// Sends host key questions to the window as `host-key-prompt`, sign-in questions as
+/// `auth-prompt`, and takes either back with `host-key-prompt-withdrawn` when their tab is
+/// closed.
 pub struct TauriEmitter(AppHandle);
 
 #[derive(Clone, Serialize)]
@@ -87,6 +89,10 @@ struct Withdrawn {
 impl PromptEmitter for TauriEmitter {
     fn asked(&self, prompt: &HostKeyPrompt) -> bool {
         self.0.emit("host-key-prompt", prompt).is_ok()
+    }
+
+    fn asked_auth(&self, prompt: &AuthPrompt) -> bool {
+        self.0.emit("auth-prompt", prompt).is_ok()
     }
 
     fn withdrawn(&self, prompt_id: u64) {

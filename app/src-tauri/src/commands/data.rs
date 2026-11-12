@@ -1,8 +1,13 @@
 //! Groups, hosts and stored host keys.
 
-use sshcraft_core::model::{Group, GroupId, Host, HostId, effective_endpoint, group_chain};
+use sshcraft_core::model::{
+    Group, GroupId, Host, HostId, PasswordId, effective_endpoint, group_chain,
+};
 use tauri::State;
 
+use super::passwords::{
+    GroupView, HostView, drop_passwords, group_view, host_view, keep_passwords, queue,
+};
 use super::{CommandError, CommandResult, ErrorCode};
 use crate::settings::{self, AppSettings};
 use crate::state::AppState;
@@ -15,8 +20,47 @@ fn store(state: &AppState) -> std::sync::MutexGuard<'_, sshcraft_core::store::St
 }
 
 #[tauri::command]
-pub fn list_groups(state: State<'_, AppState>) -> CommandResult<Vec<Group>> {
-    Ok(store(&state).list_groups()?)
+pub fn list_groups(state: State<'_, AppState>) -> CommandResult<Vec<GroupView>> {
+    Ok(store(&state)
+        .list_groups()?
+        .into_iter()
+        .map(group_view)
+        .collect())
+}
+
+/// Removes passwords nothing refers to any more and queues their removal.
+fn drop_orphans(state: &AppState, ids: &[PasswordId]) -> CommandResult<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let servers = {
+        let store = store(state);
+        let touched = drop_passwords(&store, ids)?;
+        queue(&store, touched)?
+    };
+    state.sync.nudge(&servers);
+    Ok(())
+}
+
+/// Every password the settings of a group, its subgroups and their hosts refer to.
+fn tree_passwords(
+    store: &sshcraft_core::store::Store,
+    id: GroupId,
+) -> CommandResult<Vec<PasswordId>> {
+    let mut tree = store.subgroups(id)?;
+    tree.push(id);
+    let mut out: Vec<PasswordId> = Vec::new();
+    for group in store.list_groups()? {
+        if tree.contains(&group.id) {
+            out.extend(group.defaults.password_ids());
+        }
+    }
+    for host in store.list_hosts()? {
+        if host.group_id.is_some_and(|g| tree.contains(&g)) {
+            out.extend(host.settings.password_ids());
+        }
+    }
+    Ok(out)
 }
 
 /// Writes to the store, then queues the item for the server it lives at (or left).
@@ -58,46 +102,71 @@ fn checked(
 }
 
 #[tauri::command]
-pub fn save_group(state: State<'_, AppState>, group: Group) -> CommandResult<()> {
+pub fn save_group(state: State<'_, AppState>, mut group: Group) -> CommandResult<()> {
     let id = group.id.0.to_string();
+    let orphans = {
+        let store = store(&state);
+        let stored = store.list_groups()?.into_iter().find(|g| g.id == group.id);
+        keep_passwords(stored.as_ref().map(|g| &g.defaults), &mut group.defaults)
+    };
     checked(
         &state,
         Change::SaveGroup(&group),
         ItemKind::Group,
         id,
         |s| Ok(s.upsert_group(&group)?),
-    )
+    )?;
+    drop_orphans(&state, &orphans)
 }
 
 #[tauri::command]
 pub fn delete_group(state: State<'_, AppState>, id: GroupId) -> CommandResult<()> {
     share_rights(&store(&state), Change::DeleteGroup(id))?;
+    let passwords = tree_passwords(&store(&state), id)?;
     changed(&state, ItemKind::Group, id.0.to_string(), |s| {
         // Its hosts go with it; queue them while they still exist.
         record_group_hosts(s, &id.0.to_string(), now_ms()).map_err(crate::sync::sync_error)?;
         Ok(s.delete_group(id)?)
-    })
+    })?;
+    drop_orphans(&state, &passwords)
 }
 
 #[tauri::command]
-pub fn list_hosts(state: State<'_, AppState>) -> CommandResult<Vec<Host>> {
-    Ok(store(&state).list_hosts()?)
+pub fn list_hosts(state: State<'_, AppState>) -> CommandResult<Vec<HostView>> {
+    Ok(store(&state)
+        .list_hosts()?
+        .into_iter()
+        .map(host_view)
+        .collect())
 }
 
 #[tauri::command]
-pub fn save_host(state: State<'_, AppState>, host: Host) -> CommandResult<()> {
+pub fn save_host(state: State<'_, AppState>, mut host: Host) -> CommandResult<()> {
     let id = host.id.0.to_string();
+    let orphans = {
+        let store = store(&state);
+        let stored = store.list_hosts()?.into_iter().find(|h| h.id == host.id);
+        keep_passwords(stored.as_ref().map(|h| &h.settings), &mut host.settings)
+    };
     checked(&state, Change::SaveHost(&host), ItemKind::Host, id, |s| {
         Ok(s.upsert_host(&host)?)
-    })
+    })?;
+    drop_orphans(&state, &orphans)
 }
 
 #[tauri::command]
 pub fn delete_host(state: State<'_, AppState>, id: HostId) -> CommandResult<()> {
     share_rights(&store(&state), Change::DeleteHost(id))?;
+    let passwords = store(&state)
+        .list_hosts()?
+        .into_iter()
+        .find(|h| h.id == id)
+        .map(|h| h.settings.password_ids())
+        .unwrap_or_default();
     changed(&state, ItemKind::Host, id.0.to_string(), |s| {
         Ok(s.delete_host(id)?)
-    })
+    })?;
+    drop_orphans(&state, &passwords)
 }
 
 #[tauri::command]

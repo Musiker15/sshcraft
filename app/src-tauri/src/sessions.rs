@@ -6,14 +6,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use sshcraft_core::model::{Directory, HostId, KeyRef, ResolvedHost, resolve_route};
+use sshcraft_core::model::{
+    Directory, HostId, KeyId, KeyRef, PasswordId, Proxy, ProxyEndpoint, ResolveError, ResolvedHost,
+    Route, resolve_route,
+};
 use sshcraft_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
-use sshcraft_ssh::{ConnectParams, HostKeyVerifier, ShellEvent, ShellWriter, SshError};
+use sshcraft_ssh::{
+    Auth, AuthPrompter, Credential, Hop, HostKeyVerifier, ProxyConfig, ProxyTarget, RouteParams,
+    SessionOptions, ShellEvent, ShellWriter, SshError,
+};
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::errors::ErrorCode;
 use crate::hello::{Presence, UserPresence};
@@ -28,6 +35,8 @@ pub enum EndReason {
     HostKeyRejected,
     HostKeyMismatch,
     AuthFailed,
+    /// The user cancelled a sign-in question.
+    AuthCancelled,
     /// The very first attempt could not reach the server; nothing to reconnect to.
     ConnectFailed,
     /// Could not even start: host incomplete, key missing, vault locked.
@@ -124,6 +133,7 @@ struct Context {
     store: Arc<Mutex<Store>>,
     vault: Option<Arc<Vault>>,
     prompter: Arc<dyn HostKeyPrompter>,
+    auth: Arc<dyn AuthPrompter>,
     agent: Arc<dyn AgentConnector>,
     gate: KeyGate,
     delay_scale: f32,
@@ -197,6 +207,11 @@ impl KeyGate {
 #[async_trait::async_trait]
 pub trait AgentConnector: Send + Sync + 'static {
     async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, SshError>;
+
+    /// The agent a session may forward; `None` where there is none to forward.
+    fn opener(&self) -> Option<Arc<dyn sshcraft_ssh::AgentOpener>> {
+        None
+    }
 }
 
 /// The Windows agent pipe served by the Proton Pass desktop app.
@@ -216,6 +231,17 @@ impl AgentConnector for WindowsAgent {
             ))
         }
     }
+
+    fn opener(&self) -> Option<Arc<dyn sshcraft_ssh::AgentOpener>> {
+        #[cfg(windows)]
+        {
+            Some(Arc::new(sshcraft_ssh::agent::WindowsAgentOpener))
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
 }
 
 /// What `run` shares with the manager for one session.
@@ -232,10 +258,11 @@ impl SessionManager {
         store: Arc<Mutex<Store>>,
         vault: Option<Arc<Vault>>,
         prompter: Arc<dyn HostKeyPrompter>,
+        auth: Arc<dyn AuthPrompter>,
         agent: Arc<dyn AgentConnector>,
         presence: Arc<dyn UserPresence>,
     ) -> Self {
-        Self::with_delay_scale(store, vault, prompter, agent, presence, 1.0)
+        Self::with_delay_scale(store, vault, prompter, auth, agent, presence, 1.0)
     }
 
     /// Called once, the first time Windows Hello turns out not to be set up on this PC.
@@ -256,6 +283,7 @@ impl SessionManager {
         store: Arc<Mutex<Store>>,
         vault: Option<Arc<Vault>>,
         prompter: Arc<dyn HostKeyPrompter>,
+        auth: Arc<dyn AuthPrompter>,
         agent: Arc<dyn AgentConnector>,
         presence: Arc<dyn UserPresence>,
         delay_scale: f32,
@@ -265,6 +293,7 @@ impl SessionManager {
                 store,
                 vault,
                 prompter,
+                auth,
                 agent,
                 gate: KeyGate::new(presence),
                 delay_scale,
@@ -413,15 +442,15 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
             Err(Failure::End(reason, code, detail)) => {
                 return end(sink.as_ref(), reason, code, detail);
             }
-            Err(Failure::Lost(detail)) if !ever_connected => {
+            Err(Failure::Lost(code, detail)) if !ever_connected => {
                 return end(
                     sink.as_ref(),
                     EndReason::ConnectFailed,
-                    Some(ErrorCode::Network),
+                    Some(code),
                     Some(detail),
                 );
             }
-            Err(Failure::Lost(detail)) => Disconnect::Lost(detail),
+            Err(Failure::Lost(_, detail)) => Disconnect::Lost(detail),
         };
 
         attempt += 1;
@@ -449,8 +478,160 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
 enum Failure {
     /// Do not retry.
     End(EndReason, Option<ErrorCode>, Option<String>),
-    /// Network trouble, may retry.
-    Lost(String),
+    /// Network trouble, may retry. The code says what failed (the network, a proxy, a jump
+    /// host).
+    Lost(ErrorCode, String),
+}
+
+fn end_error(code: ErrorCode, detail: Option<String>) -> Failure {
+    Failure::End(EndReason::Error, Some(code), detail)
+}
+
+/// Asks for Windows Hello once per run before the first secret from the vault (a key or a
+/// password) is used.
+async fn unlock_secrets(ctx: &Context) -> Result<&Arc<Vault>, Failure> {
+    let vault = ctx
+        .vault
+        .as_ref()
+        .ok_or_else(|| end_error(ErrorCode::VaultLocked, None))?;
+    let reason = {
+        let store = ctx.store.lock().expect("store lock");
+        let language = crate::settings::load(&store).language;
+        hello_reason(language, sys_locale::get_locale().as_deref())
+    };
+    ctx.gate
+        .ensure(reason)
+        .await
+        .map_err(|code| end_error(code, None))?;
+    Ok(vault)
+}
+
+fn vault_failure(e: sshcraft_core::vault::VaultError) -> Failure {
+    let e = crate::errors::CommandError::from(e);
+    end_error(e.code, e.detail)
+}
+
+async fn stored_key(ctx: &Context, id: KeyId) -> Result<russh::keys::PrivateKey, Failure> {
+    // A synced host can point to a key that lives on another device: say so before asking for
+    // Windows Hello for nothing.
+    let here = ctx
+        .store
+        .lock()
+        .expect("store lock")
+        .key_record(id)
+        .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?
+        .is_some();
+    if !here {
+        return Err(end_error(ErrorCode::KeyNotOnDevice, None));
+    }
+    let vault = unlock_secrets(ctx).await?;
+    let store = ctx.store.lock().expect("store lock");
+    vault.private_key(&store, id).map_err(vault_failure)
+}
+
+/// A stored password, or `None` when it is not on this device (then the server's question goes
+/// to the user).
+async fn stored_password(
+    ctx: &Context,
+    id: PasswordId,
+) -> Result<Option<Zeroizing<String>>, Failure> {
+    let here = ctx
+        .store
+        .lock()
+        .expect("store lock")
+        .password_record(id)
+        .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?
+        .is_some();
+    if !here {
+        return Ok(None);
+    }
+    let vault = unlock_secrets(ctx).await?;
+    let store = ctx.store.lock().expect("store lock");
+    vault.password(&store, id).map(Some).map_err(vault_failure)
+}
+
+/// One hop with its own credentials only.
+async fn hop(ctx: &Context, resolved: &ResolvedHost) -> Result<Hop, Failure> {
+    let key = match &resolved.key {
+        None => None,
+        Some(KeyRef::Stored { id }) => Some(Credential::Key(stored_key(ctx, *id).await?)),
+        Some(KeyRef::Agent { fingerprint }) => Some(Credential::Agent {
+            fingerprint: fingerprint.clone(),
+            agent: ctx
+                .agent
+                .connect()
+                .await
+                .map_err(|e| end_error(ErrorCode::AgentUnavailable, Some(e.to_string())))?,
+        }),
+    };
+    let password = match resolved.password {
+        Some(id) => stored_password(ctx, id).await?,
+        None => None,
+    };
+    Ok(Hop {
+        host_name: resolved.name.clone(),
+        address: resolved.address.clone(),
+        port: resolved.port,
+        username: resolved.username.clone(),
+        auth: Auth { key, password },
+    })
+}
+
+async fn proxy_target(ctx: &Context, endpoint: &ProxyEndpoint) -> Result<ProxyTarget, Failure> {
+    let password = match endpoint.password {
+        Some(id) => stored_password(ctx, id).await?,
+        None => None,
+    };
+    Ok(ProxyTarget {
+        address: endpoint.address.clone(),
+        port: endpoint.port,
+        username: endpoint.username.clone(),
+        password,
+    })
+}
+
+/// What a failed connection means for the tab.
+fn failure(e: SshError, verifier: &StoreVerifier) -> Failure {
+    match e {
+        SshError::HostKeyRejected => {
+            match verifier.mismatch.lock().expect("mismatch lock").take() {
+                Some(detail) => Failure::End(EndReason::HostKeyMismatch, None, Some(detail)),
+                None => Failure::End(EndReason::HostKeyRejected, None, None),
+            }
+        }
+        SshError::AuthFailed => Failure::End(EndReason::AuthFailed, None, None),
+        SshError::AuthCancelled => Failure::End(EndReason::AuthCancelled, None, None),
+        SshError::PasswordRejected => Failure::End(
+            EndReason::AuthFailed,
+            Some(ErrorCode::PasswordRejected),
+            None,
+        ),
+        SshError::ProxyAuthFailed => Failure::End(
+            EndReason::AuthFailed,
+            Some(ErrorCode::ProxyAuthFailed),
+            None,
+        ),
+        SshError::AgentUnavailable(detail) => end_error(ErrorCode::AgentUnavailable, Some(detail)),
+        SshError::AgentKeyMissing => end_error(ErrorCode::AgentKeyMissing, None),
+        SshError::AgentRefused => {
+            Failure::End(EndReason::AuthFailed, Some(ErrorCode::AgentRefused), None)
+        }
+        SshError::Proxy(detail) => Failure::Lost(ErrorCode::ProxyFailed, detail),
+        SshError::Hop {
+            host_name, error, ..
+        } => match failure(*error, verifier) {
+            kept @ Failure::End(EndReason::HostKeyRejected | EndReason::HostKeyMismatch, ..) => {
+                kept
+            }
+            Failure::End(reason, _, _) => {
+                Failure::End(reason, Some(ErrorCode::JumpFailed), Some(host_name))
+            }
+            Failure::Lost(_, detail) => {
+                Failure::Lost(ErrorCode::JumpFailed, format!("{host_name}: {detail}"))
+            }
+        },
+        other => Failure::Lost(ErrorCode::Network, other.to_string()),
+    }
 }
 
 async fn connect_once(
@@ -458,103 +639,53 @@ async fn connect_once(
     host_id: HostId,
     size: &Mutex<(u32, u32)>,
 ) -> Result<(ShellWriter, tokio::sync::mpsc::Receiver<ShellEvent>), Failure> {
-    let error = |code: ErrorCode, detail: Option<String>| {
-        Failure::End(EndReason::Error, Some(code), detail)
-    };
-    let resolved = {
+    let route = {
         let store = ctx.store.lock().expect("store lock");
-        lookup(&store, host_id).map_err(|(code, detail)| error(code, detail))?
+        lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
     };
-    let credential = match &resolved.key {
-        // Until password sign-in arrives, a host without a key cannot connect.
-        None => return Err(error(ErrorCode::Session, Some("no key".into()))),
-        Some(KeyRef::Stored { id }) => {
-            let vault = ctx
-                .vault
-                .as_ref()
-                .ok_or_else(|| error(ErrorCode::VaultLocked, None))?;
-            // A synced host can point to a key that lives on another device: say so before
-            // asking for Windows Hello for nothing.
-            let here = ctx
-                .store
-                .lock()
-                .expect("store lock")
-                .key_record(*id)
-                .map_err(|e| error(ErrorCode::Store, Some(e.to_string())))?
-                .is_some();
-            if !here {
-                return Err(error(ErrorCode::KeyNotOnDevice, None));
-            }
-            let reason = {
-                let store = ctx.store.lock().expect("store lock");
-                let language = crate::settings::load(&store).language;
-                hello_reason(language, sys_locale::get_locale().as_deref())
-            };
-            ctx.gate
-                .ensure(reason)
-                .await
-                .map_err(|code| error(code, None))?;
-            let store = ctx.store.lock().expect("store lock");
-            let key = vault.private_key(&store, *id).map_err(|e| {
-                let e = crate::errors::CommandError::from(e);
-                error(e.code, e.detail)
-            })?;
-            sshcraft_ssh::Credential::Key(key)
+    let mut hops = Vec::new();
+    for resolved in route.jumps.iter().chain(std::iter::once(&route.target)) {
+        hops.push(hop(ctx, resolved).await?);
+    }
+    let proxy = match &route.target.proxy {
+        Some(Proxy::Http(endpoint)) => Some(ProxyConfig::Http(proxy_target(ctx, endpoint).await?)),
+        Some(Proxy::Socks5(endpoint)) => {
+            Some(ProxyConfig::Socks5(proxy_target(ctx, endpoint).await?))
         }
-        Some(KeyRef::Agent { fingerprint }) => sshcraft_ssh::Credential::Agent {
-            fingerprint: fingerprint.clone(),
-            agent: ctx
-                .agent
-                .connect()
-                .await
-                .map_err(|e| error(ErrorCode::AgentUnavailable, Some(e.to_string())))?,
-        },
+        _ => None,
     };
-
+    let options = SessionOptions {
+        agent_forwarding: if route.target.agent_forwarding {
+            ctx.agent.opener()
+        } else {
+            None
+        },
+        env: route
+            .target
+            .env
+            .iter()
+            .map(|v| (v.name.clone(), v.value.clone()))
+            .collect(),
+    };
     let verifier = Arc::new(StoreVerifier {
         store: ctx.store.clone(),
         prompter: ctx.prompter.clone(),
         mismatch: Mutex::new(None),
     });
-    let params = ConnectParams {
-        address: resolved.address.clone(),
-        port: resolved.port,
-        username: resolved.username.clone(),
-        auth: sshcraft_ssh::Auth::key(credential),
+    let params = RouteParams {
+        hops,
+        proxy,
+        options,
+        connect_timeout: sshcraft_ssh::CONNECT_TIMEOUT,
     };
-    let session =
-        match sshcraft_ssh::connect(params, verifier.clone(), Arc::new(sshcraft_ssh::NoPrompter))
-            .await
-        {
-            Ok(s) => s,
-            Err(SshError::HostKeyRejected) => {
-                let mismatch = verifier.mismatch.lock().expect("mismatch lock").take();
-                return Err(match mismatch {
-                    Some(detail) => Failure::End(EndReason::HostKeyMismatch, None, Some(detail)),
-                    None => Failure::End(EndReason::HostKeyRejected, None, None),
-                });
-            }
-            Err(SshError::AuthFailed | SshError::AuthCancelled | SshError::PasswordRejected) => {
-                return Err(Failure::End(EndReason::AuthFailed, None, None));
-            }
-            Err(SshError::AgentUnavailable(e)) => {
-                return Err(error(ErrorCode::AgentUnavailable, Some(e)));
-            }
-            Err(SshError::AgentKeyMissing) => return Err(error(ErrorCode::AgentKeyMissing, None)),
-            Err(SshError::AgentRefused) => {
-                return Err(Failure::End(
-                    EndReason::AuthFailed,
-                    Some(ErrorCode::AgentRefused),
-                    None,
-                ));
-            }
-            Err(e) => return Err(Failure::Lost(e.to_string())),
-        };
+    let session = sshcraft_ssh::connect_route(params, verifier.clone(), ctx.auth.clone())
+        .await
+        .map_err(|e| failure(e, &verifier))?;
     let (cols, rows) = *size.lock().expect("size lock");
     let shell = session
         .open_shell(cols, rows)
         .await
-        .map_err(|e| Failure::Lost(e.to_string()))?;
+        .map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
     if needs_os(&ctx.store, host_id) {
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
     }
@@ -640,18 +771,27 @@ async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_
     );
 }
 
-fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Option<String>)> {
+fn lookup(store: &Store, host_id: HostId) -> Result<Route, (ErrorCode, Option<String>)> {
     let store_error = |e: sshcraft_core::store::StoreError| (ErrorCode::Store, Some(e.to_string()));
     let hosts = store.list_hosts().map_err(store_error)?;
     let groups = store.list_groups().map_err(store_error)?;
+    let identities = store.list_identities().map_err(store_error)?;
     let dir = Directory {
         groups: &groups,
         hosts: &hosts,
-        identities: &[],
+        identities: &identities,
     };
-    resolve_route(&dir, host_id)
-        .map(|route| route.target)
-        .map_err(|e| (ErrorCode::from(&e), None))
+    resolve_route(&dir, host_id).map_err(|e| {
+        // A jump host that cannot be used is named.
+        let detail = match &e {
+            ResolveError::Jump { host_id, .. } => hosts
+                .iter()
+                .find(|h| h.id == *host_id)
+                .map(|h| h.name.clone()),
+            _ => None,
+        };
+        (ErrorCode::from(&e), detail)
+    })
 }
 
 struct StoreVerifier {

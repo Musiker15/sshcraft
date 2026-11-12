@@ -61,6 +61,10 @@ pub enum ErrorCode {
     TooManyJumps,
     JumpMissing,
     JumpFailed,
+    ProxyFailed,
+    ProxyAuthFailed,
+    PasswordRejected,
+    NotSupported,
 }
 
 impl From<&ResolveError> for ErrorCode {

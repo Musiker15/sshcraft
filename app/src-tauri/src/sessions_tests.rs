@@ -151,6 +151,7 @@ impl Fixture {
             self.store.clone(),
             Some(self.vault.clone()),
             self.prompter.clone(),
+            Arc::new(sshcraft_ssh::NoPrompter),
             Arc::new(TestAgents {
                 keys: vec![self.key.clone()],
                 reachable: true,
@@ -165,6 +166,7 @@ impl Fixture {
             self.store.clone(),
             vault,
             self.prompter.clone(),
+            Arc::new(sshcraft_ssh::NoPrompter),
             Arc::new(TestAgents {
                 keys: vec![self.key.clone()],
                 reachable: agent_reachable,
@@ -214,6 +216,7 @@ async fn fixture(answer: bool) -> Fixture {
         store.clone(),
         Some(vault.clone()),
         prompter.clone(),
+        Arc::new(sshcraft_ssh::NoPrompter),
         Arc::new(TestAgents {
             keys: vec![key.clone()],
             reachable: true,
@@ -735,4 +738,273 @@ fn os_probe_runs_once() {
         !needs_os(&store, host.id),
         "a host whose system was not recognized is asked once"
     );
+}
+
+// ---- Passwords, routes and sign-in questions ----
+
+use crate::prompts::PromptRegistry;
+use crate::prompts::tests::{FakeEmitter, first_auth_question};
+use sshcraft_core::model::PasswordId;
+use sshcraft_ssh::testing::TestAuth;
+
+/// A store with a vault and hosts that sign in with passwords.
+struct PasswordWorld {
+    store: Arc<Mutex<Store>>,
+    vault: Arc<Vault>,
+}
+
+impl PasswordWorld {
+    fn new() -> Self {
+        let store = Store::open_in_memory().unwrap();
+        let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+        Self {
+            store: Arc::new(Mutex::new(store)),
+            vault: Arc::new(vault),
+        }
+    }
+
+    /// A host at `port` with a stored password (if given) and jump hosts.
+    fn host(&self, port: u16, password: Option<&str>, jumps: Vec<HostId>) -> HostId {
+        let store = self.store.lock().unwrap();
+        let password_id = password.map(|p| {
+            let id = PasswordId::new();
+            self.vault.store_password(&store, id, p, None).unwrap();
+            id
+        });
+        let host = Host {
+            location: None,
+            id: HostId::new(),
+            name: format!("host-{port}"),
+            group_id: None,
+            settings: ConnectionSettings {
+                address: Some("127.0.0.1".into()),
+                port: Some(port),
+                username: Some("tester".into()),
+                password: password_id,
+                jump_hosts: (!jumps.is_empty()).then_some(jumps),
+                ..Default::default()
+            },
+            tags: Vec::new(),
+            os: None,
+        };
+        store.upsert_host(&host).unwrap();
+        host.id
+    }
+
+    fn manager(
+        &self,
+        vault: Option<Arc<Vault>>,
+        host_keys: Arc<FixedPrompter>,
+        auth: Arc<dyn sshcraft_ssh::AuthPrompter>,
+        presence: Arc<FakePresence>,
+    ) -> SessionManager {
+        SessionManager::with_delay_scale(
+            self.store.clone(),
+            vault,
+            host_keys,
+            auth,
+            Arc::new(TestAgents {
+                keys: Vec::new(),
+                reachable: false,
+            }),
+            presence,
+            0.01,
+        )
+    }
+}
+
+fn trusting() -> Arc<FixedPrompter> {
+    Arc::new(FixedPrompter {
+        answer: true,
+        asked: AtomicUsize::new(0),
+    })
+}
+
+fn verified() -> Arc<FakePresence> {
+    Arc::new(FakePresence::new(&[Presence::Verified]))
+}
+
+async fn password_server(password: &str) -> TestServer {
+    TestServer::start_with(TestAuth {
+        password: Some(password.into()),
+        ..Default::default()
+    })
+    .await
+}
+
+async fn kbd_server(answer: &str) -> TestServer {
+    TestServer::start_with(TestAuth {
+        kbd: vec![vec![("Code: ".into(), true, answer.into())]],
+        ..Default::default()
+    })
+    .await
+}
+
+#[tokio::test]
+async fn password_host_connects() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(server.received_passwords(), vec!["pw".to_owned()]);
+}
+
+#[tokio::test]
+async fn jump_route_connects() {
+    let jump = password_server("a").await;
+    let target = password_server("b").await;
+    let w = PasswordWorld::new();
+    let via = w.host(jump.port, Some("a"), Vec::new());
+    let host = w.host(target.port, Some("b"), vec![via]);
+    let host_keys = trusting();
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        host_keys.clone(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(host_keys.asked.load(Ordering::SeqCst), 2);
+    assert_eq!(jump.received_passwords(), vec!["a".to_owned()]);
+    assert_eq!(target.received_passwords(), vec!["b".to_owned()]);
+}
+
+#[tokio::test]
+async fn kbd_prompt_reaches_registry_and_answer_logs_in() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    let prompt = first_auth_question(&registry).await;
+    assert_eq!(prompt.prompts[0].text, "Code: ");
+    assert_eq!(prompt.username, "tester");
+    registry.answer_auth(prompt.prompt_id, Some(vec!["42".into()]));
+    sink.wait_for(connected).await;
+}
+
+#[tokio::test]
+async fn closing_tab_withdraws_auth_prompt() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    let id = manager.open(host, 80, 24, sink.clone());
+    let prompt = first_auth_question(&registry).await;
+    manager.close(id);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !registry
+        .emitter()
+        .withdrawn
+        .lock()
+        .unwrap()
+        .contains(&prompt.prompt_id)
+    {
+        assert!(tokio::time::Instant::now() < deadline, "not withdrawn");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn cancel_ends_without_reconnect() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    let prompt = first_auth_question(&registry).await;
+    registry.answer_auth(prompt.prompt_id, None);
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::AuthCancelled));
+    assert!(
+        !sink
+            .statuses()
+            .iter()
+            .any(|s| matches!(s, SessionStatus::Reconnecting { .. }))
+    );
+}
+
+#[tokio::test]
+async fn vault_locked_with_password_reports_vault_locked() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        None,
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::VaultLocked));
+    assert!(server.received_passwords().is_empty());
+}
+
+#[tokio::test]
+async fn hello_asked_before_password_use() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let presence = verified();
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        presence.clone(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(presence.asked(), 1);
+}
+
+#[tokio::test]
+async fn declined_hello_keeps_password_back() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        Arc::new(FakePresence::new(&[Presence::Declined])),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::HelloDeclined));
+    assert!(server.received_passwords().is_empty());
 }
