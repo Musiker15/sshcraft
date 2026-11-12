@@ -209,6 +209,7 @@ impl Worker {
 
     /// One pull and one push; reports changes and rejected items.
     async fn pass(&self, engine: &mut Engine) -> Result<(), Ended> {
+        let _turn = crate::engine::server_lock(self.server).lock_owned().await;
         self.observer.status(self.server, SyncStatus::Syncing);
         let outcome = async {
             let report = engine.pull(&self.store, &self.vault).await?;

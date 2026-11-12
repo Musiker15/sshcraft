@@ -92,6 +92,9 @@ pub async fn share_items(
     grants: Vec<GrantInput>,
     with_keys: bool,
 ) -> CommandResult<ShareOutcome> {
+    let _turn = sshcraft_sync::engine::server_lock(server)
+        .lock_owned()
+        .await;
     let vault = vault(&state)?;
     let mut engine = engine(&state, server).await?;
     let what = match what {
@@ -126,6 +129,9 @@ pub async fn set_share_grants(
     area: Uuid,
     grants: Vec<GrantInput>,
 ) -> CommandResult<RevokeOutcome> {
+    let _turn = sshcraft_sync::engine::server_lock(server)
+        .lock_owned()
+        .await;
     let vault = vault(&state)?;
     let mut engine = engine(&state, server).await?;
     let outcome = set_grants(
@@ -148,6 +154,9 @@ pub async fn unshare(
     server: ServerId,
     area: Uuid,
 ) -> CommandResult<RevokeOutcome> {
+    let _turn = sshcraft_sync::engine::server_lock(server)
+        .lock_owned()
+        .await;
     let vault = vault(&state)?;
     let mut engine = engine(&state, server).await?;
     let outcome = sshcraft_sync::shares::unshare(&mut engine, &state.store, &vault, area, now_ms())

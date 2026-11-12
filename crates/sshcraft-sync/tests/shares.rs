@@ -935,3 +935,45 @@ async fn owner_key_assignments_reach_the_owners_other_devices() {
     sync(&b).await;
     assert!(b.hosts().iter().all(|h| h.settings.key.is_none()));
 }
+
+#[tokio::test]
+async fn members_ignore_additions_and_deletions_of_other_members_in_a_selection() {
+    let server = TestServer::start().await;
+    let (_a, b, c, area, host) = shared_group(&server, ShareKind::Selection).await;
+    let server_b = b.row().id;
+    let entry = b
+        .store
+        .lock()
+        .unwrap()
+        .record_entry(server_b, ItemKind::Host, &host.id.0.to_string())
+        .unwrap()
+        .unwrap();
+    // A modified client of B deletes the host and adds another, straight on the server.
+    let client = b.client(&server).await;
+    let deleted = seal_in(
+        &b,
+        area,
+        ItemBody::Deleted {
+            item_kind: ItemKind::Host,
+            item_id: host.id.0.to_string(),
+        },
+        entry.record_id,
+        entry.version + 1,
+        500,
+    );
+    client.put_record(&deleted).await.unwrap();
+    let mut extra = sample_host("extra");
+    extra.group_id = host.group_id;
+    let added = seal_in(
+        &b,
+        area,
+        ItemBody::Host { host: extra },
+        Uuid::new_v4(),
+        1,
+        501,
+    );
+    client.put_record(&added).await.unwrap();
+    sync(&c).await;
+    let names: Vec<String> = c.hosts().into_iter().map(|h| h.name).collect();
+    assert_eq!(names, vec!["web".to_owned()]);
+}

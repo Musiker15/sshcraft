@@ -183,3 +183,22 @@ async fn items_last_written_by_a_revoked_device_survive_the_rotation() {
         "the host written by the revoked device is still there"
     );
 }
+
+#[tokio::test]
+async fn one_lock_per_server() {
+    use sshcraft_core::model::ServerId;
+    use sshcraft_sync::engine::server_lock;
+    let (one, other) = (ServerId::new(), ServerId::new());
+    assert!(std::sync::Arc::ptr_eq(&server_lock(one), &server_lock(one)));
+    assert!(!std::sync::Arc::ptr_eq(
+        &server_lock(one),
+        &server_lock(other)
+    ));
+    let held = server_lock(one).lock_owned().await;
+    assert!(
+        server_lock(one).try_lock().is_err(),
+        "a second user of the same server waits"
+    );
+    assert!(server_lock(other).try_lock().is_ok());
+    drop(held);
+}

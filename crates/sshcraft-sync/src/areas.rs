@@ -11,7 +11,7 @@ use sshcraft_core::vault::Vault;
 use sshcraft_proto::area::{
     AreaId, AreaKey, AreaManifest, KeyEnvelope, Member, key_commitment, seal_area_key,
 };
-use sshcraft_proto::devicelog::DeviceSet;
+use sshcraft_proto::devicelog::{DeviceSet, LogAction};
 use sshcraft_proto::identity::{AccountPublic, DeviceCertificate};
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
 use std::collections::{HashMap, HashSet};
@@ -81,41 +81,90 @@ pub(crate) async fn readers(
 
 /// Keeps every own share in step with its members' devices (protocol: the owner's client
 /// notices changes in a member's device log): a new device gets an envelope, a device that had
-/// one and was revoked makes the key change.
+/// one and was revoked makes the key change. A revocation counts when this device saw it come
+/// into the member's log, or when it had sealed to that device itself, so it is noticed even if
+/// another device of this account did the last key change. Problems with one member or one area
+/// are returned, not raised, so they do not stop the rest.
 pub async fn check_member_devices(
     engine: &Engine,
     store: &Mutex<Store>,
     vault: &Vault,
     now: i64,
-) -> Result<(), SyncError> {
-    for (manifest, key) in engine.owned_areas(store)? {
+) -> Result<Vec<String>, SyncError> {
+    let mut problems = Vec::new();
+    let areas = engine.owned_areas(store)?;
+    let mut revoked_since: HashMap<AccountPublic, bool> = HashMap::new();
+    for (manifest, _) in &areas {
+        for member in &manifest.members {
+            if revoked_since.contains_key(&member.account) {
+                continue;
+            }
+            let before = engine.known_head(store, &member.account)?;
+            let revoked = match engine.account_log(store, &member.account).await {
+                Ok((_, log)) => before.is_some_and(|before| {
+                    log.entries.iter().any(|entry| {
+                        entry.seq > before.seq && matches!(entry.action, LogAction::Revoke { .. })
+                    })
+                }),
+                Err(SyncError::Server { status: 404, .. }) => false,
+                Err(err) if fatal(&err) => return Err(err),
+                Err(err) => {
+                    problems.push(format!("member log: {err}"));
+                    false
+                }
+            };
+            revoked_since.insert(member.account, revoked);
+        }
+    }
+    for (manifest, key) in areas {
         if manifest.members.is_empty() {
             continue;
         }
-        let sealed = load_sealed(engine, store, manifest.area_id)?;
-        let active: HashSet<Uuid> = readers(engine, store, &manifest.members)
-            .await?
-            .iter()
-            .map(|cert| cert.device_id)
-            .collect();
-        let gone = sealed.key_version == manifest.key_version
-            && sealed.devices.iter().any(|d| !active.contains(d));
-        if gone {
-            let members = manifest.members.clone();
-            rotate(
-                engine,
-                store,
-                vault,
-                vec![(manifest, key, members)],
-                None,
-                now,
-            )
-            .await?;
-        } else {
-            reseal_envelopes(engine, store, manifest.area_id).await?;
+        let area = manifest.area_id;
+        let outcome = async {
+            let sealed = load_sealed(engine, store, area)?;
+            let active: HashSet<Uuid> = readers(engine, store, &manifest.members)
+                .await?
+                .iter()
+                .map(|cert| cert.device_id)
+                .collect();
+            let gone = (sealed.key_version == manifest.key_version
+                && sealed.devices.iter().any(|d| !active.contains(d)))
+                || manifest
+                    .members
+                    .iter()
+                    .any(|m| revoked_since.get(&m.account).copied().unwrap_or(false));
+            if gone {
+                let members = manifest.members.clone();
+                rotate(
+                    engine,
+                    store,
+                    vault,
+                    vec![(manifest, key, members)],
+                    None,
+                    now,
+                )
+                .await
+            } else {
+                reseal_envelopes(engine, store, area).await.map(|_| ())
+            }
+        }
+        .await;
+        match outcome {
+            Ok(()) => {}
+            Err(err) if fatal(&err) => return Err(err),
+            Err(err) => problems.push(format!("area {}: {err}", area.0)),
         }
     }
-    Ok(())
+    Ok(problems)
+}
+
+/// Errors that end a sync pass instead of being reported per area.
+fn fatal(err: &SyncError) -> bool {
+    matches!(
+        err,
+        SyncError::Network(_) | SyncError::Revoked | SyncError::Blocked
+    )
 }
 
 fn seal_all(

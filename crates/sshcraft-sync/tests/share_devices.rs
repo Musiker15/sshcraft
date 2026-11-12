@@ -101,3 +101,60 @@ async fn nothing_to_do_without_changes() {
         0
     );
 }
+
+#[tokio::test]
+async fn a_revocation_is_noticed_by_an_owner_device_that_missed_the_last_rotation() {
+    let server = TestServer::start().await;
+    let (a, a2, a3, b, b2) = (Dev::new(), Dev::new(), Dev::new(), Dev::new(), Dev::new());
+    let export_a = create(&server, &a, "a@example.org").await;
+    join(&server, &a2, &export_a).await;
+    join(&server, &a3, &export_a).await;
+    let export_b = create(&server, &b, "b@example.org").await;
+    join(&server, &b2, &export_b).await;
+    let mut ea = engine(&a).await;
+    let (manifest, _) = create_area(&ea, &a.store, vec![member(&b, Role::Read)])
+        .await
+        .unwrap();
+    sync(&a2).await;
+    // A rotates without A2 (revoking A3), then B revokes its second device.
+    revoke_device(&mut ea, &a.store, &a.vault, a3.row().device_id, 10)
+        .await
+        .unwrap();
+    let gone = b2.row().device_id;
+    assert!(envelope_count(&server, manifest.area_id, gone).await);
+    let mut eb = engine(&b).await;
+    revoke_device(&mut eb, &b.store, &b.vault, gone, 11)
+        .await
+        .unwrap();
+    // Only A2 syncs.
+    sync(&a2).await;
+    assert_eq!(stored_area(&a2, manifest.area_id.0).0.key_version, 3);
+    assert!(!envelope_count(&server, manifest.area_id, gone).await);
+}
+
+#[tokio::test]
+async fn one_members_bad_log_does_not_stop_the_owners_sync() {
+    let server = TestServer::start().await;
+    let (a, b, c, c2) = (Dev::new(), Dev::new(), Dev::new(), Dev::new());
+    create(&server, &a, "a@example.org").await;
+    create(&server, &b, "b@example.org").await;
+    let export_c = create(&server, &c, "c@example.org").await;
+    join(&server, &c2, &export_c).await;
+    let e = engine(&a).await;
+    create_area(
+        &e,
+        &a.store,
+        vec![member(&b, Role::Read), member(&c, Role::Read)],
+    )
+    .await
+    .unwrap();
+    sync(&a).await;
+    common::server_sql(
+        &server,
+        "DELETE FROM log_entries WHERE account = ?1 AND seq = (SELECT MAX(seq) FROM log_entries WHERE account = ?1)",
+        [common::account(&c).0.to_vec()],
+    );
+    let mut e = engine(&a).await;
+    let report = e.pull(&a.store, &a.vault).await.expect("the pull goes on");
+    assert!(!report.rejected.is_empty(), "{report:?}");
+}

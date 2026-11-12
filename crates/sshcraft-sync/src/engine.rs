@@ -69,6 +69,17 @@ pub struct PullReport {
     pub rejected: Vec<String>,
 }
 
+/// One lock per server: a sync pass and a share or device command on the same server run one
+/// after the other, so they never work on the same rotation or listing at once.
+pub fn server_lock(server: ServerId) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<
+        Mutex<HashMap<ServerId, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    let locks = LOCKS.get_or_init(Mutex::default);
+    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(server).or_default().clone()
+}
+
 /// A logged-in connection to one server, with this device's keys.
 pub struct Engine {
     pub server: ServerId,
@@ -180,25 +191,46 @@ impl Engine {
         store: &Mutex<Store>,
         account: &AccountPublic,
     ) -> Result<DeviceSet, SyncError> {
-        if *account == self.account {
-            return Ok(self.own_devices(store).await?.0);
-        }
-        let entries = self.revoked_check(store, self.client.log(account, 0).await)?;
-        let log = DeviceLog { entries };
-        let setting = format!(
+        Ok(self.account_log(store, account).await?.0)
+    }
+
+    fn head_setting(&self, account: &AccountPublic) -> String {
+        format!(
             "sync.head.{}.{}",
             self.server.0,
             data_encoding::BASE64URL_NOPAD.encode(&account.0)
-        );
-        let known: Option<LogHead> = match lock(store)?.get_setting(&setting)? {
-            Some(text) if !text.is_empty() => Some(from_json(&text)?),
-            _ => None,
-        };
+        )
+    }
+
+    /// The head of another account's log this device accepted last, if any.
+    pub(crate) fn known_head(
+        &self,
+        store: &Mutex<Store>,
+        account: &AccountPublic,
+    ) -> Result<Option<LogHead>, SyncError> {
+        match lock(store)?.get_setting(&self.head_setting(account))? {
+            Some(text) if !text.is_empty() => Ok(Some(from_json(&text)?)),
+            _ => Ok(None),
+        }
+    }
+
+    /// [`Engine::account_devices`] with the log itself.
+    pub(crate) async fn account_log(
+        &self,
+        store: &Mutex<Store>,
+        account: &AccountPublic,
+    ) -> Result<(DeviceSet, DeviceLog), SyncError> {
+        if *account == self.account {
+            return self.own_devices(store).await;
+        }
+        let entries = self.revoked_check(store, self.client.log(account, 0).await)?;
+        let log = DeviceLog { entries };
+        let known = self.known_head(store, account)?;
         let set = log.verify_extends(account, known.as_ref())?;
         if let Some(head) = set.head() {
-            lock(store)?.put_setting(&setting, &to_json(&head)?)?;
+            lock(store)?.put_setting(&self.head_setting(account), &to_json(&head)?)?;
         }
-        Ok(set)
+        Ok((set, log))
     }
 
     /// The stored, verified manifest of an area and its key, opened with this device's envelope.
@@ -556,7 +588,8 @@ impl Engine {
             self.take_assignment(store, &assignment, &header)?;
         }
         // Members' devices come and go; own shares follow.
-        crate::areas::check_member_devices(self, store, vault, now_secs()).await?;
+        let problems = crate::areas::check_member_devices(self, store, vault, now_secs()).await?;
+        report.rejected.extend(problems);
         Ok(report)
     }
 
@@ -933,7 +966,17 @@ impl Engine {
                 let put = match step {
                     Step::Refuse(warning, known) => {
                         self.warnings.push(warning.to_owned());
-                        self.restore(store, vault, kind, &id, known).await?;
+                        // An item that cannot be put back is reported and skipped; the rest of
+                        // the outbox still goes.
+                        match self.restore(store, vault, kind, &id, known).await {
+                            Ok(()) => {}
+                            Err(
+                                err @ (SyncError::Network(_)
+                                | SyncError::Revoked
+                                | SyncError::Blocked),
+                            ) => return Err(err),
+                            Err(err) => self.warnings.push(format!("restore_failed: {err}")),
+                        }
                         break;
                     }
                     Step::Leave(entry, modified_at) => {
@@ -1114,6 +1157,16 @@ impl Engine {
                 return Ok(false);
             }
             return take_into_original(&store, self.server, area, &item);
+        }
+        // In a received selection only the owner adds or removes items; other members only
+        // change existing ones (a first version is a new record).
+        if let Some(share) = store
+            .share(self.server, area)?
+            .filter(|s| !s.owned && s.kind != ShareKind::GroupAll)
+            && header.author_account.0 != share.owner
+            && (deleted || header.version == 1)
+        {
+            return Ok(false);
         }
         // A deletion from an area the item has left (it moved into or out of a share) is not
         // about the item any more.

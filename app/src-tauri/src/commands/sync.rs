@@ -212,6 +212,7 @@ pub async fn revoke_sync_device(
     id: ServerId,
     device_id: Uuid,
 ) -> CommandResult<()> {
+    let _turn = sshcraft_sync::engine::server_lock(id).lock_owned().await;
     let vault = vault(&state)?;
     let mut engine = Engine::load(&state.store, &vault, id)
         .await
