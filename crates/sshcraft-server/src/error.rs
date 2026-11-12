@@ -1,5 +1,6 @@
 //! Error answers: always JSON `{"code": "...", "detail": "..."}`, never prose for people.
 
+use crate::store::StoreError;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::StatusCode;
@@ -93,6 +94,19 @@ impl IntoResponse for ApiError {
             _ => {}
         }
         (self.status(), axum::Json(body)).into_response()
+    }
+}
+
+impl From<StoreError> for ApiError {
+    fn from(err: StoreError) -> Self {
+        match err {
+            StoreError::Conflict { current } => Self::Conflict { current },
+            StoreError::EmailTaken => Self::EmailTaken,
+            StoreError::AccountExists => Self::AccountExists,
+            StoreError::DeviceIdTaken => Self::DeviceIdTaken,
+            StoreError::NotFound => Self::NotFound,
+            StoreError::Backend(cause) => Self::internal(cause),
+        }
     }
 }
 

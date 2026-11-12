@@ -20,6 +20,8 @@ rand = { workspace = true }
 data-encoding = { workspace = true }
 tokio-postgres = { workspace = true }
 deadpool-postgres = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

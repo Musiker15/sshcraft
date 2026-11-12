@@ -3,6 +3,7 @@
 //! The server stores accounts, device logs, areas, key envelopes and sealed records and pushes
 //! change notices to connected devices. It never sees a private key or a plaintext record.
 
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod hub;

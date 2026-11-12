@@ -2,28 +2,132 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use data_encoding::BASE64URL_NOPAD;
 use http_body_util::BodyExt;
 use sshcraft_proto::devicelog::{DeviceLog, LogEntry};
 use sshcraft_proto::identity::{AccountKey, AccountPublic, DeviceCertificate, DeviceKeys};
 use sshcraft_server::store::{AccountRow, Store};
 use sshcraft_server::{AppState, app};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 use tower::ServiceExt;
 use uuid::Uuid;
 
 pub const ORIGIN: &str = "https://sync.example.org";
 
+/// Start of the test clock (Unix seconds).
+pub const T0: i64 = 1_800_000_000;
+
 pub struct TestEnv {
     pub state: AppState,
+    clock: Arc<AtomicI64>,
     _dir: tempfile::TempDir,
 }
 
 impl TestEnv {
     pub async fn new() -> Self {
         let (store, dir) = fresh_sqlite().await;
-        let state = AppState::new(store, ORIGIN.to_owned(), Duration::from_secs(30));
-        Self { state, _dir: dir }
+        let clock = Arc::new(AtomicI64::new(T0));
+        let ticks = clock.clone();
+        let state = AppState::new(store, ORIGIN.to_owned(), Duration::from_secs(30))
+            .with_clock(move || ticks.load(Ordering::SeqCst));
+        Self {
+            state,
+            clock,
+            _dir: dir,
+        }
+    }
+
+    /// Moves the server clock forward.
+    pub fn advance(&self, seconds: i64) {
+        self.clock.fetch_add(seconds, Ordering::SeqCst);
+    }
+
+    pub async fn api_key(&self) -> String {
+        self.store().api_key().await.expect("api key").0
+    }
+
+    /// `POST /v1/accounts` for the person's account and first device, with the API key.
+    pub async fn register(&self, person: &Person) -> (StatusCode, serde_json::Value) {
+        let key = self.api_key().await;
+        let body = serde_json::json!({
+            "account": person.public(),
+            "name": person.name,
+            "email": person.email,
+            "log": DeviceLog { entries: vec![person.log.entries[0].clone()] },
+        });
+        self.request(
+            Method::POST,
+            "/v1/accounts",
+            &[("x-api-key", &key)],
+            Some(body),
+        )
+        .await
+    }
+
+    /// Registers and panics unless the server answers 201.
+    pub async fn register_ok(&self, person: &Person) {
+        let (status, body) = self.register(person).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+
+    /// Fetches a challenge and logs device `device` in, signed for `origin`.
+    pub async fn login_for(
+        &self,
+        person: &Person,
+        device: usize,
+        api_key: Option<&str>,
+        origin: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let (_, challenge) = self
+            .request(Method::POST, "/v1/auth/challenge", &[], None)
+            .await;
+        let challenge = challenge["challenge"]
+            .as_str()
+            .expect("challenge")
+            .to_owned();
+        let bytes = BASE64URL_NOPAD.decode(challenge.as_bytes()).expect("b64");
+        let dev = &person.devices[device];
+        let signature = dev.keys.sign_auth(&bytes, dev.id, origin);
+        let body = serde_json::json!({
+            "device_id": dev.id,
+            "challenge": challenge,
+            "signature": BASE64URL_NOPAD.encode(&signature),
+        });
+        let headers: Vec<(&str, &str)> = api_key.map(|k| ("x-api-key", k)).into_iter().collect();
+        self.request(Method::POST, "/v1/auth/login", &headers, Some(body))
+            .await
+    }
+
+    pub async fn login(
+        &self,
+        person: &Person,
+        device: usize,
+        api_key: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        self.login_for(person, device, api_key, ORIGIN).await
+    }
+
+    /// Logs in with the API key and returns the session token.
+    pub async fn token(&self, person: &Person, device: usize) -> String {
+        let key = self.api_key().await;
+        let (status, body) = self.login(person, device, Some(&key)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["token"].as_str().expect("token").to_owned()
+    }
+
+    /// A request with `Authorization: Bearer <token>`.
+    pub async fn authed(
+        &self,
+        token: &str,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> (StatusCode, serde_json::Value) {
+        let bearer = format!("Bearer {token}");
+        self.request(method, path, &[("authorization", &bearer)], body)
+            .await
     }
 
     pub fn store(&self) -> &dyn Store {
