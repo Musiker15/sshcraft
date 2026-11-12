@@ -4845,7 +4845,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "data-encoding",
  "http-body-util",
+ "rand 0.10.3",
+ "rusqlite",
  "serde",
  "serde_json",
  "sshcraft-proto",
