@@ -11,6 +11,7 @@ pub mod devices;
 pub mod engine;
 pub mod items;
 pub mod runtime;
+pub mod shares;
 
 use sshcraft_proto::ProtoError;
 

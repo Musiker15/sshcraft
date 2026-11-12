@@ -333,3 +333,48 @@ pub fn server_sql(server: &TestServer, sql: &str, params: impl rusqlite::Params)
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute(sql, params).unwrap();
 }
+
+/// Seals an item as a record written by `dev` in `area` (with the key `dev` stored for it).
+pub fn seal_in(
+    dev: &Dev,
+    area: Uuid,
+    body: ItemBody,
+    record_id: Uuid,
+    version: u64,
+    modified_at: i64,
+) -> SealedRecord {
+    let row = dev.row();
+    let (manifest, key) = stored_area(dev, area);
+    let item = SyncItem { modified_at, body };
+    let header = RecordHeader {
+        record_id,
+        area_id: manifest.area_id,
+        version,
+        key_version: manifest.key_version,
+        author_account: sshcraft_proto::identity::AccountPublic(row.account),
+        author_device: row.device_id,
+    };
+    SealedRecord::seal(header, &encode(&item).unwrap(), &key, &dev.keys())
+}
+
+/// Puts a record into the server's database directly, as a compromised server could.
+pub fn inject_record(server: &TestServer, record: &SealedRecord) {
+    server_sql(
+        server,
+        "INSERT INTO records (area_id, record_id, version, seq, record)
+         VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(seq), 0) + 1 FROM records WHERE area_id = ?1), ?4)",
+        rusqlite::params![
+            record.header.area_id.0.to_string(),
+            record.header.record_id.to_string(),
+            record.header.version as i64,
+            serde_json::to_string(record).unwrap()
+        ],
+    );
+}
+
+pub fn member(dev: &Dev, role: sshcraft_proto::area::Role) -> sshcraft_proto::area::Member {
+    sshcraft_proto::area::Member {
+        account: account(dev),
+        role,
+    }
+}

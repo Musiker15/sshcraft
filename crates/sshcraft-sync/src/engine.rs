@@ -8,13 +8,17 @@ use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
 use crate::items::{ItemBody, apply, decode, encode, local_item, newer};
+use crate::shares::{ShareInfo, decode_share_info};
 use sshcraft_core::model::ServerId;
-use sshcraft_core::store::{ItemKind, RecordEntry, ServerRow, Store};
+use sshcraft_core::store::{
+    ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
+};
 use sshcraft_core::vault::Vault;
-use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, open_area_key};
+use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, Role, open_area_key};
 use sshcraft_proto::devicelog::{DeviceLog, DeviceSet, LogHead};
 use sshcraft_proto::identity::{AccountPublic, DeviceKeys};
 use sshcraft_proto::record::{Freshness, RecordHeader, SealedRecord, VersionTracker};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
@@ -272,7 +276,103 @@ impl Engine {
         Ok(Some((manifest, key)))
     }
 
-    /// Fetches everything that changed on the server and applies what verifies.
+    /// The verified devices of `account`, fetched once per pull.
+    async fn devices_cached(
+        &self,
+        store: &Mutex<Store>,
+        cache: &mut HashMap<AccountPublic, DeviceSet>,
+        account: &AccountPublic,
+    ) -> Result<DeviceSet, SyncError> {
+        if let Some(set) = cache.get(account) {
+            return Ok(set.clone());
+        }
+        let set = self.account_devices(store, account).await?;
+        cache.insert(*account, set.clone());
+        Ok(set)
+    }
+
+    /// Shares the server no longer lists. A received one means this account was removed or the
+    /// share ended: its items go (design, section 8, the recipient loses access). An own one
+    /// was ended on another device and only loses its bookkeeping here.
+    fn drop_lost_shares(
+        &self,
+        store: &Mutex<Store>,
+        listed: &HashSet<Uuid>,
+    ) -> Result<(), SyncError> {
+        let guard = lock(store)?;
+        for share in guard.shares(self.server)? {
+            if listed.contains(&share.area_id) {
+                continue;
+            }
+            if !share.owned {
+                for (kind, id) in guard.items_in_area(self.server, share.area_id)? {
+                    remove_item(&guard, kind, &id)?;
+                }
+            }
+            guard.forget_area(self.server, share.area_id)?;
+        }
+        Ok(())
+    }
+
+    /// Remembers what this device learns about a share from its verified manifest.
+    fn note_share(&self, store: &Mutex<Store>, manifest: &AreaManifest) -> Result<(), SyncError> {
+        let guard = lock(store)?;
+        let owned = manifest.owner == self.account;
+        if owned && manifest.members.is_empty() {
+            return Ok(());
+        }
+        let role = if owned {
+            None
+        } else {
+            match manifest.members.iter().find(|m| m.account == self.account) {
+                Some(m) => Some(match m.role {
+                    Role::Read => ShareRole::Read,
+                    Role::Write => ShareRole::Write,
+                }),
+                None => return Ok(()),
+            }
+        };
+        let existing = guard.share(self.server, manifest.area_id.0)?;
+        guard.put_share(
+            self.server,
+            &ShareRow {
+                area_id: manifest.area_id.0,
+                // Until the owner's share info arrives, the strictest rules apply.
+                kind: existing.as_ref().map_or(ShareKind::Selection, |s| s.kind),
+                group_id: existing.as_ref().and_then(|s| s.group_id.clone()),
+                with_keys: existing.as_ref().is_some_and(|s| s.with_keys),
+                owned,
+                role,
+                owner: manifest.owner.0,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn note_share_info(
+        &self,
+        store: &Mutex<Store>,
+        manifest: &AreaManifest,
+        info: ShareInfo,
+    ) -> Result<(), SyncError> {
+        self.note_share(store, manifest)?;
+        let guard = lock(store)?;
+        if let Some(share) = guard.share(self.server, manifest.area_id.0)? {
+            guard.put_share(
+                self.server,
+                &ShareRow {
+                    kind: info.kind,
+                    group_id: info.group,
+                    with_keys: info.with_keys,
+                    ..share
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Fetches everything that changed on the server and applies what verifies: the personal
+    /// area, own shares and shares of other accounts this account is a member of.
     pub async fn pull(
         &mut self,
         store: &Mutex<Store>,
@@ -283,17 +383,25 @@ impl Engine {
         crate::areas::resume_rotation(self, store, vault, now_secs()).await?;
         let (devices, _) = self.own_devices(store).await?;
         let mut tracker = self.tracker(store)?;
+        let mut cache = HashMap::from([(self.account, devices.clone())]);
         let listings = self.revoked_check(store, self.client.areas().await)?;
+        let listed: HashSet<Uuid> = listings.iter().map(|l| l.manifest.area_id.0).collect();
+        self.drop_lost_shares(store, &listed)?;
+        let personal = self.personal_area(store).ok().map(|(m, _)| m.area_id.0);
+        let sync_keys = lock(store)?
+            .server(self.server)?
+            .is_some_and(|row| row.sync_keys);
         for listing in listings {
-            // Shares from other accounts come with Teilplan 7.
-            if listing.owner != self.account {
-                continue;
-            }
             let area_id = listing.manifest.area_id;
-            let (manifest, key) = match self
-                .open_area(store, listing.manifest, &devices, &mut tracker)
-                .await
-            {
+            let owner = listing.manifest.owner;
+            let opened = match self.devices_cached(store, &mut cache, &owner).await {
+                Ok(owner_devices) => {
+                    self.open_area(store, listing.manifest, &owner_devices, &mut tracker)
+                        .await
+                }
+                Err(err) => Err(err),
+            };
+            let (manifest, key) = match opened {
                 Ok(Some(opened)) => opened,
                 Ok(None) => {
                     report
@@ -301,20 +409,18 @@ impl Engine {
                         .push(format!("area {}: no key for this device", area_id.0));
                     continue;
                 }
-                Err(err @ SyncError::Proto(_)) => {
+                Err(err) if skippable(&err) => {
                     report.rejected.push(format!("area {}: {err}", area_id.0));
                     continue;
                 }
                 Err(err) => return Err(err),
             };
+            self.note_share(store, &manifest)?;
             let mut cursor = lock(store)?
                 .areas(self.server)?
                 .into_iter()
                 .find(|a| a.area_id == area_id.0)
                 .map_or(0, |a| a.cursor);
-            let sync_keys = lock(store)?
-                .server(self.server)?
-                .is_some_and(|row| row.sync_keys);
             // A record that verified but could not be applied yet (its group not here yet, for
             // example) is fetched again next time: the stored cursor stays before it.
             let mut retry_from: Option<u64> = None;
@@ -324,23 +430,36 @@ impl Engine {
                 for (seq, record) in records {
                     cursor = cursor.max(seq);
                     let record_id = record.header.record_id;
-                    // Records of other accounts (members) come with Teilplan 7.
-                    if record.header.author_account != self.account {
-                        report
-                            .rejected
-                            .push(format!("record {record_id}: not allowed"));
-                        continue;
-                    }
+                    let author = record.header.author_account;
+                    let author_devices = match self.devices_cached(store, &mut cache, &author).await
+                    {
+                        Ok(set) => set,
+                        Err(err) if skippable(&err) => {
+                            report.rejected.push(format!("record {record_id}: {err}"));
+                            continue;
+                        }
+                        Err(err) => return Err(err),
+                    };
                     // Keys are skipped uncounted while key sync is off, so turning it on (which
                     // fetches from the start) still brings them.
-                    if !sync_keys && is_key_record(&record, &key, &manifest, &devices) {
+                    if !sync_keys && is_key_record(&record, &key, &manifest, &author_devices) {
                         continue;
                     }
                     let before = tracker.clone();
-                    match tracker.accept_record(&record, &key, &manifest, &devices) {
+                    match tracker.accept_record(&record, &key, &manifest, &author_devices) {
                         Ok((Freshness::Unchanged, _)) => {}
                         Ok((Freshness::New, body)) => {
-                            match self.take(store, vault, &record.header, &body) {
+                            if let Some(info) = decode_share_info(&body) {
+                                if author == manifest.owner {
+                                    self.note_share_info(store, &manifest, info)?;
+                                } else {
+                                    report
+                                        .rejected
+                                        .push(format!("record {record_id}: not allowed"));
+                                }
+                                continue;
+                            }
+                            match self.take(store, vault, &record.header, &body, personal) {
                                 Ok(true) => report.applied += 1,
                                 Ok(false) => {}
                                 Err(err) => {
@@ -472,21 +591,34 @@ impl Engine {
         vault: &Vault,
         header: &RecordHeader,
         body: &[u8],
+        personal: Option<Uuid>,
     ) -> Result<bool, SyncError> {
         let item = decode(body)?;
         let (kind, item_id) = item.item();
         let store = lock(store)?;
+        let area = header.area_id.0;
         let entry = RecordEntry {
             record_id: header.record_id,
-            area_id: header.area_id.0,
+            area_id: area,
             version: header.version,
             modified_at: item.modified_at,
         };
+        let deleted = matches!(item.body, ItemBody::Deleted { .. });
+        // A deletion from an area the item has left (it moved into or out of a share) is not
+        // about the item any more.
+        if deleted
+            && store.item_location(kind, &item_id)?.is_some()
+            && store
+                .effective_area(self.server, kind, &item_id)?
+                .or(personal)
+                != Some(area)
+        {
+            return Ok(false);
+        }
         let local_wins = store
             .queued_at(self.server, kind, &item_id)?
             .is_some_and(|queued| newer(queued, item.modified_at));
         let sync_keys = store.server(self.server)?.is_some_and(|row| row.sync_keys);
-        let deleted = matches!(item.body, ItemBody::Deleted { .. });
         // Where the item is here decides whether this server may touch it: an item this device
         // keeps only locally is not this server's business; one at another server is taken
         // over by a live record (it was moved here) but not removed by a deletion (it was moved
@@ -501,10 +633,35 @@ impl Engine {
             return Ok(false);
         }
         apply(&store, vault, self.server, &item)?;
+        if deleted || Some(area) == personal {
+            store.clear_item_area(self.server, kind, &item_id)?;
+        } else if store.effective_area(self.server, kind, &item_id)? != Some(area) {
+            store.set_item_area(self.server, kind, &item_id, area)?;
+        }
         store.put_record_entry(self.server, &entry, kind, &item_id)?;
         store.dequeue(self.server, kind, &item_id)?;
         Ok(true)
     }
+}
+
+/// Errors that make one area or record unusable but not the whole pull: it did not verify, or
+/// its account is gone from the server.
+fn skippable(err: &SyncError) -> bool {
+    matches!(
+        err,
+        SyncError::Proto(_) | SyncError::Server { status: 404, .. }
+    )
+}
+
+/// Removes an item that came with a share this account lost.
+fn remove_item(store: &Store, kind: ItemKind, id: &str) -> Result<(), SyncError> {
+    let uuid = Uuid::parse_str(id).map_err(|e| SyncError::Store(e.to_string()))?;
+    match kind {
+        ItemKind::Group => store.delete_group(sshcraft_core::model::GroupId(uuid))?,
+        ItemKind::Host => store.delete_host(sshcraft_core::model::HostId(uuid))?,
+        ItemKind::Key => store.delete_key_record(sshcraft_core::model::KeyId(uuid))?,
+    }
+    Ok(())
 }
 
 /// Whether a record holds a key, read without counting it in the tracker.

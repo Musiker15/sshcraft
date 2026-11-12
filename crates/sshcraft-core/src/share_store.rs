@@ -441,6 +441,22 @@ impl Store {
         Ok(())
     }
 
+    /// Forgets an area on this device: the share, its copies, item areas, record entries and
+    /// the stored manifest and key.
+    pub fn forget_area(&self, server: ServerId, area: Uuid) -> Result<(), StoreError> {
+        self.remove_share(server, area)?;
+        let (s, a) = (server.0.to_string(), area.to_string());
+        self.conn.execute(
+            "DELETE FROM sync_records WHERE server_id = ?1 AND area_id = ?2",
+            params![s, a],
+        )?;
+        self.conn.execute(
+            "DELETE FROM sync_areas WHERE server_id = ?1 AND area_id = ?2",
+            params![s, a],
+        )?;
+        Ok(())
+    }
+
     pub fn put_copy(
         &self,
         server: ServerId,
