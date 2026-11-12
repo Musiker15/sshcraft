@@ -138,6 +138,24 @@ Only the owner's devices can sign a manifest, so only the owner can rotate an ar
 member revokes one of their own devices, the owner's client has to notice it in the member's
 device log and rotate every area it shares with that member.
 
+The client reads the device log of every member and author it meets, and checks it against the
+head it accepted before for that account, as for its own log, so a server cannot roll a member's
+log back.
+
+**Owner change.** When the server deletes an owner, it hands each area with a writing member to
+the first such member (design, section 12). The server's area listing then names the new owner
+while the stored manifest still names the old one. The new owner's client signs a manifest with
+itself as owner, only if the manifest it verified before names it as a member with `write`, and
+rotates the key. Other members accept a manifest whose owner differs from the one they verified
+before only if the new owner was a member with `write` in it.
+
+**Share info and copies.** A share's area holds one record written by the owner, id
+`copy_id(area, area)`, that says what the share holds (`group_all`, `selection` or `host`), the
+shared group and whether keys go along. Members take it only from the owner. A copy of an item
+in share `area` has the id `copy_id(area, original)`: SHA-256 over `"sshcraft-copy" || area ||
+original`, the first 16 bytes made into a UUID version 4. Every device of the owner can tell
+which copy belongs to which original from that; a member only sees the copy.
+
 After a rotation, and after a device is revoked, records written under the old key version or
 by the revoked device no longer open: `open` requires the current key version and an active
 author device. They have to be re-sealed by an active device under the new key.

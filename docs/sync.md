@@ -86,6 +86,47 @@ operator*, keeps trying, and syncs again once the block is lifted.
 With key sync off, the key a host uses is chosen on each device: it is not sent to the server,
 and another device's choice does not replace it.
 
+## Sharing
+
+A host or a group at a server can be shared with other accounts on the **same** server:
+right-click it on the hosts page and choose *Share*. Each share is an area of its own with the
+recipients as members; the server sees who shares with whom, never what.
+
+**What goes along.** A group can be shared with *all hosts*: the group itself moves into the
+share, and hosts added to it later go along. Or with *only these hosts*: the share then holds
+copies of the group and the picked hosts, and a single host is shared the same way. The owner's
+devices keep each copy in step with its original in both directions, last change wins. Keys go
+along only when asked for, and keys from the SSH agent (Proton Pass) never do; the recipient then
+assigns a key of their own, which stays on their device.
+
+**Roles.** *Read* shows the items; changes the recipient makes are not sent and are reset to the
+owner's state. *Read and change* sends changes back. In a share of some hosts or of one host,
+changing is all a recipient may do: adding and removing hosts needs a group shared with all
+hosts. Recipients can never share further, move or delete a shared group.
+
+**Safety number.** Recipients are found by e-mail, but the e-mail is only a search term: what
+counts is the account key. Before the first share the app shows the recipient's safety number
+(six groups of five digits). Compare it over another channel, by phone or in person, and tick
+that you did. The app remembers the key. If the server later names another key for the same
+e-mail, the app warns, shows the old and the new number and does not share until the new one is
+accepted on its own.
+
+**Taking someone out.** *Settings → Sync → Shares* lists the own shares with their recipients
+and roles, and the shares received. Removing a recipient replaces the share's key at once, so
+they cannot read what follows; their copy of the items goes on their next sync. The others need
+not do anything. If keys were shared, they may have been copied: the app says so, replace them on
+your servers. *End share* returns a group shared with all hosts to the personal area and deletes
+copies.
+
+**Devices of recipients.** When a recipient sets up a new device, it can read the share once the
+owner's app has synced. When a recipient revokes a device, the owner's app notices it in their
+device log on its next sync and replaces the share's key.
+
+**Owner deleted.** If the server's operator deletes the owner's account, the share goes to the
+first recipient who may change it (see [server.md](server.md)). That recipient's app signs the
+share anew as its owner with a new key; the other recipients accept the change only because the
+new owner was a recipient with *read and change* before.
+
 ## What the app refuses
 
 The app verifies everything that comes from the server: the device log must extend the state it
