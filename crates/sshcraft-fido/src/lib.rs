@@ -17,6 +17,8 @@ pub mod cose;
 pub mod signature;
 #[cfg(feature = "testing")]
 pub mod soft;
+#[cfg(windows)]
+pub mod webauthn;
 
 /// The application (WebAuthn relying party) of every key, as with OpenSSH.
 pub const SSH_APPLICATION: &str = "ssh:";

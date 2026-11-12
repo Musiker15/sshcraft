@@ -22,6 +22,9 @@ p256 = "0.14.0"
 ed25519-dalek = { workspace = true, optional = true }
 rand = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Networking_WindowsWebServices"] }
+
 [dev-dependencies]
 sshcraft-fido = { path = ".", features = ["testing"] }
 sshcraft-ssh = { workspace = true, features = ["testing"] }
