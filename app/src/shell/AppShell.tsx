@@ -19,15 +19,16 @@ import {
 import { GroupForm } from "../components/GroupForm";
 import { HostForm } from "../components/HostForm";
 import { HostKeyDialog } from "../components/HostKeyDialog";
-import { KeyManager } from "../components/KeyManager";
 import { SessionStatusLine } from "../components/SessionStatusLine";
 import { SshConfigImport } from "../components/SshConfigImport";
 import { TerminalView } from "../components/TerminalView";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
+import { KeysPage } from "../pages/KeysPage";
 import { NewTabPage } from "../pages/NewTabPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
+import { SettingsPage } from "../pages/SettingsPage";
 import { initialTabs, tabsReducer } from "../state/tabs";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Drawer } from "./Drawer";
@@ -191,10 +192,9 @@ export function AppShell() {
                   onImportSshConfig={() => setEditor({ kind: "sshconfig" })}
                 />
               )}
-              {page === "keys" && <KeyManager keys={keys} onChanged={reload} onClose={() => setPage("hosts")} />}
-              {(page === "snippets" || page === "forwarding" || page === "logs" || page === "settings") && (
-                <PlaceholderPage page={page} />
-              )}
+              {page === "keys" && <KeysPage keys={keys} onChanged={() => void reload()} />}
+              {page === "settings" && <SettingsPage />}
+              {(page === "snippets" || page === "forwarding" || page === "logs") && <PlaceholderPage page={page} />}
             </main>
           </div>
         )}
