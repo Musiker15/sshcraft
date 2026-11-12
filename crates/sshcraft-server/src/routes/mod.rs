@@ -1,6 +1,7 @@
 //! The HTTP routes under `/v1`.
 
 pub(crate) mod accounts;
+pub(crate) mod areas;
 mod devicelog;
 mod login;
 mod server;
@@ -9,7 +10,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 
 /// Largest accepted request body.
 pub const BODY_LIMIT: usize = 1 << 20;
@@ -26,6 +27,11 @@ pub fn app(state: AppState) -> Router {
             "/v1/accounts/{account}/log",
             get(devicelog::read).post(devicelog::append),
         )
+        .route("/v1/areas", get(areas::list))
+        .route("/v1/areas/{area}", delete(areas::delete))
+        .route("/v1/areas/{area}/manifest", put(areas::put_manifest))
+        .route("/v1/areas/{area}/envelopes", put(areas::put_envelopes))
+        .route("/v1/areas/{area}/envelope", get(areas::my_envelope))
         .route("/v1/auth/challenge", post(login::challenge))
         .route("/v1/auth/login", post(login::login))
         .fallback(|| async { ApiError::NotFound })

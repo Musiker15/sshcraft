@@ -157,7 +157,8 @@ that opened and manifests that verified are counted (`VersionTracker::accept_rec
 Two rules keep normal offline edits from looking like a fork:
 
 - the server accepts a new version of an id only as `previous + 1` (compare and swap) and
-  rejects the second of two concurrent writes;
+  rejects the second of two concurrent writes; a new record and a new area manifest start at
+  version 1;
 - a client counts its own write only after the server acknowledged it. A rejected write is a
   conflict: the client fetches the current version, merges ("last change wins" per item) and
   writes `current + 1`.
