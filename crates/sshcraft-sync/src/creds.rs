@@ -157,8 +157,52 @@ fn foreign(
     Ok(elsewhere || other_area)
 }
 
+/// Whether two proxies lead to the same place (kind, address, port and user); the password
+/// reference does not count.
+pub fn same_proxy_endpoint(a: &Option<Proxy>, b: &Option<Proxy>) -> bool {
+    let strip = |p: &Option<Proxy>| {
+        p.clone().map(|mut p| {
+            if let Proxy::Http(e) | Proxy::Socks5(e) = &mut p {
+                e.password = None;
+            }
+            p
+        })
+    };
+    strip(a) == strip(b)
+}
+
+/// Removes passwords no host, group or identity on this device refers to any more, and queues
+/// their removal.
+pub(crate) fn drop_unreferenced(store: &Store, ids: &[PasswordId]) -> Result<(), SyncError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut used: Vec<PasswordId> = Vec::new();
+    for host in store.list_hosts()? {
+        used.extend(host.settings.password_ids());
+    }
+    for group in store.list_groups()? {
+        used.extend(group.defaults.password_ids());
+    }
+    for identity in store.list_identities()? {
+        used.extend(identity.password);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    for id in ids {
+        if !used.contains(id) && store.password_record(*id)?.is_some() {
+            crate::engine::record_local_change(store, ItemKind::Password, &id.0.to_string(), now)?;
+            store.delete_password(*id)?;
+        }
+    }
+    Ok(())
+}
+
 /// Fills references a record does not carry with the local ones it could not have carried; a
-/// missing reference the record could have carried means "removed".
+/// missing reference the record could have carried means "removed". A local proxy password is
+/// only kept while the proxy still leads to the same place (`same_proxy`): a proxy that someone
+/// else pointed elsewhere never gets the owner's password.
 pub(crate) fn keep_local(
     store: &Store,
     server: ServerId,
@@ -166,6 +210,7 @@ pub(crate) fn keep_local(
     incoming: &mut CredentialRefs,
     area: Option<Uuid>,
     personal: Option<Uuid>,
+    same_proxy: bool,
 ) -> Result<(), SyncError> {
     let shared_area = area.is_some() && area != personal;
     if incoming.key.is_none() {
@@ -183,9 +228,14 @@ pub(crate) fn keep_local(
             _ => None,
         };
     }
+    let local_proxy = if same_proxy {
+        local.proxy_password
+    } else {
+        None
+    };
     for (incoming, local) in [
         (&mut incoming.password, local.password),
-        (&mut incoming.proxy_password, local.proxy_password),
+        (&mut incoming.proxy_password, local_proxy),
     ] {
         if incoming.is_none()
             && let Some(id) = local

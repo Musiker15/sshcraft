@@ -36,6 +36,8 @@ pub struct TestAuth {
     pub kbd: Vec<Vec<(String, bool, String)>>,
     /// The key alone is not enough: keyboard-interactive follows it.
     pub key_then_kbd: bool,
+    /// The password alone is not enough: keyboard-interactive follows it.
+    pub password_then_kbd: bool,
 }
 
 /// What clients sent to the test server.
@@ -133,7 +135,7 @@ impl TestServer {
         if self.auth.password.is_some() {
             methods.push(MethodKind::Password);
         }
-        if !self.auth.kbd.is_empty() && !self.auth.key_then_kbd {
+        if !self.auth.kbd.is_empty() && !self.auth.key_then_kbd && !self.auth.password_then_kbd {
             methods.push(MethodKind::KeyboardInteractive);
         }
         let config = Arc::new(server::Config {
@@ -249,6 +251,15 @@ impl server::Handler for Handler {
             .unwrap()
             .push(password.to_owned());
         if self.auth.password.as_deref() == Some(password) {
+            if self.auth.password_then_kbd {
+                self.key_ok = true;
+                return Ok(Auth::Reject {
+                    proceed_with_methods: Some(MethodSet::from(
+                        &[MethodKind::KeyboardInteractive][..],
+                    )),
+                    partial_success: true,
+                });
+            }
             Ok(Auth::Accept)
         } else {
             Ok(Auth::reject())
@@ -261,7 +272,8 @@ impl server::Handler for Handler {
         _submethods: &str,
         response: Option<server::Response<'a>>,
     ) -> Result<Auth, Self::Error> {
-        if self.auth.kbd.is_empty() || (self.auth.key_then_kbd && !self.key_ok) {
+        let staged = self.auth.key_then_kbd || self.auth.password_then_kbd;
+        if self.auth.kbd.is_empty() || (staged && !self.key_ok) {
             return Ok(Auth::reject());
         }
         let Some(response) = response else {

@@ -59,6 +59,10 @@ pub struct KeyAssignment {
     pub identity: Option<sshcraft_core::model::IdentityId>,
     #[serde(default)]
     pub proxy_password: Option<sshcraft_core::model::PasswordId>,
+    /// The proxy the proxy password belongs to; it is applied only while the item's proxy still
+    /// leads there.
+    #[serde(default)]
+    pub proxy: Option<sshcraft_core::model::Proxy>,
     pub modified_at: i64,
 }
 

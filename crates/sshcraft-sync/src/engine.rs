@@ -874,6 +874,22 @@ impl Engine {
             .unwrap_or(0)
             + 1;
         let (manifest, area_key) = self.stored_area(store, personal)?;
+        let proxy = {
+            let guard = lock(store)?;
+            match kind {
+                ItemKind::Host => guard
+                    .list_hosts()?
+                    .into_iter()
+                    .find(|h| h.id.0 == item)
+                    .and_then(|h| h.settings.proxy),
+                ItemKind::Group => guard
+                    .list_groups()?
+                    .into_iter()
+                    .find(|g| g.id.0 == item)
+                    .and_then(|g| g.defaults.proxy),
+                _ => None,
+            }
+        };
         let body = encode_key_assignment(&KeyAssignment {
             kind,
             item: id.to_owned(),
@@ -881,6 +897,7 @@ impl Engine {
             password: refs.password,
             identity: refs.identity,
             proxy_password: refs.proxy_password,
+            proxy,
             modified_at,
         });
         for _ in 0..CONFLICT_ROUNDS {
@@ -928,13 +945,26 @@ impl Engine {
         match assignment.kind {
             ItemKind::Host => {
                 if let Some(mut host) = guard.list_hosts()?.into_iter().find(|h| h.id.0 == uuid) {
-                    assignment.refs().apply_to_settings(&mut host.settings);
+                    let mut refs = assignment.refs();
+                    if !crate::creds::same_proxy_endpoint(&assignment.proxy, &host.settings.proxy) {
+                        refs.proxy_password =
+                            crate::creds::CredentialRefs::of_settings(&host.settings)
+                                .proxy_password;
+                    }
+                    refs.apply_to_settings(&mut host.settings);
                     guard.upsert_host(&host)?;
                 }
             }
             ItemKind::Group => {
                 if let Some(mut group) = guard.list_groups()?.into_iter().find(|g| g.id.0 == uuid) {
-                    assignment.refs().apply_to_settings(&mut group.defaults);
+                    let mut refs = assignment.refs();
+                    if !crate::creds::same_proxy_endpoint(&assignment.proxy, &group.defaults.proxy)
+                    {
+                        refs.proxy_password =
+                            crate::creds::CredentialRefs::of_settings(&group.defaults)
+                                .proxy_password;
+                    }
+                    refs.apply_to_settings(&mut group.defaults);
                     guard.upsert_group(&group)?;
                 }
             }
@@ -1438,7 +1468,7 @@ fn take_into_original(
     area: Uuid,
     item: &SyncItem,
 ) -> Result<bool, SyncError> {
-    use sshcraft_core::model::{KeyId, KeyRef, PasswordId, Proxy};
+    use sshcraft_core::model::{KeyId, KeyRef, Proxy};
     let (kind, copy) = item.item();
     let Some(original) = find_original(store, server, area, kind, &copy)? else {
         return Ok(false);
@@ -1453,12 +1483,6 @@ fn take_into_original(
         Ok(store
             .original_of(server, kind, &id.to_string())?
             .and_then(|o| Uuid::parse_str(&o).ok()))
-    };
-    let back_password = |p: Option<PasswordId>| -> Result<Option<PasswordId>, SyncError> {
-        Ok(match p {
-            Some(p) => back(ItemKind::Password, p.0)?.map(PasswordId),
-            None => None,
-        })
     };
     let uuid = Uuid::parse_str(&original).map_err(|e| SyncError::Store(e.to_string()))?;
     match &item.body {
@@ -1491,13 +1515,13 @@ fn take_into_original(
                 };
                 settings.key = picked.or(mine.settings.key.clone());
             }
-            if edited.password != sent.password {
-                settings.password = back_password(edited.password)?.or(mine.settings.password);
-            }
-            if edited.proxy != sent.proxy {
+            // Passwords are the owner's: a member cannot point the original to another one, so
+            // the original keeps its own. A proxy pointed elsewhere loses its password, so the
+            // owner's password never goes to a proxy someone else chose.
+            if !crate::creds::same_proxy_endpoint(&edited.proxy, &sent.proxy) {
                 let mut proxy = edited.proxy.clone();
                 if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut proxy {
-                    e.password = back_password(e.password)?;
+                    e.password = None;
                 }
                 settings.proxy = proxy;
             }
@@ -1525,8 +1549,16 @@ fn take_into_original(
             next.id = mine.id;
             next.group_id = mine.group_id;
             next.location = mine.location;
+            let old_proxy =
+                crate::creds::CredentialRefs::of_settings(&mine.settings).proxy_password;
+            let new_proxy = crate::creds::CredentialRefs::of_settings(&settings).proxy_password;
             next.settings = settings;
             store.upsert_host(&next)?;
+            if let Some(old) = old_proxy
+                && new_proxy != Some(old)
+            {
+                crate::creds::drop_unreferenced(store, &[old])?;
+            }
         }
         // The group, keys, passwords and deletions of copies are the owner's alone (a selection
         // only lets members change hosts).

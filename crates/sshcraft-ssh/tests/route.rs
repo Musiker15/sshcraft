@@ -303,3 +303,49 @@ async fn unreachable_proxy_times_out() {
     );
     assert!(started.elapsed() < Duration::from_secs(5));
 }
+
+/// Trusts every host key, but each one only just now (a first contact).
+struct FirstContact;
+
+#[async_trait::async_trait]
+impl HostKeyVerifier for FirstContact {
+    async fn verify(&self, _: &str, _: &str, _: u16, _: &str) -> bool {
+        true
+    }
+
+    fn first_contact(&self, _address: &str, _port: u16) -> bool {
+        true
+    }
+}
+
+#[tokio::test]
+async fn stored_password_is_not_sent_on_first_contact() {
+    let server = password_server("pw").await;
+    let result = connect_route(
+        route(vec![hop("t", "127.0.0.1", server.port, "pw")], None),
+        Arc::new(FirstContact),
+        Arc::new(NoPrompter),
+    )
+    .await;
+    assert_eq!(result.err(), Some(SshError::AuthCancelled));
+    assert!(server.received_passwords().is_empty());
+}
+
+#[tokio::test]
+async fn proxy_user_with_line_break_or_colon_is_refused() {
+    let server = password_server("pw").await;
+    let proxy = spawn_http_proxy(Some(("u".into(), "p".into()))).await;
+    for user in ["u\r\nX-Evil: 1", "a:b"] {
+        let mut t = target(proxy.port, Some((user, "p")));
+        t.username = Some(user.into());
+        let params = route(
+            vec![hop("t", "127.0.0.1", server.port, "pw")],
+            Some(ProxyConfig::Http(t)),
+        );
+        assert!(matches!(
+            go(params, Arc::default()).await,
+            Err(SshError::Proxy(_))
+        ));
+    }
+    assert_eq!(proxy.connects(), 0);
+}

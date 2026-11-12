@@ -48,7 +48,27 @@ fn authority(address: &str, port: u16) -> String {
     }
 }
 
+/// Text that goes into the proxy request: no control characters (no header can be smuggled in
+/// through a synced or shared value).
+fn clean(text: &str, what: &str) -> Result<(), SshError> {
+    if text.chars().any(char::is_control) {
+        return Err(SshError::Proxy(format!("invalid {what}")));
+    }
+    Ok(())
+}
+
 async fn http(proxy: &ProxyTarget, address: &str, port: u16) -> Result<Box<dyn Io>, SshError> {
+    clean(address, "target address")?;
+    if let Some(user) = &proxy.username {
+        clean(user, "proxy user")?;
+        // Basic authentication joins user and password with a colon.
+        if user.contains(':') {
+            return Err(SshError::Proxy("invalid proxy user".into()));
+        }
+    }
+    if let Some(password) = &proxy.password {
+        clean(password, "proxy password")?;
+    }
     let mut tcp = TcpStream::connect((proxy.address.as_str(), proxy.port))
         .await
         .map_err(|e| SshError::Proxy(e.to_string()))?;

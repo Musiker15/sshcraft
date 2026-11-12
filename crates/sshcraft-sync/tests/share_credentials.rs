@@ -360,3 +360,89 @@ async fn owner_password_change_reaches_member() {
     let route = route_on(&b, "one");
     assert_eq!(secret(&b, route.password).as_deref(), Some("rotated"));
 }
+
+/// B changes the proxy of the shared host "one" (as the normal form would) and sends it.
+async fn member_moves_proxy(b: &Dev, port: u16) {
+    let server_b = b.row().id;
+    {
+        let store = b.store.lock().unwrap();
+        let mut host = store
+            .list_hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.name == "one")
+            .unwrap();
+        host.settings.proxy = Some(Proxy::Socks5(ProxyEndpoint {
+            address: "attacker.example.org".into(),
+            port,
+            username: Some("p".into()),
+            password: None,
+        }));
+        store.upsert_host(&host).unwrap();
+        record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 70).unwrap();
+    }
+    let _ = server_b;
+    sync(b).await;
+}
+
+#[tokio::test]
+async fn member_changing_the_proxy_does_not_get_the_owners_proxy_password() {
+    let server = TestServer::start().await;
+    let (a, b) = people(&server).await;
+    let s = team(&a).await;
+    share_it(&a, &b, ShareWhat::GroupAll(s.group.id), Role::Write, false).await;
+    member_moves_proxy(&b, 1080).await;
+    sync(&a).await;
+    let route = route_on(&a, "one");
+    match &route.proxy {
+        Some(Proxy::Socks5(e)) => assert_eq!(e.address, "attacker.example.org"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(proxy_password(&route), None);
+}
+
+#[tokio::test]
+async fn member_changing_a_copy_proxy_does_not_get_the_owners_proxy_password() {
+    let server = TestServer::start().await;
+    let (a, b) = people(&server).await;
+    let s = team(&a).await;
+    share_it(&a, &b, ShareWhat::Host(s.host.id), Role::Write, false).await;
+    member_moves_proxy(&b, 1081).await;
+    sync(&a).await;
+    let route = route_on(&a, "one");
+    match &route.proxy {
+        Some(Proxy::Socks5(e)) => {
+            assert_eq!((e.address.as_str(), e.port), ("attacker.example.org", 1081))
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(proxy_password(&route), None);
+}
+
+#[tokio::test]
+async fn member_edit_elsewhere_keeps_the_owners_proxy_password() {
+    let server = TestServer::start().await;
+    let (a, b) = people(&server).await;
+    let s = team(&a).await;
+    share_it(&a, &b, ShareWhat::Host(s.host.id), Role::Write, false).await;
+    {
+        let store = b.store.lock().unwrap();
+        let mut host = store
+            .list_hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.name == "one")
+            .unwrap();
+        host.settings.port = Some(2222);
+        store.upsert_host(&host).unwrap();
+        record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 70).unwrap();
+    }
+    sync(&b).await;
+    sync(&a).await;
+    let route = route_on(&a, "one");
+    assert_eq!(route.port, 2222);
+    assert_eq!(
+        secret(&a, proxy_password(&route)).as_deref(),
+        Some(PROXY_SECRET)
+    );
+}

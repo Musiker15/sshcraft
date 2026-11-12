@@ -290,3 +290,23 @@ async fn wrong_key_without_other_methods_fails() {
         .unwrap_err();
     assert_eq!(err, SshError::AuthFailed);
 }
+
+#[tokio::test]
+async fn password_then_otp_does_not_send_the_password_as_code() {
+    let server = TestServer::start_with(TestAuth {
+        password: Some(STORED.into()),
+        kbd: vec![round(&[("Verification code: ", false, "424242")])],
+        password_then_kbd: true,
+        ..Default::default()
+    })
+    .await;
+    let prompter = Recording::new(vec![Some(vec!["424242"])]);
+    run(&server, with_password(STORED), prompter.clone())
+        .await
+        .unwrap();
+    assert_eq!(prompter.asked(), 1);
+    assert_eq!(
+        server.received_passwords(),
+        vec![STORED.to_owned(), "424242".to_owned()]
+    );
+}

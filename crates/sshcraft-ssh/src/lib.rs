@@ -153,6 +153,13 @@ pub struct ConnectParams {
 #[async_trait::async_trait]
 pub trait HostKeyVerifier: Send + Sync {
     async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
+
+    /// Whether the host key of this server was trusted only during this connection (a first
+    /// contact). A stored password never goes to such a server: the address may have been
+    /// changed by someone else, so the user is asked instead.
+    fn first_contact(&self, _address: &str, _port: u16) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -396,11 +403,15 @@ pub async fn connect_route(
                     SshError::Connect(e.to_string())
                 })
             })?;
+        let mut credentials = hop.auth;
+        if verifier.first_contact(&hop.address, hop.port) {
+            credentials.password = None;
+        }
         auth::authenticate(
             &mut handle,
             &hop.username,
             &hop.host_name,
-            hop.auth,
+            credentials,
             prompter.as_ref(),
         )
         .await

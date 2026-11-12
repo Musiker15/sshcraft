@@ -3,7 +3,7 @@
 //! they came from.
 
 use crate::SyncError;
-use crate::creds::{CredentialRefs, keep_local};
+use crate::creds::{CredentialRefs, drop_unreferenced, keep_local, same_proxy_endpoint};
 use serde::{Deserialize, Serialize};
 use sshcraft_core::model::{
     Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, PasswordId, ServerId,
@@ -169,7 +169,7 @@ pub fn apply_in(
     area: Option<Uuid>,
     personal: Option<Uuid>,
 ) -> Result<(), SyncError> {
-    let keep = |local: Option<CredentialRefs>, incoming: &mut CredentialRefs| {
+    let keep = |local: Option<CredentialRefs>, incoming: &mut CredentialRefs, same_proxy: bool| {
         keep_local(
             store,
             server,
@@ -177,6 +177,7 @@ pub fn apply_in(
             incoming,
             area,
             personal,
+            same_proxy,
         )
     };
     match &item.body {
@@ -184,16 +185,15 @@ pub fn apply_in(
             let mut group = group.clone();
             group.location = Some(server);
             let mut refs = CredentialRefs::of_settings(&group.defaults);
-            keep(
-                store
-                    .list_groups()?
-                    .into_iter()
-                    .find(|g| g.id == group.id)
-                    .map(|g| CredentialRefs::of_settings(&g.defaults)),
-                &mut refs,
-            )?;
+            let before = store.list_groups()?.into_iter().find(|g| g.id == group.id);
+            let same = before
+                .as_ref()
+                .is_some_and(|b| same_proxy_endpoint(&b.defaults.proxy, &group.defaults.proxy));
+            let before_refs = before.map(|g| CredentialRefs::of_settings(&g.defaults));
+            keep(before_refs.clone(), &mut refs, same)?;
             refs.apply_to_settings(&mut group.defaults);
             store.upsert_group(&group)?;
+            dropped_proxy(store, before_refs, &refs)?;
             // A subgroup takes its parent's location by itself.
             if group.parent_id.is_none()
                 && store.location_of(ItemKind::Group, &group.id.0.to_string())? != Some(server)
@@ -205,16 +205,15 @@ pub fn apply_in(
             let mut host = host.clone();
             host.location = Some(server);
             let mut refs = CredentialRefs::of_settings(&host.settings);
-            keep(
-                store
-                    .list_hosts()?
-                    .into_iter()
-                    .find(|h| h.id == host.id)
-                    .map(|h| CredentialRefs::of_settings(&h.settings)),
-                &mut refs,
-            )?;
+            let before = store.list_hosts()?.into_iter().find(|h| h.id == host.id);
+            let same = before
+                .as_ref()
+                .is_some_and(|b| same_proxy_endpoint(&b.settings.proxy, &host.settings.proxy));
+            let before_refs = before.map(|h| CredentialRefs::of_settings(&h.settings));
+            keep(before_refs.clone(), &mut refs, same)?;
             refs.apply_to_settings(&mut host.settings);
             store.upsert_host(&host)?;
+            dropped_proxy(store, before_refs, &refs)?;
             let id = host.id.0.to_string();
             if host.group_id.is_none() && store.location_of(ItemKind::Host, &id)? != Some(server) {
                 store.set_location(ItemKind::Host, &id, Some(server))?;
@@ -246,6 +245,7 @@ pub fn apply_in(
                         ..Default::default()
                     }),
                 &mut refs,
+                true,
             )?;
             identity.key = refs.key;
             identity.password = refs.password;
@@ -270,6 +270,19 @@ pub fn apply_in(
         }
     }
     Ok(())
+}
+
+/// A proxy password this device had before a record came in and that is now gone (the proxy was
+/// pointed elsewhere or removed) is deleted, unless something else still uses it.
+fn dropped_proxy(
+    store: &Store,
+    before: Option<CredentialRefs>,
+    after: &CredentialRefs,
+) -> Result<(), SyncError> {
+    match before.and_then(|b| b.proxy_password) {
+        Some(old) if after.proxy_password != Some(old) => drop_unreferenced(store, &[old]),
+        _ => Ok(()),
+    }
 }
 
 /// "Last change wins": whether the local change is newer than the one on the server. On a tie

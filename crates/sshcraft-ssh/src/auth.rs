@@ -70,6 +70,8 @@ struct Flow<'a> {
     prompter: &'a dyn AuthPrompter,
     methods: MethodSet,
     password_rejected: bool,
+    /// The stored password went out over the `password` method.
+    offers_tried_password: bool,
 }
 
 impl Flow<'_> {
@@ -124,6 +126,7 @@ pub(crate) async fn authenticate<H: client::Handler>(
         prompter,
         methods: MethodSet::empty(),
         password_rejected: false,
+        offers_tried_password: false,
     };
     let first = match auth.key {
         Some(credential) => publickey(handle, username, credential).await?,
@@ -154,8 +157,11 @@ pub(crate) async fn authenticate<H: client::Handler>(
                 flow.failed(remaining_methods);
             }
         }
+        flow.offers_tried_password = true;
     }
-    if flow.password_rejected {
+    // Tried once is enough: neither a rejected password nor an accepted one (with a second
+    // factor to follow) answers a keyboard-interactive question afterwards.
+    if flow.offers_tried_password {
         stored = None;
     }
 
