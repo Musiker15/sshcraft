@@ -35,6 +35,8 @@ pub async fn events(
 /// device blocked or locked from outside this process (the admin command) is cut off too.
 /// Every send has the same time limit, so a client that stops reading cannot hold off the check.
 async fn run(state: AppState, mut socket: WebSocket, session: Session, token: Vec<u8>) {
+    // Before anything else: a shutdown that comes while this connection starts must not be missed.
+    let mut shutdown = state.shutdown.subscribe();
     let Some((subscription, mut events)) = state.hub.subscribe(session.device_id, session.account)
     else {
         let _ = socket.send(Message::Close(None)).await;
@@ -62,6 +64,7 @@ async fn run(state: AppState, mut socket: WebSocket, session: Session, token: Ve
                     break;
                 }
             }
+            _ = async { shutdown.wait_for(|stopping| *stopping).await.is_ok() } => break,
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
                 Some(Ok(_)) => {}

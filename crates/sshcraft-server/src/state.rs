@@ -21,6 +21,8 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     pub challenges: Arc<Challenges>,
     pub ws_recheck: Duration,
+    /// Turns `true` when the server shuts down; open WebSockets close on it.
+    pub shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     clock: Clock,
 }
 
@@ -32,6 +34,7 @@ impl AppState {
             hub: Arc::new(Hub::default()),
             challenges: Arc::new(Challenges::default()),
             ws_recheck,
+            shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             clock: Arc::new(system_now),
         }
     }

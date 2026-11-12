@@ -8,6 +8,7 @@ pub mod client;
 pub mod devices;
 pub mod engine;
 pub mod items;
+pub mod runtime;
 
 use sshcraft_proto::ProtoError;
 

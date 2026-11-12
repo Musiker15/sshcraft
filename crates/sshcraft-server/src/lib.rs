@@ -59,6 +59,7 @@ pub async fn serve_on(
         );
     }
     let state = AppState::new(store, origin.clone(), config.ws_recheck);
+    let closing = state.shutdown.clone();
     let sweeper = {
         let state = state.clone();
         tokio::spawn(async move {
@@ -76,7 +77,11 @@ pub async fn serve_on(
         listener.local_addr()?
     );
     let result = axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            // Upgraded WebSockets are not tracked by the graceful shutdown; tell them.
+            let _ = closing.send(true);
+        })
         .await;
     sweeper.abort();
     result.map_err(ServeError::Io)

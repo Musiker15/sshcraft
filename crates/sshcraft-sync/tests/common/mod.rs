@@ -76,9 +76,15 @@ impl TestServer {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
-        if let Some(task) = self.task.take() {
-            task.abort();
-            let _ = task.await;
+        if let Some(mut task) = self.task.take() {
+            // Graceful first, so open WebSockets close as on a real shutdown.
+            if tokio::time::timeout(Duration::from_secs(5), &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = task.await;
+            }
         }
     }
 
