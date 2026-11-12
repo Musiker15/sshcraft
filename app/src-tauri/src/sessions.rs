@@ -134,9 +134,20 @@ pub struct KeyGate {
     presence: Arc<dyn UserPresence>,
     verified: tokio::sync::Mutex<bool>,
     hello_missing: std::sync::atomic::AtomicBool,
+    on_unavailable: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
 }
 
-const HELLO_REASON: &str = "SSHCraft möchte deine gespeicherten SSH-Schlüssel verwenden.";
+/// Text in the Windows Hello dialog. The dialog belongs to the system, so it follows the
+/// system language rather than the app setting.
+fn hello_reason() -> &'static str {
+    let german = sys_locale::get_locale()
+        .is_some_and(|l| l.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("de")));
+    if german {
+        "SSHCraft möchte deine gespeicherten SSH-Schlüssel verwenden."
+    } else {
+        "SSHCraft wants to use your stored SSH keys."
+    }
+}
 
 impl KeyGate {
     fn new(presence: Arc<dyn UserPresence>) -> Self {
@@ -144,6 +155,7 @@ impl KeyGate {
             presence,
             verified: tokio::sync::Mutex::new(false),
             hello_missing: std::sync::atomic::AtomicBool::new(false),
+            on_unavailable: Mutex::new(None),
         }
     }
 
@@ -153,14 +165,18 @@ impl KeyGate {
         if *verified {
             return Ok(());
         }
-        match self.presence.verify(HELLO_REASON).await {
+        match self.presence.verify(hello_reason()).await {
             Presence::Verified => {
                 *verified = true;
                 Ok(())
             }
             Presence::Unavailable => {
-                self.hello_missing
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                let first = !self
+                    .hello_missing
+                    .swap(true, std::sync::atomic::Ordering::SeqCst);
+                if first && let Some(report) = &*self.on_unavailable.lock().expect("hook lock") {
+                    report();
+                }
                 *verified = true;
                 Ok(())
             }
@@ -212,6 +228,11 @@ impl SessionManager {
         presence: Arc<dyn UserPresence>,
     ) -> Self {
         Self::with_delay_scale(store, vault, prompter, agent, presence, 1.0)
+    }
+
+    /// Called once, the first time Windows Hello turns out not to be set up on this PC.
+    pub fn on_hello_unavailable(&self, report: Box<dyn Fn() + Send + Sync>) {
+        *self.ctx.gate.on_unavailable.lock().expect("hook lock") = Some(report);
     }
 
     /// True once Windows Hello turned out not to be set up on this PC.

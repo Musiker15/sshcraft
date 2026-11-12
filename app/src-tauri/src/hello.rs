@@ -19,42 +19,101 @@ pub struct WindowsHello {
     pub hwnd: isize,
 }
 
+/// Something that can be called off, like a pending Windows Hello request.
+pub trait Cancellable {
+    fn cancel(&self);
+}
+
+/// Cancels the wrapped operation when dropped, unless it was disarmed after finishing.
+/// Dropping the `verify` future (the tab was closed) thus also closes the Hello dialog.
+pub struct CancelOnDrop<C: Cancellable>(Option<C>);
+
+impl<C: Cancellable> CancelOnDrop<C> {
+    pub fn new(operation: C) -> Self {
+        Self(Some(operation))
+    }
+
+    pub fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl<C: Cancellable> Drop for CancelOnDrop<C> {
+    fn drop(&mut self) {
+        if let Some(operation) = self.0.take() {
+            operation.cancel();
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl UserPresence for WindowsHello {
     async fn verify(&self, reason: &str) -> Presence {
-        let hwnd = self.hwnd;
-        let reason = reason.to_owned();
-        tokio::task::spawn_blocking(move || verify_blocking(hwnd, &reason))
-            .await
-            // A crashed check must not open the gate.
-            .unwrap_or(Presence::Declined)
+        verify_async(self.hwnd, reason.to_owned()).await
     }
 }
 
 #[cfg(windows)]
-fn verify_blocking(hwnd: isize, reason: &str) -> Presence {
-    use windows::Security::Credentials::UI::{UserConsentVerificationResult, UserConsentVerifier};
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
-    use windows::core::{HSTRING, factory};
-    use windows_future::IAsyncOperation;
+impl Cancellable
+    for windows_future::IAsyncOperation<
+        windows::Security::Credentials::UI::UserConsentVerificationResult,
+    >
+{
+    fn cancel(&self) {
+        let _ = self.Cancel();
+    }
+}
 
-    let availability = UserConsentVerifier::CheckAvailabilityAsync().and_then(|op| op.join());
+#[cfg(windows)]
+async fn verify_async(hwnd: isize, reason: String) -> Presence {
+    use windows::Security::Credentials::UI::UserConsentVerifier;
+
+    let availability = tokio::task::spawn_blocking(|| {
+        UserConsentVerifier::CheckAvailabilityAsync().and_then(|op| op.join())
+    })
+    .await;
+    // A crashed check must not open the gate.
+    let Ok(availability) = availability else {
+        return Presence::Declined;
+    };
     if let Some(presence) = gate_from_availability(availability) {
         return presence;
     }
-    let result =
-        factory::<UserConsentVerifier, IUserConsentVerifierInterop>().and_then(|interop| {
-            // SAFETY: `hwnd` is the handle of SSHCraft's own main window, valid while the app runs.
-            let op: IAsyncOperation<UserConsentVerificationResult> = unsafe {
-                interop.RequestVerificationForWindowAsync(
-                    HWND(hwnd as *mut core::ffi::c_void),
-                    &HSTRING::from(reason),
-                )?
-            };
-            op.join()
-        });
-    presence_from_result(result)
+    let operation = match tokio::task::spawn_blocking(move || request(hwnd, &reason)).await {
+        Ok(Ok(operation)) => operation,
+        _ => return Presence::Declined,
+    };
+    let guard = CancelOnDrop::new(operation.clone());
+    let result = tokio::task::spawn_blocking(move || operation.join()).await;
+    guard.disarm();
+    match result {
+        Ok(result) => presence_from_result(result),
+        Err(_) => Presence::Declined,
+    }
+}
+
+#[cfg(windows)]
+fn request(
+    hwnd: isize,
+    reason: &str,
+) -> windows::core::Result<
+    windows_future::IAsyncOperation<
+        windows::Security::Credentials::UI::UserConsentVerificationResult,
+    >,
+> {
+    use windows::Security::Credentials::UI::UserConsentVerifier;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
+    use windows::core::{HSTRING, factory};
+
+    let interop = factory::<UserConsentVerifier, IUserConsentVerifierInterop>()?;
+    // SAFETY: `hwnd` is the handle of SSHCraft's own main window, valid while the app runs.
+    unsafe {
+        interop.RequestVerificationForWindowAsync(
+            HWND(hwnd as *mut core::ffi::c_void),
+            &HSTRING::from(reason),
+        )
+    }
 }
 
 /// `None` when Windows Hello is ready to ask. Only "not set up" opens the gate without a
@@ -91,8 +150,9 @@ fn presence_from_result(
     }
 }
 
+/// No presence check outside Windows yet: behaves like a PC without Windows Hello.
 #[cfg(not(windows))]
-fn verify_blocking(_hwnd: isize, _reason: &str) -> Presence {
+async fn verify_async(_hwnd: isize, _reason: String) -> Presence {
     Presence::Unavailable
 }
 
@@ -144,5 +204,35 @@ mod tests {
             presence_from_result(Ok(R::NotConfiguredForUser)),
             Presence::Unavailable
         );
+    }
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone, Default)]
+    struct Counter(Arc<AtomicUsize>);
+
+    impl Cancellable for Counter {
+        fn cancel(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn dropped_guard_cancels() {
+        let counter = Counter::default();
+        drop(CancelOnDrop::new(counter.clone()));
+        assert_eq!(counter.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn disarmed_guard_does_not_cancel() {
+        let counter = Counter::default();
+        CancelOnDrop::new(counter.clone()).disarm();
+        assert_eq!(counter.0.load(Ordering::SeqCst), 0);
     }
 }

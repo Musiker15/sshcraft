@@ -2,6 +2,7 @@ pub mod commands;
 pub mod errors;
 pub mod hello;
 pub mod passcli;
+pub mod prompts;
 pub mod sessions;
 pub mod state;
 

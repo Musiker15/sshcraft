@@ -139,6 +139,10 @@ impl Fixture {
     }
 
     fn manager_with_presence(&self, presence: Arc<FakePresence>) -> SessionManager {
+        self.manager_with_any_presence(presence)
+    }
+
+    fn manager_with_any_presence(&self, presence: Arc<dyn UserPresence>) -> SessionManager {
         SessionManager::with_delay_scale(
             self.store.clone(),
             Some(self.vault.clone()),
@@ -569,4 +573,85 @@ async fn output_waits_for_acknowledgement() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert_eq!(sink.data.lock().unwrap().len(), total);
+}
+
+/// Never answers; counts how often a pending check was dropped (the tab was closed).
+#[derive(Default)]
+struct PendingThenVerified {
+    asked: AtomicUsize,
+    dropped: Arc<AtomicUsize>,
+}
+
+struct CountDrop(Arc<AtomicUsize>);
+
+impl Drop for CountDrop {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl UserPresence for PendingThenVerified {
+    async fn verify(&self, _reason: &str) -> Presence {
+        if self.asked.fetch_add(1, Ordering::SeqCst) == 0 {
+            let _guard = CountDrop(self.dropped.clone());
+            std::future::pending::<()>().await;
+        }
+        Presence::Verified
+    }
+}
+
+async fn wait_until(pred: impl Fn() -> bool) {
+    for _ in 0..400 {
+        if pred() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("condition not reached");
+}
+
+#[tokio::test]
+async fn closing_tab_cancels_hello() {
+    let f = fixture(true).await;
+    let presence = Arc::new(PendingThenVerified::default());
+    let manager = f.manager_with_any_presence(presence.clone());
+    let id = manager.open(f.host_id, 80, 24, Arc::new(RecordingSink::default()));
+    wait_until(|| presence.asked.load(Ordering::SeqCst) == 1).await;
+    manager.close(id);
+    wait_until(|| presence.dropped.load(Ordering::SeqCst) == 1).await;
+}
+
+#[tokio::test]
+async fn waiting_tab_asks_again_after_other_tab_closed() {
+    let f = fixture(true).await;
+    let presence = Arc::new(PendingThenVerified::default());
+    let manager = f.manager_with_any_presence(presence.clone());
+    let first = manager.open(f.host_id, 80, 24, Arc::new(RecordingSink::default()));
+    wait_until(|| presence.asked.load(Ordering::SeqCst) == 1).await;
+    let second = Arc::new(RecordingSink::default());
+    manager.open(f.host_id, 80, 24, second.clone());
+    manager.close(first);
+    second.wait_for(connected).await;
+    assert_eq!(presence.asked.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn hello_unavailable_is_reported_once() {
+    let f = fixture(true).await;
+    let manager = f.manager_with_presence(Arc::new(FakePresence::new(&[Presence::Unavailable])));
+    let reported = Arc::new(AtomicUsize::new(0));
+    let counter = reported.clone();
+    manager.on_hello_unavailable(Box::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
+    let (a, b) = (
+        Arc::new(RecordingSink::default()),
+        Arc::new(RecordingSink::default()),
+    );
+    manager.open(f.host_id, 80, 24, a.clone());
+    a.wait_for(connected).await;
+    manager.open(f.host_id, 80, 24, b.clone());
+    b.wait_for(connected).await;
+    assert_eq!(reported.load(Ordering::SeqCst), 1);
 }

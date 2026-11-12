@@ -45,12 +45,6 @@ function App() {
   const [tabs, dispatch] = useReducer(tabsReducer, initialTabs);
   const [helloMissing, setHelloMissing] = useState(false);
   const [helloDismissed, setHelloDismissed] = useState(false);
-  const anyConnected = tabs.tabs.some((t) => t.status.state === "connected");
-
-  // Windows Hello is asked on the first connect with a stored key; check the outcome then.
-  useEffect(() => {
-    if (anyConnected && !helloMissing) void helloStatus().then((s) => setHelloMissing(s.missing));
-  }, [anyConnected, helloMissing]);
 
   const reload = useCallback(async () => {
     try {
@@ -67,11 +61,18 @@ function App() {
   useEffect(() => {
     void reload();
     void vaultStatus().then((s) => setVault(s.ok ? null : s));
-    const unlisten = listen<HostKeyPrompt>("host-key-prompt", (event) =>
-      setPrompts((queue) => [...queue, event.payload]),
-    );
+    // Hello is only checked when a stored key is first used; the core reports the outcome.
+    void helloStatus().then((s) => setHelloMissing(s.missing));
+    const listeners = [
+      listen<HostKeyPrompt>("host-key-prompt", (event) => setPrompts((queue) => [...queue, event.payload])),
+      // The tab that asked was closed: its question must not stay on screen.
+      listen<{ prompt_id: number }>("host-key-prompt-withdrawn", (event) =>
+        setPrompts((queue) => queue.filter((p) => p.prompt_id !== event.payload.prompt_id)),
+      ),
+      listen("hello-unavailable", () => setHelloMissing(true)),
+    ];
     return () => {
-      void unlisten.then((stop) => stop());
+      for (const unlisten of listeners) void unlisten.then((stop) => stop());
     };
   }, [reload]);
 
