@@ -53,6 +53,11 @@ pub enum ErrorCode {
     ShareNotOwner,
     ShareAlreadyShared,
     ShareEndFirst,
+    GroupCycle,
+    ImportUnreadable,
+    ImportTooLarge,
+    ShareNestedGroup,
+    GroupTooDeep,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -94,7 +99,11 @@ impl From<ResolveError> for CommandError {
 
 impl From<sshcraft_core::store::StoreError> for CommandError {
     fn from(e: sshcraft_core::store::StoreError) -> Self {
-        Self::new(ErrorCode::Store, e)
+        match e {
+            sshcraft_core::store::StoreError::GroupCycle => Self::code(ErrorCode::GroupCycle),
+            sshcraft_core::store::StoreError::TooDeep => Self::code(ErrorCode::GroupTooDeep),
+            e => Self::new(ErrorCode::Store, e),
+        }
     }
 }
 

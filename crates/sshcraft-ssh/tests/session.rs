@@ -242,3 +242,19 @@ async fn stalled_agent_times_out_on_list() {
         .expect("a stalled agent must not hang the key list");
     assert!(matches!(result, Err(SshError::AgentUnavailable(_))));
 }
+
+#[tokio::test]
+async fn exec_returns_output() {
+    let (server, k) = setup().await;
+    let session = connect(params(server.port, k), Verifier::new(true))
+        .await
+        .unwrap();
+    let out = session.exec("cat /etc/os-release", 4096).await.unwrap();
+    assert_eq!(out, sshcraft_ssh::testing::TEST_EXEC_OUTPUT.as_bytes());
+    let short = session.exec("cat /etc/os-release", 4).await.unwrap();
+    assert_eq!(short.len(), 4);
+    assert_eq!(
+        sshcraft_core::os_detect::from_output(&String::from_utf8_lossy(&out)),
+        Some(sshcraft_core::model::HostOs::Debian)
+    );
+}

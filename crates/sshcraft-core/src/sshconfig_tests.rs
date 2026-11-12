@@ -134,12 +134,12 @@ fn unknown_key_gets_a_note() {
 fn same_hostname_becomes_one_group() {
     let text = "Host srv-root\n  HostName example.org\n  User root\nHost srv-deploy\n  HostName example.org\n  User deploy\nHost single\n  HostName other.org\n";
     let plan = plan_import(&parse(text).hosts, &fingerprints, Some(&[]));
-    let root = plan.iter().find(|c| c.alias == "srv-root").unwrap();
-    assert_eq!(root.group.as_deref(), Some("example.org"));
+    let root = plan.iter().find(|c| c.name == "srv-root").unwrap();
+    assert_eq!(root.group_path, vec!["example.org".to_owned()]);
     assert_eq!(root.settings.address, None, "address comes from the group");
     assert_eq!(root.settings.username.as_deref(), Some("root"));
-    let single = plan.iter().find(|c| c.alias == "single").unwrap();
-    assert_eq!(single.group, None);
+    let single = plan.iter().find(|c| c.name == "single").unwrap();
+    assert!(single.group_path.is_empty());
     assert_eq!(single.settings.address.as_deref(), Some("other.org"));
 }
 
@@ -155,16 +155,26 @@ fn alias_without_hostname_uses_alias_as_address() {
 
 fn candidate(alias: &str, group: Option<&str>, address: Option<&str>) -> ImportCandidate {
     ImportCandidate {
-        alias: alias.into(),
-        group: group.map(Into::into),
+        name: alias.into(),
+        group_path: group.map(Into::into).into_iter().collect(),
+        group_defaults: crate::model::ConnectionSettings {
+            address: group.map(Into::into),
+            ..Default::default()
+        },
         settings: crate::model::ConnectionSettings {
             address: address.map(Into::into),
             username: Some("u".into()),
             ..Default::default()
         },
-        key_note: None,
-        warnings: Vec::new(),
+        ..ImportCandidate::default()
     }
+}
+
+fn apply_import(
+    store: &crate::store::Store,
+    candidates: &[ImportCandidate],
+) -> Result<usize, crate::store::StoreError> {
+    crate::import::apply_import(store, candidates, None).map(|o| o.created)
 }
 
 #[test]
@@ -283,9 +293,10 @@ fn other_tokens_are_warned() {
 
 #[test]
 fn candidate_without_warnings_field_still_deserializes() {
-    let json = r#"{"alias":"a","group":null,"settings":{"address":"a.org","port":null,"username":null,"key":null},"key_note":null}"#;
+    let json = r#"{"name":"a","settings":{"address":"a.org","port":null,"username":null,"key":null},"key_note":null}"#;
     let c: ImportCandidate = serde_json::from_str(json).unwrap();
     assert!(c.warnings.is_empty());
+    assert!(c.group_path.is_empty() && c.tags.is_empty());
 }
 
 #[test]

@@ -143,6 +143,8 @@ fn sample_group(name: &str) -> sshcraft_core::model::Group {
         name: name.into(),
         defaults: Default::default(),
         location: None,
+        parent_id: None,
+        tags: Vec::new(),
     }
 }
 
@@ -976,4 +978,483 @@ async fn members_ignore_additions_and_deletions_of_other_members_in_a_selection(
     sync(&c).await;
     let names: Vec<String> = c.hosts().into_iter().map(|h| h.name).collect();
     assert_eq!(names, vec!["web".to_owned()]);
+}
+
+// ---------- Teilplan 8: subgroups in shares
+
+/// A puts group "team" (address) > "inner" (username deploy) > host "deep" on the server.
+fn nested_group(
+    a: &Dev,
+) -> (
+    sshcraft_core::model::Group,
+    sshcraft_core::model::Group,
+    Host,
+) {
+    let server = a.row().id;
+    let mut team = sample_group("team");
+    team.location = Some(server);
+    team.defaults.address = Some("team.example.org".into());
+    let mut inner = sample_group("inner");
+    inner.parent_id = Some(team.id);
+    inner.defaults.username = Some("deploy".into());
+    let mut deep = sample_host("deep");
+    deep.settings.address = None;
+    deep.settings.username = None;
+    deep.group_id = Some(inner.id);
+    let store = a.store.lock().unwrap();
+    store.upsert_group(&team).unwrap();
+    store.upsert_group(&inner).unwrap();
+    store.upsert_host(&deep).unwrap();
+    record_local_change(&store, ItemKind::Group, &team.id.0.to_string(), 1).unwrap();
+    record_local_change(&store, ItemKind::Group, &inner.id.0.to_string(), 1).unwrap();
+    record_local_change(&store, ItemKind::Host, &deep.id.0.to_string(), 1).unwrap();
+    (team, inner, deep)
+}
+
+#[tokio::test]
+async fn group_share_takes_subgroups() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let groups = b.store.lock().unwrap().list_groups().unwrap();
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.id == inner.id && g.parent_id == Some(team.id))
+    );
+    assert!(b.hosts().iter().any(|h| h.id == deep.id));
+    // A later subgroup goes along.
+    let server_a = a.row().id;
+    let mut later = sample_group("later");
+    later.parent_id = Some(inner.id);
+    later.location = Some(server_a);
+    {
+        let store = a.store.lock().unwrap();
+        store.upsert_group(&later).unwrap();
+        record_local_change(&store, ItemKind::Group, &later.id.0.to_string(), 10).unwrap();
+    }
+    sync(&a).await;
+    sync(&b).await;
+    assert!(
+        b.store
+            .lock()
+            .unwrap()
+            .list_groups()
+            .unwrap()
+            .iter()
+            .any(|g| g.id == later.id)
+    );
+}
+
+#[tokio::test]
+async fn selection_copies_inherit_intermediate_settings() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, _inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let what = ShareWhat::Selection {
+        group: team.id,
+        hosts: vec![deep.id],
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Write)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let copy = b.hosts().pop().unwrap();
+    let groups = b.store.lock().unwrap().list_groups().unwrap();
+    assert_eq!(groups.len(), 1, "a flat copy of the shared group");
+    assert_eq!(copy.group_id, Some(groups[0].id));
+    assert_eq!(
+        copy.settings.username.as_deref(),
+        Some("deploy"),
+        "baked in from the subgroup"
+    );
+    assert_eq!(
+        groups[0].defaults.address.as_deref(),
+        Some("team.example.org")
+    );
+    // A change by B does not write the inherited value into the original.
+    rename(&b, copy.id, "deep-new", 100);
+    sync(&b).await;
+    sync(&a).await;
+    let original = a.hosts().into_iter().find(|h| h.id == deep.id).unwrap();
+    assert_eq!(original.name, "deep-new");
+    assert_eq!(original.settings.username, None);
+    assert_eq!(original.group_id, deep.group_id);
+}
+
+#[tokio::test]
+async fn reader_cannot_add_a_subgroup() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, _, _) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let server_b = b.row().id;
+    let mut mine = sample_group("mine");
+    mine.parent_id = Some(team.id);
+    mine.location = Some(server_b);
+    {
+        let store = b.store.lock().unwrap();
+        store.upsert_group(&mine).unwrap();
+        record_local_change(&store, ItemKind::Group, &mine.id.0.to_string(), 20).unwrap();
+    }
+    let mut eb = engine(&b).await;
+    eb.push(&b.store, &b.vault, 20).await.unwrap();
+    assert!(
+        eb.warnings().iter().any(|w| w == "share_read_only"),
+        "{:?}",
+        eb.warnings()
+    );
+    assert!(
+        b.store
+            .lock()
+            .unwrap()
+            .list_groups()
+            .unwrap()
+            .iter()
+            .all(|g| g.id != mine.id)
+    );
+}
+
+// ---------- Teilplan 8 review: nested groups in shares
+
+#[tokio::test]
+async fn nested_group_can_be_shared_as_selection() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (_team, inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let what = ShareWhat::Selection {
+        group: inner.id,
+        hosts: vec![deep.id],
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let groups = b.store.lock().unwrap().list_groups().unwrap();
+    assert_eq!(groups.len(), 1, "{:?}", groups);
+    assert_eq!(groups[0].parent_id, None, "the copy is a top-level group");
+    assert_eq!(
+        groups[0].defaults.address.as_deref(),
+        Some("team.example.org")
+    );
+    assert_eq!(groups[0].defaults.username.as_deref(), Some("deploy"));
+    assert_eq!(b.hosts().len(), 1);
+}
+
+#[tokio::test]
+async fn host_share_carries_what_the_host_inherits() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (_team, _inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::Host(deep.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let copy = b.hosts().pop().unwrap();
+    assert_eq!(copy.settings.address.as_deref(), Some("team.example.org"));
+    assert_eq!(copy.settings.username.as_deref(), Some("deploy"));
+}
+
+#[tokio::test]
+async fn nested_group_all_and_nested_own_shares_are_refused() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let nested = share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(inner.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await;
+    assert_eq!(nested.unwrap_err(), SyncError::NestedGroupAll);
+    // A selection of the inner group and the whole tree above it can live side by side: the
+    // copies follow their originals wherever those are.
+    let what = ShareWhat::Selection {
+        group: inner.id,
+        hosts: vec![deep.id],
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Read)],
+        false,
+        6,
+    )
+    .await
+    .unwrap();
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        7,
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_group_change_reaches_copies_below_it() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, inner, deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let what = ShareWhat::Selection {
+        group: team.id,
+        hosts: vec![deep.id],
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    assert_eq!(b.hosts()[0].settings.username.as_deref(), Some("deploy"));
+    {
+        let store = a.store.lock().unwrap();
+        let mut changed = store
+            .list_groups()
+            .unwrap()
+            .into_iter()
+            .find(|g| g.id == inner.id)
+            .unwrap();
+        changed.defaults.username = Some("admin".into());
+        store.upsert_group(&changed).unwrap();
+        record_local_change(&store, ItemKind::Group, &inner.id.0.to_string(), 50).unwrap();
+    }
+    sync(&a).await;
+    sync(&b).await;
+    assert_eq!(b.hosts()[0].settings.username.as_deref(), Some("admin"));
+    let _ = deep;
+}
+
+#[tokio::test]
+async fn keys_on_subgroups_go_along() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    for dev in [&a, &b] {
+        let id = dev.row().id;
+        dev.store
+            .lock()
+            .unwrap()
+            .update_server_flags(id, true, true)
+            .unwrap();
+    }
+    let (team, inner, _deep) = nested_group(&a);
+    let server_a = a.row().id;
+    {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "inner-key").unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
+            .unwrap();
+        record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
+        let mut g = store
+            .list_groups()
+            .unwrap()
+            .into_iter()
+            .find(|g| g.id == inner.id)
+            .unwrap();
+        g.defaults.key = Some(KeyRef::Stored { id: info.id });
+        store.upsert_group(&g).unwrap();
+    }
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        true,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    assert_eq!(b.store.lock().unwrap().list_key_records().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn moving_a_populated_group_into_a_shared_group_sends_its_hosts() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, _inner, _deep) = nested_group(&a);
+    let server_a = a.row().id;
+    let mut loose = sample_group("loose");
+    loose.location = Some(server_a);
+    let mut inside = sample_host("inside");
+    inside.group_id = Some(loose.id);
+    {
+        let store = a.store.lock().unwrap();
+        store.upsert_group(&loose).unwrap();
+        store.upsert_host(&inside).unwrap();
+        record_local_change(&store, ItemKind::Group, &loose.id.0.to_string(), 1).unwrap();
+        record_local_change(&store, ItemKind::Host, &inside.id.0.to_string(), 1).unwrap();
+    }
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    {
+        let store = a.store.lock().unwrap();
+        let mut moved = loose.clone();
+        moved.parent_id = Some(team.id);
+        store.upsert_group(&moved).unwrap();
+        record_local_change(&store, ItemKind::Group, &loose.id.0.to_string(), 20).unwrap();
+    }
+    sync(&a).await;
+    sync(&b).await;
+    assert!(
+        b.hosts().iter().any(|h| h.id == inside.id),
+        "the moved group's host arrives"
+    );
+}
+
+#[tokio::test]
+async fn a_writer_cannot_move_the_share_root() {
+    let server = TestServer::start().await;
+    let (a, b, _c) = three(&server).await;
+    let (team, _inner, _deep) = nested_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(team.id),
+        vec![grant(&b, Role::Write)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let server_b = b.row().id;
+    let mut own = sample_group("b-own");
+    own.location = Some(server_b);
+    {
+        let store = b.store.lock().unwrap();
+        store.upsert_group(&own).unwrap();
+        record_local_change(&store, ItemKind::Group, &own.id.0.to_string(), 30).unwrap();
+        let mut root = store
+            .list_groups()
+            .unwrap()
+            .into_iter()
+            .find(|g| g.id == team.id)
+            .unwrap();
+        root.parent_id = Some(own.id);
+        store.upsert_group(&root).unwrap();
+        record_local_change(&store, ItemKind::Group, &team.id.0.to_string(), 31).unwrap();
+    }
+    sync(&b).await;
+    let mut ea = engine(&a).await;
+    let report = ea.pull(&a.store, &a.vault).await.unwrap();
+    let root = a
+        .store
+        .lock()
+        .unwrap()
+        .list_groups()
+        .unwrap()
+        .into_iter()
+        .find(|g| g.id == team.id)
+        .unwrap();
+    assert_eq!(root.parent_id, None, "{report:?}");
+    assert!(
+        report.rejected.is_empty(),
+        "the change is taken, the parent kept: {report:?}"
+    );
 }

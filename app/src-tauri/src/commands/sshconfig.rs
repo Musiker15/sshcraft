@@ -12,8 +12,8 @@ use crate::state::AppState;
 
 #[derive(Serialize)]
 pub struct SshConfigPreview {
-    candidates: Vec<ImportCandidate>,
-    skipped: Vec<String>,
+    pub(crate) candidates: Vec<ImportCandidate>,
+    pub(crate) skipped: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -21,7 +21,7 @@ pub struct SshConfigImportResult {
     created: usize,
 }
 
-fn home() -> Option<PathBuf> {
+pub(crate) fn home() -> Option<PathBuf> {
     directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
 }
 
@@ -56,7 +56,7 @@ async fn agent_fingerprints() -> Option<Vec<String>> {
         .map(|keys| keys.into_iter().map(|k| k.fingerprint).collect())
 }
 
-async fn preview() -> CommandResult<SshConfigPreview> {
+pub(crate) async fn preview() -> CommandResult<SshConfigPreview> {
     let path = home()
         .map(|h| h.join(".ssh").join("config"))
         .ok_or_else(|| CommandError::new(ErrorCode::Io, "no home directory"))?;
@@ -86,6 +86,6 @@ pub fn ssh_config_import(
 ) -> CommandResult<SshConfigImportResult> {
     let store = state.store.lock().expect("store lock");
     Ok(SshConfigImportResult {
-        created: sshconfig::apply_import(&store, &candidates)?,
+        created: sshcraft_core::import::apply_import(&store, &candidates, None)?.created,
     })
 }

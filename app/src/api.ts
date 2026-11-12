@@ -13,8 +13,36 @@ export type ConnectionSettings = {
   key: KeyRef | null;
 };
 
+export const HOST_OS = [
+  "linux",
+  "debian",
+  "ubuntu",
+  "fedora",
+  "red_hat",
+  "cent_os",
+  "rocky",
+  "alma",
+  "arch",
+  "alpine",
+  "open_suse",
+  "raspbian",
+  "free_bsd",
+  "open_bsd",
+  "mac_os",
+  "windows",
+  "other",
+] as const;
+export type HostOs = (typeof HOST_OS)[number];
+
 /** `location`: the sync server an item belongs to; missing or null means "only on this device". */
-export type Group = { id: string; name: string; defaults: ConnectionSettings; location?: string | null };
+export type Group = {
+  id: string;
+  name: string;
+  defaults: ConnectionSettings;
+  location?: string | null;
+  parent_id?: string | null;
+  tags?: string[];
+};
 
 export type Host = {
   id: string;
@@ -22,6 +50,8 @@ export type Host = {
   group_id: string | null;
   settings: ConnectionSettings;
   location?: string | null;
+  tags?: string[];
+  os?: HostOs | null;
 };
 
 export type KeyInfo = {
@@ -75,22 +105,6 @@ export const importKey = (name: string, text: string, passphrase: string | null)
 export const generateKey = (name: string) => invoke<KeyInfo>("generate_key", { name });
 export const deleteKey = (id: string) => invoke<void>("delete_key", { id });
 export const listAgentKeys = () => invoke<AgentKey[]>("list_agent_keys");
-
-export type KeyNote = "no_identity_file" | "not_in_agent" | "agent_unavailable";
-export type ImportWarning =
-  | { kind: "proxy_ignored"; directive: string }
-  | { kind: "unsupported_token"; token: string };
-export type ImportCandidate = {
-  alias: string;
-  group: string | null;
-  settings: ConnectionSettings;
-  key_note: KeyNote | null;
-  warnings: ImportWarning[];
-};
-export type SshConfigPreview = { candidates: ImportCandidate[]; skipped: string[] };
-export const sshConfigPreview = () => invoke<SshConfigPreview>("ssh_config_preview");
-export const sshConfigImport = (candidates: ImportCandidate[]) =>
-  invoke<{ created: number }>("ssh_config_import", { candidates });
 
 export type PassCliStatus = "not_installed" | "logged_out" | "ready" | "failed";
 export type PassKey = { share_id: string; item_id: string; title: string };
@@ -249,3 +263,65 @@ export const setShareGrants = (server: string, area: string, grants: GrantInput[
   invoke<RevokeOutcome>("set_share_grants", { server, area, grants });
 export const unshare = (server: string, area: string) => invoke<RevokeOutcome>("unshare", { server, area });
 export const itemShares = () => invoke<ItemShare[]>("item_shares");
+
+export type KeyNote =
+  | { kind: "no_identity_file" }
+  | { kind: "not_in_agent" }
+  | { kind: "agent_unavailable" }
+  | { kind: "file"; path: string };
+export type ImportWarning =
+  | { kind: "proxy_ignored"; directive: string }
+  | { kind: "unsupported_token"; token: string }
+  | { kind: "password_not_imported" }
+  | { kind: "bad_port" }
+  | { kind: "unsupported"; what: string };
+export type ImportCandidate = {
+  name: string;
+  group_path: string[];
+  group_defaults?: ConnectionSettings;
+  settings: ConnectionSettings;
+  tags?: string[];
+  os?: HostOs | null;
+  key_note: KeyNote | null;
+  warnings: ImportWarning[];
+};
+export type ImportPlan = { candidates: ImportCandidate[]; skipped: string[] };
+export type ImportPreview = { plan: ImportPlan; host_keys: number | null };
+export type ImportOutcome = { created: number; duplicates: number; groups: string[]; hosts: string[] };
+export type ImportSource =
+  | { kind: "ssh_config" }
+  | { kind: "known_hosts"; path: string }
+  | { kind: "csv"; path: string }
+  | { kind: "putty_registry" }
+  | { kind: "putty_reg"; path: string }
+  | { kind: "moba_xterm"; path: string }
+  | { kind: "secure_crt"; dir: string };
+export type ImportDefaults = {
+  known_hosts: string | null;
+  ssh_dir: string | null;
+  mobaxterm: string | null;
+  securecrt: string | null;
+  putty_registry: boolean;
+};
+export type KeyFile = {
+  path: string;
+  name: string;
+  format: "open_ssh" | "pem" | "ppk";
+  encrypted: boolean;
+  algorithm: string | null;
+  fingerprint: string | null;
+};
+export type KnownOutcome = { added: number; same: number; conflicts: [string, number][] };
+export type ExportPlace = { kind: "local" } | { kind: "server"; id: string };
+export type ExportFilter = { location?: ExportPlace; group?: string };
+
+export const importDefaults = () => invoke<ImportDefaults>("import_defaults");
+export const importPreview = (source: ImportSource) => invoke<ImportPreview>("import_preview", { source });
+export const importApply = (candidates: ImportCandidate[], location: string | null) =>
+  invoke<ImportOutcome>("import_apply", { candidates, location });
+export const importKnownHosts = (path: string) => invoke<KnownOutcome>("import_known_hosts", { path });
+export const scanKeyFiles = (dir: string) => invoke<KeyFile[]>("scan_key_files", { dir });
+export const importKeyFile = (path: string, passphrase: string | null) =>
+  invoke<KeyInfo>("import_key_file", { path, passphrase });
+export const exportHosts = (format: "csv" | "json", filter: ExportFilter, path: string) =>
+  invoke<void>("export_hosts", { format, filter, path });

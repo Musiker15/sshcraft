@@ -12,6 +12,12 @@ pub enum StoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("stored data is malformed: {0}")]
     Malformed(String),
+    /// A group would end up inside itself.
+    #[error("a group cannot be inside itself")]
+    GroupCycle,
+    /// Groups would nest deeper than `MAX_GROUP_DEPTH`.
+    #[error("groups nest too deep")]
+    TooDeep,
 }
 
 /// A key as stored on disk. `sealed_secret` is the vault's ciphertext, never plaintext.
@@ -31,7 +37,7 @@ pub struct Store {
     conn: rusqlite::Connection,
 }
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -71,6 +77,14 @@ CREATE TABLE IF NOT EXISTS recent_hosts (
     host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
     connected_at INTEGER NOT NULL
 );
+";
+
+/// Version 5: nested groups, tags, and the operating system of a host.
+pub(crate) const SCHEMA_V5: &str = "
+ALTER TABLE groups ADD COLUMN parent_id TEXT REFERENCES groups(id) ON DELETE CASCADE;
+ALTER TABLE groups ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE hosts ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE hosts ADD COLUMN os TEXT;
 ";
 
 /// Version 3: where each item lives (a sync server or only this device) and the sync state.
@@ -165,28 +179,116 @@ impl Store {
         if version < 4 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(share_store::SCHEMA_V4)?;
+            tx.pragma_update(None, "user_version", 4)?;
+            tx.commit()?;
+        }
+        if version < 5 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V5)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
         Ok(Self { conn })
     }
 
+    /// Saves a group. A subgroup takes its parent's location, and so do its own subgroups and
+    /// hosts; the parent must exist and must not be the group or one of its subgroups.
     pub fn upsert_group(&self, group: &Group) -> Result<(), StoreError> {
-        self.conn.execute(
-            // The location is set on insert only; moving an item goes through `set_location`,
-            // so a form that sends an item back without its location cannot move it.
-            "INSERT INTO groups (id, name, defaults, location) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(id) DO UPDATE SET name = excluded.name, defaults = excluded.defaults",
+        let id = group.id.0.to_string();
+        let tx = self.conn.unchecked_transaction()?;
+        if let Some(parent) = group.parent_id {
+            if parent == group.id || subgroups_of(&tx, &id)?.contains(&parent.0.to_string()) {
+                return Err(StoreError::GroupCycle);
+            }
+            // Levels above the parent, the parent, this group and the deepest level below it.
+            let above: i64 = tx.query_row(
+                "WITH RECURSIVE up(id, depth) AS (
+                     SELECT ?1, 1
+                     UNION ALL
+                     SELECT g.parent_id, up.depth + 1 FROM groups g JOIN up ON g.id = up.id
+                     WHERE g.parent_id IS NOT NULL AND up.depth <= ?2
+                 )
+                 SELECT MAX(depth) FROM up",
+                rusqlite::params![parent.0.to_string(), crate::model::MAX_GROUP_DEPTH as i64],
+                |r| r.get(0),
+            )?;
+            let below: i64 = tx.query_row(
+                "WITH RECURSIVE down(id, depth) AS (
+                     SELECT ?1, 0
+                     UNION ALL
+                     SELECT g.id, down.depth + 1 FROM groups g JOIN down ON g.parent_id = down.id
+                     WHERE down.depth <= ?2
+                 )
+                 SELECT MAX(depth) FROM down",
+                rusqlite::params![id, crate::model::MAX_GROUP_DEPTH as i64],
+                |r| r.get(0),
+            )?;
+            if above + 1 + below > crate::model::MAX_GROUP_DEPTH as i64 {
+                return Err(StoreError::TooDeep);
+            }
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?1)",
+                [parent.0.to_string()],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                return Err(StoreError::Malformed("no such parent group".into()));
+            }
+        }
+        tx.execute(
+            // The location is set on insert only (or taken from the parent); moving an item goes
+            // through `set_location`, so a form that sends an item back without its location
+            // cannot move it.
+            "INSERT INTO groups (id, name, defaults, location, parent_id, tags)
+             VALUES (?1, ?2, ?3,
+                 CASE WHEN ?5 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?5) ELSE ?4 END,
+                 ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, defaults = excluded.defaults,
+                 parent_id = excluded.parent_id, tags = excluded.tags,
+                 location = CASE WHEN excluded.parent_id IS NOT NULL
+                     THEN (SELECT location FROM groups WHERE id = excluded.parent_id)
+                     ELSE groups.location END",
             rusqlite::params![
-                group.id.0.to_string(),
+                id,
                 group.name,
                 to_json(&group.defaults)?,
-                group.location.map(|s| s.0.to_string())
+                group.location.map(|s| s.0.to_string()),
+                group.parent_id.map(|p| p.0.to_string()),
+                to_json(&crate::model::normalize_tags(&group.tags))?
             ],
         )?;
+        // Whatever is below follows the group's (possibly new) location.
+        let location: Option<String> =
+            tx.query_row("SELECT location FROM groups WHERE id = ?1", [&id], |r| {
+                r.get(0)
+            })?;
+        for sub in subgroups_of(&tx, &id)? {
+            tx.execute(
+                "UPDATE groups SET location = ?2 WHERE id = ?1",
+                rusqlite::params![sub, location],
+            )?;
+            tx.execute(
+                "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
+                rusqlite::params![sub, location],
+            )?;
+        }
+        tx.execute(
+            "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
+            rusqlite::params![id, location],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
+    /// Every group below `id`, at any depth.
+    pub fn subgroups(&self, id: GroupId) -> Result<Vec<GroupId>, StoreError> {
+        subgroups_of(&self.conn, &id.0.to_string())?
+            .iter()
+            .map(|s| parse_uuid(s).map(GroupId))
+            .collect()
+    }
+
+    /// Deletes a group with its subgroups and all their hosts.
     pub fn delete_group(&self, id: GroupId) -> Result<(), StoreError> {
         self.conn
             .execute("DELETE FROM groups WHERE id = ?1", [id.0.to_string()])?;
@@ -195,7 +297,8 @@ impl Store {
 
     pub fn list_groups(&self) -> Result<Vec<Group>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, defaults, location FROM groups ORDER BY name COLLATE NOCASE, id",
+            "SELECT id, name, defaults, location, parent_id, tags FROM groups
+             ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -203,15 +306,19 @@ impl Store {
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
                 r.get::<_, Option<String>>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, String>(5)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, defaults, location) = row?;
+            let (id, name, defaults, location, parent, tags) = row?;
             Ok(Group {
                 id: GroupId(parse_uuid(&id)?),
                 name,
                 defaults: from_json(&defaults)?,
                 location: parse_location(location)?,
+                parent_id: parent.map(|p| parse_uuid(&p).map(GroupId)).transpose()?,
+                tags: from_json(&tags)?,
             })
         })
         .collect()
@@ -220,10 +327,12 @@ impl Store {
     pub fn upsert_host(&self, host: &Host) -> Result<(), StoreError> {
         self.conn.execute(
             // A host in a group always lives where its group lives.
-            "INSERT INTO hosts (id, name, group_id, settings, location) VALUES (?1, ?2, ?3, ?4,
-                 CASE WHEN ?3 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?3) ELSE ?5 END)
+            "INSERT INTO hosts (id, name, group_id, settings, location, tags, os)
+             VALUES (?1, ?2, ?3, ?4,
+                 CASE WHEN ?3 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?3) ELSE ?5 END,
+                 ?6, ?7)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, group_id = excluded.group_id,
-             settings = excluded.settings,
+             settings = excluded.settings, tags = excluded.tags, os = excluded.os,
              location = CASE WHEN excluded.group_id IS NOT NULL
                  THEN (SELECT location FROM groups WHERE id = excluded.group_id)
                  ELSE hosts.location END",
@@ -232,7 +341,9 @@ impl Store {
                 host.name,
                 host.group_id.map(|g| g.0.to_string()),
                 to_json(&host.settings)?,
-                host.location.map(|s| s.0.to_string())
+                host.location.map(|s| s.0.to_string()),
+                to_json(&crate::model::normalize_tags(&host.tags))?,
+                host.os.map(|os| to_json(&os)).transpose()?
             ],
         )?;
         Ok(())
@@ -246,7 +357,7 @@ impl Store {
 
     pub fn list_hosts(&self) -> Result<Vec<Host>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, group_id, settings, location FROM hosts
+            "SELECT id, name, group_id, settings, location, tags, os FROM hosts
              ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -256,16 +367,20 @@ impl Store {
                 r.get::<_, Option<String>>(2)?,
                 r.get::<_, String>(3)?,
                 r.get::<_, Option<String>>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, Option<String>>(6)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, group_id, settings, location) = row?;
+            let (id, name, group_id, settings, location, tags, os) = row?;
             Ok(Host {
                 id: HostId(parse_uuid(&id)?),
                 name,
                 group_id: group_id.map(|g| parse_uuid(&g).map(GroupId)).transpose()?,
                 settings: from_json(&settings)?,
                 location: parse_location(location)?,
+                tags: from_json(&tags)?,
+                os: os.map(|o| from_json(&o)).transpose()?,
             })
         })
         .collect()
@@ -420,6 +535,26 @@ impl Store {
     }
 }
 
+/// Every group below `id`, at any depth (at most `MAX_GROUP_DEPTH` levels).
+fn subgroups_of(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, StoreError> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE below(id, depth) AS (
+             SELECT id, 1 FROM groups WHERE parent_id = ?1
+             UNION
+             SELECT g.id, below.depth + 1 FROM groups g JOIN below ON g.parent_id = below.id
+             WHERE below.depth < ?2
+         )
+         SELECT DISTINCT id FROM below WHERE id != ?1",
+    )?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![id, crate::model::MAX_GROUP_DEPTH as i64],
+            |r| r.get::<_, String>(0),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 fn to_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
     serde_json::to_string(value).map_err(|e| StoreError::Malformed(e.to_string()))
 }
@@ -442,6 +577,10 @@ mod share_store;
 mod sync_store;
 pub use share_store::{Contact, ShareKind, ShareRole, ShareRow, copy_id};
 pub use sync_store::{AreaState, ItemKind, RecordEntry, ServerRow};
+
+#[cfg(test)]
+#[path = "store_tree_tests.rs"]
+mod tree_tests;
 
 #[cfg(test)]
 #[path = "store_tests.rs"]

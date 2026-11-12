@@ -207,6 +207,8 @@ async fn renaming_a_group_keeps_a_newer_host_edit() {
         name: "srv".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server_id),
+        parent_id: None,
+        tags: Vec::new(),
     };
     let mut host = sample_host("web");
     host.group_id = Some(group.id);

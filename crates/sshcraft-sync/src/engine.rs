@@ -45,17 +45,64 @@ pub fn record_local_change(
         return Ok(());
     };
     store.queue(server, kind, id, now_ms)?;
+    // A group that changed area (hung into or out of a share) takes everything below along.
+    if kind == ItemKind::Group
+        && let Some(personal) = store
+            .get_setting(&crate::account::personal_setting(server))?
+            .and_then(|t| Uuid::parse_str(&t).ok())
+        && let Some(entry) = store.record_entry(server, ItemKind::Group, id)?
+        && entry.area_id != store.area_for(server, ItemKind::Group, id, personal)?
+    {
+        record_group_hosts(store, id, now_ms)?;
+    }
     // Its copies in shares follow it.
     for (_, copy) in store.copies_of(server, kind, id)? {
         store.queue(server, kind, &copy, now_ms)?;
     }
+    // Copies below a group carry values from it: they follow too.
+    if kind == ItemKind::Group
+        && let Ok(uuid) = Uuid::parse_str(id)
+    {
+        let mut tree: Vec<String> = store
+            .subgroups(sshcraft_core::model::GroupId(uuid))?
+            .iter()
+            .map(|g| g.0.to_string())
+            .collect();
+        for group in &tree {
+            for (_, copy) in store.copies_of(server, ItemKind::Group, group)? {
+                store.queue(server, ItemKind::Group, &copy, now_ms)?;
+            }
+        }
+        tree.push(id.to_owned());
+        for host in store.list_hosts()? {
+            if host
+                .group_id
+                .is_some_and(|g| tree.contains(&g.0.to_string()))
+            {
+                for (_, copy) in store.copies_of(server, ItemKind::Host, &host.id.0.to_string())? {
+                    store.queue(server, ItemKind::Host, &copy, now_ms)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
-/// Queues every host of a group, for when the group moves or is deleted (its hosts go with it).
+/// Queues every subgroup and every host below a group, for when the group moves or is deleted
+/// (all of it goes with it).
 pub fn record_group_hosts(store: &Store, group_id: &str, now_ms: i64) -> Result<(), SyncError> {
+    let id = Uuid::parse_str(group_id).map_err(|e| SyncError::Store(e.to_string()))?;
+    let mut groups = vec![group_id.to_owned()];
+    for sub in store.subgroups(sshcraft_core::model::GroupId(id))? {
+        let sub = sub.0.to_string();
+        record_local_change(store, ItemKind::Group, &sub, now_ms)?;
+        groups.push(sub);
+    }
     for host in store.list_hosts()? {
-        if host.group_id.is_some_and(|g| g.0.to_string() == group_id) {
+        if host
+            .group_id
+            .is_some_and(|g| groups.contains(&g.0.to_string()))
+        {
             record_local_change(store, ItemKind::Host, &host.id.0.to_string(), now_ms)?;
         }
     }
@@ -564,6 +611,10 @@ impl Engine {
                             match self.take(store, vault, &record.header, &body, personal) {
                                 Ok(true) => report.applied += 1,
                                 Ok(false) => {}
+                                // Refused for good, not fetched again.
+                                Err(err @ SyncError::GroupCycle) => {
+                                    report.rejected.push(format!("record {record_id}: {err}"))
+                                }
                                 Err(err) => {
                                     tracker = before;
                                     retry_from =
@@ -879,7 +930,24 @@ impl Engine {
             .server(self.server)?
             .ok_or(SyncError::NotSetUp)?
             .sync_keys;
-        let outbox = lock(store)?.outbox(self.server)?;
+        let mut outbox = lock(store)?.outbox(self.server)?;
+        // Keys before what uses them, a group before its subgroups, groups before hosts, so a
+        // device fetching in order can apply each record as it comes.
+        {
+            let groups = lock(store)?.list_groups()?;
+            let rank = |(kind, id): &(ItemKind, String)| match kind {
+                ItemKind::Key => (0, 0),
+                ItemKind::Group => (
+                    1,
+                    Uuid::parse_str(id).map_or(0, |u| {
+                        sshcraft_core::model::group_chain(&groups, sshcraft_core::model::GroupId(u))
+                            .len()
+                    }),
+                ),
+                ItemKind::Host => (2, 0),
+            };
+            outbox.sort_by_key(rank);
+        }
         let mut sent = 0;
         for (kind, id) in outbox {
             if kind == ItemKind::Key && !sync_keys {
@@ -910,7 +978,7 @@ impl Engine {
                             guard.remove_copy(self.server, kind, &id)?;
                             break;
                         }
-                        Step::Write(item, known, area, queued)
+                        Step::Write(Box::new(item), known, area, queued)
                     } else {
                         let mut item = local_item(&guard, vault, kind, &id, queued)?;
                         // Moved to another place (this device only, or another server): for this
@@ -959,7 +1027,7 @@ impl Engine {
                         } else if let Some(entry) = known.clone().filter(|e| e.area_id != target) {
                             Step::Leave(entry, item.modified_at)
                         } else {
-                            Step::Write(item, known, target, queued)
+                            Step::Write(Box::new(item), known, target, queued)
                         }
                     }
                 };
@@ -1134,7 +1202,7 @@ impl Engine {
         body: &[u8],
         personal: Option<Uuid>,
     ) -> Result<bool, SyncError> {
-        let item = decode(body)?;
+        let mut item = decode(body)?;
         let (kind, item_id) = item.item();
         let store = lock(store)?;
         let area = header.area_id.0;
@@ -1145,6 +1213,45 @@ impl Engine {
             modified_at: item.modified_at,
         };
         let deleted = matches!(item.body, ItemBody::Deleted { .. });
+        // In an own share with all hosts, a member neither moves nor deletes the shared group,
+        // nor hangs anything into groups outside the share.
+        if header.author_account != self.account
+            && let Some(share) = store
+                .share(self.server, area)?
+                .filter(|s| s.owned && s.kind == ShareKind::GroupAll)
+        {
+            let is_root = |id: &str| share.group_id.as_deref() == Some(id);
+            let outside =
+                |group: Option<sshcraft_core::model::GroupId>| -> Result<bool, SyncError> {
+                    Ok(match group {
+                        Some(g) => {
+                            store.effective_area(self.server, ItemKind::Group, &g.0.to_string())?
+                                != Some(area)
+                        }
+                        None => false,
+                    })
+                };
+            let refuse = match &mut item.body {
+                ItemBody::Deleted { item_kind, item_id } => {
+                    *item_kind == ItemKind::Group && is_root(item_id)
+                }
+                ItemBody::Group { group } if is_root(&group.id.0.to_string()) => {
+                    group.parent_id = store
+                        .list_groups()?
+                        .into_iter()
+                        .find(|g| g.id == group.id)
+                        .and_then(|g| g.parent_id);
+                    false
+                }
+                ItemBody::Group { group } => outside(group.parent_id)?,
+                ItemBody::Host { host } => outside(host.group_id)?,
+                ItemBody::Key { .. } => false,
+            };
+            if refuse {
+                store.put_record_entry(self.server, &entry, kind, &item_id)?;
+                return Ok(false);
+            }
+        }
         // On the owner's devices a copy in an own share is not an item of its own: a member's
         // change goes into the original (and from there into every other copy).
         if store
@@ -1195,6 +1302,12 @@ impl Engine {
         if local_wins || elsewhere || (kind == ItemKind::Key && !sync_keys) {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Ok(false);
+        }
+        if let ItemBody::Group { group } = &item.body
+            && !settle_cycle(&store, self.server, group, item.modified_at)?
+        {
+            store.put_record_entry(self.server, &entry, kind, &item_id)?;
+            return Err(SyncError::GroupCycle);
         }
         apply_in(&store, vault, self.server, &item, Some(area), personal)?;
         if deleted || Some(area) == personal {
@@ -1280,7 +1393,25 @@ fn take_into_original(
             next.id = mine.id;
             next.group_id = mine.group_id;
             next.location = mine.location;
-            next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key);
+            next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key.clone());
+            // What the copy only carried because the original inherits it stays inherited.
+            let shared = store.share(server, area)?.and_then(|s| s.group_id);
+            let baked =
+                crate::shares::intermediate_defaults(store, mine.group_id, shared.as_deref())?;
+            let own = &mine.settings;
+            let settings = &mut next.settings;
+            if own.address.is_none() && settings.address == baked.address {
+                settings.address = None;
+            }
+            if own.port.is_none() && settings.port == baked.port {
+                settings.port = None;
+            }
+            if own.username.is_none() && settings.username == baked.username {
+                settings.username = None;
+            }
+            if own.key.is_none() && settings.key == baked.key {
+                settings.key = None;
+            }
             store.upsert_host(&next)?;
         }
         // The group, keys and deletions of copies are the owner's alone (a selection only lets
@@ -1326,7 +1457,7 @@ enum Step {
     Refuse(&'static str, Option<RecordEntry>),
     /// The item moved to another area: its old record says it is gone first.
     Leave(RecordEntry, i64),
-    Write(crate::items::SyncItem, Option<RecordEntry>, Uuid, i64),
+    Write(Box<crate::items::SyncItem>, Option<RecordEntry>, Uuid, i64),
 }
 
 /// Why this account may not send a change into `area`, if it may not: a received share it may
@@ -1353,6 +1484,50 @@ fn refusal(
         return Ok(Some("share_read_only"));
     }
     Ok(None)
+}
+
+/// A group from the server that would end up inside itself here (two devices nested two groups
+/// into each other at the same time): the later change wins. If it is the incoming one, the
+/// local group that closes the loop moves to the top level and is sent as a change of its own;
+/// otherwise the incoming one is refused. Returns whether the group may be applied.
+fn settle_cycle(
+    store: &Store,
+    server: ServerId,
+    group: &sshcraft_core::model::Group,
+    modified_at: i64,
+) -> Result<bool, SyncError> {
+    let Some(parent) = group.parent_id else {
+        return Ok(true);
+    };
+    if parent == group.id {
+        return Ok(false);
+    }
+    let groups = store.list_groups()?;
+    let above = sshcraft_core::model::group_chain(&groups, parent);
+    let Some(closing) = above.iter().find(|g| g.parent_id == Some(group.id)) else {
+        return Ok(true);
+    };
+    let id = closing.id.0.to_string();
+    let local = store
+        .queued_at(server, ItemKind::Group, &id)?
+        .into_iter()
+        .chain(
+            store
+                .record_entry(server, ItemKind::Group, &id)?
+                .map(|e| e.modified_at),
+        )
+        .max()
+        .unwrap_or(i64::MIN);
+    if newer(local, modified_at) {
+        return Ok(false);
+    }
+    let mut detached = closing.clone();
+    detached.parent_id = None;
+    store.upsert_group(&detached)?;
+    record_local_change(store, ItemKind::Group, &id, modified_at)?;
+    // Moved to the top level, it may have left a share: everything below follows.
+    record_group_hosts(store, &id, modified_at)?;
+    Ok(true)
 }
 
 /// Errors that make one area or record unusable but not the whole pull: it did not verify, or

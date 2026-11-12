@@ -9,6 +9,8 @@ fn group() -> Group {
         name: "g".into(),
         defaults: ConnectionSettings::default(),
         location: None,
+        parent_id: None,
+        tags: Vec::new(),
     }
 }
 
@@ -19,6 +21,8 @@ fn host(group_id: Option<GroupId>) -> Host {
         group_id,
         settings: ConnectionSettings::default(),
         location: None,
+        tags: Vec::new(),
+        os: None,
     }
 }
 

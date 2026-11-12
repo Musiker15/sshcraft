@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\Default%20Settings]
+"Protocol"="ssh"
+
+[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\web%20server]
+"HostName"="deploy@web.example.org"
+"PortNumber"=dword:000008ae
+"Protocol"="ssh"
+"UserName"=""
+"PublicKeyFile"="C:\\Users\\me\\web.ppk"
+
+[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\serial]
+"HostName"="COM1"
+"Protocol"="serial"

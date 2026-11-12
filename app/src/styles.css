@@ -849,3 +849,78 @@ button.icon:hover {
 .share-card .grant .card-sub {
   flex: 1;
 }
+
+/* Tags, group levels */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85em;
+  background: transparent;
+  color: inherit;
+}
+.chip.small {
+  padding: 0 6px;
+  font-size: 0.75em;
+}
+.chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+.tag-input input {
+  flex: 1;
+  min-width: 140px;
+}
+.tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0;
+}
+.breadcrumbs span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+button.link[aria-current="page"] {
+  color: inherit;
+  font-weight: 600;
+}
+.import-dialog .row-form {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+.import-dialog .row-form label {
+  flex: 1;
+}

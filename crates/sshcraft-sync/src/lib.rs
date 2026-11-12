@@ -58,6 +58,13 @@ pub enum SyncError {
     /// Sharing needs a contact whose safety number the user confirmed.
     #[error("the recipient's safety number is not confirmed")]
     ContactUnconfirmed,
+    /// A group would end up inside itself (a record from the server, or a local move).
+    #[error("a group cannot be inside itself")]
+    GroupCycle,
+    /// Only a top-level group can be shared with all its hosts (a nested one can be shared as a
+    /// selection).
+    #[error("only a top-level group can be shared with all its hosts")]
+    NestedGroupAll,
     /// The group is already shared with all its hosts; add recipients to that share instead.
     #[error("already shared")]
     AlreadyShared,

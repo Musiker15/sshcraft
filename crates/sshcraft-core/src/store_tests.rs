@@ -10,6 +10,8 @@ fn group(name: &str) -> Group {
             address: Some("example.org".into()),
             ..Default::default()
         },
+        parent_id: None,
+        tags: Vec::new(),
     }
 }
 
@@ -20,6 +22,8 @@ fn host(name: &str, group_id: Option<GroupId>) -> Host {
         name: name.into(),
         group_id,
         settings: ConnectionSettings::default(),
+        tags: Vec::new(),
+        os: None,
     }
 }
 

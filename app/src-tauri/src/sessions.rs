@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use sshcraft_core::model::{HostId, KeyRef, ResolvedHost, resolve};
+use sshcraft_core::model::{HostId, KeyRef, ResolvedHost, group_chain, resolve};
 use sshcraft_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
@@ -551,7 +551,89 @@ async fn connect_once(
         .open_shell(cols, rows)
         .await
         .map_err(|e| Failure::Lost(e.to_string()))?;
+    if needs_os(&ctx.store, host_id) {
+        tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
+    }
     Ok(shell.split())
+}
+
+fn probed_setting(host_id: HostId) -> String {
+    format!("os.probed.{}", host_id.0)
+}
+
+/// Notes on this device that a host was asked for its system, recognized or not.
+pub(crate) fn mark_probed(store: &Store, host_id: HostId) {
+    let _ = store.put_setting(&probed_setting(host_id), "1");
+}
+
+/// Whether a host has no symbol yet and was never asked from this device.
+pub(crate) fn needs_os(store: &Mutex<Store>, host_id: HostId) -> bool {
+    let store = store.lock().expect("store lock");
+    let asked = store
+        .get_setting(&probed_setting(host_id))
+        .is_ok_and(|v| v.is_some());
+    !asked
+        && store
+            .list_hosts()
+            .is_ok_and(|hosts| hosts.iter().any(|h| h.id == host_id && h.os.is_none()))
+}
+
+/// Asks the server once which operating system it runs and stores it on the host (sent like
+/// any change, unless the host came in a share that may only be read). Failures are ignored:
+/// the symbol simply stays neutral.
+async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_ssh::Session) {
+    // Asked once: a server whose system is not recognized (or that runs a forced command for
+    // every session) is not asked again on each connection.
+    mark_probed(&store.lock().expect("store lock"), host_id);
+    let Ok(output) = session
+        .exec(sshcraft_core::os_detect::OS_PROBE, 16 * 1024)
+        .await
+    else {
+        return;
+    };
+    let Some(os) = sshcraft_core::os_detect::from_output(&String::from_utf8_lossy(&output)) else {
+        return;
+    };
+    let store = store.lock().expect("store lock");
+    let Ok(hosts) = store.list_hosts() else {
+        return;
+    };
+    let Some(mut host) = hosts
+        .into_iter()
+        .find(|h| h.id == host_id && h.os.is_none())
+    else {
+        return;
+    };
+    host.os = Some(os);
+    let id = host.id.0.to_string();
+    let read_only = host.location.is_some_and(|server| {
+        store
+            .read_only(server, sshcraft_core::store::ItemKind::Host, &id)
+            .unwrap_or(true)
+    });
+    if store.upsert_host(&host).is_err() || read_only {
+        return;
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    // Just after the version this device knows: a change made meanwhile on another device
+    // (a rename) is newer and wins over this background update.
+    let at = host
+        .location
+        .and_then(|server| {
+            store
+                .record_entry(server, sshcraft_core::store::ItemKind::Host, &id)
+                .ok()
+                .flatten()
+        })
+        .map_or(now_ms, |entry| entry.modified_at.saturating_add(1));
+    let _ = sshcraft_sync::engine::record_local_change(
+        &store,
+        sshcraft_core::store::ItemKind::Host,
+        &id,
+        at,
+    );
 }
 
 fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Option<String>)> {
@@ -562,15 +644,12 @@ fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Op
         .into_iter()
         .find(|h| h.id == host_id)
         .ok_or((ErrorCode::NotFound, None))?;
-    let group = match host.group_id {
-        Some(gid) => store
-            .list_groups()
-            .map_err(store_error)?
-            .into_iter()
-            .find(|g| g.id == gid),
-        None => None,
+    let chain = match host.group_id {
+        Some(gid) => group_chain(&store.list_groups().map_err(store_error)?, gid),
+        None => Vec::new(),
     };
-    resolve(&host, group.as_ref()).map_err(|e| (ErrorCode::from(&e), None))
+    let chain: Vec<&sshcraft_core::model::Group> = chain.iter().collect();
+    resolve(&host, &chain).map_err(|e| (ErrorCode::from(&e), None))
 }
 
 struct StoreVerifier {

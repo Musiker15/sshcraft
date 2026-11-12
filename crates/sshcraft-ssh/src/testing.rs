@@ -13,6 +13,8 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 const FLOOD_LEN: usize = 5 * 1024 * 1024;
+/// What the test server answers to any command.
+pub const TEST_EXEC_OUTPUT: &str = "NAME=\"Debian\"\nID=debian\nLinux\n";
 const FLOOD_CHUNK: usize = 32 * 1024;
 
 /// 5 MiB of bytes 0..=255 interleaved with multi-byte UTF-8, so chunk borders split characters.
@@ -171,6 +173,25 @@ impl server::Handler for Handler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)
+    }
+
+    async fn exec_request(
+        &mut self,
+        channel: ChannelId,
+        _data: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        session.channel_success(channel)?;
+        let handle = session.handle();
+        tokio::spawn(async move {
+            let _ = handle
+                .data(channel, Bytes::from_static(TEST_EXEC_OUTPUT.as_bytes()))
+                .await;
+            let _ = handle.exit_status_request(channel, 0).await;
+            let _ = handle.eof(channel).await;
+            let _ = handle.close(channel).await;
+        });
+        Ok(())
     }
 
     async fn window_change_request(

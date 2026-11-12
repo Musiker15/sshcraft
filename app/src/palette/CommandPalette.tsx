@@ -9,7 +9,8 @@ const ACTIONS: PaletteActionId[] = [
   "newTab",
   "newHost",
   "newGroup",
-  "importSshConfig",
+  "importHosts",
+  "exportHosts",
   "openHosts",
   "openKeys",
   "openSettings",
@@ -32,7 +33,6 @@ export function CommandPalette({ hosts, groups, recent, onClose, onHost, onActio
   const [selected, setSelected] = useState(0);
   const actions = useMemo(() => ACTIONS.map((id) => ({ id, label: t(`palette.action.${id}`) })), [t]);
   const items = useMemo(() => rankPalette(query, hosts, groups, recent, actions), [query, hosts, groups, recent, actions]);
-  const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   const current = Math.min(selected, Math.max(items.length - 1, 0));
 
   function pick(index: number) {
@@ -95,7 +95,7 @@ export function CommandPalette({ hosts, groups, recent, onClose, onHost, onActio
                   <Server size={16} aria-hidden="true" />
                   <span className="palette-name">{item.host.name}</span>
                   <span className="card-sub">
-                    {hostSubtitle(item.host, item.host.group_id ? groupsById.get(item.host.group_id) : undefined)}
+                    {hostSubtitle(item.host, groups)}
                   </span>
                 </>
               ) : (

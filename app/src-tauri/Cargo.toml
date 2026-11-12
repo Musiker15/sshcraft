@@ -35,11 +35,14 @@ russh = { workspace = true }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "freebsd"))'.dependencies]
 tauri-plugin-single-instance = "2.5.5"
+tauri-plugin-dialog = "2.8.4"
 
 [target.'cfg(windows)'.dependencies]
+winreg = "0.56.0"
 windows = { version = "0.62.2", features = ["Security_Credentials_UI", "Foundation", "Win32_Foundation", "Win32_System_WinRT"] }
 windows-future = "0.3.2"
 
 [dev-dependencies]
+tempfile = { workspace = true }
 sshcraft-ssh = { workspace = true, features = ["testing"] }
 rand = { workspace = true }

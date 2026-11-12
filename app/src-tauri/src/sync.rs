@@ -200,8 +200,20 @@ pub fn note_change(
     {
         store.queue(old, kind, id, now)?;
         if kind == ItemKind::Group {
+            // Everything below goes away from the old server with the group.
+            let gid = sshcraft_core::model::GroupId(
+                uuid::Uuid::parse_str(id).map_err(|_| CommandError::code(ErrorCode::Store))?,
+            );
+            let mut groups = vec![id.to_owned()];
+            for sub in store.subgroups(gid)? {
+                store.queue(old, ItemKind::Group, &sub.0.to_string(), now)?;
+                groups.push(sub.0.to_string());
+            }
             for host in store.list_hosts()? {
-                if host.group_id.is_some_and(|g| g.0.to_string() == id) {
+                if host
+                    .group_id
+                    .is_some_and(|g| groups.contains(&g.0.to_string()))
+                {
                     store.queue(old, ItemKind::Host, &host.id.0.to_string(), now)?;
                 }
             }
@@ -290,7 +302,33 @@ pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandEr
             }
         }
         Change::SaveGroup(group) => {
-            let Some(share) = received(store, ItemKind::Group, &group.id.0.to_string())? else {
+            let id = group.id.0.to_string();
+            let existing = store.list_groups()?.into_iter().find(|g| g.id == group.id);
+            let moved = existing.as_ref().map_or(group.parent_id.is_some(), |old| {
+                old.parent_id != group.parent_id
+            });
+            if moved {
+                // Nesting into a group that came in a share adds to that share.
+                if let Some(parent) = group.parent_id {
+                    let target = received(store, ItemKind::Group, &parent.0.to_string())?;
+                    if target.is_some_and(|t| {
+                        t.role != Some(ShareRole::Write) || t.kind != ShareKind::GroupAll
+                    }) {
+                        return Err(read_only());
+                    }
+                }
+                if existing.is_some() && received(store, ItemKind::Group, &id)?.is_some() {
+                    return Err(CommandError::code(ErrorCode::ShareNotOwner));
+                }
+                // A group that is itself an own share stays where it is until the share ends.
+                if let Some(server) = store.location_of(ItemKind::Group, &id)?
+                    && let Some(area) = store.item_area(server, ItemKind::Group, &id)?
+                    && store.share(server, area)?.is_some_and(|s| s.owned)
+                {
+                    return Err(CommandError::code(ErrorCode::ShareEndFirst));
+                }
+            }
+            let Some(share) = received(store, ItemKind::Group, &id)? else {
                 return Ok(true);
             };
             if share.role == Some(ShareRole::Write) {
@@ -321,8 +359,16 @@ pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandEr
         },
         Change::DeleteGroup(id) => {
             let group = id.0.to_string();
-            if received(store, ItemKind::Group, &group)?.is_some() {
-                return Err(CommandError::code(ErrorCode::ShareNotOwner));
+            if let Some(share) = received(store, ItemKind::Group, &group)? {
+                // The shared group itself is the owner's; below it, write in a group shared
+                // with all hosts allows removing.
+                if share.group_id.as_deref() == Some(group.as_str()) {
+                    return Err(CommandError::code(ErrorCode::ShareNotOwner));
+                }
+                if share.role == Some(ShareRole::Write) && share.kind == ShareKind::GroupAll {
+                    return Ok(true);
+                }
+                return Err(read_only());
             }
             // A group of an own share goes with its share: end that first.
             if let Some(server) = store.location_of(ItemKind::Group, &group)?
@@ -396,6 +442,8 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::NotAllowed => ErrorCode::SyncNotAllowed,
         SyncError::ContactUnconfirmed => ErrorCode::ShareContactUnconfirmed,
         SyncError::AlreadyShared => ErrorCode::ShareAlreadyShared,
+        SyncError::GroupCycle => ErrorCode::GroupCycle,
+        SyncError::NestedGroupAll => ErrorCode::ShareNestedGroup,
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,
     };
     let detail = match err {

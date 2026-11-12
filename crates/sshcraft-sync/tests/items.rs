@@ -23,6 +23,8 @@ fn host(key: Option<KeyRef>) -> Host {
             key,
         },
         location: None,
+        tags: Vec::new(),
+        os: None,
     }
 }
 

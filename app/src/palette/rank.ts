@@ -5,7 +5,8 @@ import { normalize } from "../pages/hostsView";
 export type PaletteActionId =
   | "newHost"
   | "newGroup"
-  | "importSshConfig"
+  | "importHosts"
+  | "exportHosts"
   | "openHosts"
   | "openKeys"
   | "openSettings"

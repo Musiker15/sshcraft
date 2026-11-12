@@ -33,6 +33,8 @@ fn host(group: Option<GroupId>) -> Host {
         group_id: group,
         settings: ConnectionSettings::default(),
         location: None,
+        tags: Vec::new(),
+        os: None,
     }
 }
 
@@ -66,6 +68,8 @@ fn a_host_moved_into_a_synced_group_queues_for_its_server() {
         name: "srv".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     store.upsert_group(&g).unwrap();
     let mut h = host(None);
@@ -280,6 +284,8 @@ fn moving_an_own_host_into_a_received_group_is_refused() {
         name: "theirs".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     store.upsert_group(&group).unwrap();
     let area = Uuid::new_v4();
@@ -328,6 +334,8 @@ fn a_shared_group_is_ended_before_it_is_deleted() {
         name: "mine".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     store.upsert_group(&group).unwrap();
     let area = Uuid::new_v4();
@@ -342,5 +350,89 @@ fn a_shared_group_is_ended_before_it_is_deleted() {
             .unwrap_err()
             .code,
         ErrorCode::ShareEndFirst
+    );
+}
+
+#[test]
+fn moving_a_group_into_a_received_group_is_refused() {
+    use sshcraft_core::store::ShareRole;
+    let (store, server) = store_with_server();
+    let theirs = Group {
+        id: GroupId::new(),
+        name: "theirs".into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
+    };
+    store.upsert_group(&theirs).unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(server, &share_row(area, false, Some(ShareRole::Write)))
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &theirs.id.0.to_string(), area)
+        .unwrap();
+    let mine = Group {
+        id: GroupId::new(),
+        name: "mine".into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
+    };
+    store.upsert_group(&mine).unwrap();
+    let moved = Group {
+        parent_id: Some(theirs.id),
+        ..mine.clone()
+    };
+    assert_eq!(
+        share_rights(&store, Change::SaveGroup(&moved))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareReadOnly
+    );
+}
+
+#[test]
+fn writer_may_delete_a_subgroup_in_a_group_share() {
+    use sshcraft_core::store::{ShareKind, ShareRole, ShareRow};
+    let (store, server) = store_with_server();
+    let group = |name: &str, parent: Option<GroupId>| Group {
+        id: GroupId::new(),
+        name: name.into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+        parent_id: parent,
+        tags: Vec::new(),
+    };
+    let root = group("root", None);
+    let sub = group("sub", Some(root.id));
+    store.upsert_group(&root).unwrap();
+    store.upsert_group(&sub).unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(
+            server,
+            &ShareRow {
+                area_id: area,
+                kind: ShareKind::GroupAll,
+                group_id: Some(root.id.0.to_string()),
+                with_keys: false,
+                owned: false,
+                role: Some(ShareRole::Write),
+                owner: [9; 32],
+            },
+        )
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &root.id.0.to_string(), area)
+        .unwrap();
+    assert!(share_rights(&store, Change::DeleteGroup(sub.id)).unwrap());
+    assert_eq!(
+        share_rights(&store, Change::DeleteGroup(root.id))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareNotOwner
     );
 }
