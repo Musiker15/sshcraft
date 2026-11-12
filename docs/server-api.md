@@ -27,7 +27,8 @@ people. Version conflicts add `"current": <number>`.
 | `unauthorized` | 401 | No valid session, or the login failed |
 | `forbidden` | 403 | Not allowed for this account |
 | `account_locked` | 403 | The account (or the owner of the area) is locked by the operator |
-| `device_inactive` | 403 | The device is revoked or blocked |
+| `device_inactive` | 403 | The device is revoked in its account's device log |
+| `device_blocked` | 403 | The operator blocked the device; this can be lifted |
 | `not_found` | 404 | No such account, area, envelope or route |
 | `method_not_allowed` | 405 | The route exists, but not for this method |
 | `conflict` | 409 | Someone else wrote first; `current` is the stored version or log length |

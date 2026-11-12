@@ -24,8 +24,12 @@ pub const MAX_BACKOFF_SECS: u64 = 60;
 pub enum SyncStatus {
     Idle,
     Syncing,
-    Offline { retry_in_secs: u64 },
+    Offline {
+        retry_in_secs: u64,
+    },
     Revoked,
+    /// Blocked by the server's operator; retried, the block may be lifted.
+    Blocked,
     Error(String),
 }
 
@@ -86,7 +90,36 @@ struct Worker {
 /// What ended a connected phase.
 enum Ended {
     Revoked,
+    /// Connection lost or not possible; try again after a pause.
     Lost,
+    /// The operator blocked this device; try again after a pause, it may be lifted.
+    Blocked,
+    /// Something else failed (a locked account, a broken vault); shown as an error, retried.
+    Failed(String),
+}
+
+/// The pause before the next connection attempt: 1, 2, 4 ... up to `MAX_BACKOFF_SECS`, and back
+/// to 1 once a connection worked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Backoff(u64);
+
+impl Default for Backoff {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+impl Backoff {
+    /// The pause to wait now; the next one is twice as long.
+    pub fn next(&mut self) -> u64 {
+        let now = self.0;
+        self.0 = (self.0 * 2).min(MAX_BACKOFF_SECS);
+        now
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = 1;
+    }
 }
 
 fn now_ms() -> i64 {
@@ -98,72 +131,78 @@ fn now_ms() -> i64 {
 
 impl Worker {
     async fn run(self) {
-        let mut backoff = 1;
+        let mut backoff = Backoff::default();
         loop {
-            match self.connected().await {
+            let ended = self.connected(&mut backoff).await;
+            let pause = backoff.next();
+            match ended {
                 Ended::Revoked => {
                     self.observer.status(self.server, SyncStatus::Revoked);
                     return;
                 }
-                Ended::Lost => {
-                    self.observer.status(
-                        self.server,
-                        SyncStatus::Offline {
-                            retry_in_secs: backoff,
-                        },
-                    );
-                    // A local change does not shorten the pause; the outbox keeps it.
-                    tokio::time::sleep(Duration::from_secs(backoff)).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
+                Ended::Lost => self.observer.status(
+                    self.server,
+                    SyncStatus::Offline {
+                        retry_in_secs: pause,
+                    },
+                ),
+                Ended::Blocked => self.observer.status(self.server, SyncStatus::Blocked),
+                Ended::Failed(detail) => {
+                    self.observer.status(self.server, SyncStatus::Error(detail))
                 }
             }
+            // A local change does not shorten the pause; the outbox keeps it.
+            tokio::time::sleep(Duration::from_secs(pause)).await;
+        }
+    }
+
+    fn ended(err: SyncError) -> Ended {
+        match err {
+            SyncError::Revoked => Ended::Revoked,
+            SyncError::Blocked => Ended::Blocked,
+            SyncError::Network(_) => Ended::Lost,
+            SyncError::Server { code, .. } if code == "unauthorized" => Ended::Lost,
+            other => Ended::Failed(other.to_string()),
         }
     }
 
     /// Logs in, syncs, then follows the event stream until it breaks.
-    async fn connected(&self) -> Ended {
+    async fn connected(&self, backoff: &mut Backoff) -> Ended {
         let mut engine = match Engine::load(&self.store, &self.vault, self.server).await {
             Ok(engine) => engine,
-            Err(SyncError::Revoked) => return Ended::Revoked,
-            Err(SyncError::Network(_)) => return Ended::Lost,
-            Err(err) => {
-                self.observer
-                    .status(self.server, SyncStatus::Error(err.to_string()));
-                return Ended::Lost;
-            }
+            Err(err) => return Self::ended(err),
         };
         if let Err(ended) = self.pass(&mut engine).await {
             return ended;
         }
-        let mut socket = match self.open_events(&engine).await {
-            Some(socket) => socket,
-            None => return Ended::Lost,
+        let Some(mut socket) = self.open_events(&engine).await else {
+            return Ended::Lost;
         };
+        // Connected and in step: the next outage starts with a short pause again.
+        backoff.reset();
+        let mut next_periodic = tokio::time::Instant::now() + PERIODIC;
         loop {
-            tokio::select! {
+            let run = tokio::select! {
                 message = socket.next() => match message {
                     Some(Ok(Message::Text(text))) => {
                         if text.contains("\"session_ended\"") {
-                            // The next login tells whether this device was revoked.
+                            // The next login tells whether this device was revoked or blocked.
                             return Ended::Lost;
                         }
-                        if let Err(ended) = self.pass(&mut engine).await {
-                            return ended;
-                        }
+                        true
                     }
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return Ended::Lost,
-                    Some(Ok(_)) => {}
+                    Some(Ok(_)) => false,
                 },
-                _ = self.nudge.notified() => {
-                    if let Err(ended) = self.pass(&mut engine).await {
-                        return ended;
-                    }
+                _ = self.nudge.notified() => true,
+                _ = tokio::time::sleep_until(next_periodic) => true,
+            };
+            if run {
+                if let Err(ended) = self.pass(&mut engine).await {
+                    return ended;
                 }
-                _ = tokio::time::sleep(PERIODIC) => {
-                    if let Err(ended) = self.pass(&mut engine).await {
-                        return ended;
-                    }
-                }
+                // Pings do not count: the periodic run is measured from the last real one.
+                next_periodic = tokio::time::Instant::now() + PERIODIC;
             }
         }
     }
@@ -188,14 +227,14 @@ impl Worker {
                 self.observer.status(self.server, SyncStatus::Idle);
                 Ok(())
             }
-            Err(SyncError::Revoked) => Err(Ended::Revoked),
-            Err(SyncError::Network(_)) => Err(Ended::Lost),
-            Err(SyncError::Server { code, .. }) if code == "unauthorized" => Err(Ended::Lost),
-            Err(err) => {
-                self.observer
-                    .status(self.server, SyncStatus::Error(err.to_string()));
-                Ok(())
-            }
+            Err(err) => match Self::ended(err) {
+                Ended::Failed(detail) => {
+                    // Shown, but the connection stays; the next notice or nudge tries again.
+                    self.observer.status(self.server, SyncStatus::Error(detail));
+                    Ok(())
+                }
+                ended => Err(ended),
+            },
         }
     }
 
@@ -216,5 +255,19 @@ impl Worker {
             .await
             .ok()
             .map(|(socket, _)| socket)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_grows_to_the_limit_and_resets() {
+        let mut b = Backoff::default();
+        let waits: Vec<u64> = (0..8).map(|_| b.next()).collect();
+        assert_eq!(waits, vec![1, 2, 4, 8, 16, 32, 60, 60]);
+        b.reset();
+        assert_eq!(b.next(), 1);
     }
 }

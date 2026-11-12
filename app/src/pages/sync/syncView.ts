@@ -1,6 +1,6 @@
 import type { Host, KeyInfo, SyncStatusView } from "../../api";
 
-export type Tone = "ok" | "busy" | "offline" | "revoked" | "error" | "off";
+export type Tone = "ok" | "busy" | "offline" | "revoked" | "blocked" | "error" | "off";
 
 /** The colour class of a server's status dot. */
 export function statusTone(status: SyncStatusView): Tone {
@@ -13,6 +13,8 @@ export function statusTone(status: SyncStatusView): Tone {
       return "offline";
     case "revoked":
       return "revoked";
+    case "blocked":
+      return "blocked";
     case "error":
       return "error";
     case "off":

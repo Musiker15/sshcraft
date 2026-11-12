@@ -66,8 +66,11 @@ pub async fn login(
     if account.locked {
         return Err(ApiError::AccountLocked);
     }
-    if !device.active || device.admin_blocked {
+    if !device.active {
         return Err(ApiError::DeviceInactive);
+    }
+    if device.admin_blocked {
+        return Err(ApiError::DeviceBlocked);
     }
     if !device.has_logged_in && !has_api_key(&state, &headers).await? {
         return Err(ApiError::BadApiKey);

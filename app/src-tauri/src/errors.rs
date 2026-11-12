@@ -41,6 +41,7 @@ pub enum ErrorCode {
     SyncEmailTaken,
     SyncAccountNotFound,
     SyncRevoked,
+    SyncBlocked,
     SyncBadAccountKey,
     SyncChecksum,
     SyncProtocol,

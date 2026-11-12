@@ -346,3 +346,35 @@ async fn moving_between_two_servers_keeps_the_item_on_a_device_with_both() {
         assert_eq!(hosts[0].location, Some(by), "y_first = {y_first}");
     }
 }
+
+#[tokio::test]
+async fn unsynced_key_assignments_stay_per_device() {
+    use sshcraft_core::model::KeyRef;
+    let server = TestServer::start().await;
+    let (a, b, host) = pair(&server).await;
+    // Key sync is off: each device assigns a key of its own to the same host.
+    let assign = |dev: &Dev, name: &str, at: i64| {
+        let id = dev.store.lock().unwrap().list_hosts().unwrap()[0].id;
+        let key = {
+            let store = dev.store.lock().unwrap();
+            dev.vault.generate_ed25519(&store, name).unwrap().id
+        };
+        let mut h = host.clone();
+        h.id = id;
+        h.settings.key = Some(KeyRef::Stored { id: key });
+        save(dev, &h, at);
+        key
+    };
+    let ka = assign(&a, "a-key", 200);
+    sync(&a, 200).await;
+    let kb = assign(&b, "b-key", 300);
+    sync(&b, 300).await;
+    sync(&a, 400).await;
+    rename(&a, &a.hosts()[0], "renamed", 500);
+    sync(&a, 500).await;
+    sync(&b, 600).await;
+    let key_on = |dev: &Dev| dev.hosts()[0].settings.key.clone();
+    assert_eq!(key_on(&a), Some(KeyRef::Stored { id: ka }));
+    assert_eq!(key_on(&b), Some(KeyRef::Stored { id: kb }));
+    assert_eq!(name_on(&b), vec!["renamed"]);
+}

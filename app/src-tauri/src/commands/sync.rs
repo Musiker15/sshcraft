@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::CommandResult;
 use crate::state::AppState;
-use crate::sync::{StatusView, note_change, now_ms, sync_error};
+use crate::sync::{StatusView, note_change, now_ms, server_status, sync_error};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServerView {
@@ -68,7 +68,7 @@ pub fn list_servers(state: State<'_, AppState>) -> CommandResult<Vec<ServerView>
     Ok(servers
         .into_iter()
         .map(|row| ServerView {
-            status: state.sync.status(row.id),
+            status: server_status(row.revoked, state.sync.status(row.id)),
             id: row.id,
             name: row.name,
             origin: row.origin,

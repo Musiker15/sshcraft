@@ -280,7 +280,7 @@ async fn blocked_device_cannot_log_in() {
     let (status, err) = env.login(&a, 0, None).await;
     assert_eq!(
         (status, err["code"].as_str()),
-        (StatusCode::FORBIDDEN, Some("device_inactive"))
+        (StatusCode::FORBIDDEN, Some("device_blocked"))
     );
 }
 

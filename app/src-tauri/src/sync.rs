@@ -23,6 +23,7 @@ pub enum StatusView {
     Syncing,
     Offline { retry_in_secs: u64 },
     Revoked,
+    Blocked,
     Error { detail: String },
     Off,
 }
@@ -36,6 +37,7 @@ impl From<&SyncStatus> for StatusView {
                 retry_in_secs: *retry_in_secs,
             },
             SyncStatus::Revoked => Self::Revoked,
+            SyncStatus::Blocked => Self::Blocked,
             SyncStatus::Error(detail) => Self::Error {
                 detail: detail.clone(),
             },
@@ -169,6 +171,12 @@ impl SyncManager {
     }
 }
 
+/// What the window shows for a server: a revoked device stays "revoked" after a restart, when no
+/// runtime runs for it any more.
+pub fn server_status(revoked: bool, live: StatusView) -> StatusView {
+    if revoked { StatusView::Revoked } else { live }
+}
+
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -221,6 +229,7 @@ pub fn sync_error(err: SyncError) -> CommandError {
             "bad_api_key" => ErrorCode::SyncBadApiKey,
             "email_taken" => ErrorCode::SyncEmailTaken,
             "device_inactive" => ErrorCode::SyncRevoked,
+            "device_blocked" => ErrorCode::SyncBlocked,
             _ => ErrorCode::SyncServer,
         },
         SyncError::Proto(ProtoError::BadChecksum) => ErrorCode::SyncChecksum,
@@ -229,6 +238,7 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::Store(_) => ErrorCode::Store,
         SyncError::Vault(_) => ErrorCode::Vault,
         SyncError::Revoked => ErrorCode::SyncRevoked,
+        SyncError::Blocked => ErrorCode::SyncBlocked,
         SyncError::NotSetUp => ErrorCode::NotFound,
         SyncError::NotAllowed => ErrorCode::SyncNotAllowed,
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,

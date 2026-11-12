@@ -735,7 +735,8 @@ button.icon:hover {
   background: var(--accent);
 }
 
-.status-dot.offline {
+.status-dot.offline,
+.status-dot.blocked {
   background: var(--warning);
 }
 

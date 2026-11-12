@@ -131,6 +131,9 @@ impl Engine {
                 lock(store)?.mark_server_revoked(self.server)?;
                 Err(SyncError::Revoked)
             }
+            Err(SyncError::Server { code, .. }) if code == "device_blocked" => {
+                Err(SyncError::Blocked)
+            }
             other => other,
         }
     }
@@ -232,11 +235,11 @@ impl Engine {
                         .push(format!("area {}: no key for this device", area_id.0));
                     continue;
                 }
-                Err(SyncError::Revoked) => return Err(SyncError::Revoked),
-                Err(err) => {
+                Err(err @ SyncError::Proto(_)) => {
                     report.rejected.push(format!("area {}: {err}", area_id.0));
                     continue;
                 }
+                Err(err) => return Err(err),
             };
             let mut cursor = lock(store)?
                 .areas(self.server)?
@@ -341,6 +344,7 @@ impl Engine {
                         break;
                     };
                     let mut item = local_item(&guard, vault, kind, &id, queued)?;
+                    strip_unsynced_keys(&guard, self.server, &mut item)?;
                     // Moved to another place (this device only, or another server): for this
                     // server it is gone.
                     if guard.location_of(kind, &id)? != Some(self.server) {
@@ -454,4 +458,24 @@ fn is_key_record(
         .ok()
         .and_then(|body| decode(&body).ok())
         .is_some_and(|item| item.item().0 == ItemKind::Key)
+}
+
+/// A host or group that points to a stored key which does not live at this server sends no key:
+/// each device assigns its own (design, section 7). `apply` keeps the local assignment.
+fn strip_unsynced_keys(
+    store: &Store,
+    server: ServerId,
+    item: &mut crate::items::SyncItem,
+) -> Result<(), SyncError> {
+    let key = match &mut item.body {
+        ItemBody::Host { host } => &mut host.settings.key,
+        ItemBody::Group { group } => &mut group.defaults.key,
+        _ => return Ok(()),
+    };
+    if let Some(sshcraft_core::model::KeyRef::Stored { id }) = key
+        && store.location_of(ItemKind::Key, &id.0.to_string())? != Some(server)
+    {
+        *key = None;
+    }
+    Ok(())
 }

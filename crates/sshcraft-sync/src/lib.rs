@@ -37,6 +37,9 @@ pub enum SyncError {
     Store(String),
     #[error("vault: {0}")]
     Vault(String),
+    /// The server's operator blocked this device; that can be lifted, so it is not stored.
+    #[error("this device is blocked by the server's operator")]
+    Blocked,
     /// This device was revoked on the server.
     #[error("this device was revoked")]
     Revoked,

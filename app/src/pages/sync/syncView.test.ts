@@ -7,6 +7,7 @@ test("status tones", () => {
   expect(statusTone({ state: "syncing" })).toBe("busy");
   expect(statusTone({ state: "offline", retry_in_secs: 4 })).toBe("offline");
   expect(statusTone({ state: "revoked" })).toBe("revoked");
+  expect(statusTone({ state: "blocked" })).toBe("blocked");
   expect(statusTone({ state: "error", detail: "x" })).toBe("error");
   expect(statusTone({ state: "off" })).toBe("off");
 });

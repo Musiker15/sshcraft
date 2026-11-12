@@ -144,6 +144,8 @@ fn every_sync_error_maps_to_a_code() {
             ErrorCode::SyncProtocol,
         ),
         (SyncError::Revoked, ErrorCode::SyncRevoked),
+        (SyncError::Blocked, ErrorCode::SyncBlocked),
+        (server("device_blocked"), ErrorCode::SyncBlocked),
         (SyncError::NotAllowed, ErrorCode::SyncNotAllowed),
         (SyncError::AccountNotFound, ErrorCode::SyncAccountNotFound),
     ];
@@ -151,4 +153,11 @@ fn every_sync_error_maps_to_a_code() {
         assert_eq!(sync_error(err).code, code);
     }
     assert_eq!(sync_error(server("busy")).detail.as_deref(), Some("busy"));
+}
+
+#[test]
+fn a_revoked_server_shows_revoked_without_a_runtime() {
+    assert_eq!(server_status(true, StatusView::Off), StatusView::Revoked);
+    assert_eq!(server_status(false, StatusView::Off), StatusView::Off);
+    assert_eq!(server_status(false, StatusView::Idle), StatusView::Idle);
 }

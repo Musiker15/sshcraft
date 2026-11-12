@@ -129,6 +129,17 @@ pub fn apply(
         ItemBody::Group { group } => {
             let mut group = group.clone();
             group.location = Some(server);
+            if group.defaults.key.is_none() {
+                group.defaults.key = local_key(
+                    store,
+                    server,
+                    store
+                        .list_groups()?
+                        .into_iter()
+                        .find(|g| g.id == group.id)
+                        .and_then(|g| g.defaults.key),
+                )?;
+            }
             store.upsert_group(&group)?;
             if store.location_of(ItemKind::Group, &group.id.0.to_string())? != Some(server) {
                 store.set_location(ItemKind::Group, &group.id.0.to_string(), Some(server))?;
@@ -137,6 +148,17 @@ pub fn apply(
         ItemBody::Host { host } => {
             let mut host = host.clone();
             host.location = Some(server);
+            if host.settings.key.is_none() {
+                host.settings.key = local_key(
+                    store,
+                    server,
+                    store
+                        .list_hosts()?
+                        .into_iter()
+                        .find(|h| h.id == host.id)
+                        .and_then(|h| h.settings.key),
+                )?;
+            }
             store.upsert_host(&host)?;
             let id = host.id.0.to_string();
             if host.group_id.is_none() && store.location_of(ItemKind::Host, &id)? != Some(server) {
@@ -160,6 +182,23 @@ pub fn apply(
         }
     }
     Ok(())
+}
+
+/// The local key assignment to keep when a record carries none: a stored key that does not
+/// live at this server was never sent, so the record's "no key" does not mean "remove it".
+fn local_key(
+    store: &Store,
+    server: ServerId,
+    local: Option<sshcraft_core::model::KeyRef>,
+) -> Result<Option<sshcraft_core::model::KeyRef>, SyncError> {
+    match local {
+        Some(sshcraft_core::model::KeyRef::Stored { id })
+            if store.location_of(ItemKind::Key, &id.0.to_string())? != Some(server) =>
+        {
+            Ok(Some(sshcraft_core::model::KeyRef::Stored { id }))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// "Last change wins": whether the local change is newer than the one on the server. On a tie

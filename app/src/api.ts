@@ -142,6 +142,7 @@ export type SyncStatusView =
   | { state: "syncing" }
   | { state: "offline"; retry_in_secs: number }
   | { state: "revoked" }
+  | { state: "blocked" }
   | { state: "error"; detail: string }
   | { state: "off" };
 

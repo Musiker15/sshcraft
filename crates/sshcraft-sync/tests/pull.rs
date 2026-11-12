@@ -146,3 +146,22 @@ async fn a_record_that_cannot_apply_yet_is_tried_again() {
     assert_eq!(hosts.len(), 1, "the host arrives once its group is there");
     assert_eq!(hosts[0].group_id, Some(group.id));
 }
+
+#[tokio::test]
+async fn an_operator_block_is_not_a_revocation() {
+    let server = TestServer::start().await;
+    let (a, b) = (Dev::new(), Dev::new());
+    let export = create(&server, &a, "a@example.org").await;
+    join(&server, &b, &export).await;
+    let device = b.row().device_id;
+    let on_server = server.store().await;
+    on_server.set_admin_blocked(device, true).await.unwrap();
+    let err = Engine::load(&b.store, &b.vault, b.row().id).await.err();
+    assert_eq!(err, Some(SyncError::Blocked));
+    assert!(
+        !b.row().revoked,
+        "a block can be lifted, it is not stored as revoked"
+    );
+    on_server.set_admin_blocked(device, false).await.unwrap();
+    assert!(pull(&b).await.is_ok());
+}

@@ -22,6 +22,8 @@ pub enum ApiError {
     AccountLocked,
     #[error("device inactive")]
     DeviceInactive,
+    #[error("device blocked")]
+    DeviceBlocked,
     #[error("not found")]
     NotFound,
     #[error("method not allowed")]
@@ -52,6 +54,7 @@ impl ApiError {
             Self::Forbidden => "forbidden",
             Self::AccountLocked => "account_locked",
             Self::DeviceInactive => "device_inactive",
+            Self::DeviceBlocked => "device_blocked",
             Self::NotFound => "not_found",
             Self::MethodNotAllowed => "method_not_allowed",
             Self::Conflict { .. } => "conflict",
@@ -68,7 +71,9 @@ impl ApiError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::BadApiKey | Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::Forbidden | Self::AccountLocked | Self::DeviceInactive => StatusCode::FORBIDDEN,
+            Self::Forbidden | Self::AccountLocked | Self::DeviceInactive | Self::DeviceBlocked => {
+                StatusCode::FORBIDDEN
+            }
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::Conflict { .. }

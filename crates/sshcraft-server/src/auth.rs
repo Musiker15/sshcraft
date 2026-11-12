@@ -74,8 +74,13 @@ impl Session {
             .device(session.device_id)
             .await?
             .ok_or(ApiError::Unauthorized)?;
-        if !device.active || device.admin_blocked || device.account != session.account {
+        if !device.active || device.account != session.account {
             return Err(ApiError::DeviceInactive);
+        }
+        // A block by the operator can be lifted; it has its own code so a client does not take
+        // it for a revocation.
+        if device.admin_blocked {
+            return Err(ApiError::DeviceBlocked);
         }
         if device
             .last_seen
