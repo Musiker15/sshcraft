@@ -2,15 +2,15 @@
 //! of a selection of hosts or of one host (design, section 8).
 
 use crate::SyncError;
-use crate::areas::create_area;
+use crate::areas::{create_area, set_members};
 use crate::contacts::require_confirmed;
-use crate::engine::{Engine, lock, record_local_change};
+use crate::engine::{Engine, from_json, lock, record_local_change};
 use crate::items::{ItemBody, SyncItem, encode, local_item};
 use serde::{Deserialize, Serialize};
 use sshcraft_core::model::{Group, GroupId, Host, HostId, KeyId, KeyRef, ServerId};
-use sshcraft_core::store::{ItemKind, RecordEntry, ShareKind, ShareRow, Store, copy_id};
+use sshcraft_core::store::{ItemKind, RecordEntry, ShareKind, ShareRole, ShareRow, Store, copy_id};
 use sshcraft_core::vault::Vault;
-use sshcraft_proto::area::{AreaKey, AreaManifest, Member, Role};
+use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role};
 use sshcraft_proto::identity::AccountPublic;
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
 use std::sync::Mutex;
@@ -389,4 +389,196 @@ pub async fn share(
         area,
         agent_keys_skipped,
     })
+}
+
+/// After taking someone out: whether keys went along, so the user can be told to change them
+/// (they may have been copied, design section 8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RevokeOutcome {
+    pub keys_were_shared: bool,
+}
+
+/// One share as the settings show it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShareView {
+    pub area: Uuid,
+    pub kind: ShareKind,
+    /// The shared group (own shares: the original's id).
+    pub group: Option<String>,
+    /// The shared hosts (own shares: the originals' ids).
+    pub hosts: Vec<String>,
+    pub grants: Vec<GrantView>,
+    pub with_keys: bool,
+    pub owned: bool,
+    pub owner: AccountPublic,
+    /// This account's role in a received share.
+    pub role: Option<ShareRole>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GrantView {
+    pub account: AccountPublic,
+    pub role: Role,
+    /// From the contacts, when this device looked the account up.
+    pub email: Option<String>,
+    pub name: Option<String>,
+}
+
+fn owned_share(store: &Mutex<Store>, server: ServerId, area: Uuid) -> Result<ShareRow, SyncError> {
+    match lock(store)?.share(server, area)? {
+        Some(share) if share.owned => Ok(share),
+        _ => not_allowed(),
+    }
+}
+
+/// Changes who a share goes to and with which role. Someone taken out gets no key for what
+/// follows (rotation); the others need not do anything. No grants left ends the share.
+pub async fn set_grants(
+    engine: &mut Engine,
+    store: &Mutex<Store>,
+    vault: &Vault,
+    area: Uuid,
+    grants: Vec<Grant>,
+    now_ms: i64,
+) -> Result<RevokeOutcome, SyncError> {
+    let share = owned_share(store, engine.server, area)?;
+    if grants.is_empty() {
+        return unshare(engine, store, vault, area, now_ms).await;
+    }
+    let (manifest, _) = engine.stored_area(store, area)?;
+    for grant in &grants {
+        if !manifest.members.iter().any(|m| m.account == grant.account) {
+            require_confirmed(store, engine.server, &grant.account)?;
+        }
+    }
+    let removed = manifest
+        .members
+        .iter()
+        .any(|m| !grants.iter().any(|g| g.account == m.account));
+    let members = grants
+        .iter()
+        .map(|g| Member {
+            account: g.account,
+            role: g.role,
+        })
+        .collect();
+    set_members(engine, store, vault, AreaId(area), members, now_ms / 1000).await?;
+    Ok(RevokeOutcome {
+        keys_were_shared: removed && share.with_keys,
+    })
+}
+
+/// Ends a share. A group shared with all its hosts goes back into the personal area; copies
+/// are deleted with the share's area.
+pub async fn unshare(
+    engine: &mut Engine,
+    store: &Mutex<Store>,
+    vault: &Vault,
+    area: Uuid,
+    now_ms: i64,
+) -> Result<RevokeOutcome, SyncError> {
+    let share = owned_share(store, engine.server, area)?;
+    let server = engine.server;
+    if share.kind == ShareKind::GroupAll {
+        {
+            let guard = lock(store)?;
+            let mut items = guard.items_in_area(server, area)?;
+            for host in guard.list_hosts()? {
+                if host
+                    .group_id
+                    .is_some_and(|g| Some(g.0.to_string()) == share.group_id)
+                {
+                    items.push((ItemKind::Host, host.id.0.to_string()));
+                }
+            }
+            for (kind, id) in &items {
+                guard.clear_item_area(server, *kind, id)?;
+            }
+            for (kind, id) in &items {
+                record_local_change(&guard, *kind, id, now_ms)?;
+            }
+        }
+        engine.push(store, vault, now_ms).await?;
+    }
+    let deleted = engine.client().delete_area(AreaId(area)).await;
+    match deleted {
+        Ok(()) | Err(SyncError::Server { status: 404, .. }) => {}
+        Err(err) => return engine.revoked_check(store, Err(err)),
+    }
+    lock(store)?.forget_area(server, area)?;
+    Ok(RevokeOutcome {
+        keys_were_shared: share.with_keys,
+    })
+}
+
+/// Every share this device knows on `server`, own and received.
+pub fn list(store: &Mutex<Store>, server: ServerId) -> Result<Vec<ShareView>, SyncError> {
+    let guard = lock(store)?;
+    let areas = guard.areas(server)?;
+    let mut views = Vec::new();
+    for share in guard.shares(server)? {
+        let Some(state) = areas.iter().find(|a| a.area_id == share.area_id) else {
+            continue;
+        };
+        let manifest: AreaManifest = from_json(&state.manifest)?;
+        let hosts = if share.owned && share.kind != ShareKind::GroupAll {
+            guard
+                .copies_in(server, share.area_id)?
+                .into_iter()
+                .filter(|(kind, _, _)| *kind == ItemKind::Host)
+                .map(|(_, original, _)| original)
+                .collect()
+        } else if share.kind == ShareKind::GroupAll && share.owned {
+            guard
+                .list_hosts()?
+                .into_iter()
+                .filter(|h| {
+                    h.group_id
+                        .is_some_and(|g| Some(g.0.to_string()) == share.group_id)
+                })
+                .map(|h| h.id.0.to_string())
+                .collect()
+        } else {
+            guard
+                .list_hosts()?
+                .into_iter()
+                .map(|h| h.id.0.to_string())
+                .filter(|id| {
+                    guard
+                        .effective_area(server, ItemKind::Host, id)
+                        .ok()
+                        .flatten()
+                        == Some(share.area_id)
+                })
+                .collect()
+        };
+        let grants = manifest
+            .members
+            .iter()
+            .map(|m| {
+                let contact = guard
+                    .contact_by_account(server, &m.account.0)
+                    .ok()
+                    .flatten();
+                GrantView {
+                    account: m.account,
+                    role: m.role,
+                    email: contact.as_ref().map(|c| c.email.clone()),
+                    name: contact.map(|c| c.name),
+                }
+            })
+            .collect();
+        views.push(ShareView {
+            area: share.area_id,
+            kind: share.kind,
+            group: share.group_id.clone(),
+            hosts,
+            grants,
+            with_keys: share.with_keys,
+            owned: share.owned,
+            owner: AccountPublic(share.owner),
+            role: share.role,
+        });
+    }
+    Ok(views)
 }
