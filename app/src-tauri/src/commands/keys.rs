@@ -81,3 +81,16 @@ pub fn delete_key(state: State<'_, AppState>, id: KeyId) -> CommandResult<()> {
         id,
     )?)
 }
+
+/// Keys the Proton Pass agent offers. Only public facts, never key material.
+#[tauri::command]
+pub async fn list_agent_keys() -> CommandResult<Vec<stollen_ssh::AgentKey>> {
+    use crate::sessions::{AgentConnector, WindowsAgent};
+    let mut agent = WindowsAgent
+        .connect()
+        .await
+        .map_err(|e| CommandError::new("agent_unavailable", e))?;
+    stollen_ssh::list_agent_keys(&mut agent)
+        .await
+        .map_err(|e| CommandError::new("agent_unavailable", e))
+}

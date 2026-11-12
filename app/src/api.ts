@@ -1,7 +1,9 @@
 // Typed wrappers around the Tauri commands. Field names mirror the Rust serde output.
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-export type KeyRef = { kind: "stored"; id: string };
+export type KeyRef = { kind: "stored"; id: string } | { kind: "agent"; fingerprint: string };
+
+export type AgentKey = { fingerprint: string; algorithm: string; comment: string; public_key: string };
 
 export type ConnectionSettings = {
   address: string | null;
@@ -72,6 +74,7 @@ export const importKeyFile = (name: string, path: string, passphrase: string | n
   invoke<KeyInfo>("import_key_file", { name, path, passphrase });
 export const generateKey = (name: string) => invoke<KeyInfo>("generate_key", { name });
 export const deleteKey = (id: string) => invoke<void>("delete_key", { id });
+export const listAgentKeys = () => invoke<AgentKey[]>("list_agent_keys");
 
 export async function sessionOpen(
   hostId: string,

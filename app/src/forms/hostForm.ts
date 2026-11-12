@@ -1,11 +1,12 @@
 // Converts between form text fields and ConnectionSettings. Empty means "inherit from group".
-import type { ConnectionSettings } from "../api";
+import type { ConnectionSettings, KeyRef } from "../api";
 
 export type SettingsFormValues = {
   address: string;
   port: string;
   username: string;
-  keyId: string;
+  /** "" (inherit), "stored:<uuid>" or "agent:<fingerprint>". */
+  keyChoice: string;
 };
 
 function text(value: string): string | null {
@@ -22,13 +23,30 @@ export function parsePort(value: string): number | null {
   return port;
 }
 
+export function keyChoice(key: KeyRef | null): string {
+  if (!key) return "";
+  return key.kind === "stored" ? `stored:${key.id}` : `agent:${key.fingerprint}`;
+}
+
+export function parseKeyChoice(choice: string): KeyRef | null {
+  if (choice === "") return null;
+  // Split at the first colon only: fingerprints contain colons themselves.
+  const colon = choice.indexOf(":");
+  const kind = choice.slice(0, colon);
+  const value = choice.slice(colon + 1);
+  if (colon > 0 && value !== "") {
+    if (kind === "stored") return { kind: "stored", id: value };
+    if (kind === "agent") return { kind: "agent", fingerprint: value };
+  }
+  throw new Error("Unbekannte Schlüsselauswahl.");
+}
+
 export function toConnectionSettings(form: SettingsFormValues): ConnectionSettings {
-  const keyId = text(form.keyId);
   return {
     address: text(form.address),
     port: parsePort(form.port),
     username: text(form.username),
-    key: keyId ? { kind: "stored", id: keyId } : null,
+    key: parseKeyChoice(form.keyChoice),
   };
 }
 
@@ -37,6 +55,6 @@ export function fromConnectionSettings(settings: ConnectionSettings): SettingsFo
     address: settings.address ?? "",
     port: settings.port === null ? "" : String(settings.port),
     username: settings.username ?? "",
-    keyId: settings.key?.id ?? "",
+    keyChoice: keyChoice(settings.key),
   };
 }

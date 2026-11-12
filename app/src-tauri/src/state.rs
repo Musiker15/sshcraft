@@ -10,7 +10,7 @@ use stollen_core::vault::{KeyringMasterKey, Vault};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
-use crate::sessions::{HostKeyPrompter, SessionManager};
+use crate::sessions::{HostKeyPrompter, SessionManager, WindowsAgent};
 
 pub struct AppState {
     pub store: Arc<Mutex<Store>>,
@@ -30,7 +30,12 @@ impl AppState {
             .map_err(|e| e.to_string());
         let store = Arc::new(Mutex::new(store));
         let prompter = Arc::new(TauriPrompter::new(app.clone()));
-        let sessions = SessionManager::new(store.clone(), vault.clone().ok(), prompter.clone());
+        let sessions = SessionManager::new(
+            store.clone(),
+            vault.clone().ok(),
+            prompter.clone(),
+            Arc::new(WindowsAgent),
+        );
         Ok(Self {
             store,
             vault,

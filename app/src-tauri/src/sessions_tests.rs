@@ -55,12 +55,66 @@ impl HostKeyPrompter for FixedPrompter {
     }
 }
 
+/// Hands out in-memory agents holding `keys`, or fails like a missing Proton Pass.
+struct TestAgents {
+    keys: Vec<PrivateKey>,
+    reachable: bool,
+}
+
+#[async_trait::async_trait]
+impl AgentConnector for TestAgents {
+    async fn connect(&self) -> Result<stollen_ssh::DynAgent, SshError> {
+        if !self.reachable {
+            return Err(SshError::AgentUnavailable("pipe not found".into()));
+        }
+        Ok(stollen_ssh::testing::spawn_agent(&self.keys, true).await)
+    }
+}
+
 struct Fixture {
     server: TestServer,
     store: Arc<Mutex<Store>>,
     manager: SessionManager,
     prompter: Arc<FixedPrompter>,
     host_id: HostId,
+    key: PrivateKey,
+}
+
+impl Fixture {
+    /// Adds a host that uses the fixture's key through the agent instead of the vault.
+    fn agent_host(&self) -> HostId {
+        let host = Host {
+            id: HostId::new(),
+            name: "agent host".into(),
+            group_id: None,
+            settings: ConnectionSettings {
+                address: Some("127.0.0.1".into()),
+                port: Some(self.server.port),
+                username: Some("tester".into()),
+                key: Some(KeyRef::Agent {
+                    fingerprint: self
+                        .key
+                        .fingerprint(russh::keys::HashAlg::Sha256)
+                        .to_string(),
+                }),
+            },
+        };
+        self.store.lock().unwrap().upsert_host(&host).unwrap();
+        host.id
+    }
+
+    fn manager_with(&self, vault: Option<Arc<Vault>>, agent_reachable: bool) -> SessionManager {
+        SessionManager::with_delay_scale(
+            self.store.clone(),
+            vault,
+            self.prompter.clone(),
+            Arc::new(TestAgents {
+                keys: vec![self.key.clone()],
+                reachable: agent_reachable,
+            }),
+            0.01,
+        )
+    }
 }
 
 async fn fixture(answer: bool) -> Fixture {
@@ -97,6 +151,10 @@ async fn fixture(answer: bool) -> Fixture {
         store.clone(),
         Some(Arc::new(vault)),
         prompter.clone(),
+        Arc::new(TestAgents {
+            keys: vec![key.clone()],
+            reachable: true,
+        }),
         0.01,
     );
     Fixture {
@@ -105,7 +163,49 @@ async fn fixture(answer: bool) -> Fixture {
         manager,
         prompter,
         host_id: host.id,
+        key,
     }
+}
+
+#[tokio::test]
+async fn agent_key_connects() {
+    let f = fixture(true).await;
+    let host = f.agent_host();
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+}
+
+#[tokio::test]
+async fn agent_unavailable_ends_with_error_and_no_retry() {
+    let f = fixture(true).await;
+    let host = f.agent_host();
+    let manager = f.manager_with(None, false);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    let statuses = sink.statuses();
+    assert_eq!(ended(&statuses), Some(EndReason::Error));
+    let detail = statuses.iter().find_map(|s| match s {
+        SessionStatus::Ended { detail, .. } => detail.clone(),
+        _ => None,
+    });
+    assert!(detail.unwrap_or_default().contains("Proton Pass"));
+    assert!(
+        !statuses
+            .iter()
+            .any(|s| matches!(s, SessionStatus::Reconnecting { .. }))
+    );
+}
+
+#[tokio::test]
+async fn agent_key_needs_no_vault() {
+    let f = fixture(true).await;
+    let host = f.agent_host();
+    let manager = f.manager_with(None, true);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
 }
 
 fn ended(statuses: &[SessionStatus]) -> Option<EndReason> {
@@ -246,7 +346,7 @@ async fn output_reaches_sink() {
 #[tokio::test]
 async fn missing_vault_ends_with_error() {
     let f = fixture(true).await;
-    let manager = SessionManager::new(f.store.clone(), None, f.prompter.clone());
+    let manager = f.manager_with(None, true);
     let sink = Arc::new(RecordingSink::default());
     manager.open(f.host_id, 80, 24, sink.clone());
     sink.wait_for(|s| ended(s).is_some()).await;

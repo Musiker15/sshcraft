@@ -116,8 +116,38 @@ struct Context {
     store: Arc<Mutex<Store>>,
     vault: Option<Arc<Vault>>,
     prompter: Arc<dyn HostKeyPrompter>,
+    agent: Arc<dyn AgentConnector>,
     delay_scale: f32,
 }
+
+/// Opens a connection to the SSH agent (Proton Pass on Windows, an in-memory agent in tests).
+#[async_trait::async_trait]
+pub trait AgentConnector: Send + Sync + 'static {
+    async fn connect(&self) -> Result<stollen_ssh::DynAgent, SshError>;
+}
+
+/// The Windows agent pipe served by the Proton Pass desktop app.
+pub struct WindowsAgent;
+
+#[async_trait::async_trait]
+impl AgentConnector for WindowsAgent {
+    async fn connect(&self) -> Result<stollen_ssh::DynAgent, SshError> {
+        #[cfg(windows)]
+        {
+            stollen_ssh::agent::open_windows_agent().await
+        }
+        #[cfg(not(windows))]
+        {
+            Err(SshError::AgentUnavailable(
+                "no agent support on this platform yet".into(),
+            ))
+        }
+    }
+}
+
+const AGENT_UNAVAILABLE: &str = "Proton Pass ist nicht erreichbar. Läuft die Proton-Pass-App?";
+const AGENT_KEY_MISSING: &str = "Der Schlüssel ist nicht mehr in Proton Pass.";
+const AGENT_REFUSED: &str = "Proton Pass hat die Signatur abgelehnt.";
 
 /// What `run` shares with the manager for one session.
 struct Shared {
@@ -133,8 +163,9 @@ impl SessionManager {
         store: Arc<Mutex<Store>>,
         vault: Option<Arc<Vault>>,
         prompter: Arc<dyn HostKeyPrompter>,
+        agent: Arc<dyn AgentConnector>,
     ) -> Self {
-        Self::with_delay_scale(store, vault, prompter, 1.0)
+        Self::with_delay_scale(store, vault, prompter, agent, 1.0)
     }
 
     /// `delay_scale` shortens reconnect delays in tests.
@@ -142,6 +173,7 @@ impl SessionManager {
         store: Arc<Mutex<Store>>,
         vault: Option<Arc<Vault>>,
         prompter: Arc<dyn HostKeyPrompter>,
+        agent: Arc<dyn AgentConnector>,
         delay_scale: f32,
     ) -> Self {
         Self {
@@ -149,6 +181,7 @@ impl SessionManager {
                 store,
                 vault,
                 prompter,
+                agent,
                 delay_scale,
             }),
             sessions: Mutex::new(HashMap::new()),
@@ -316,21 +349,30 @@ async fn connect_once(
     size: &Mutex<(u32, u32)>,
 ) -> Result<(ShellWriter, tokio::sync::mpsc::Receiver<ShellEvent>), Failure> {
     let error = |msg: String| Failure::End(EndReason::Error, Some(msg));
-    let vault = ctx
-        .vault
-        .as_ref()
-        .ok_or_else(|| error("the key vault is locked".into()))?;
-    let (resolved, key) = {
+    let resolved = {
         let store = ctx.store.lock().expect("store lock");
-        let resolved = lookup(&store, host_id).map_err(error)?;
-        let KeyRef::Stored { id } = &resolved.key else {
-            // Agent keys are wired up in the next task.
-            return Err(error("agent keys are not supported yet".into()));
-        };
-        let key = vault
-            .private_key(&store, *id)
-            .map_err(|e| error(e.to_string()))?;
-        (resolved, key)
+        lookup(&store, host_id).map_err(error)?
+    };
+    let credential = match &resolved.key {
+        KeyRef::Stored { id } => {
+            let vault = ctx
+                .vault
+                .as_ref()
+                .ok_or_else(|| error("the key vault is locked".into()))?;
+            let store = ctx.store.lock().expect("store lock");
+            let key = vault
+                .private_key(&store, *id)
+                .map_err(|e| error(e.to_string()))?;
+            stollen_ssh::Credential::Key(key)
+        }
+        KeyRef::Agent { fingerprint } => stollen_ssh::Credential::Agent {
+            fingerprint: fingerprint.clone(),
+            agent: ctx
+                .agent
+                .connect()
+                .await
+                .map_err(|_| error(AGENT_UNAVAILABLE.into()))?,
+        },
     };
 
     let verifier = Arc::new(StoreVerifier {
@@ -343,7 +385,7 @@ async fn connect_once(
         address: resolved.address.clone(),
         port: resolved.port,
         username: resolved.username.clone(),
-        credential: stollen_ssh::Credential::Key(key),
+        credential,
     };
     let session = match stollen_ssh::connect(params, verifier.clone()).await {
         Ok(s) => s,
@@ -355,6 +397,14 @@ async fn connect_once(
             });
         }
         Err(SshError::AuthFailed) => return Err(Failure::End(EndReason::AuthFailed, None)),
+        Err(SshError::AgentUnavailable(_)) => return Err(error(AGENT_UNAVAILABLE.into())),
+        Err(SshError::AgentKeyMissing) => return Err(error(AGENT_KEY_MISSING.into())),
+        Err(SshError::AgentRefused) => {
+            return Err(Failure::End(
+                EndReason::AuthFailed,
+                Some(AGENT_REFUSED.into()),
+            ));
+        }
         Err(e) => return Err(Failure::Lost(e.to_string())),
     };
     let (cols, rows) = *size.lock().expect("size lock");

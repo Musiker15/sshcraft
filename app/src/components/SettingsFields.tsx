@@ -1,5 +1,6 @@
-import type { ConnectionSettings, KeyInfo } from "../api";
-import type { SettingsFormValues } from "../forms/hostForm";
+import { useEffect, useState } from "react";
+import { listAgentKeys, type AgentKey, type ConnectionSettings, type KeyInfo } from "../api";
+import { keyChoice, type SettingsFormValues } from "../forms/hostForm";
 
 type Props = {
   values: SettingsFormValues;
@@ -11,8 +12,23 @@ type Props = {
 
 /** Address, port, user and key fields, shared by the host and group forms. */
 export function SettingsFields({ values, onChange, keys, inherited }: Props) {
+  const [agentKeys, setAgentKeys] = useState<AgentKey[] | null>(null);
+  useEffect(() => {
+    listAgentKeys().then(setAgentKeys, () => setAgentKeys(null));
+  }, []);
+
   const set = (field: keyof SettingsFormValues) => (value: string) => onChange({ ...values, [field]: value });
-  const inheritedKey = keys.find((k) => k.id === inherited?.key?.id);
+  const label = (choice: string): string | null => {
+    const stored = keys.find((k) => `stored:${k.id}` === choice);
+    if (stored) return stored.name;
+    const agent = agentKeys?.find((k) => `agent:${k.fingerprint}` === choice);
+    if (agent) return `${agent.comment || agent.fingerprint} (Proton Pass)`;
+    return null;
+  };
+  const inheritedChoice = keyChoice(inherited?.key ?? null);
+  const inheritedLabel = inheritedChoice ? (label(inheritedChoice) ?? "nicht gefunden") : null;
+  const currentMissing = values.keyChoice !== "" && label(values.keyChoice) === null;
+
   return (
     <>
       <div className="grid-2">
@@ -44,13 +60,24 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
       </label>
       <label>
         Schlüssel
-        <select value={values.keyId} onChange={(e) => set("keyId")(e.target.value)}>
-          <option value="">{inheritedKey ? `Von der Gruppe: ${inheritedKey.name}` : "Keiner"}</option>
-          {keys.map((k) => (
-            <option key={k.id} value={k.id}>
-              {k.name} ({k.algorithm})
-            </option>
-          ))}
+        <select value={values.keyChoice} onChange={(e) => set("keyChoice")(e.target.value)}>
+          <option value="">{inheritedLabel ? `Von der Gruppe: ${inheritedLabel}` : "Keiner"}</option>
+          {currentMissing && <option value={values.keyChoice}>Nicht gefunden: {values.keyChoice}</option>}
+          <optgroup label="Proton Pass">
+            {agentKeys === null && <option disabled>Proton Pass nicht erreichbar</option>}
+            {agentKeys?.map((k) => (
+              <option key={k.fingerprint} value={`agent:${k.fingerprint}`}>
+                {k.comment || k.fingerprint} ({k.algorithm})
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Gespeichert">
+            {keys.map((k) => (
+              <option key={k.id} value={`stored:${k.id}`}>
+                {k.name} ({k.algorithm})
+              </option>
+            ))}
+          </optgroup>
         </select>
       </label>
     </>

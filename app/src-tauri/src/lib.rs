@@ -26,6 +26,7 @@ pub fn run() {
             commands::keys::import_key_file,
             commands::keys::generate_key,
             commands::keys::delete_key,
+            commands::keys::list_agent_keys,
             commands::sessions::session_open,
             commands::sessions::session_write,
             commands::sessions::session_resize,
