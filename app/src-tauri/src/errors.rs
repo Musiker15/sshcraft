@@ -54,6 +54,8 @@ pub enum ErrorCode {
     ShareAlreadyShared,
     ShareEndFirst,
     GroupCycle,
+    ImportUnreadable,
+    ImportTooLarge,
 }
 
 impl From<&ResolveError> for ErrorCode {

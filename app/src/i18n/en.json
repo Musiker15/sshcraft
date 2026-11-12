@@ -18,6 +18,8 @@
   "errors.host_missing_key": "The host has no key, neither itself nor from its group.",
   "errors.host_missing_username": "The host has no username, neither itself nor from its group.",
   "errors.host_wrong_group": "The host does not belong to this group.",
+  "errors.import_too_large": "The file is too large to import.",
+  "errors.import_unreadable": "The file could not be read.",
   "errors.internal": "An internal error occurred.",
   "errors.invalid_key": "This is not a valid private key.",
   "errors.io": "A file could not be read.",

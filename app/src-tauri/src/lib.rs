@@ -16,13 +16,16 @@ pub fn run() {
     // A second start must not open the database and the vault a second time: it brings the
     // running window to the front and exits.
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    }));
+    let builder =
+        builder
+            .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }));
     builder
         .setup(|app| {
             let state = state::AppState::init(app.handle())?;
@@ -48,6 +51,13 @@ pub fn run() {
             commands::data::list_recent,
             commands::sshconfig::ssh_config_preview,
             commands::sshconfig::ssh_config_import,
+            commands::import::import_defaults,
+            commands::import::import_preview,
+            commands::import::import_apply,
+            commands::import::import_known_hosts,
+            commands::import::scan_key_files,
+            commands::import::import_key_file,
+            commands::import::export_hosts,
             commands::keys::vault_status,
             commands::keys::hello_status,
             commands::keys::list_keys,
