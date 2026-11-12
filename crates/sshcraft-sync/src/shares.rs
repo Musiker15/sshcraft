@@ -43,6 +43,34 @@ pub fn encode_share_info(info: &ShareInfo) -> Vec<u8> {
     .expect("share info serializes")
 }
 
+/// Which key the owner uses for an item in one of its shares when that key is not shared: kept
+/// in the owner's personal area, so the owner's devices agree while members never see it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyAssignment {
+    pub kind: ItemKind,
+    pub item: String,
+    pub key: Option<KeyRef>,
+    pub modified_at: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct KeyAssignmentBody {
+    key_assignment: KeyAssignment,
+}
+
+pub(crate) fn encode_key_assignment(assignment: &KeyAssignment) -> Vec<u8> {
+    serde_json::to_vec(&KeyAssignmentBody {
+        key_assignment: assignment.clone(),
+    })
+    .expect("key assignment serializes")
+}
+
+pub(crate) fn decode_key_assignment(body: &[u8]) -> Option<KeyAssignment> {
+    serde_json::from_slice::<KeyAssignmentBody>(body)
+        .ok()
+        .map(|b| b.key_assignment)
+}
+
 /// The share info a record body holds, if it is one.
 pub(crate) fn decode_share_info(body: &[u8]) -> Option<ShareInfo> {
     serde_json::from_slice::<ShareInfoBody>(body)

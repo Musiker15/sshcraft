@@ -8,7 +8,11 @@ use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
 use crate::items::{ItemBody, SyncItem, apply_in, decode, encode, local_item, newer};
-use crate::shares::{ShareInfo, copy_item, decode_share_info, share_info_record_id};
+use crate::shares::{
+    KeyAssignment, ShareInfo, copy_item, decode_key_assignment, decode_share_info,
+    encode_key_assignment, share_info_record_id,
+};
+use sshcraft_core::model::KeyRef;
 use sshcraft_core::model::ServerId;
 use sshcraft_core::store::{
     ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
@@ -416,6 +420,8 @@ impl Engine {
         let sync_keys = lock(store)?
             .server(self.server)?
             .is_some_and(|row| row.sync_keys);
+        // Key assignments of own shared items, applied once their items are here.
+        let mut assignments = Vec::new();
         // The personal area first: originals are there before their copies in own shares.
         listings.sort_by_key(|l| Some(l.manifest.area_id.0) != personal);
         for listing in listings {
@@ -503,6 +509,16 @@ impl Engine {
                     match tracker.accept_record(&record, &key, &manifest, &author_devices) {
                         Ok((Freshness::Unchanged, _)) => {}
                         Ok((Freshness::New, body)) => {
+                            if let Some(assignment) = decode_key_assignment(&body) {
+                                if author == self.account && Some(area_id.0) == personal {
+                                    assignments.push((assignment, record.header.clone()));
+                                } else {
+                                    report
+                                        .rejected
+                                        .push(format!("record {record_id}: not allowed"));
+                                }
+                                continue;
+                            }
                             if let Some(info) = decode_share_info(&body) {
                                 if author == manifest.owner {
                                     self.note_share_info(store, &manifest, info)?;
@@ -536,6 +552,9 @@ impl Engine {
             }
         }
         self.save_state(store, &devices, &tracker)?;
+        for (assignment, header) in assignments {
+            self.take_assignment(store, &assignment, &header)?;
+        }
         // Members' devices come and go; own shares follow.
         crate::areas::check_member_devices(self, store, vault, now_secs()).await?;
         Ok(report)
@@ -717,6 +736,95 @@ impl Engine {
         Ok(true)
     }
 
+    fn assignment_setting(&self, record_id: Uuid) -> String {
+        format!("sync.assign.{}.{}", self.server.0, record_id)
+    }
+
+    /// Writes this account's key for an item of an own share into the personal area.
+    async fn write_assignment(
+        &self,
+        store: &Mutex<Store>,
+        personal: Uuid,
+        kind: ItemKind,
+        id: &str,
+        key: Option<KeyRef>,
+        modified_at: i64,
+    ) -> Result<(), SyncError> {
+        let item = Uuid::parse_str(id).map_err(|e| SyncError::Store(e.to_string()))?;
+        let record_id = sshcraft_core::store::copy_id(personal, item);
+        let setting = self.assignment_setting(record_id);
+        let mut version = lock(store)?
+            .get_setting(&setting)?
+            .and_then(|t| t.parse::<u64>().ok())
+            .unwrap_or(0)
+            + 1;
+        let (manifest, area_key) = self.stored_area(store, personal)?;
+        let body = encode_key_assignment(&KeyAssignment {
+            kind,
+            item: id.to_owned(),
+            key,
+            modified_at,
+        });
+        for _ in 0..CONFLICT_ROUNDS {
+            let written = crate::shares::write_record(
+                self, store, &manifest, &area_key, record_id, version, &body,
+            )
+            .await;
+            match written {
+                Ok(()) => {
+                    lock(store)?.put_setting(&setting, &version.to_string())?;
+                    return Ok(());
+                }
+                Err(SyncError::Server {
+                    status: 409,
+                    current: Some(current),
+                    ..
+                }) => version = current + 1,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
+
+    /// Applies the owner's key for an item of an own share, written by another own device,
+    /// unless a newer local change of that item waits to be sent. Stays on this device.
+    fn take_assignment(
+        &self,
+        store: &Mutex<Store>,
+        assignment: &KeyAssignment,
+        header: &RecordHeader,
+    ) -> Result<(), SyncError> {
+        let guard = lock(store)?;
+        guard.put_setting(
+            &self.assignment_setting(header.record_id),
+            &header.version.to_string(),
+        )?;
+        if guard
+            .queued_at(self.server, assignment.kind, &assignment.item)?
+            .is_some_and(|queued| newer(queued, assignment.modified_at))
+        {
+            return Ok(());
+        }
+        let uuid =
+            Uuid::parse_str(&assignment.item).map_err(|e| SyncError::Store(e.to_string()))?;
+        match assignment.kind {
+            ItemKind::Host => {
+                if let Some(mut host) = guard.list_hosts()?.into_iter().find(|h| h.id.0 == uuid) {
+                    host.settings.key = assignment.key.clone();
+                    guard.upsert_host(&host)?;
+                }
+            }
+            ItemKind::Group => {
+                if let Some(mut group) = guard.list_groups()?.into_iter().find(|g| g.id.0 == uuid) {
+                    group.defaults.key = assignment.key.clone();
+                    guard.upsert_group(&group)?;
+                }
+            }
+            ItemKind::Key => {}
+        }
+        Ok(())
+    }
+
     /// Warnings of the last push: changes it refused to send (`share_read_only`,
     /// `share_no_add_remove`) and reset to the server's state.
     pub fn warnings(&self) -> &[String] {
@@ -880,12 +988,33 @@ impl Engine {
                         };
                         match self.client.put_record(&record).await {
                             Ok(_) => {
-                                let guard = lock(store)?;
-                                guard.put_record_entry(self.server, &entry, kind, &id)?;
-                                guard.dequeue_if(self.server, kind, &id, queued)?;
-                                if matches!(item.body, ItemBody::Deleted { .. }) {
-                                    // A deleted copy is done with.
-                                    guard.remove_copy(self.server, kind, &id)?;
+                                let assignment = {
+                                    let guard = lock(store)?;
+                                    guard.put_record_entry(self.server, &entry, kind, &id)?;
+                                    guard.dequeue_if(self.server, kind, &id, queued)?;
+                                    if matches!(item.body, ItemBody::Deleted { .. }) {
+                                        // A deleted copy is done with.
+                                        guard.remove_copy(self.server, kind, &id)?;
+                                    }
+                                    own_assignment(
+                                        &guard,
+                                        self.server,
+                                        kind,
+                                        &id,
+                                        target,
+                                        personal,
+                                    )?
+                                };
+                                if let Some(key) = assignment {
+                                    self.write_assignment(
+                                        store,
+                                        personal,
+                                        kind,
+                                        &id,
+                                        key,
+                                        item.modified_at,
+                                    )
+                                    .await?;
                                 }
                                 sent += 1;
                                 break;
@@ -1107,6 +1236,35 @@ fn take_into_original(
     }
     record_local_change(store, kind, &original, item.modified_at)?;
     Ok(true)
+}
+
+/// The key to remember privately after sending an item into an own share: its local key when
+/// the item is a host or group in a share this account owns.
+fn own_assignment(
+    store: &Store,
+    server: ServerId,
+    kind: ItemKind,
+    id: &str,
+    target: Uuid,
+    personal: Uuid,
+) -> Result<Option<Option<KeyRef>>, SyncError> {
+    if target == personal || !store.share(server, target)?.is_some_and(|s| s.owned) {
+        return Ok(None);
+    }
+    let key = match kind {
+        ItemKind::Host => store
+            .list_hosts()?
+            .into_iter()
+            .find(|h| h.id.0.to_string() == id)
+            .map(|h| h.settings.key),
+        ItemKind::Group => store
+            .list_groups()?
+            .into_iter()
+            .find(|g| g.id.0.to_string() == id)
+            .map(|g| g.defaults.key),
+        ItemKind::Key => None,
+    };
+    Ok(key)
 }
 
 /// What `push` does with one queued item.

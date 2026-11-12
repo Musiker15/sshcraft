@@ -876,3 +876,62 @@ async fn selection_writer_cannot_change_the_group() {
     );
     let _ = server_b;
 }
+
+#[tokio::test]
+async fn owner_key_assignments_reach_the_owners_other_devices() {
+    let server = TestServer::start().await;
+    let (a, b, a2) = (Dev::new(), Dev::new(), Dev::new());
+    let export = create(&server, &a, "a@example.org").await;
+    create(&server, &b, "b@example.org").await;
+    let (group, one, _) = local_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::GroupAll(group.id),
+        vec![grant(&b, Role::Read)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    common::join(&server, &a2, &export).await;
+    for dev in [&a, &a2] {
+        let id = dev.row().id;
+        dev.store
+            .lock()
+            .unwrap()
+            .update_server_flags(id, true, true)
+            .unwrap();
+    }
+    sync(&a2).await;
+    let server_a = a.row().id;
+    let key = {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
+            .unwrap();
+        record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 10).unwrap();
+        let mut host = store
+            .list_hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == one.id)
+            .unwrap();
+        host.settings.key = Some(KeyRef::Stored { id: info.id });
+        store.upsert_host(&host).unwrap();
+        record_local_change(&store, ItemKind::Host, &one.id.0.to_string(), 11).unwrap();
+        info.id
+    };
+    sync(&a).await;
+    sync(&a2).await;
+    let on_a2 = a2.hosts().into_iter().find(|h| h.id == one.id).unwrap();
+    assert_eq!(on_a2.settings.key, Some(KeyRef::Stored { id: key }));
+    // B, who got the group without keys, sees none.
+    sync(&b).await;
+    assert!(b.hosts().iter().all(|h| h.settings.key.is_none()));
+}
