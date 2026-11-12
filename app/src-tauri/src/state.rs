@@ -10,6 +10,7 @@ use stollen_core::vault::{KeyringMasterKey, Vault};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
+use crate::hello::WindowsHello;
 use crate::sessions::{HostKeyPrompter, SessionManager, WindowsAgent};
 
 pub struct AppState {
@@ -35,6 +36,9 @@ impl AppState {
             vault.clone().ok(),
             prompter.clone(),
             Arc::new(WindowsAgent),
+            Arc::new(WindowsHello {
+                hwnd: main_window_handle(app),
+            }),
         );
         Ok(Self {
             store,
@@ -43,6 +47,20 @@ impl AppState {
             prompter,
         })
     }
+}
+
+/// Raw handle of the main window, so the Windows Hello dialog belongs to it.
+#[cfg(windows)]
+fn main_window_handle(app: &AppHandle) -> isize {
+    use tauri::Manager;
+    app.get_webview_window("main")
+        .and_then(|w| w.hwnd().ok())
+        .map_or(0, |h| h.0 as isize)
+}
+
+#[cfg(not(windows))]
+fn main_window_handle(_app: &AppHandle) -> isize {
+    0
 }
 
 #[derive(Clone, Serialize)]

@@ -66,6 +66,7 @@ export const saveHost = (host: Host) => invoke<void>("save_host", { host });
 export const deleteHost = (id: string) => invoke<void>("delete_host", { id });
 export const forgetHostKey = (hostId: string) => invoke<void>("forget_host_key", { hostId });
 
+export const helloStatus = () => invoke<{ missing: boolean }>("hello_status");
 export const vaultStatus = () => invoke<{ ok: boolean; error: string | null }>("vault_status");
 export const listKeys = () => invoke<KeyInfo[]>("list_keys");
 export const importKey = (name: string, text: string, passphrase: string | null) =>

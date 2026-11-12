@@ -15,6 +15,8 @@ use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use crate::hello::{Presence, UserPresence};
+
 pub type SessionId = Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -117,7 +119,48 @@ struct Context {
     vault: Option<Arc<Vault>>,
     prompter: Arc<dyn HostKeyPrompter>,
     agent: Arc<dyn AgentConnector>,
+    gate: KeyGate,
     delay_scale: f32,
+}
+
+/// Asks Windows Hello once per app run before a key from the vault is used.
+pub struct KeyGate {
+    presence: Arc<dyn UserPresence>,
+    verified: tokio::sync::Mutex<bool>,
+    hello_missing: std::sync::atomic::AtomicBool,
+}
+
+const HELLO_REASON: &str = "Stollen möchte deine gespeicherten SSH-Schlüssel verwenden.";
+
+impl KeyGate {
+    fn new(presence: Arc<dyn UserPresence>) -> Self {
+        Self {
+            presence,
+            verified: tokio::sync::Mutex::new(false),
+            hello_missing: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Concurrent callers wait on the same lock, so one prompt serves them all.
+    async fn ensure(&self) -> Result<(), String> {
+        let mut verified = self.verified.lock().await;
+        if *verified {
+            return Ok(());
+        }
+        match self.presence.verify(HELLO_REASON).await {
+            Presence::Verified => {
+                *verified = true;
+                Ok(())
+            }
+            Presence::Unavailable => {
+                self.hello_missing
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                *verified = true;
+                Ok(())
+            }
+            Presence::Declined => Err("Windows Hello wurde abgebrochen.".into()),
+        }
+    }
 }
 
 /// Opens a connection to the SSH agent (Proton Pass on Windows, an in-memory agent in tests).
@@ -164,8 +207,17 @@ impl SessionManager {
         vault: Option<Arc<Vault>>,
         prompter: Arc<dyn HostKeyPrompter>,
         agent: Arc<dyn AgentConnector>,
+        presence: Arc<dyn UserPresence>,
     ) -> Self {
-        Self::with_delay_scale(store, vault, prompter, agent, 1.0)
+        Self::with_delay_scale(store, vault, prompter, agent, presence, 1.0)
+    }
+
+    /// True once Windows Hello turned out not to be set up on this PC.
+    pub fn hello_missing(&self) -> bool {
+        self.ctx
+            .gate
+            .hello_missing
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// `delay_scale` shortens reconnect delays in tests.
@@ -174,6 +226,7 @@ impl SessionManager {
         vault: Option<Arc<Vault>>,
         prompter: Arc<dyn HostKeyPrompter>,
         agent: Arc<dyn AgentConnector>,
+        presence: Arc<dyn UserPresence>,
         delay_scale: f32,
     ) -> Self {
         Self {
@@ -182,6 +235,7 @@ impl SessionManager {
                 vault,
                 prompter,
                 agent,
+                gate: KeyGate::new(presence),
                 delay_scale,
             }),
             sessions: Mutex::new(HashMap::new()),
@@ -359,6 +413,7 @@ async fn connect_once(
                 .vault
                 .as_ref()
                 .ok_or_else(|| error("the key vault is locked".into()))?;
+            ctx.gate.ensure().await.map_err(error)?;
             let store = ctx.store.lock().expect("store lock");
             let key = vault
                 .private_key(&store, *id)

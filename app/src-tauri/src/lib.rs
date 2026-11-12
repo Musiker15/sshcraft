@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod hello;
 pub mod passcli;
 pub mod sessions;
 pub mod state;
@@ -24,6 +25,7 @@ pub fn run() {
             commands::sshconfig::ssh_config_preview,
             commands::sshconfig::ssh_config_import,
             commands::keys::vault_status,
+            commands::keys::hello_status,
             commands::keys::list_keys,
             commands::keys::import_key,
             commands::keys::generate_key,

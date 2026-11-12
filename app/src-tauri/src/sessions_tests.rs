@@ -8,6 +8,7 @@ use stollen_core::vault::MemoryMasterKey;
 use stollen_ssh::testing::TestServer;
 
 use super::*;
+use crate::hello::{Presence, UserPresence};
 
 #[derive(Default)]
 struct RecordingSink {
@@ -78,6 +79,39 @@ struct Fixture {
     prompter: Arc<FixedPrompter>,
     host_id: HostId,
     key: PrivateKey,
+    vault: Arc<Vault>,
+}
+
+/// Answers Windows Hello requests from a script; the last answer repeats.
+struct FakePresence {
+    answers: Mutex<Vec<Presence>>,
+    asked: AtomicUsize,
+}
+
+impl FakePresence {
+    fn new(answers: &[Presence]) -> Self {
+        Self {
+            answers: Mutex::new(answers.to_vec()),
+            asked: AtomicUsize::new(0),
+        }
+    }
+
+    fn asked(&self) -> usize {
+        self.asked.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl UserPresence for FakePresence {
+    async fn verify(&self, _reason: &str) -> Presence {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        let mut answers = self.answers.lock().unwrap();
+        if answers.len() > 1 {
+            answers.remove(0)
+        } else {
+            answers[0]
+        }
+    }
 }
 
 impl Fixture {
@@ -103,6 +137,20 @@ impl Fixture {
         host.id
     }
 
+    fn manager_with_presence(&self, presence: Arc<FakePresence>) -> SessionManager {
+        SessionManager::with_delay_scale(
+            self.store.clone(),
+            Some(self.vault.clone()),
+            self.prompter.clone(),
+            Arc::new(TestAgents {
+                keys: vec![self.key.clone()],
+                reachable: true,
+            }),
+            presence,
+            0.01,
+        )
+    }
+
     fn manager_with(&self, vault: Option<Arc<Vault>>, agent_reachable: bool) -> SessionManager {
         SessionManager::with_delay_scale(
             self.store.clone(),
@@ -112,6 +160,7 @@ impl Fixture {
                 keys: vec![self.key.clone()],
                 reachable: agent_reachable,
             }),
+            Arc::new(FakePresence::new(&[Presence::Verified])),
             0.01,
         )
     }
@@ -147,14 +196,16 @@ async fn fixture(answer: bool) -> Fixture {
         answer,
         asked: AtomicUsize::new(0),
     });
+    let vault = Arc::new(vault);
     let manager = SessionManager::with_delay_scale(
         store.clone(),
-        Some(Arc::new(vault)),
+        Some(vault.clone()),
         prompter.clone(),
         Arc::new(TestAgents {
             keys: vec![key.clone()],
             reachable: true,
         }),
+        Arc::new(FakePresence::new(&[Presence::Verified])),
         0.01,
     );
     Fixture {
@@ -164,7 +215,83 @@ async fn fixture(answer: bool) -> Fixture {
         prompter,
         host_id: host.id,
         key,
+        vault,
     }
+}
+
+fn connected(statuses: &[SessionStatus]) -> bool {
+    statuses.contains(&SessionStatus::Connected)
+}
+
+#[tokio::test]
+async fn stored_key_asks_hello_once_per_run() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = f.manager_with_presence(presence.clone());
+    let (a, b) = (
+        Arc::new(RecordingSink::default()),
+        Arc::new(RecordingSink::default()),
+    );
+    manager.open(f.host_id, 80, 24, a.clone());
+    a.wait_for(connected).await;
+    manager.open(f.host_id, 80, 24, b.clone());
+    b.wait_for(connected).await;
+    assert_eq!(presence.asked(), 1);
+}
+
+#[tokio::test]
+async fn declined_hello_ends_without_connecting() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Declined]));
+    let manager = f.manager_with_presence(presence.clone());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(f.host_id, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    let statuses = sink.statuses();
+    assert_eq!(ended(&statuses), Some(EndReason::Error));
+    assert!(!connected(&statuses));
+    assert!(
+        !statuses
+            .iter()
+            .any(|s| matches!(s, SessionStatus::Reconnecting { .. }))
+    );
+}
+
+#[tokio::test]
+async fn declined_hello_asks_again_next_time() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Declined, Presence::Verified]));
+    let manager = f.manager_with_presence(presence.clone());
+    let first = Arc::new(RecordingSink::default());
+    manager.open(f.host_id, 80, 24, first.clone());
+    first.wait_for(|s| ended(s).is_some()).await;
+    let second = Arc::new(RecordingSink::default());
+    manager.open(f.host_id, 80, 24, second.clone());
+    second.wait_for(connected).await;
+    assert_eq!(presence.asked(), 2);
+}
+
+#[tokio::test]
+async fn unavailable_hello_connects_and_flags() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Unavailable]));
+    let manager = f.manager_with_presence(presence.clone());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(f.host_id, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert!(manager.hello_missing());
+}
+
+#[tokio::test]
+async fn agent_key_does_not_ask_hello() {
+    let f = fixture(true).await;
+    let host = f.agent_host();
+    let presence = Arc::new(FakePresence::new(&[Presence::Declined]));
+    let manager = f.manager_with_presence(presence.clone());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(host, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(presence.asked(), 0);
 }
 
 #[tokio::test]

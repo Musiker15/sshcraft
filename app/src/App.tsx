@@ -8,6 +8,7 @@ import {
   listGroups,
   listHosts,
   listKeys,
+  helloStatus,
   vaultStatus,
   type Group,
   type Host,
@@ -39,6 +40,14 @@ function App() {
   const [editor, setEditor] = useState<Editor>(null);
   const [prompts, setPrompts] = useState<HostKeyPrompt[]>([]);
   const [tabs, dispatch] = useReducer(tabsReducer, initialTabs);
+  const [helloMissing, setHelloMissing] = useState(false);
+  const [helloDismissed, setHelloDismissed] = useState(false);
+  const anyConnected = tabs.tabs.some((t) => t.status.state === "connected");
+
+  // Windows Hello is asked on the first connect with a stored key; check the outcome then.
+  useEffect(() => {
+    if (anyConnected && !helloMissing) void helloStatus().then((s) => setHelloMissing(s.missing));
+  }, [anyConnected, helloMissing]);
 
   const reload = useCallback(async () => {
     try {
@@ -108,6 +117,15 @@ function App() {
           </div>
         )}
         {loadError && <div className="banner">{loadError}</div>}
+        {helloMissing && !helloDismissed && (
+          <div className="banner">
+            Windows Hello ist auf diesem PC nicht eingerichtet. Gespeicherte Schlüssel sind dann nur durch dein
+            Windows-Konto geschützt.{" "}
+            <button className="link" onClick={() => setHelloDismissed(true)}>
+              Ausblenden
+            </button>
+          </div>
+        )}
         <TerminalTabs state={tabs} dispatch={dispatch} />
       </main>
 

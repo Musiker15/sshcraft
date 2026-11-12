@@ -48,6 +48,18 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| CommandError::new("internal", e))?
 }
 
+#[derive(Serialize)]
+pub struct HelloStatus {
+    missing: bool,
+}
+
+#[tauri::command]
+pub fn hello_status(state: State<'_, AppState>) -> HelloStatus {
+    HelloStatus {
+        missing: state.sessions.hello_missing(),
+    }
+}
+
 #[tauri::command]
 pub fn list_keys(state: State<'_, AppState>) -> CommandResult<Vec<KeyInfo>> {
     Ok(vault::list_keys(&state.store.lock().expect("store lock"))?)
