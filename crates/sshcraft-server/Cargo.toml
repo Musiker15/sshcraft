@@ -23,6 +23,7 @@ deadpool-postgres = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
 clap = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

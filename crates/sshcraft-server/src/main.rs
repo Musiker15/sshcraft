@@ -2,6 +2,8 @@
 
 use clap::{Parser, Subcommand};
 use sshcraft_server::admin;
+use sshcraft_server::config::ServeConfig;
+use std::net::SocketAddr;
 use std::process::ExitCode;
 use uuid::Uuid;
 
@@ -27,6 +29,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run the server
+    Serve {
+        /// Address and port to listen on; put a reverse proxy with TLS in front
+        #[arg(long, env = "SSHCRAFT_LISTEN", default_value = "127.0.0.1:8470")]
+        listen: SocketAddr,
+        /// The address clients use, e.g. https://sync.example.org (logins are bound to it)
+        #[arg(long, env = "SSHCRAFT_PUBLIC_ORIGIN")]
+        public_origin: String,
+    },
     /// Manage users
     Users {
         #[command(subcommand)]
@@ -91,6 +102,26 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Command::Serve {
+        listen,
+        public_origin,
+    } = cli.command
+    {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .init();
+        let config = ServeConfig {
+            listen,
+            database_url: cli.database_url,
+            public_origin,
+            ..ServeConfig::default()
+        };
+        sshcraft_server::serve(config, shutdown_signal()).await?;
+        return Ok(());
+    }
     let store = sshcraft_server::store::open(&cli.database_url).await?;
     let store = store.as_ref();
     let out = &mut std::io::stdout().lock();
@@ -110,10 +141,34 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 admin::devices_block(store, &email, device_id, false, out).await?
             }
         },
+        Command::Serve { .. } => unreachable!("handled above"),
         Command::ApiKey { action } => match action {
             ApiKey::Show => admin::api_key_show(store, out).await?,
             ApiKey::Rotate => admin::api_key_rotate(store, out).await?,
         },
     }
     Ok(())
+}
+
+/// Completes on Ctrl+C, and on SIGTERM where there is one (Docker, systemd).
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let term = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = term => {}
+    }
+    tracing::info!("shutting down");
 }
