@@ -38,6 +38,11 @@ enum Command {
         #[arg(long, env = "SSHCRAFT_PUBLIC_ORIGIN")]
         public_origin: String,
     },
+    /// Exit 0 if the server on --listen answers (for container health checks)
+    Health {
+        #[arg(long, env = "SSHCRAFT_LISTEN", default_value = "127.0.0.1:8470")]
+        listen: SocketAddr,
+    },
     /// Manage users
     Users {
         #[command(subcommand)]
@@ -122,6 +127,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         sshcraft_server::serve(config, shutdown_signal()).await?;
         return Ok(());
     }
+    if let Command::Health { mut listen } = cli.command {
+        // A server listening on all interfaces is reached through the loopback address.
+        if listen.ip().is_unspecified() {
+            listen.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+        }
+        sshcraft_server::health(listen).await?;
+        return Ok(());
+    }
     let store = sshcraft_server::store::open(&cli.database_url).await?;
     let store = store.as_ref();
     let out = &mut std::io::stdout().lock();
@@ -141,7 +154,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 admin::devices_block(store, &email, device_id, false, out).await?
             }
         },
-        Command::Serve { .. } => unreachable!("handled above"),
+        Command::Serve { .. } | Command::Health { .. } => unreachable!("handled above"),
         Command::ApiKey { action } => match action {
             ApiKey::Show => admin::api_key_show(store, out).await?,
             ApiKey::Rotate => admin::api_key_rotate(store, out).await?,

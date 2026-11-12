@@ -257,3 +257,52 @@ async fn removed_member_hears_about_it() {
     put_record(&env, &ta, &a, area, &key).await;
     silent(&mut ws, Duration::from_millis(500)).await;
 }
+
+#[tokio::test]
+async fn too_many_connections_per_device_are_refused() {
+    let mut env = TestEnv::new().await;
+    let url = serve(&mut env).await;
+    let a = Person::new("alice");
+    env.register_ok(&a).await;
+    let token = env.token(&a, 0).await;
+    let mut open = Vec::new();
+    for _ in 0..sshcraft_server::hub::MAX_PER_DEVICE {
+        open.push(connect(&url, Some(&token)).await.unwrap());
+    }
+    match connect(&url, Some(&token)).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE)
+        }
+        other => panic!("expected 503, got {:?}", other.map(|_| ())),
+    }
+    drop(open);
+}
+
+#[tokio::test]
+async fn oversized_client_message_closes_the_connection() {
+    use futures::SinkExt;
+    let mut env = TestEnv::new().await;
+    let url = serve(&mut env).await;
+    let a = Person::new("alice");
+    env.register_ok(&a).await;
+    let token = env.token(&a, 0).await;
+    let mut ws = connect(&url, Some(&token)).await.unwrap();
+    ws.send(Message::Text("x".repeat(64 * 1024).into()))
+        .await
+        .unwrap();
+    assert!(
+        next_event(&mut ws, WAIT).await.is_none(),
+        "the server closes the connection"
+    );
+}
+
+#[tokio::test]
+async fn events_without_upgrade_answer_in_the_error_format() {
+    let env = TestEnv::new().await;
+    let a = Person::new("alice");
+    env.register_ok(&a).await;
+    let token = env.token(&a, 0).await;
+    let (status, body) = env.authed(&token, Method::GET, "/v1/events", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid");
+}

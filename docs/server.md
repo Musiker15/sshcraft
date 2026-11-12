@@ -37,6 +37,11 @@ docker run -d --name sshcraft -v sshcraft-data:/data \
   -p 127.0.0.1:8470:8470 sshcraft-server
 ```
 
+The image runs as user `sshcraft` (UID 10001) and checks itself with `sshcraft-server health`
+(`docker ps` shows `healthy`). If you mount a host directory instead of a named volume, give it to
+that user first, or SQLite cannot create its file: `chown 10001 /srv/sshcraft`. The Rust and
+Debian versions are pinned at the top of the Dockerfile; raise them when newer ones are out.
+
 On first start the server creates the **API key** and writes it to the log once. People need it
 to register and to log in a new device. Show it again any time:
 

@@ -40,6 +40,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/auth/challenge", post(login::challenge))
         .route("/v1/auth/login", post(login::login))
         .fallback(|| async { ApiError::NotFound })
+        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .with_state(state)
 }

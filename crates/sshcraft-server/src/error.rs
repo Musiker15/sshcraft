@@ -24,6 +24,8 @@ pub enum ApiError {
     DeviceInactive,
     #[error("not found")]
     NotFound,
+    #[error("method not allowed")]
+    MethodNotAllowed,
     #[error("conflict, current {current}")]
     Conflict { current: u64 },
     #[error("email taken")]
@@ -51,6 +53,7 @@ impl ApiError {
             Self::AccountLocked => "account_locked",
             Self::DeviceInactive => "device_inactive",
             Self::NotFound => "not_found",
+            Self::MethodNotAllowed => "method_not_allowed",
             Self::Conflict { .. } => "conflict",
             Self::EmailTaken => "email_taken",
             Self::AccountExists => "account_exists",
@@ -67,6 +70,7 @@ impl ApiError {
             Self::BadApiKey | Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden | Self::AccountLocked | Self::DeviceInactive => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
+            Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::Conflict { .. }
             | Self::EmailTaken
             | Self::AccountExists
@@ -105,6 +109,10 @@ impl From<StoreError> for ApiError {
             StoreError::AccountExists => Self::AccountExists,
             StoreError::DeviceIdTaken => Self::DeviceIdTaken,
             StoreError::NotFound => Self::NotFound,
+            StoreError::NotAllowed => Self::Forbidden,
+            StoreError::WrongKeyVersion { current } => {
+                Self::Invalid(format!("the area is at key version {current}"))
+            }
             StoreError::Backend(cause) => Self::internal(cause),
         }
     }

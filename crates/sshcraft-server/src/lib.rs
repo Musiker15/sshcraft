@@ -81,3 +81,40 @@ pub async fn serve_on(
     sweeper.abort();
     result.map_err(ServeError::Io)
 }
+
+/// Asks a running server at `addr` for `GET /v1/server`; `Ok` when it answers 200 within five
+/// seconds. Used by `sshcraft-server health` (the Docker health check), so it needs no HTTP client.
+pub async fn health(addr: std::net::SocketAddr) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let check = async {
+        let mut stream = tokio::net::TcpStream::connect(addr)
+            .await
+            .map_err(|e| e.to_string())?;
+        stream
+            .write_all(
+                b"GET /v1/server HTTP/1.1
+Host: localhost
+Connection: close
+
+",
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut head = [0u8; 12];
+        stream
+            .read_exact(&mut head)
+            .await
+            .map_err(|e| e.to_string())?;
+        if head.starts_with(b"HTTP/1.1 200") {
+            Ok(())
+        } else {
+            Err(format!(
+                "unexpected answer: {}",
+                String::from_utf8_lossy(&head)
+            ))
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), check)
+        .await
+        .map_err(|_| "no answer within 5 seconds".to_owned())?
+}

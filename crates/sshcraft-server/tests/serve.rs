@@ -49,3 +49,28 @@ async fn serve_refuses_a_missing_origin() {
     .expect("returns at once");
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn health_check_reports_a_running_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let config = ServeConfig {
+        listen: addr,
+        database_url: format!("sqlite://{}", dir.path().join("health.db").display()),
+        public_origin: "https://sync.example.org".into(),
+        ..ServeConfig::default()
+    };
+    tokio::spawn(sshcraft_server::serve_on(
+        listener,
+        config,
+        std::future::pending(),
+    ));
+    assert!(sshcraft_server::health(addr).await.is_ok());
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    assert!(sshcraft_server::health(closed).await.is_err());
+}

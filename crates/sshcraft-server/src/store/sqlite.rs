@@ -263,6 +263,18 @@ fn insert_device(tx: &Transaction<'_>, cert: &DeviceCertificate) -> Result<(), S
     Ok(())
 }
 
+/// Owner and key version of an area, read inside the write transaction, or `NotFound`.
+fn area_head(tx: &Connection, area_id: &str) -> Result<(Vec<u8>, u32), StoreError> {
+    tx.query_row(
+        "SELECT owner, key_version FROM areas WHERE area_id = ?1",
+        [area_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()
+    .map_err(backend)?
+    .ok_or(StoreError::NotFound)
+}
+
 fn owned_area_fates(tx: &Connection, account: &AccountPublic) -> Result<Vec<AreaFate>, StoreError> {
     let mut stmt = tx
         .prepare("SELECT manifest FROM areas WHERE owner = ?1 ORDER BY area_id")
@@ -741,14 +753,18 @@ impl Store for SqliteStore {
         let (owner, manifest) = (owner.0.to_vec(), manifest.clone());
         self.write(move |tx| {
             let id = manifest.area_id.0.to_string();
-            let stored: Option<(i64, i64)> = tx
+            let stored: Option<(i64, Vec<u8>)> = tx
                 .query_row(
-                    "SELECT version, key_version FROM areas WHERE area_id = ?1",
+                    "SELECT version, owner FROM areas WHERE area_id = ?1",
                     [&id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()
                 .map_err(backend)?;
+            // The owner changes only through account deletion, never through a manifest.
+            if stored.as_ref().is_some_and(|(_, stored_owner)| *stored_owner != owner) {
+                return Err(StoreError::NotAllowed);
+            }
             let current = stored.map(|(v, _)| v as u64);
             let required = current.map_or(1, |v| v + 1);
             if current != expected || manifest.version != required {
@@ -808,11 +824,11 @@ impl Store for SqliteStore {
         let envelopes = envelopes.to_vec();
         self.write(move |tx| {
             let id = area_id.0.to_string();
-            let exists: bool = tx
-                .query_row("SELECT EXISTS(SELECT 1 FROM areas WHERE area_id = ?1)", [&id], |r| r.get(0))
-                .map_err(backend)?;
-            if !exists {
-                return Err(StoreError::NotFound);
+            let (_, key_version) = area_head(tx, &id)?;
+            if envelopes.iter().any(|e| e.key_version != key_version) {
+                return Err(StoreError::WrongKeyVersion {
+                    current: key_version,
+                });
             }
             for envelope in &envelopes {
                 tx.execute(
@@ -852,11 +868,24 @@ impl Store for SqliteStore {
         self.write(move |tx| {
             let area = record.header.area_id.0.to_string();
             let id = record.header.record_id.to_string();
-            let exists: bool = tx
-                .query_row("SELECT EXISTS(SELECT 1 FROM areas WHERE area_id = ?1)", [&area], |r| r.get(0))
-                .map_err(backend)?;
-            if !exists {
-                return Err(StoreError::NotFound);
+            let (owner, key_version) = area_head(tx, &area)?;
+            let author = record.header.author_account.0.to_vec();
+            let may_write = owner == author
+                || tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM area_members
+                         WHERE area_id = ?1 AND account = ?2 AND role = 'write')",
+                        params![area, author],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .map_err(backend)?;
+            if !may_write {
+                return Err(StoreError::NotAllowed);
+            }
+            if record.header.key_version != key_version {
+                return Err(StoreError::WrongKeyVersion {
+                    current: key_version,
+                });
             }
             let stored: Option<i64> = tx
                 .query_row(

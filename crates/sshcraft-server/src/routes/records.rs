@@ -17,6 +17,8 @@ use uuid::Uuid;
 /// Largest accepted ciphertext of one record.
 pub const MAX_CIPHERTEXT: usize = 64 * 1024;
 const DEFAULT_LIMIT: u32 = 500;
+/// A page stops growing once its records reach this many bytes of JSON; `more` says so.
+pub const MAX_PAGE_BYTES: usize = 4 << 20;
 const MAX_LIMIT: u32 = 1000;
 
 /// `PUT /v1/areas/{area_id}/records/{record_id}`
@@ -85,11 +87,18 @@ pub async fn list(
         .store
         .records_since(AreaId(area), query.since, limit + 1)
         .await?;
-    let more = records.len() > limit as usize;
+    let mut more = records.len() > limit as usize;
     records.truncate(limit as usize);
-    let records: Vec<Value> = records
-        .into_iter()
-        .map(|r| json!({ "seq": r.seq, "record": r.record }))
-        .collect();
-    Ok(Json(json!({ "records": records, "more": more })))
+    let mut page = Vec::with_capacity(records.len());
+    let mut bytes = 0;
+    for r in records {
+        let entry = json!({ "seq": r.seq, "record": r.record });
+        bytes += entry.to_string().len();
+        if bytes > MAX_PAGE_BYTES && !page.is_empty() {
+            more = true;
+            break;
+        }
+        page.push(entry);
+    }
+    Ok(Json(json!({ "records": page, "more": more })))
 }

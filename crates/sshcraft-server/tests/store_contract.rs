@@ -58,6 +58,9 @@ macro_rules! all_contract_tests {
                 sessions_expire,
                 heir_must_still_have_an_open_account,
                 deleted_account_cannot_register_again,
+                record_writes_need_the_write_role_and_current_key,
+                envelopes_need_the_current_key_version,
+                manifest_cannot_change_the_owner,
             ]
         );
     };
@@ -545,4 +548,76 @@ async fn deleted_account_cannot_register_again(store: Arc<dyn Store>) {
         .await
         .unwrap_err();
     assert_eq!(err, StoreError::AccountExists);
+}
+
+async fn record_writes_need_the_write_role_and_current_key(store: Arc<dyn Store>) {
+    let (a, w, r, s) = (
+        Person::new("alice"),
+        Person::new("wendy"),
+        Person::new("rita"),
+        Person::new("sam"),
+    );
+    for p in [&a, &w, &r, &s] {
+        p.create_in(store.as_ref()).await;
+    }
+    let area = AreaId(Uuid::new_v4());
+    let members = vec![
+        Member {
+            account: w.public(),
+            role: Role::Write,
+        },
+        Member {
+            account: r.public(),
+            role: Role::Read,
+        },
+    ];
+    let (m, key) = manifest(&a, area, 1, 1, members);
+    store.put_manifest(&a.public(), &m, None).await.unwrap();
+    for stranger in [&r, &s] {
+        let err = store
+            .put_record(&record(stranger, area, Uuid::new_v4(), 1, &key))
+            .await
+            .unwrap_err();
+        assert_eq!(err, StoreError::NotAllowed);
+    }
+    assert!(
+        store
+            .put_record(&record(&w, area, Uuid::new_v4(), 1, &key))
+            .await
+            .is_ok()
+    );
+    let mut stale = record(&a, area, Uuid::new_v4(), 1, &key);
+    stale.header.key_version = 2;
+    assert_eq!(
+        store.put_record(&stale).await,
+        Err(StoreError::WrongKeyVersion { current: 1 })
+    );
+}
+
+async fn envelopes_need_the_current_key_version(store: Arc<dyn Store>) {
+    let a = Person::new("alice");
+    a.create_in(store.as_ref()).await;
+    let area = AreaId(Uuid::new_v4());
+    let (m, key) = manifest(&a, area, 1, 1, vec![]);
+    store.put_manifest(&a.public(), &m, None).await.unwrap();
+    let old = seal_area_key(&key, area, 0, &a.devices[0].cert).unwrap();
+    assert_eq!(
+        store.put_envelopes(area, &[old]).await,
+        Err(StoreError::WrongKeyVersion { current: 1 })
+    );
+}
+
+async fn manifest_cannot_change_the_owner(store: Arc<dyn Store>) {
+    let (a, b) = (Person::new("alice"), Person::new("bob"));
+    a.create_in(store.as_ref()).await;
+    b.create_in(store.as_ref()).await;
+    let area = AreaId(Uuid::new_v4());
+    let (v1, _) = manifest(&a, area, 1, 1, vec![]);
+    store.put_manifest(&a.public(), &v1, None).await.unwrap();
+    let (v2, _) = manifest(&b, area, 2, 1, vec![]);
+    assert_eq!(
+        store.put_manifest(&b.public(), &v2, Some(1)).await,
+        Err(StoreError::NotAllowed)
+    );
+    assert_eq!(store.area(area).await.unwrap().unwrap().owner, a.public());
 }

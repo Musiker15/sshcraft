@@ -82,6 +82,12 @@ pub enum StoreError {
     DeviceIdTaken,
     #[error("not found")]
     NotFound,
+    /// The account may not do this to the area (re-checked inside the write transaction).
+    #[error("not allowed")]
+    NotAllowed,
+    /// The area moved on to another key version while the write was on its way.
+    #[error("the area is at key version {current}")]
+    WrongKeyVersion { current: u32 },
     #[error("storage: {0}")]
     Backend(String),
 }
@@ -186,10 +192,10 @@ pub async fn open(url: &str) -> Result<Arc<dyn Store>, StoreError> {
     if url.starts_with("postgres://") || url.starts_with("postgresql://") {
         return Ok(Arc::new(postgres::PostgresStore::connect(url).await?));
     }
-    Err(StoreError::Backend(format!(
-        "unsupported database url scheme: {}",
-        url.split("://").next().unwrap_or_default()
-    )))
+    // Never echo the URL: it may carry a password.
+    Err(StoreError::Backend(
+        "unsupported database url, expected sqlite://... or postgres://...".into(),
+    ))
 }
 
 /// What happens to the areas of an account that is deleted (design, section 12): an area with a

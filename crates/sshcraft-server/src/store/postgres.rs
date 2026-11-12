@@ -245,17 +245,33 @@ async fn insert_device(c: &impl GenericClient, cert: &DeviceCertificate) -> Resu
     Ok(())
 }
 
+/// Owner and key version of an area, locked for the rest of the transaction, or `NotFound`.
+async fn area_head(c: &impl GenericClient, area_id: Uuid) -> Result<(Vec<u8>, u32), StoreError> {
+    let row = c
+        .query_opt(
+            "SELECT owner, key_version FROM areas WHERE area_id = $1 FOR UPDATE",
+            &[&area_id],
+        )
+        .await
+        .map_err(pg)?
+        .ok_or(StoreError::NotFound)?;
+    let key_version = u32::try_from(row.get::<_, i64>(1)).map_err(backend)?;
+    Ok((row.get(0), key_version))
+}
+
+/// The fate of each area the account owns; with `lock`, the area rows stay locked until the
+/// transaction ends, so no manifest write can change them in between.
 async fn owned_area_fates(
     c: &impl GenericClient,
     account: &AccountPublic,
+    lock: bool,
 ) -> Result<Vec<AreaFate>, StoreError> {
-    let rows = c
-        .query(
-            "SELECT manifest FROM areas WHERE owner = $1 ORDER BY area_id",
-            &[&account.0.as_slice()],
-        )
-        .await
-        .map_err(pg)?;
+    let sql = if lock {
+        "SELECT manifest FROM areas WHERE owner = $1 ORDER BY area_id FOR UPDATE"
+    } else {
+        "SELECT manifest FROM areas WHERE owner = $1 ORDER BY area_id"
+    };
+    let rows = c.query(sql, &[&account.0.as_slice()]).await.map_err(pg)?;
     let open = c
         .query(
             "SELECT account FROM accounts WHERE NOT locked AND account <> $1",
@@ -679,14 +695,21 @@ impl Store for PostgresStore {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let id = manifest.area_id.0;
-        let current: Option<u64> = tx
+        let stored = tx
             .query_opt(
-                "SELECT version FROM areas WHERE area_id = $1 FOR UPDATE",
+                "SELECT version, owner FROM areas WHERE area_id = $1 FOR UPDATE",
                 &[&id],
             )
             .await
-            .map_err(pg)?
-            .map(|r| r.get::<_, i64>(0) as u64);
+            .map_err(pg)?;
+        // The owner changes only through account deletion, never through a manifest.
+        if stored
+            .as_ref()
+            .is_some_and(|r| r.get::<_, &[u8]>(1) != owner.0.as_slice())
+        {
+            return Err(StoreError::NotAllowed);
+        }
+        let current: Option<u64> = stored.map(|r| r.get::<_, i64>(0) as u64);
         if current != expected || manifest.version != current.map_or(1, |v| v + 1) {
             return Err(StoreError::Conflict {
                 current: current.unwrap_or(0),
@@ -758,14 +781,11 @@ impl Store for PostgresStore {
     ) -> Result<(), StoreError> {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
-        if !exists(
-            &tx,
-            "SELECT 1 FROM areas WHERE area_id = $1 FOR UPDATE",
-            &area_id.0,
-        )
-        .await?
-        {
-            return Err(StoreError::NotFound);
+        let (_, key_version) = area_head(&tx, area_id.0).await?;
+        if envelopes.iter().any(|e| e.key_version != key_version) {
+            return Err(StoreError::WrongKeyVersion {
+                current: key_version,
+            });
         }
         for envelope in envelopes {
             tx.execute(
@@ -807,14 +827,24 @@ impl Store for PostgresStore {
         let tx = c.transaction().await.map_err(pg)?;
         let (area, id) = (record.header.area_id.0, record.header.record_id);
         // Locking the area row serializes all writes in this area, which also keeps `seq` gapless.
-        if !exists(
-            &tx,
-            "SELECT 1 FROM areas WHERE area_id = $1 FOR UPDATE",
-            &area,
-        )
-        .await?
-        {
-            return Err(StoreError::NotFound);
+        let (owner, key_version) = area_head(&tx, area).await?;
+        let author = record.header.author_account.0.as_slice();
+        let may_write = owner == author
+            || tx
+                .query_opt(
+                    "SELECT 1 FROM area_members WHERE area_id = $1 AND account = $2 AND role = 'write'",
+                    &[&area, &author],
+                )
+                .await
+                .map_err(pg)?
+                .is_some();
+        if !may_write {
+            return Err(StoreError::NotAllowed);
+        }
+        if record.header.key_version != key_version {
+            return Err(StoreError::WrongKeyVersion {
+                current: key_version,
+            });
         }
         let current: Option<u64> = tx
             .query_opt(
@@ -878,7 +908,7 @@ impl Store for PostgresStore {
         &self,
         account: &AccountPublic,
     ) -> Result<Vec<AreaFate>, StoreError> {
-        owned_area_fates(&self.client().await?, account).await
+        owned_area_fates(&self.client().await?, account, false).await
     }
 
     async fn delete_account(&self, account: &AccountPublic) -> Result<Vec<AreaFate>, StoreError> {
@@ -894,7 +924,7 @@ impl Store for PostgresStore {
         {
             return Err(StoreError::NotFound);
         }
-        let plan = owned_area_fates(&tx, account).await?;
+        let plan = owned_area_fates(&tx, account, true).await?;
         for fate in &plan {
             let id = fate.area_id.0;
             match &fate.outcome {

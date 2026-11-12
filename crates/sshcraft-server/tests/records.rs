@@ -271,3 +271,23 @@ async fn paging_reports_more() {
     assert_eq!(rest["records"].as_array().unwrap().len(), 1);
     assert_eq!(rest["more"], false);
 }
+
+#[tokio::test]
+async fn large_pages_are_cut_by_size() {
+    let w = World::new().await;
+    let body = vec![7u8; 60 * 1024];
+    for _ in 0..80 {
+        let r = w
+            .put(OWNER, &w.seal(&w.owner, Uuid::new_v4(), 1, &body))
+            .await;
+        assert_eq!(r.0, StatusCode::OK);
+    }
+    let (status, page) = w.get(OWNER, "?since=0&limit=1000").await;
+    assert_eq!(status, StatusCode::OK);
+    let n = page["records"].as_array().unwrap().len();
+    assert!(n > 0 && n < 80, "{n} records in one page");
+    assert_eq!(page["more"], true);
+    let last = page["records"][n - 1]["seq"].as_u64().unwrap();
+    let (_, rest) = w.get(OWNER, &format!("?since={last}&limit=1000")).await;
+    assert_eq!(rest["records"].as_array().unwrap().len() + n, 80);
+}

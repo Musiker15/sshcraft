@@ -29,11 +29,12 @@ people. Version conflicts add `"current": <number>`.
 | `account_locked` | 403 | The account (or the owner of the area) is locked by the operator |
 | `device_inactive` | 403 | The device is revoked or blocked |
 | `not_found` | 404 | No such account, area, envelope or route |
+| `method_not_allowed` | 405 | The route exists, but not for this method |
 | `conflict` | 409 | Someone else wrote first; `current` is the stored version or log length |
 | `email_taken` | 409 | Another account uses this email |
 | `account_exists` | 409 | The account key is already registered |
 | `device_id_taken` | 409 | The device id belongs to another device |
-| `invalid` | 400 | Malformed or failed a check |
+| `invalid` | 400 | Malformed or failed a check, also a write under an outdated key version |
 | `too_large` | 413 | Body over 1 MiB, or record ciphertext over 64 KiB |
 | `internal` | 500 | Server fault; the cause is in the server log only |
 
@@ -110,8 +111,8 @@ change number.
 
 `GET /v1/areas/{area_id}/records?since=<seq>&limit=<n>` (session of owner or member):
 `{"records": [{"seq", "record"}], "more"}`, records whose latest write is after `since`, oldest
-first. `limit` defaults to 500, at most 1000. The server does not check record signatures; clients
-do.
+first. `limit` defaults to 500, at most 1000; a page also ends once it holds about 4 MiB of
+JSON, and then `more` is `true`. The server does not check record signatures; clients do.
 
 ## Live updates
 
@@ -129,4 +130,6 @@ data over HTTP, and resync after every new connection.
 | `area_deleted` | `area_id` | owner and members |
 | `session_ended` | | the device whose session ended; the connection closes |
 
-A connection that falls 256 events behind is closed.
+A connection that falls 256 events behind is closed. A device may have at most 4 open event
+connections (a fifth is answered with `503 busy`), and a client message may be at most 4 KiB;
+clients only need to answer pings.
