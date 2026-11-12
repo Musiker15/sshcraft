@@ -168,6 +168,11 @@ fn outbox_dedupes_per_item() {
     store.queue(s, ItemKind::Host, "a", 2).unwrap();
     store.queue(s, ItemKind::Group, "a", 3).unwrap();
     assert_eq!(
+        store.queued_at(s, ItemKind::Host, "a").unwrap(),
+        Some(2),
+        "latest change counts"
+    );
+    assert_eq!(
         store.outbox(s).unwrap(),
         vec![
             (ItemKind::Host, "a".to_owned()),

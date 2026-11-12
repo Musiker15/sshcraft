@@ -397,7 +397,8 @@ impl Store {
         Ok(())
     }
 
-    /// Notes that an item changed locally and still has to go to `server`.
+    /// Notes that an item changed locally and still has to go to `server`; the time is the
+    /// latest change, which "last change wins" compares against the server's state.
     pub fn queue(
         &self,
         server: ServerId,
@@ -407,7 +408,7 @@ impl Store {
     ) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO sync_outbox (server_id, kind, item_id, queued_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(server_id, kind, item_id) DO NOTHING",
+             ON CONFLICT(server_id, kind, item_id) DO UPDATE SET queued_at = excluded.queued_at",
             params![server.0.to_string(), kind.as_str(), item_id, at],
         )?;
         Ok(())

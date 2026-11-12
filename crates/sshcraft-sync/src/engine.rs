@@ -7,19 +7,43 @@
 use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
-use crate::items::{apply, decode, newer};
+use crate::items::{ItemBody, apply, decode, encode, local_item, newer};
 use sshcraft_core::model::ServerId;
-use sshcraft_core::store::{RecordEntry, ServerRow, Store};
+use sshcraft_core::store::{ItemKind, RecordEntry, ServerRow, Store};
 use sshcraft_core::vault::Vault;
-use sshcraft_proto::area::{AreaKey, AreaManifest, open_area_key};
+use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, open_area_key};
 use sshcraft_proto::devicelog::{DeviceLog, DeviceSet, LogHead};
 use sshcraft_proto::identity::{AccountPublic, DeviceKeys};
-use sshcraft_proto::record::{Freshness, VersionTracker};
+use sshcraft_proto::record::{Freshness, RecordHeader, SealedRecord, VersionTracker};
 use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 /// Records fetched per request.
 pub const PAGE: u32 = 500;
+/// How often one item is retried after a conflict within one push.
+pub const CONFLICT_ROUNDS: usize = 3;
+
+/// Queues a local change for the server the item lives at (nothing for a local item). Call it
+/// before deleting an item: afterwards its location is gone. A group also queues its hosts.
+pub fn record_local_change(
+    store: &Store,
+    kind: ItemKind,
+    id: &str,
+    now_ms: i64,
+) -> Result<(), SyncError> {
+    let Some(server) = store.location_of(kind, id)? else {
+        return Ok(());
+    };
+    store.queue(server, kind, id, now_ms)?;
+    if kind == ItemKind::Group {
+        for host in store.list_hosts()? {
+            if host.group_id.is_some_and(|g| g.0.to_string() == id) {
+                store.queue(server, ItemKind::Host, &host.id.0.to_string(), now_ms)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PullReport {
@@ -242,13 +266,103 @@ impl Engine {
         Ok(report)
     }
 
+    /// This account's own area with its key, from what this device verified and stored.
+    pub(crate) fn personal_area(
+        &self,
+        store: &Mutex<Store>,
+    ) -> Result<(AreaManifest, AreaKey), SyncError> {
+        for area in lock(store)?.areas(self.server)? {
+            let manifest: AreaManifest = from_json(&area.manifest)?;
+            if manifest.owner != self.account {
+                continue;
+            }
+            let envelope: KeyEnvelope = from_json(&area.envelope)?;
+            let key = open_area_key(&envelope, self.device_id, &self.keys, &manifest)?;
+            return Ok((manifest, key));
+        }
+        Err(SyncError::NotSetUp)
+    }
+
+    /// Sends every queued local change. A conflict (someone wrote first) is settled by
+    /// fetching and "last change wins"; a network error leaves the outbox as it is.
+    pub async fn push(
+        &mut self,
+        store: &Mutex<Store>,
+        vault: &Vault,
+        _now_ms: i64,
+    ) -> Result<usize, SyncError> {
+        let sync_keys = lock(store)?
+            .server(self.server)?
+            .ok_or(SyncError::NotSetUp)?
+            .sync_keys;
+        let outbox = lock(store)?.outbox(self.server)?;
+        let mut sent = 0;
+        for (kind, id) in outbox {
+            if kind == ItemKind::Key && !sync_keys {
+                lock(store)?.dequeue(self.server, kind, &id)?;
+                continue;
+            }
+            for _ in 0..CONFLICT_ROUNDS {
+                let (manifest, key) = self.personal_area(store)?;
+                let (record, entry) = {
+                    let guard = lock(store)?;
+                    let Some(queued) = guard.queued_at(self.server, kind, &id)? else {
+                        break;
+                    };
+                    let item = local_item(&guard, vault, kind, &id, queued)?;
+                    let known = guard.record_entry(self.server, kind, &id)?;
+                    if matches!(item.body, ItemBody::Deleted { .. }) && known.is_none() {
+                        // Never reached the server: nothing to delete there.
+                        guard.dequeue(self.server, kind, &id)?;
+                        break;
+                    }
+                    let (record_id, version) = known
+                        .as_ref()
+                        .map_or_else(|| (Uuid::new_v4(), 1), |e| (e.record_id, e.version + 1));
+                    let header = RecordHeader {
+                        record_id,
+                        area_id: manifest.area_id,
+                        version,
+                        key_version: manifest.key_version,
+                        author_account: self.account,
+                        author_device: self.device_id,
+                    };
+                    let record = SealedRecord::seal(header, &encode(&item)?, &key, &self.keys);
+                    let entry = RecordEntry {
+                        record_id,
+                        area_id: manifest.area_id.0,
+                        version,
+                        modified_at: item.modified_at,
+                    };
+                    (record, entry)
+                };
+                match self.client.put_record(&record).await {
+                    Ok(_) => {
+                        let guard = lock(store)?;
+                        guard.put_record_entry(self.server, &entry, kind, &id)?;
+                        guard.dequeue(self.server, kind, &id)?;
+                        sent += 1;
+                        break;
+                    }
+                    Err(SyncError::Server { status: 409, .. }) => {
+                        // Someone wrote first: fetch, then decide again (the item may be gone
+                        // from the outbox if the server's state won).
+                        self.pull(store, vault).await?;
+                    }
+                    Err(err) => return self.revoked_check(store, Err(err)),
+                }
+            }
+        }
+        Ok(sent)
+    }
+
     /// Applies a verified record unless a newer local change is waiting to be sent; either way
     /// remembers its version. Returns whether the local store changed.
     fn take(
         &self,
         store: &Mutex<Store>,
         vault: &Vault,
-        header: &sshcraft_proto::record::RecordHeader,
+        header: &RecordHeader,
         body: &[u8],
     ) -> Result<bool, SyncError> {
         let item = decode(body)?;
@@ -264,7 +378,8 @@ impl Engine {
             .queued_at(self.server, kind, &item_id)?
             .is_some_and(|queued| newer(queued, item.modified_at));
         store.put_record_entry(self.server, &entry, kind, &item_id)?;
-        if local_wins {
+        let sync_keys = store.server(self.server)?.is_some_and(|row| row.sync_keys);
+        if local_wins || (kind == ItemKind::Key && !sync_keys) {
             return Ok(false);
         }
         apply(&store, vault, self.server, &item)?;
