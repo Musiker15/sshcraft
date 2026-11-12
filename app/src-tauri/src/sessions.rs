@@ -1,5 +1,6 @@
-//! Runs SSH sessions for the UI: resolves the host, loads the key, checks the host key
-//! against the store (asking the user for unknown ones), and reconnects lost sessions.
+//! Runs terminal sessions for the UI. SSH: resolves the route, loads keys and passwords, checks
+//! host keys against the store (asking the user for unknown ones) and reconnects lost sessions.
+//! On the desktop also a local shell and a serial port.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -114,11 +115,93 @@ impl Flow {
     }
 }
 
+/// What a tab is connected to.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionTarget {
+    Host {
+        host_id: HostId,
+    },
+    #[cfg(desktop)]
+    Local {
+        shell: sshcraft_local::pty::ShellCommand,
+    },
+    #[cfg(desktop)]
+    Serial {
+        settings: sshcraft_local::serial::SerialSettings,
+    },
+}
+
+/// The sending half of any terminal: SSH shell, local shell or serial port.
+#[async_trait::async_trait]
+pub(crate) trait TermWriter: Send + Sync {
+    async fn write(&self, data: &[u8]) -> Result<(), String>;
+    async fn resize(&self, cols: u32, rows: u32) -> Result<(), String>;
+}
+
+#[async_trait::async_trait]
+impl TermWriter for ShellWriter {
+    async fn write(&self, data: &[u8]) -> Result<(), String> {
+        ShellWriter::write(self, data)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn resize(&self, cols: u32, rows: u32) -> Result<(), String> {
+        ShellWriter::resize(self, cols, rows)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(desktop)]
+fn to_u16(v: u32) -> u16 {
+    u16::try_from(v).unwrap_or(u16::MAX)
+}
+
+#[cfg(desktop)]
+#[async_trait::async_trait]
+impl TermWriter for sshcraft_local::pty::LocalWriter {
+    async fn write(&self, data: &[u8]) -> Result<(), String> {
+        let writer = self.clone();
+        let data = data.to_vec();
+        tokio::task::spawn_blocking(move || writer.write(&data))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    async fn resize(&self, cols: u32, rows: u32) -> Result<(), String> {
+        sshcraft_local::pty::LocalWriter::resize(self, to_u16(cols), to_u16(rows))
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(desktop)]
+#[async_trait::async_trait]
+impl TermWriter for sshcraft_local::serial::SerialWriter {
+    async fn write(&self, data: &[u8]) -> Result<(), String> {
+        let writer = self.clone();
+        let data = data.to_vec();
+        tokio::task::spawn_blocking(move || writer.write(&data))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// A serial line has no window size.
+    async fn resize(&self, _cols: u32, _rows: u32) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+type Writer = Arc<dyn TermWriter>;
+
 struct Live {
     /// Keystrokes in call order. A per-connection task forwards them to the server.
     input: mpsc::UnboundedSender<Vec<u8>>,
     /// Cloned out before awaiting, so no lock is held while talking to the server.
-    writer: Arc<Mutex<Option<ShellWriter>>>,
+    writer: Arc<Mutex<Option<Writer>>>,
     size: Arc<Mutex<(u32, u32)>>,
     flow: Arc<Flow>,
     task: JoinHandle<()>,
@@ -248,7 +331,7 @@ impl AgentConnector for WindowsAgent {
 struct Shared {
     sink: Arc<dyn SessionSink>,
     input: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>,
-    writer: Arc<Mutex<Option<ShellWriter>>>,
+    writer: Arc<Mutex<Option<Writer>>>,
     size: Arc<Mutex<(u32, u32)>>,
     flow: Arc<Flow>,
 }
@@ -304,7 +387,7 @@ impl SessionManager {
 
     pub fn open(
         &self,
-        host_id: HostId,
+        target: SessionTarget,
         cols: u32,
         rows: u32,
         sink: Arc<dyn SessionSink>,
@@ -323,7 +406,7 @@ impl SessionManager {
             writer: shared.writer.clone(),
             size: shared.size.clone(),
             flow: shared.flow.clone(),
-            task: tokio::spawn(run(self.ctx.clone(), host_id, shared)),
+            task: tokio::spawn(run(self.ctx.clone(), target, shared)),
         };
         self.sessions
             .lock()
@@ -394,7 +477,7 @@ fn end(sink: &dyn SessionSink, reason: EndReason, code: Option<ErrorCode>, detai
 /// which also frees a write that is stuck on a dead connection.
 async fn forward_input(
     input: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>,
-    writer: ShellWriter,
+    writer: Writer,
 ) {
     let mut input = input.lock().await;
     while let Some(data) = input.recv().await {
@@ -405,19 +488,21 @@ async fn forward_input(
 }
 
 /// The whole life of one tab: connect, pump output, reconnect after a drop, end.
-async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
+async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let sink = shared.sink.clone();
     let mut attempt = 0u32;
     let mut ever_connected = false;
     loop {
         sink.status(SessionStatus::Connecting);
-        let reason = match connect_once(&ctx, host_id, &shared.size).await {
-            Ok((shell_writer, mut events)) => {
-                *shared.writer.lock().expect("writer lock") = Some(shell_writer.clone());
-                let forwarder = tokio::spawn(forward_input(shared.input.clone(), shell_writer));
+        let reason = match connect_target(&ctx, &target, &shared.size).await {
+            Ok((writer, mut events)) => {
+                *shared.writer.lock().expect("writer lock") = Some(writer.clone());
+                let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
                 shared.flow.reset();
                 sink.status(SessionStatus::Connected);
-                remember_connection(&ctx, host_id);
+                if let SessionTarget::Host { host_id } = &target {
+                    remember_connection(&ctx, *host_id);
+                }
                 ever_connected = true;
                 attempt = 0;
                 let mut reason = Disconnect::Lost("connection closed".into());
@@ -454,7 +539,13 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
         };
 
         attempt += 1;
-        match next_reconnect_delay(&reason, attempt) {
+        // A local shell that ended is not started again.
+        let retry = match &target {
+            #[cfg(desktop)]
+            SessionTarget::Local { .. } => None,
+            _ => next_reconnect_delay(&reason, attempt),
+        };
+        match retry {
             Some(delay) => {
                 sink.status(SessionStatus::Reconnecting {
                     attempt,
@@ -634,11 +725,41 @@ fn failure(e: SshError, verifier: &StoreVerifier) -> Failure {
     }
 }
 
+type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>);
+
+async fn connect_target(
+    ctx: &Context,
+    target: &SessionTarget,
+    size: &Mutex<(u32, u32)>,
+) -> Result<Connected, Failure> {
+    match target {
+        SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size).await,
+        #[cfg(desktop)]
+        SessionTarget::Local { shell } => {
+            let (cols, rows) = *size.lock().expect("size lock");
+            let (writer, events) = sshcraft_local::pty::spawn(shell, to_u16(cols), to_u16(rows))
+                .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
+            Ok((Arc::new(writer), events))
+        }
+        #[cfg(desktop)]
+        SessionTarget::Serial { settings } => {
+            settings
+                .validate()
+                .map_err(|e| end_error(ErrorCode::SerialFailed, Some(e.to_string())))?;
+            // A port that is gone may come back (an adapter plugged in again): retried like a
+            // lost connection once it was open.
+            let (writer, events) = sshcraft_local::serial::open(settings)
+                .map_err(|e| Failure::Lost(ErrorCode::SerialFailed, e.to_string()))?;
+            Ok((Arc::new(writer), events))
+        }
+    }
+}
+
 async fn connect_once(
     ctx: &Context,
     host_id: HostId,
     size: &Mutex<(u32, u32)>,
-) -> Result<(ShellWriter, tokio::sync::mpsc::Receiver<ShellEvent>), Failure> {
+) -> Result<Connected, Failure> {
     let route = {
         let store = ctx.store.lock().expect("store lock");
         lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
@@ -689,7 +810,8 @@ async fn connect_once(
     if needs_os(&ctx.store, host_id) {
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
     }
-    Ok(shell.split())
+    let (writer, events) = shell.split();
+    Ok((Arc::new(writer), events))
 }
 
 fn probed_setting(host_id: HostId) -> String {

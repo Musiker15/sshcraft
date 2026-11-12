@@ -65,6 +65,8 @@ pub enum ErrorCode {
     ProxyAuthFailed,
     PasswordRejected,
     NotSupported,
+    LocalShellFailed,
+    SerialFailed,
 }
 
 impl From<&ResolveError> for ErrorCode {

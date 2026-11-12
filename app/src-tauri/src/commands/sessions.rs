@@ -2,12 +2,11 @@
 
 use std::sync::Arc;
 
-use sshcraft_core::model::HostId;
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 use super::{CommandError, CommandResult, ErrorCode};
-use crate::sessions::{SessionId, SessionSink, SessionStatus};
+use crate::sessions::{SessionId, SessionSink, SessionStatus, SessionTarget};
 use crate::state::AppState;
 
 struct ChannelSink {
@@ -28,7 +27,7 @@ impl SessionSink for ChannelSink {
 #[tauri::command]
 pub async fn session_open(
     state: State<'_, AppState>,
-    host_id: HostId,
+    target: SessionTarget,
     cols: u32,
     rows: u32,
     on_data: Channel<InvokeResponseBody>,
@@ -38,7 +37,7 @@ pub async fn session_open(
         data: on_data,
         status: on_status,
     });
-    Ok(state.sessions.open(host_id, cols, rows, sink))
+    Ok(state.sessions.open(target, cols, rows, sink))
 }
 
 /// Synchronous on purpose: sync commands run in call order, so keystrokes stay in order.
