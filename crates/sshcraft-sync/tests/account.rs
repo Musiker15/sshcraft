@@ -157,8 +157,15 @@ async fn mistyped_account_key_is_a_checksum_error() {
         .await
         .unwrap();
     let mut typo = export.to_string();
-    let last = typo.pop().unwrap();
-    typo.push(if last == 'A' { 'B' } else { 'A' });
+    // A character in the middle: the last one partly holds Base32 padding bits, so a
+    // change there can be a format error instead of a checksum error.
+    let at = typo.len() / 2 + 10;
+    let swapped = if typo.as_bytes()[at] == b'A' {
+        "B"
+    } else {
+        "A"
+    };
+    typo.replace_range(at..=at, swapped);
     let b = device();
     let err = join_account(&b.store, &b.vault, join(&server, &typo), 2)
         .await

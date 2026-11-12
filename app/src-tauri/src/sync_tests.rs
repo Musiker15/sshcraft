@@ -97,8 +97,15 @@ fn qr_for_a_bad_account_key_is_refused() {
     );
     let key = sshcraft_proto::identity::AccountKey::generate().export();
     let mut typo = key.to_string();
-    let last = typo.pop().unwrap();
-    typo.push(if last == 'A' { 'B' } else { 'A' });
+    // A character in the middle: the last one partly holds Base32 padding bits, so a
+    // change there can be a format error instead of a checksum error.
+    let at = typo.len() / 2 + 10;
+    let swapped = if typo.as_bytes()[at] == b'A' {
+        "B"
+    } else {
+        "A"
+    };
+    typo.replace_range(at..=at, swapped);
     assert_eq!(
         account_key_qr_svg_checked(&typo).unwrap_err().code,
         ErrorCode::SyncChecksum
