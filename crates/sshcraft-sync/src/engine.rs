@@ -390,7 +390,25 @@ impl Engine {
         let (devices, _) = self.own_devices(store).await?;
         let mut tracker = self.tracker(store)?;
         let mut cache = HashMap::from([(self.account, devices.clone())]);
-        let listings = self.revoked_check(store, self.client.areas().await)?;
+        let mut listings = self.revoked_check(store, self.client.areas().await)?;
+        // Areas the server handed to this account because their owner was deleted (design,
+        // section 12): this device signs them anew as their owner.
+        let mut taken = false;
+        for listing in &listings {
+            if listing.owner == self.account && listing.manifest.owner != self.account {
+                if self.take_over(store, vault, listing).await? {
+                    taken = true;
+                } else {
+                    report.rejected.push(format!(
+                        "area {}: not this account's to take over",
+                        listing.manifest.area_id.0
+                    ));
+                }
+            }
+        }
+        if taken {
+            listings = self.revoked_check(store, self.client.areas().await)?;
+        }
         let listed: HashSet<Uuid> = listings.iter().map(|l| l.manifest.area_id.0).collect();
         self.drop_lost_shares(store, &listed)?;
         let personal = self.personal_area(store).ok().map(|(m, _)| m.area_id.0);
@@ -400,6 +418,21 @@ impl Engine {
         for listing in listings {
             let area_id = listing.manifest.area_id;
             let owner = listing.manifest.owner;
+            // A new owner must have been a member who may write (the only one the server may
+            // hand an area to); anything else is a server making someone else owner.
+            let known = self.stored_area(store, area_id.0).ok().map(|(m, _)| m);
+            if let Some(old) = known
+                && old.owner != owner
+                && !old
+                    .members
+                    .iter()
+                    .any(|m| m.account == owner && m.role == Role::Write)
+            {
+                report
+                    .rejected
+                    .push(format!("area {}: owner change not allowed", area_id.0));
+                continue;
+            }
             let opened = match self.devices_cached(store, &mut cache, &owner).await {
                 Ok(owner_devices) => {
                     self.open_area(store, listing.manifest, &owner_devices, &mut tracker)
@@ -493,16 +526,82 @@ impl Engine {
         Ok(report)
     }
 
-    /// This account's personal area with its key: the own area without members (a share always
-    /// has some).
+    /// This account's personal area with its key: the own area without members that is no
+    /// share (a share always has members, unless it was taken over from a deleted owner).
     pub(crate) fn personal_area(
         &self,
         store: &Mutex<Store>,
     ) -> Result<(AreaManifest, AreaKey), SyncError> {
+        let shares: HashSet<Uuid> = lock(store)?
+            .shares(self.server)?
+            .into_iter()
+            .map(|s| s.area_id)
+            .collect();
         self.owned_areas(store)?
             .into_iter()
-            .find(|(manifest, _)| manifest.members.is_empty())
+            .find(|(manifest, _)| {
+                manifest.members.is_empty() && !shares.contains(&manifest.area_id.0)
+            })
             .ok_or(SyncError::NotSetUp)
+    }
+
+    /// Takes over an area whose owner was deleted, if this account may: the manifest this device
+    /// verified before must name it as a member who may write. A new key keeps the deleted
+    /// owner's devices out; the other members stay. Returns whether it took over.
+    async fn take_over(
+        &self,
+        store: &Mutex<Store>,
+        vault: &Vault,
+        listing: &crate::client::AreaListing,
+    ) -> Result<bool, SyncError> {
+        let area = listing.manifest.area_id.0;
+        let Ok((old, key)) = self.stored_area(store, area) else {
+            return Ok(false);
+        };
+        if old != listing.manifest
+            || !old
+                .members
+                .iter()
+                .any(|m| m.account == self.account && m.role == Role::Write)
+        {
+            return Ok(false);
+        }
+        let members = old
+            .members
+            .iter()
+            .filter(|m| m.account != self.account)
+            .cloned()
+            .collect();
+        crate::areas::rotate(
+            self,
+            store,
+            vault,
+            vec![(old, key, members)],
+            None,
+            now_secs(),
+        )
+        .await?;
+        // The items stay where they are; they are this account's own now, not copies.
+        let guard = lock(store)?;
+        let group = guard
+            .items_in_area(self.server, area)?
+            .into_iter()
+            .find(|(kind, _)| *kind == ItemKind::Group)
+            .map(|(_, id)| id);
+        let with_keys = guard.share(self.server, area)?.is_some_and(|s| s.with_keys);
+        guard.put_share(
+            self.server,
+            &ShareRow {
+                area_id: area,
+                kind: ShareKind::GroupAll,
+                group_id: group,
+                with_keys,
+                owned: true,
+                role: None,
+                owner: self.account.0,
+            },
+        )?;
+        Ok(true)
     }
 
     /// Warnings of the last push: changes it refused to send (`share_read_only`,
