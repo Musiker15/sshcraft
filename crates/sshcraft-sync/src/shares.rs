@@ -162,7 +162,12 @@ fn used_keys(
         match key {
             KeyRef::Agent { .. } => agent += 1,
             KeyRef::Stored { id } => {
-                if store.location_of(ItemKind::Key, &id.0.to_string())? == Some(server)
+                // A key that came in someone else's share is theirs to share, not this account's.
+                let key = id.0.to_string();
+                if store.location_of(ItemKind::Key, &key)? == Some(server)
+                    && store
+                        .received_share_of(server, ItemKind::Key, &key)?
+                        .is_none()
                     && !keys.contains(id)
                 {
                     keys.push(*id);

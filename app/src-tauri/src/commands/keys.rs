@@ -137,6 +137,9 @@ pub fn delete_key(state: State<'_, AppState>, id: KeyId) -> CommandResult<()> {
         let kind = sshcraft_core::store::ItemKind::Key;
         let key = id.0.to_string();
         let before = store.location_of(kind, &key)?;
+        if let Some(server) = before {
+            crate::sync::share_rights_for_key(&store, server, id)?;
+        }
         let servers = crate::sync::note_change(&store, kind, &key, before, crate::sync::now_ms())?;
         vault::delete_key(&store, id)?;
         servers

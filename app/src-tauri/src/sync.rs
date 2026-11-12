@@ -255,12 +255,23 @@ pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandEr
                 (None, Some(group)) => received(store, ItemKind::Group, &group.0.to_string())?,
                 (None, None) => None,
             };
+            // Putting a host into a group that came in a share adds to that share: only a
+            // group shared with all hosts and the right to change allow it.
+            let moved = existing
+                .as_ref()
+                .is_some_and(|old| old.group_id != host.group_id);
+            if moved && let Some(group) = host.group_id {
+                let target = received(store, ItemKind::Group, &group.0.to_string())?;
+                if target.is_some_and(|t| {
+                    t.role != Some(ShareRole::Write) || t.kind != ShareKind::GroupAll
+                }) {
+                    return Err(read_only());
+                }
+            }
             let Some(share) = share else {
                 return Ok(true);
             };
-            if let Some(old) = &existing
-                && old.group_id != host.group_id
-            {
+            if moved {
                 return Err(CommandError::code(ErrorCode::ShareNotOwner));
             }
             match (share.role, existing) {
@@ -308,14 +319,36 @@ pub fn share_rights(store: &Store, change: Change<'_>) -> Result<bool, CommandEr
             }
             Some(_) => Err(read_only()),
         },
-        Change::DeleteGroup(id) => match received(store, ItemKind::Group, &id.0.to_string())? {
-            None => Ok(true),
-            Some(_) => Err(CommandError::code(ErrorCode::ShareNotOwner)),
-        },
+        Change::DeleteGroup(id) => {
+            let group = id.0.to_string();
+            if received(store, ItemKind::Group, &group)?.is_some() {
+                return Err(CommandError::code(ErrorCode::ShareNotOwner));
+            }
+            // A group of an own share goes with its share: end that first.
+            if let Some(server) = store.location_of(ItemKind::Group, &group)?
+                && let Some(area) = store.item_area(server, ItemKind::Group, &group)?
+                && store.share(server, area)?.is_some_and(|s| s.owned)
+            {
+                return Err(CommandError::code(ErrorCode::ShareEndFirst));
+            }
+            Ok(true)
+        }
         Change::Move(kind, id) => match received(store, kind, id)? {
             None => Ok(true),
             Some(_) => Err(CommandError::code(ErrorCode::ShareNotOwner)),
         },
+    }
+}
+
+/// A key that came in someone else's share is theirs: it is neither deleted nor moved here.
+pub fn share_rights_for_key(
+    store: &Store,
+    server: ServerId,
+    key: sshcraft_core::model::KeyId,
+) -> Result<(), CommandError> {
+    match store.received_share_of(server, ItemKind::Key, &key.0.to_string())? {
+        Some(_) => Err(CommandError::code(ErrorCode::ShareNotOwner)),
+        None => Ok(()),
     }
 }
 

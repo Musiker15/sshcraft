@@ -680,9 +680,26 @@ impl Engine {
                             _ => guard.area_for(self.server, kind, &id, personal)?,
                         };
                         strip_unsynced_keys(&guard, self.server, &mut item, target, personal)?;
-                        if let Some(warning) =
-                            refusal(&guard, self.server, target, deleted, known.is_none())?
-                        {
+                        // Moving between areas is a deletion in the old one and an addition in the
+                        // new one; both are checked before anything is sent.
+                        let moving = known.as_ref().is_some_and(|e| e.area_id != target);
+                        let refused = match refusal(
+                            &guard,
+                            self.server,
+                            target,
+                            kind,
+                            deleted,
+                            known.is_none() || moving,
+                        )? {
+                            Some(warning) => Some(warning),
+                            None => match (&known, moving) {
+                                (Some(entry), true) => {
+                                    refusal(&guard, self.server, entry.area_id, kind, true, false)?
+                                }
+                                _ => None,
+                            },
+                        };
+                        if let Some(warning) = refused {
                             guard.dequeue(self.server, kind, &id)?;
                             Step::Refuse(warning, known)
                         } else if let Some(entry) = known.clone().filter(|e| e.area_id != target) {
@@ -970,17 +987,8 @@ fn take_into_original(
             next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key);
             store.upsert_host(&next)?;
         }
-        ItemBody::Group { group } => {
-            let Some(mine) = store.list_groups()?.into_iter().find(|g| g.id.0 == uuid) else {
-                return Ok(false);
-            };
-            let mut next = group.clone();
-            next.id = mine.id;
-            next.location = mine.location;
-            next.defaults.key = original_key(&group.defaults.key)?.or(mine.defaults.key);
-            store.upsert_group(&next)?;
-        }
-        // Keys and deletions of copies are the owner's alone.
+        // The group, keys and deletions of copies are the owner's alone (a selection only lets
+        // members change hosts).
         _ => return Ok(false),
     }
     record_local_change(store, kind, &original, item.modified_at)?;
@@ -997,22 +1005,27 @@ enum Step {
 }
 
 /// Why this account may not send a change into `area`, if it may not: a received share it may
-/// only read, or a received selection (or single host) that may only be changed.
+/// only read; the owner's keys, which members never change; a received selection (or single
+/// host), where only hosts may be changed, none added or removed.
 fn refusal(
     store: &Store,
     server: ServerId,
     area: Uuid,
+    kind: ItemKind,
     deleted: bool,
     new: bool,
 ) -> Result<Option<&'static str>, SyncError> {
     let Some(share) = store.share(server, area)?.filter(|s| !s.owned) else {
         return Ok(None);
     };
-    if share.role != Some(ShareRole::Write) {
+    if share.role != Some(ShareRole::Write) || kind == ItemKind::Key {
         return Ok(Some("share_read_only"));
     }
     if share.kind != ShareKind::GroupAll && (deleted || new) {
         return Ok(Some("share_no_add_remove"));
+    }
+    if share.kind != ShareKind::GroupAll && kind == ItemKind::Group {
+        return Ok(Some("share_read_only"));
     }
     Ok(None)
 }

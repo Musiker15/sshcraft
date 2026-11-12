@@ -254,3 +254,93 @@ fn editing_a_read_only_item_is_refused() {
         ErrorCode::ShareReadOnly
     );
 }
+
+fn share_row(
+    area: Uuid,
+    owned: bool,
+    role: Option<sshcraft_core::store::ShareRole>,
+) -> sshcraft_core::store::ShareRow {
+    sshcraft_core::store::ShareRow {
+        area_id: area,
+        kind: sshcraft_core::store::ShareKind::Selection,
+        group_id: None,
+        with_keys: false,
+        owned,
+        role,
+        owner: [9; 32],
+    }
+}
+
+#[test]
+fn moving_an_own_host_into_a_received_group_is_refused() {
+    use sshcraft_core::store::ShareRole;
+    let (store, server) = store_with_server();
+    let group = Group {
+        id: GroupId::new(),
+        name: "theirs".into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+    };
+    store.upsert_group(&group).unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(server, &share_row(area, false, Some(ShareRole::Write)))
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &group.id.0.to_string(), area)
+        .unwrap();
+    let mut mine = host(None);
+    mine.location = Some(server);
+    store.upsert_host(&mine).unwrap();
+    let mut moved = mine.clone();
+    moved.group_id = Some(group.id);
+    assert_eq!(
+        share_rights(&store, Change::SaveHost(&moved))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareReadOnly
+    );
+}
+
+#[test]
+fn received_keys_cannot_be_deleted() {
+    use sshcraft_core::model::KeyId;
+    use sshcraft_core::store::ShareRole;
+    let (store, server) = store_with_server();
+    let key = KeyId::new();
+    let area = Uuid::new_v4();
+    store
+        .put_share(server, &share_row(area, false, Some(ShareRole::Write)))
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Key, &key.0.to_string(), area)
+        .unwrap();
+    // The key record itself is not needed for the check: its area decides.
+    let refused = share_rights_for_key(&store, server, key).unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ShareNotOwner);
+}
+
+#[test]
+fn a_shared_group_is_ended_before_it_is_deleted() {
+    let (store, server) = store_with_server();
+    let group = Group {
+        id: GroupId::new(),
+        name: "mine".into(),
+        defaults: ConnectionSettings::default(),
+        location: Some(server),
+    };
+    store.upsert_group(&group).unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(server, &share_row(area, true, None))
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Group, &group.id.0.to_string(), area)
+        .unwrap();
+    assert_eq!(
+        share_rights(&store, Change::DeleteGroup(group.id))
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareEndFirst
+    );
+}

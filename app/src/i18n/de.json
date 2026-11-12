@@ -35,6 +35,7 @@
   "errors.session": "Die Sitzung existiert nicht mehr.",
   "errors.share_already_shared": "Diese Gruppe ist schon mit allen Hosts geteilt. Füge die Personen dort hinzu.",
   "errors.share_contact_unconfirmed": "Vergleiche zuerst die Sicherheitsnummer mit dem Empfänger.",
+  "errors.share_end_first": "Beende zuerst die Freigabe dieser Gruppe.",
   "errors.share_not_owner": "Das kann bei geteilten Einträgen nur der Besitzer.",
   "errors.share_read_only": "Das wurde mit dir geteilt und lässt sich hier nicht ändern.",
   "errors.store": "Die lokale Datenbank ließ sich nicht lesen oder schreiben.",

@@ -662,3 +662,217 @@ async fn newer_unsent_owner_change_beats_an_older_copy_change() {
     assert_eq!(original.name, "from-a");
     assert_eq!(b.hosts()[0].name, "from-a");
 }
+
+// ---------- Final review fixes
+
+#[tokio::test]
+async fn own_host_moved_into_a_received_selection_stays() {
+    let server = TestServer::start().await;
+    let (_a, b, _c, _, host) = shared_group(&server, ShareKind::Selection).await;
+    let server_b = b.row().id;
+    let mut mine = sample_host("mine");
+    mine.location = Some(server_b);
+    {
+        let store = b.store.lock().unwrap();
+        store.upsert_host(&mine).unwrap();
+        record_local_change(&store, ItemKind::Host, &mine.id.0.to_string(), 50).unwrap();
+    }
+    sync(&b).await;
+    // B puts the own host into the received group: an addition the selection does not allow.
+    {
+        let store = b.store.lock().unwrap();
+        let mut moved = mine.clone();
+        moved.group_id = host.group_id;
+        store.upsert_host(&moved).unwrap();
+        record_local_change(&store, ItemKind::Host, &mine.id.0.to_string(), 60).unwrap();
+    }
+    let mut e = engine(&b).await;
+    e.push(&b.store, &b.vault, 60).await.unwrap();
+    assert!(
+        e.warnings().iter().any(|w| w == "share_no_add_remove"),
+        "{:?}",
+        e.warnings()
+    );
+    let kept = b
+        .hosts()
+        .into_iter()
+        .find(|h| h.id == mine.id)
+        .expect("the own host stays");
+    assert_eq!(kept.group_id, None);
+    // And it is still in the personal area on the server: another sync keeps it.
+    sync(&b).await;
+    assert!(b.hosts().iter().any(|h| h.id == mine.id));
+}
+
+/// A shares host "one" with key "deploy" as a selection with B (write, key sync on); returns
+/// the key B received.
+async fn received_key(
+    server: &TestServer,
+    all_hosts: bool,
+) -> (Dev, Dev, Dev, sshcraft_core::model::KeyId) {
+    let (a, b, c) = three(server).await;
+    for dev in [&a, &b, &c] {
+        let id = dev.row().id;
+        dev.store
+            .lock()
+            .unwrap()
+            .update_server_flags(id, true, true)
+            .unwrap();
+    }
+    let (group, mut one, _) = local_group(&a);
+    let server_a = a.row().id;
+    {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
+            .unwrap();
+        record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
+        one.settings.key = Some(KeyRef::Stored { id: info.id });
+        store.upsert_host(&one).unwrap();
+    }
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let what = if all_hosts {
+        ShareWhat::GroupAll(group.id)
+    } else {
+        ShareWhat::Selection {
+            group: group.id,
+            hosts: vec![one.id],
+        }
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Write)],
+        true,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    let key = b.store.lock().unwrap().list_key_records().unwrap()[0].id;
+    (a, b, c, key)
+}
+
+#[tokio::test]
+async fn received_keys_are_not_shared_on() {
+    let server = TestServer::start().await;
+    let (a, b, c, key) = received_key(&server, false).await;
+    let server_b = b.row().id;
+    let mut mine = sample_host("mine");
+    mine.location = Some(server_b);
+    mine.settings.key = Some(KeyRef::Stored { id: key });
+    let mut group = sample_group("b-team");
+    group.location = Some(server_b);
+    let mut grouped = sample_host("grouped");
+    grouped.location = Some(server_b);
+    grouped.group_id = Some(group.id);
+    grouped.settings.key = Some(KeyRef::Stored { id: key });
+    {
+        let store = b.store.lock().unwrap();
+        store.upsert_host(&mine).unwrap();
+        store.upsert_group(&group).unwrap();
+        store.upsert_host(&grouped).unwrap();
+        record_local_change(&store, ItemKind::Host, &mine.id.0.to_string(), 50).unwrap();
+        record_local_change(&store, ItemKind::Group, &group.id.0.to_string(), 50).unwrap();
+        record_local_change(&store, ItemKind::Host, &grouped.id.0.to_string(), 50).unwrap();
+    }
+    sync(&b).await;
+    befriend(&b, &c, "c@example.org").await;
+    let mut e = engine(&b).await;
+    share(
+        &mut e,
+        &b.store,
+        &b.vault,
+        ShareWhat::Host(mine.id),
+        vec![grant(&c, Role::Read)],
+        true,
+        60,
+    )
+    .await
+    .unwrap();
+    share(
+        &mut e,
+        &b.store,
+        &b.vault,
+        ShareWhat::GroupAll(group.id),
+        vec![grant(&c, Role::Read)],
+        true,
+        61,
+    )
+    .await
+    .unwrap();
+    sync(&c).await;
+    assert!(
+        c.store
+            .lock()
+            .unwrap()
+            .list_key_records()
+            .unwrap()
+            .is_empty(),
+        "A's key never reaches C"
+    );
+    // The received key stays in A's share, and A keeps it.
+    let area_of_key = b
+        .store
+        .lock()
+        .unwrap()
+        .effective_area(server_b, ItemKind::Key, &key.0.to_string())
+        .unwrap();
+    assert!(area_of_key.is_some());
+    sync(&a).await;
+    assert_eq!(a.store.lock().unwrap().list_key_records().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn members_cannot_delete_a_shared_key() {
+    let server = TestServer::start().await;
+    let (a, b, _c, key) = received_key(&server, true).await;
+    {
+        let store = b.store.lock().unwrap();
+        record_local_change(&store, ItemKind::Key, &key.0.to_string(), 70).unwrap();
+        store.delete_key_record(key).unwrap();
+    }
+    let mut e = engine(&b).await;
+    e.push(&b.store, &b.vault, 70).await.unwrap();
+    assert!(!e.warnings().is_empty());
+    assert_eq!(
+        b.store.lock().unwrap().list_key_records().unwrap().len(),
+        1,
+        "restored"
+    );
+    sync(&a).await;
+    assert_eq!(a.store.lock().unwrap().list_key_records().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn selection_writer_cannot_change_the_group() {
+    let server = TestServer::start().await;
+    let (a, b, _c, _one) = selection_of_one(&server).await;
+    let server_b = b.row().id;
+    let copy = b.store.lock().unwrap().list_groups().unwrap()[0].clone();
+    {
+        let store = b.store.lock().unwrap();
+        let mut renamed = copy.clone();
+        renamed.name = "renamed".into();
+        store.upsert_group(&renamed).unwrap();
+        record_local_change(&store, ItemKind::Group, &copy.id.0.to_string(), 80).unwrap();
+    }
+    let mut e = engine(&b).await;
+    e.push(&b.store, &b.vault, 80).await.unwrap();
+    assert!(
+        e.warnings().iter().any(|w| w == "share_read_only"),
+        "{:?}",
+        e.warnings()
+    );
+    sync(&a).await;
+    assert_eq!(
+        a.store.lock().unwrap().list_groups().unwrap()[0].name,
+        "team"
+    );
+    let _ = server_b;
+}

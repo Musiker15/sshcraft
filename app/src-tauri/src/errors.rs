@@ -52,6 +52,7 @@ pub enum ErrorCode {
     ShareReadOnly,
     ShareNotOwner,
     ShareAlreadyShared,
+    ShareEndFirst,
 }
 
 impl From<&ResolveError> for ErrorCode {
