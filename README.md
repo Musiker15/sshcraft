@@ -26,6 +26,7 @@ encrypted vault.
 |---|---|
 | Design (German) | [docs/superpowers/specs/2026-11-11-sshcraft-design.md](docs/superpowers/specs/2026-11-11-sshcraft-design.md) |
 | Roadmap (German) | [docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md](docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md) |
+| Protocol and cryptography | [docs/protocol.md](docs/protocol.md) |
 
 ## Help and contributing
 
