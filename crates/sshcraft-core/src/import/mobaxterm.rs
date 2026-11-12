@@ -67,6 +67,7 @@ pub fn parse(bytes: &[u8]) -> ImportPlan {
                 port,
                 username,
                 key: None,
+                ..Default::default()
             },
             warnings,
             ..ImportCandidate::default()

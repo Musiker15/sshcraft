@@ -93,7 +93,7 @@ fn three_levels_inherit() {
     let groups = store.list_groups().unwrap();
     let chain = group_chain(&groups, bottom.id);
     let refs: Vec<&Group> = chain.iter().collect();
-    let resolved = resolve(&h, &refs).unwrap();
+    let resolved = resolve(&h, &refs, &[]).unwrap();
     assert_eq!(resolved.address, "top.example.org");
     assert_eq!(resolved.port, 2200);
     assert_eq!(resolved.username, "middle-user", "the nearest group wins");
@@ -105,10 +105,10 @@ fn nearest_group_wins() {
     let (top, middle, _) = three_levels(&store);
     let h = host("h", Some(middle.id), ConnectionSettings::default());
     let chain = [&middle, &top];
-    assert_eq!(resolve(&h, &chain).unwrap().username, "middle-user");
+    assert_eq!(resolve(&h, &chain, &[]).unwrap().username, "middle-user");
     // A chain that is not the host's own is refused.
     let wrong = [&top];
-    assert!(resolve(&h, &wrong).is_err());
+    assert!(resolve(&h, &wrong, &[]).is_err());
 }
 
 #[test]

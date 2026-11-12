@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use sshcraft_core::model::{HostId, KeyRef, ResolvedHost, group_chain, resolve};
+use sshcraft_core::model::{Directory, HostId, KeyRef, ResolvedHost, resolve_route};
 use sshcraft_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
@@ -466,7 +466,9 @@ async fn connect_once(
         lookup(&store, host_id).map_err(|(code, detail)| error(code, detail))?
     };
     let credential = match &resolved.key {
-        KeyRef::Stored { id } => {
+        // Until password sign-in arrives, a host without a key cannot connect.
+        None => return Err(error(ErrorCode::Session, Some("no key".into()))),
+        Some(KeyRef::Stored { id }) => {
             let vault = ctx
                 .vault
                 .as_ref()
@@ -499,7 +501,7 @@ async fn connect_once(
             })?;
             sshcraft_ssh::Credential::Key(key)
         }
-        KeyRef::Agent { fingerprint } => sshcraft_ssh::Credential::Agent {
+        Some(KeyRef::Agent { fingerprint }) => sshcraft_ssh::Credential::Agent {
             fingerprint: fingerprint.clone(),
             agent: ctx
                 .agent
@@ -638,18 +640,16 @@ async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_
 
 fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Option<String>)> {
     let store_error = |e: sshcraft_core::store::StoreError| (ErrorCode::Store, Some(e.to_string()));
-    let host = store
-        .list_hosts()
-        .map_err(store_error)?
-        .into_iter()
-        .find(|h| h.id == host_id)
-        .ok_or((ErrorCode::NotFound, None))?;
-    let chain = match host.group_id {
-        Some(gid) => group_chain(&store.list_groups().map_err(store_error)?, gid),
-        None => Vec::new(),
+    let hosts = store.list_hosts().map_err(store_error)?;
+    let groups = store.list_groups().map_err(store_error)?;
+    let dir = Directory {
+        groups: &groups,
+        hosts: &hosts,
+        identities: &[],
     };
-    let chain: Vec<&sshcraft_core::model::Group> = chain.iter().collect();
-    resolve(&host, &chain).map_err(|e| (ErrorCode::from(&e), None))
+    resolve_route(&dir, host_id)
+        .map(|route| route.target)
+        .map_err(|e| (ErrorCode::from(&e), None))
 }
 
 struct StoreVerifier {

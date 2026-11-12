@@ -298,6 +298,7 @@ pub fn plan_import(
                     port: h.port,
                     username: h.user.clone(),
                     key,
+                    ..Default::default()
                 },
                 key_note,
                 warnings,

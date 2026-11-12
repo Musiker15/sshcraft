@@ -27,6 +27,8 @@ id_type!(GroupId);
 id_type!(HostId);
 id_type!(KeyId);
 id_type!(ServerId);
+id_type!(IdentityId);
+id_type!(PasswordId);
 
 /// Where the private key for a connection comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +47,93 @@ pub struct ConnectionSettings {
     pub port: Option<u16>,
     pub username: Option<String>,
     pub key: Option<KeyRef>,
+    /// A password sealed in the vault.
+    #[serde(default)]
+    pub password: Option<PasswordId>,
+    /// Fills username, key and password where this level does not set them itself.
+    #[serde(default)]
+    pub identity: Option<IdentityId>,
+    /// Hosts to hop through, in order. `Some(vec![])` means "none", not "inherit".
+    #[serde(default)]
+    pub jump_hosts: Option<Vec<HostId>>,
+    #[serde(default)]
+    pub proxy: Option<Proxy>,
+    #[serde(default)]
+    pub agent_forwarding: Option<bool>,
+    /// Merged with the groups above: a name set lower wins.
+    #[serde(default)]
+    pub env: Vec<EnvVar>,
+}
+
+/// How the first connection leaves this device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Proxy {
+    /// No proxy, and none inherited from a group.
+    Direct,
+    Http(ProxyEndpoint),
+    Socks5(ProxyEndpoint),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxyEndpoint {
+    pub address: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<PasswordId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// A reusable bundle of user and credentials for hosts and groups.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Identity {
+    pub id: IdentityId,
+    pub name: String,
+    pub username: Option<String>,
+    pub key: Option<KeyRef>,
+    pub password: Option<PasswordId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<ServerId>,
+}
+
+/// At most this many environment variables per level, names up to 64 characters, values up to
+/// 4096 bytes.
+pub const MAX_ENV: usize = 64;
+pub const MAX_ENV_NAME: usize = 64;
+pub const MAX_ENV_VALUE: usize = 4096;
+/// At most this many jump hosts before the target.
+pub const MAX_JUMPS: usize = 8;
+
+fn valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    name.len() <= MAX_ENV_NAME
+        && (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Environment variables as they are stored: invalid names and too long values dropped, a name
+/// given twice keeps the last value at the place of the first, at most [`MAX_ENV`].
+pub fn normalize_env(vars: &[EnvVar]) -> Vec<EnvVar> {
+    let mut out: Vec<EnvVar> = Vec::new();
+    for var in vars {
+        if !valid_env_name(&var.name) || var.value.len() > MAX_ENV_VALUE {
+            continue;
+        }
+        if let Some(existing) = out.iter_mut().find(|v| v.name == var.name) {
+            existing.value = var.value.clone();
+        } else if out.len() < MAX_ENV {
+            out.push(var.clone());
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,7 +249,27 @@ pub struct ResolvedHost {
     pub address: String,
     pub port: u16,
     pub username: String,
-    pub key: KeyRef,
+    pub key: Option<KeyRef>,
+    pub password: Option<PasswordId>,
+    /// Never [`Proxy::Direct`]: that resolves to `None`.
+    pub proxy: Option<Proxy>,
+    pub agent_forwarding: bool,
+    pub env: Vec<EnvVar>,
+    pub jump_hosts: Vec<HostId>,
+}
+
+/// Everything a route is resolved from.
+pub struct Directory<'a> {
+    pub groups: &'a [Group],
+    pub hosts: &'a [Host],
+    pub identities: &'a [Identity],
+}
+
+/// How to reach a host: through `jumps` in order, then `target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Route {
+    pub target: ResolvedHost,
+    pub jumps: Vec<ResolvedHost>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -169,10 +278,21 @@ pub enum ResolveError {
     MissingAddress,
     #[error("no username set on the host or its group")]
     MissingUsername,
-    #[error("no key set on the host or its group")]
-    MissingKey,
     #[error("the given group is not the host's group")]
     WrongGroup,
+    #[error("the host does not exist")]
+    NotFound,
+    #[error("the jump hosts contain the host itself or one host twice")]
+    JumpLoop,
+    #[error("more than {MAX_JUMPS} jump hosts")]
+    TooManyJumps,
+    #[error("a jump host does not exist")]
+    JumpMissing,
+    #[error("a jump host cannot be resolved: {error}")]
+    Jump {
+        host_id: HostId,
+        error: Box<ResolveError>,
+    },
 }
 
 pub const DEFAULT_PORT: u16 = 22;
@@ -192,21 +312,70 @@ fn check_chain(host: &Host, chain: &[&Group]) -> Result<(), ResolveError> {
     Ok(())
 }
 
+/// One level of settings (the host or one of its groups) with the identity it names.
+struct Level<'a> {
+    settings: &'a ConnectionSettings,
+    identity: Option<&'a Identity>,
+}
+
 /// Combines a host with its groups (`chain`: its group, then that group's parent and so on):
 /// a value set on the host wins, then the nearest group that sets it; empty strings count as
-/// unset.
-pub fn resolve(host: &Host, chain: &[&Group]) -> Result<ResolvedHost, ResolveError> {
+/// unset. On each level, the level's identity fills username, key and password where the level
+/// does not set them itself. An identity that does not exist is ignored.
+pub fn resolve(
+    host: &Host,
+    chain: &[&Group],
+    identities: &[Identity],
+) -> Result<ResolvedHost, ResolveError> {
     check_chain(host, chain)?;
     let (address, port) = endpoint(host, chain)?;
-    let username = non_empty(&host.settings.username)
-        .or_else(|| chain.iter().find_map(|g| non_empty(&g.defaults.username)))
+    let identity = |settings: &ConnectionSettings| {
+        settings
+            .identity
+            .and_then(|id| identities.iter().find(|i| i.id == id))
+    };
+    let levels: Vec<Level> = std::iter::once(&host.settings)
+        .chain(chain.iter().map(|g| &g.defaults))
+        .map(|settings| Level {
+            settings,
+            identity: identity(settings),
+        })
+        .collect();
+    let username = levels
+        .iter()
+        .find_map(|l| {
+            non_empty(&l.settings.username)
+                .or_else(|| l.identity.and_then(|i| non_empty(&i.username)))
+        })
         .ok_or(ResolveError::MissingUsername)?;
-    let key = host
-        .settings
-        .key
-        .clone()
-        .or_else(|| chain.iter().find_map(|g| g.defaults.key.clone()))
-        .ok_or(ResolveError::MissingKey)?;
+    let key = levels.iter().find_map(|l| {
+        l.settings
+            .key
+            .clone()
+            .or_else(|| l.identity.and_then(|i| i.key.clone()))
+    });
+    let password = levels.iter().find_map(|l| {
+        l.settings
+            .password
+            .or_else(|| l.identity.and_then(|i| i.password))
+    });
+    let proxy = levels
+        .iter()
+        .find_map(|l| l.settings.proxy.clone())
+        .filter(|p| *p != Proxy::Direct);
+    let agent_forwarding = levels
+        .iter()
+        .find_map(|l| l.settings.agent_forwarding)
+        .unwrap_or(false);
+    let jump_hosts = levels
+        .iter()
+        .find_map(|l| l.settings.jump_hosts.clone())
+        .unwrap_or_default();
+    let env: Vec<EnvVar> = levels
+        .iter()
+        .rev()
+        .flat_map(|l| l.settings.env.iter().cloned())
+        .collect();
     Ok(ResolvedHost {
         host_id: host.id,
         name: host.name.clone(),
@@ -214,7 +383,59 @@ pub fn resolve(host: &Host, chain: &[&Group]) -> Result<ResolvedHost, ResolveErr
         port,
         username,
         key,
+        password,
+        proxy,
+        agent_forwarding,
+        env: normalize_env(&env),
+        jump_hosts,
     })
+}
+
+/// Resolves one host of the directory with its groups.
+fn resolve_in(dir: &Directory, host_id: HostId) -> Result<ResolvedHost, ResolveError> {
+    let host = dir
+        .hosts
+        .iter()
+        .find(|h| h.id == host_id)
+        .ok_or(ResolveError::NotFound)?;
+    let chain = match host.group_id {
+        Some(gid) => group_chain(dir.groups, gid),
+        None => Vec::new(),
+    };
+    let chain: Vec<&Group> = chain.iter().collect();
+    resolve(host, &chain, dir.identities)
+}
+
+/// How to reach a host. The jump hosts come from the target and are resolved with their own
+/// address and credentials; their own jump hosts and proxy do not apply here.
+pub fn resolve_route(dir: &Directory, host_id: HostId) -> Result<Route, ResolveError> {
+    let target = resolve_in(dir, host_id)?;
+    if target.jump_hosts.len() > MAX_JUMPS {
+        return Err(ResolveError::TooManyJumps);
+    }
+    let mut jumps: Vec<ResolvedHost> = Vec::new();
+    for &jump in &target.jump_hosts {
+        if jump == host_id {
+            return Err(ResolveError::JumpLoop);
+        }
+        if jumps.iter().any(|j| j.host_id == jump) {
+            return Err(ResolveError::JumpLoop);
+        }
+        let mut hop = match resolve_in(dir, jump) {
+            Ok(hop) => hop,
+            Err(ResolveError::NotFound) => return Err(ResolveError::JumpMissing),
+            Err(error) => {
+                return Err(ResolveError::Jump {
+                    host_id: jump,
+                    error: Box::new(error),
+                });
+            }
+        };
+        hop.jump_hosts.clear();
+        hop.proxy = None;
+        jumps.push(hop);
+    }
+    Ok(Route { target, jumps })
 }
 
 /// Address and port of a host after inheriting from its groups. Needs neither a username nor
@@ -281,6 +502,7 @@ mod tests {
             port: Some(2222),
             username: Some("root".into()),
             key: Some(k.clone()),
+            ..Default::default()
         })
     }
 
@@ -289,11 +511,11 @@ mod tests {
         let k = key();
         let g = full_group(&k);
         let h = host_in(&g, ConnectionSettings::default());
-        let r = resolve(&h, &[&g]).unwrap();
+        let r = resolve(&h, &[&g], &[]).unwrap();
         assert_eq!(r.address, "example.org");
         assert_eq!(r.port, 2222);
         assert_eq!(r.username, "root");
-        assert_eq!(r.key, k);
+        assert_eq!(r.key, Some(k));
         assert_eq!(r.host_id, h.id);
     }
 
@@ -307,7 +529,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(resolve(&h, &[&g]).unwrap().username, "deploy");
+        assert_eq!(resolve(&h, &[&g], &[]).unwrap().username, "deploy");
     }
 
     #[test]
@@ -320,7 +542,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(resolve(&h, &[&g]).unwrap().username, "root");
+        assert_eq!(resolve(&h, &[&g], &[]).unwrap().username, "root");
     }
 
     #[test]
@@ -330,9 +552,10 @@ mod tests {
             username: Some("u".into()),
             key: Some(key()),
             port: None,
+            ..Default::default()
         });
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(resolve(&h, &[&g]).unwrap().port, 22);
+        assert_eq!(resolve(&h, &[&g], &[]).unwrap().port, 22);
     }
 
     #[test]
@@ -350,25 +573,7 @@ mod tests {
             tags: Vec::new(),
             os: None,
         };
-        assert_eq!(resolve(&h, &[]), Err(ResolveError::MissingAddress));
-    }
-
-    #[test]
-    fn missing_key_is_error() {
-        let h = Host {
-            location: None,
-            id: HostId::new(),
-            name: "h".into(),
-            group_id: None,
-            settings: ConnectionSettings {
-                address: Some("a".into()),
-                username: Some("u".into()),
-                ..Default::default()
-            },
-            tags: Vec::new(),
-            os: None,
-        };
-        assert_eq!(resolve(&h, &[]), Err(ResolveError::MissingKey));
+        assert_eq!(resolve(&h, &[], &[]), Err(ResolveError::MissingAddress));
     }
 
     #[test]
@@ -376,7 +581,7 @@ mod tests {
         let g = full_group(&key());
         let other = full_group(&key());
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(resolve(&h, &[&other]), Err(ResolveError::WrongGroup));
+        assert_eq!(resolve(&h, &[&other], &[]), Err(ResolveError::WrongGroup));
     }
 
     #[test]
@@ -404,7 +609,7 @@ mod tests {
         };
         let g = full_group(&agent);
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(resolve(&h, &[&g]).unwrap().key, agent);
+        assert_eq!(resolve(&h, &[&g], &[]).unwrap().key, Some(agent));
     }
 
     #[test]
@@ -442,3 +647,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "route_tests.rs"]
+mod route_tests;

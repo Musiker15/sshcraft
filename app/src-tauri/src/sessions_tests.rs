@@ -133,6 +133,7 @@ impl Fixture {
                         .fingerprint(russh::keys::HashAlg::Sha256)
                         .to_string(),
                 }),
+                ..Default::default()
             },
             tags: Vec::new(),
             os: None,
@@ -197,6 +198,7 @@ async fn fixture(answer: bool) -> Fixture {
             port: Some(server.port),
             username: Some("tester".into()),
             key: Some(KeyRef::Stored { id: info.id }),
+            ..Default::default()
         },
         tags: Vec::new(),
         os: None,

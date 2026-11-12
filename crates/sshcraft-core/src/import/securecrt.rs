@@ -52,6 +52,7 @@ fn session(text: &str, name: String, group_path: Vec<String>, plan: &mut ImportP
             port,
             username,
             key: None,
+            ..Default::default()
         },
         key_note: Some(match key {
             Some(path) => KeyNote::File { path },

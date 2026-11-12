@@ -31,7 +31,6 @@ pub enum ErrorCode {
     HostWrongGroup,
     HostMissingAddress,
     HostMissingUsername,
-    HostMissingKey,
     KeyNotOnDevice,
     Network,
     Session,
@@ -58,6 +57,10 @@ pub enum ErrorCode {
     ImportTooLarge,
     ShareNestedGroup,
     GroupTooDeep,
+    JumpLoop,
+    TooManyJumps,
+    JumpMissing,
+    JumpFailed,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -66,7 +69,11 @@ impl From<&ResolveError> for ErrorCode {
             ResolveError::WrongGroup => Self::HostWrongGroup,
             ResolveError::MissingAddress => Self::HostMissingAddress,
             ResolveError::MissingUsername => Self::HostMissingUsername,
-            ResolveError::MissingKey => Self::HostMissingKey,
+            ResolveError::NotFound => Self::NotFound,
+            ResolveError::JumpLoop => Self::JumpLoop,
+            ResolveError::TooManyJumps => Self::TooManyJumps,
+            ResolveError::JumpMissing => Self::JumpMissing,
+            ResolveError::Jump { .. } => Self::JumpFailed,
         }
     }
 }
