@@ -230,3 +230,51 @@ async fn too_many_entries_are_refused() {
         (StatusCode::BAD_REQUEST, Some("invalid"))
     );
 }
+
+#[tokio::test]
+async fn api_key_append_accepts_only_account_signed_entries() {
+    let env = TestEnv::new().await;
+    let mut a = Person::new("alice");
+    env.register_ok(&a).await;
+    let second = env.enroll_new_device(&mut a).await;
+    env.store()
+        .set_admin_blocked(a.devices[second].id, true)
+        .await
+        .unwrap();
+    // The blocked device still holds its key and the shared API key.
+    let revoke = a.revoke_by_device(second, 0);
+    let (status, err) = env.append(&a, &[revoke], Auth::ApiKey).await;
+    assert_eq!(
+        (status, err["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("forbidden"))
+    );
+    let first = env.store().device(a.devices[0].id).await.unwrap().unwrap();
+    assert!(first.active);
+}
+
+#[tokio::test]
+async fn log_is_capped() {
+    let env = TestEnv::new().await;
+    let mut a = Person::new("alice");
+    env.register_ok(&a).await;
+    let token = env.token(&a, 0).await;
+    // Fill the log to 999 entries straight in the store; the server would verify each append.
+    let entries: Vec<_> = (0..998).map(|_| a.add_device().1).collect();
+    let changes = sshcraft_server::store::DeviceChanges {
+        added: a.devices[1..].iter().map(|d| d.cert.clone()).collect(),
+        revoked: vec![],
+    };
+    env.store()
+        .append_log(&a.public(), 1, &entries, &changes)
+        .await
+        .unwrap();
+    let (_, last) = a.add_device();
+    let (status, body) = env.append(&a, &[last], Auth::Token(&token)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, one_more) = a.add_device();
+    let (status, err) = env.append(&a, &[one_more], Auth::Token(&token)).await;
+    assert_eq!(
+        (status, err["code"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("invalid"))
+    );
+}

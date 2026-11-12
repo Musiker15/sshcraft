@@ -35,7 +35,6 @@ people. Version conflicts add `"current": <number>`.
 | `device_id_taken` | 409 | The device id belongs to another device |
 | `invalid` | 400 | Malformed or failed a check |
 | `too_large` | 413 | Body over 1 MiB, or record ciphertext over 64 KiB |
-| `busy` | 503 | Too many open login challenges, try again |
 | `internal` | 500 | Server fault; the cause is in the server log only |
 
 ## Server
@@ -50,7 +49,9 @@ entry, the account key adding the first device. Name 1 to 100 characters, email 
 at most 254 characters, compared in lower case. Device name 1 to 100, platform 1 to 32 characters.
 Answer `201 {"account"}`.
 
-`POST /v1/auth/challenge` (none): `{"challenge"}`, 32 random bytes, valid for 60 seconds and once.
+`POST /v1/auth/challenge` (none): `{"challenge"}`, 56 bytes (random nonce, expiry, and an HMAC
+only this server process can make), valid for 60 seconds and for one successful login. The server
+stores nothing for a challenge until it is used, so asking for many costs it nothing.
 
 `POST /v1/auth/login` (none; API key on a device's first login): `{"device_id", "challenge",
 "signature"}`, where the signature is `DeviceKeys::sign_auth(challenge, device_id, origin)`.
@@ -75,8 +76,9 @@ other users of the server.
 
 `POST /v1/accounts/{account}/log` (session of that account, or API key without a session):
 `{"entries": [LogEntry]}`, 1 to 100 entries; the first one must have `seq` equal to the current
-length (else `conflict` with `current`). The whole log must still verify; at most 10,000 entries
-per account. A new device uses the API key to add itself with an entry signed by the account key.
+length (else `conflict` with `current`). The whole log must still verify; at most 1,000 entries
+per account. A new device uses the API key to add itself with an entry signed by the account key;
+without a session, entries signed by a device are `forbidden`.
 Answer `{"len"}`. Revoked devices lose their sessions and WebSockets at once.
 
 ## Areas

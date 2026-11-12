@@ -26,6 +26,7 @@ const SCHEMA_VERSION: i64 = 1;
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (version BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS server_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS deleted_accounts (account BYTEA PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS accounts (
     account BYTEA PRIMARY KEY,
     name TEXT NOT NULL,
@@ -255,8 +256,18 @@ async fn owned_area_fates(
         )
         .await
         .map_err(pg)?;
+    let open = c
+        .query(
+            "SELECT account FROM accounts WHERE NOT locked AND account <> $1",
+            &[&account.0.as_slice()],
+        )
+        .await
+        .map_err(pg)?
+        .iter()
+        .map(|r| account_from(r.get(0)))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
     rows.iter()
-        .map(|r| from_json::<AreaManifest>(r.get::<_, &str>(0)).map(|m| area_fate(&m)))
+        .map(|r| from_json::<AreaManifest>(r.get::<_, &str>(0)).map(|m| area_fate(&m, &open)))
         .collect()
 }
 
@@ -303,7 +314,16 @@ impl Store for PostgresStore {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let key = row.account.0.as_slice();
-        if exists(&tx, "SELECT 1 FROM accounts WHERE account = $1", &key).await? {
+        // A deleted account key stays taken, so deleting a user also keeps them out of the areas
+        // whose manifests still name them.
+        if exists(&tx, "SELECT 1 FROM accounts WHERE account = $1", &key).await?
+            || exists(
+                &tx,
+                "SELECT 1 FROM deleted_accounts WHERE account = $1",
+                &key,
+            )
+            .await?
+        {
             return Err(StoreError::AccountExists);
         }
         if exists(
@@ -905,6 +925,12 @@ impl Store for PostgresStore {
             .map_err(pg)?;
         tx.execute(
             "DELETE FROM envelopes WHERE device_id IN (SELECT device_id FROM devices WHERE account = $1)",
+            &[&key],
+        )
+        .await
+        .map_err(pg)?;
+        tx.execute(
+            "INSERT INTO deleted_accounts (account) VALUES ($1) ON CONFLICT DO NOTHING",
             &[&key],
         )
         .await

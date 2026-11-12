@@ -193,12 +193,16 @@ pub async fn open(url: &str) -> Result<Arc<dyn Store>, StoreError> {
 }
 
 /// What happens to the areas of an account that is deleted (design, section 12): an area with a
-/// member who may write goes to the first such member in manifest order; every other area goes.
-pub(crate) fn area_fate(manifest: &AreaManifest) -> AreaFate {
+/// member who may write goes to the first such member in manifest order whose account still
+/// exists and is not locked (`open_accounts`); every other area goes.
+pub(crate) fn area_fate(
+    manifest: &AreaManifest,
+    open_accounts: &std::collections::HashSet<AccountPublic>,
+) -> AreaFate {
     let outcome = manifest
         .members
         .iter()
-        .find(|m| m.role == Role::Write)
+        .find(|m| m.role == Role::Write && open_accounts.contains(&m.account))
         .map(|m| AreaOutcome::TransferTo(m.account))
         .unwrap_or(AreaOutcome::Delete);
     AreaFate {

@@ -5,6 +5,7 @@ mod common;
 
 use common::Person;
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role, seal_area_key};
+use sshcraft_proto::identity::AccountKey;
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
 use sshcraft_server::store::{AreaOutcome, DeviceChanges, Store, StoreError};
 use std::sync::Arc;
@@ -55,6 +56,8 @@ macro_rules! all_contract_tests {
                 records_are_compare_and_swap_and_numbered,
                 account_deletion_follows_the_plan,
                 sessions_expire,
+                heir_must_still_have_an_open_account,
+                deleted_account_cannot_register_again,
             ]
         );
     };
@@ -487,4 +490,59 @@ async fn sessions_expire(store: Arc<dyn Store>) {
     assert_eq!(store.session([1; 32]).await.unwrap(), None);
     let left = store.session([2; 32]).await.unwrap().unwrap();
     assert_eq!((left.device_id, left.expires_at), (id, 200));
+}
+
+async fn heir_must_still_have_an_open_account(store: Arc<dyn Store>) {
+    let (a, b, c, d) = (
+        Person::new("alice"),
+        Person::new("bob"),
+        Person::new("carol"),
+        Person::new("dave"),
+    );
+    for p in [&a, &b, &c, &d] {
+        p.create_in(store.as_ref()).await;
+    }
+    let area = AreaId(Uuid::new_v4());
+    let members = vec![
+        Member {
+            account: b.public(),
+            role: Role::Write,
+        },
+        Member {
+            account: d.public(),
+            role: Role::Write,
+        },
+        Member {
+            account: c.public(),
+            role: Role::Write,
+        },
+    ];
+    let (m, _) = manifest(&a, area, 1, 1, members);
+    store.put_manifest(&a.public(), &m, None).await.unwrap();
+    store.delete_account(&b.public()).await.unwrap();
+    store.set_locked(&d.public(), true).await.unwrap();
+    let plan = store.delete_account(&a.public()).await.unwrap();
+    assert_eq!(plan[0].outcome, AreaOutcome::TransferTo(c.public()));
+    assert_eq!(store.area(area).await.unwrap().unwrap().owner, c.public());
+}
+
+async fn deleted_account_cannot_register_again(store: Arc<dyn Store>) {
+    let a = Person::new("alice");
+    a.create_in(store.as_ref()).await;
+    store.delete_account(&a.public()).await.unwrap();
+    let mut again = Person::new("alice2");
+    again.key = AccountKey::import(&a.key.export()).unwrap();
+    again.devices.clear();
+    again.log.entries.clear();
+    again.add_device();
+    let err = store
+        .create_account(
+            &again.row(),
+            &again.email_norm(),
+            &again.log.entries[0],
+            &again.devices[0].cert,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err, StoreError::AccountExists);
 }

@@ -12,12 +12,14 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sshcraft_proto::devicelog::{DeviceLog, LogAction, LogEntry};
+use sshcraft_proto::devicelog::{DeviceLog, LogAction, LogEntry, LogSigner};
+use sshcraft_proto::identity::AccountPublic;
 
 /// Most entries in one append.
 pub const MAX_APPEND: usize = 100;
-/// Most entries in one account's log.
-pub const MAX_LOG: usize = 10_000;
+/// Most entries in one account's log. Every append verifies the whole log, so this also bounds
+/// the work one request can cause.
+pub const MAX_LOG: usize = 1_000;
 
 #[derive(Deserialize)]
 pub struct From {
@@ -63,7 +65,13 @@ pub async fn append(
         if session.account != account {
             return Err(ApiError::Forbidden);
         }
-    } else if !has_api_key(&state, &headers).await? {
+    } else if has_api_key(&state, &headers).await? {
+        // Without a session only the account key may sign: that is all a new device needs to
+        // enroll, and it keeps a device the operator blocked from revoking the others.
+        if body.entries.iter().any(|e| e.signer != LogSigner::Account) {
+            return Err(ApiError::Forbidden);
+        }
+    } else {
         return Err(ApiError::Unauthorized);
     }
     let row = state
@@ -90,7 +98,7 @@ pub async fn append(
         entries: stored.entries,
     };
     extended.entries.extend(body.entries.iter().cloned());
-    extended.verify(&account)?;
+    let extended = verify_off_runtime(extended, account).await?;
 
     let mut changes = DeviceChanges::default();
     for entry in &body.entries {
@@ -120,4 +128,16 @@ pub async fn append(
         },
     );
     Ok(Json(json!({ "len": new_len })))
+}
+
+/// Runs the full log verification on the blocking pool, so a long log does not hold up a
+/// runtime thread that serves other requests.
+pub async fn verify_off_runtime(
+    log: DeviceLog,
+    account: AccountPublic,
+) -> Result<DeviceLog, ApiError> {
+    tokio::task::spawn_blocking(move || log.verify(&account).map(|_| log))
+        .await
+        .map_err(ApiError::internal)?
+        .map_err(ApiError::from)
 }

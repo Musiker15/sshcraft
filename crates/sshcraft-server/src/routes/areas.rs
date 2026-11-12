@@ -27,7 +27,11 @@ fn invalid(why: &str) -> ApiError {
 /// The verified device set of `account`, from its stored log.
 pub async fn devices_of(state: &AppState, account: &AccountPublic) -> Result<DeviceSet, ApiError> {
     let log = state.store.device_log(account).await?;
-    log.verify(account).map_err(ApiError::internal)
+    let account = *account;
+    tokio::task::spawn_blocking(move || log.verify(&account))
+        .await
+        .map_err(ApiError::internal)?
+        .map_err(ApiError::internal)
 }
 
 /// The area, or `not_found`.

@@ -285,24 +285,49 @@ async fn blocked_device_cannot_log_in() {
 }
 
 #[tokio::test]
-async fn challenge_flood_answers_busy() {
+async fn challenge_flood_does_not_block_logins() {
     let env = TestEnv::new().await;
+    let a = Person::new("alice");
+    env.register_ok(&a).await;
     let now = env.state.now();
-    for _ in 0..10_000 {
+    for _ in 0..20_000 {
         env.state.challenges.issue(now).unwrap();
     }
-    let (status, err) = env
+    let key = env.api_key().await;
+    let (status, body) = env.login(&a, 0, Some(&key)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn forged_challenge_is_refused() {
+    let env = TestEnv::new().await;
+    let a = Person::new("alice");
+    env.register_ok(&a).await;
+    let key = env.api_key().await;
+    let (_, ch) = env
         .request(Method::POST, "/v1/auth/challenge", &[], None)
         .await;
-    assert_eq!(
-        (status, err["code"].as_str()),
-        (StatusCode::SERVICE_UNAVAILABLE, Some("busy"))
-    );
-    env.advance(61);
+    let mut bytes = data_encoding::BASE64URL_NOPAD
+        .decode(ch["challenge"].as_str().unwrap().as_bytes())
+        .unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    let dev = &a.devices[0];
+    let sig = dev.keys.sign_auth(&bytes, dev.id, common::ORIGIN);
+    let body = json!({
+        "device_id": dev.id,
+        "challenge": data_encoding::BASE64URL_NOPAD.encode(&bytes),
+        "signature": data_encoding::BASE64URL_NOPAD.encode(&sig),
+    });
     let (status, _) = env
-        .request(Method::POST, "/v1/auth/challenge", &[], None)
+        .request(
+            Method::POST,
+            "/v1/auth/login",
+            &[("x-api-key", &key)],
+            Some(body),
+        )
         .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

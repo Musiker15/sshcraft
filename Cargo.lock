@@ -5078,6 +5078,7 @@ dependencies = [
  "data-encoding",
  "deadpool-postgres",
  "futures",
+ "hmac",
  "http-body-util",
  "rand 0.10.3",
  "rusqlite",

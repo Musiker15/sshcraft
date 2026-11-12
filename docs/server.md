@@ -134,7 +134,7 @@ the server to run.
 | `sshcraft-server users lock <email>` | No more logins; open sessions end. Areas the user owns stay readable for members but nobody can change them |
 | `sshcraft-server users unlock <email>` | Lifts the lock |
 | `sshcraft-server users delete <email>` | Shows what would happen to the user's areas, changes nothing |
-| `sshcraft-server users delete <email> --yes` | Deletes the user. An area with a member who may write goes to the first such member; every other area of the user is deleted for everyone |
+| `sshcraft-server users delete <email> --yes` | Deletes the user. An area with a member who may write goes to the first such member whose account still exists and is not locked; every other area of the user is deleted for everyone. The deleted account key can never register again |
 | `sshcraft-server devices list <email>` | The user's devices: id, name, platform, state, last seen |
 | `sshcraft-server devices block <email> <device-id>` | The device can no longer log in; open sessions and WebSockets end within 30 seconds |
 | `sshcraft-server devices unblock <email> <device-id>` | Lifts the block |

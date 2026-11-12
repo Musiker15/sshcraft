@@ -45,10 +45,12 @@ pub async fn login(
     headers: HeaderMap,
     ApiJson(body): ApiJson<Login>,
 ) -> Result<Json<Value>, ApiError> {
-    let challenge: [u8; 32] = decode(&body.challenge)?;
+    let challenge = BASE64URL_NOPAD
+        .decode(body.challenge.as_bytes())
+        .map_err(|_| ApiError::Invalid("bad base64 field".into()))?;
     let signature: [u8; 64] = decode(&body.signature)?;
     let now = state.now();
-    if !state.challenges.take(&challenge, now) {
+    if !state.challenges.valid(&challenge, now) {
         return Err(ApiError::Unauthorized);
     }
     let device = state
@@ -74,6 +76,9 @@ pub async fn login(
         .cert
         .verify_auth(&challenge, &state.origin, &signature)
         .map_err(|_| ApiError::Unauthorized)?;
+    if !state.challenges.redeem(&challenge, now) {
+        return Err(ApiError::Unauthorized);
+    }
 
     state.store.mark_logged_in(device.device_id, now).await?;
     let mut token = [0u8; 32];

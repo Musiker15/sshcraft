@@ -21,6 +21,30 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+  server-postgres:
+    name: Server mit PostgreSQL prüfen
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Vertragstests gegen PostgreSQL
+        env:
+          SSHCRAFT_TEST_POSTGRES_URL: postgres://postgres:test@localhost:5432/postgres
+        run: cargo test -p sshcraft-server --test store_contract
+
   frontend:
     name: Oberfläche prüfen
     runs-on: windows-latest

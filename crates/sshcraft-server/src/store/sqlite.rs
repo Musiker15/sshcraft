@@ -21,6 +21,7 @@ const SCHEMA_VERSION: i64 = 1;
 
 const SCHEMA: &str = "
 CREATE TABLE server_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE deleted_accounts (account BLOB PRIMARY KEY);
 CREATE TABLE accounts (
     account BLOB PRIMARY KEY,
     name TEXT NOT NULL,
@@ -271,9 +272,20 @@ fn owned_area_fates(tx: &Connection, account: &AccountPublic) -> Result<Vec<Area
         .map_err(backend)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(backend)?;
+    let mut stmt = tx
+        .prepare("SELECT account FROM accounts WHERE locked = 0 AND account <> ?1")
+        .map_err(backend)?;
+    let open = stmt
+        .query_map([account.0.to_vec()], |r| r.get::<_, Vec<u8>>(0))
+        .map_err(backend)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(backend)?
+        .into_iter()
+        .map(account_from)
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
     manifests
         .iter()
-        .map(|m| from_json::<AreaManifest>(m).map(|m| area_fate(&m)))
+        .map(|m| from_json::<AreaManifest>(m).map(|m| area_fate(&m, &open)))
         .collect()
 }
 
@@ -332,9 +344,12 @@ impl Store for SqliteStore {
         );
         self.write(move |tx| {
             let key = row.account.0.to_vec();
+            // A deleted account key stays taken, so deleting a user also keeps them out of the
+            // areas whose manifests still name them.
             let exists: bool = tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM accounts WHERE account = ?1)",
+                    "SELECT EXISTS(SELECT 1 FROM accounts WHERE account = ?1)
+                     OR EXISTS(SELECT 1 FROM deleted_accounts WHERE account = ?1)",
                     [&key],
                     |r| r.get(0),
                 )
@@ -955,6 +970,8 @@ impl Store for SqliteStore {
                 [&key],
             )
             .map_err(backend)?;
+            tx.execute("INSERT OR IGNORE INTO deleted_accounts (account) VALUES (?1)", [&key])
+                .map_err(backend)?;
             tx.execute("DELETE FROM accounts WHERE account = ?1", [&key])
                 .map_err(backend)?;
             Ok(plan)

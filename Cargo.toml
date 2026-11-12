@@ -36,6 +36,7 @@ clap = { version = "4.6.7", features = ["derive", "env"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 subtle = "2.6.1"
+hmac = "0.13.0"
 tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"] }
 deadpool-postgres = "0.14.2"
 tower = { version = "0.5.3", features = ["util"] }
@@ -48,3 +49,13 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Signature checks dominate the server tests; optimizing these crates keeps debug test runs fast.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
