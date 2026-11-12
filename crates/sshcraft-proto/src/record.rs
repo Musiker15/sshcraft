@@ -85,7 +85,10 @@ impl SealedRecord {
     }
 
     /// Checks area, write permission, author device and signature, then decrypts.
-    /// `author_devices` must be the verified device set of `header.author_account`.
+    ///
+    /// Preconditions: `manifest` must already have passed [`AreaManifest::verify`], and
+    /// `author_devices` must be the verified device set of `header.author_account`. This
+    /// function trusts both and does not check them again.
     pub fn open(
         &self,
         key: &AreaKey,

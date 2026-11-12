@@ -63,8 +63,16 @@ the same account (the server could otherwise hand out its own key).
 an X25519 HPKE key (receiving area keys). The account signs a **device certificate** over device
 id, account public key, both device public keys, name, platform and creation time.
 
-**Server login.** The device signs `signing_bytes(sshcraft/server-auth/v1, [challenge, device id])`
-with its signing key; the server checks it against the device certificate.
+**Server login.** The device signs
+`signing_bytes(sshcraft/server-auth/v1, [challenge, device id, origin])` with its signing key;
+the server checks it against the device certificate. `origin` is the server address in normal
+form (`normalize_origin`: scheme and host in lower case, the port only when it is not the
+scheme's default, no path): `HTTPS://Sync.Example.org:443/api/` signs as
+`https://sync.example.org`. Binding the origin keeps a server from relaying a login to another
+server. Device keys are still meant for one server each: every server has its own account.
+
+A valid login signature only proves the key. The server must also check that the device is
+active in the account's verified device log before it accepts the login.
 
 ## Device log
 
@@ -130,7 +138,9 @@ record id, area id, version, key version, author account, author device. The bod
 with the area key; the associated data is the header (`sshcraft/record-aad/v1`). The author
 device signs `signing_bytes(sshcraft/record/v1, [header bytes, nonce, ciphertext])`.
 
-A client opens a record only after these checks, in this order:
+A client opens a record only after it has verified the area's manifest (its signature by the
+owner and the key checksum, see above); `SealedRecord::open` takes that manifest as given. Then
+these checks run, in this order:
 
 1. area id and key version match the manifest;
 2. the author account may write the area (owner, or member with `write`);

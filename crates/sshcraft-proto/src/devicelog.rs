@@ -280,10 +280,9 @@ impl DeviceLog {
     ) -> Result<DeviceSet, ProtoError> {
         let set = self.verify(account)?;
         if let Some(known) = known {
-            let entry = self
-                .entries
-                .get(known.seq as usize)
-                .ok_or(ProtoError::Rollback)?;
+            // A sequence number beyond `usize` (32-bit targets) cannot be in this log either.
+            let index = usize::try_from(known.seq).map_err(|_| ProtoError::Rollback)?;
+            let entry = self.entries.get(index).ok_or(ProtoError::Rollback)?;
             if entry.hash() != known.hash {
                 return Err(ProtoError::Fork);
             }

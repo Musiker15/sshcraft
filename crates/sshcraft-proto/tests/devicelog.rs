@@ -207,3 +207,58 @@ fn validly_signed_entry_from_another_chain_is_rejected() {
     theirs.entries.push(ours.entries[1].clone());
     assert!(broken(theirs.verify(&account.public())));
 }
+
+#[test]
+fn adding_same_device_twice_is_rejected() {
+    let account = AccountKey::generate();
+    let mut log = DeviceLog::default();
+    let keys = DeviceKeys::generate();
+    let id = Uuid::new_v4();
+    let cert = DeviceCertificate::issue(&account, id, keys.public(), "a", "windows", 100);
+    log.append_add(&account, cert.clone(), 100);
+    log.append_add(&account, cert, 101);
+    assert!(log.verify(&account.public()).is_err());
+}
+
+#[test]
+fn revoking_unknown_or_revoked_device_is_rejected() {
+    let account = AccountKey::generate();
+    let mut log = DeviceLog::default();
+    device(&account, &mut log, "a");
+    let mut unknown = log.clone();
+    unknown.append_revoke_by_account(&account, Uuid::new_v4(), 200);
+    assert!(unknown.verify(&account.public()).is_err());
+
+    let b = device(&account, &mut log, "b");
+    log.append_revoke_by_account(&account, b.id, 200);
+    assert!(log.verify(&account.public()).is_ok());
+    log.append_revoke_by_account(&account, b.id, 201);
+    assert!(log.verify(&account.public()).is_err());
+}
+
+#[test]
+fn verify_extends_with_empty_log_and_known_head_is_rejected() {
+    let account = AccountKey::generate();
+    let mut seen = DeviceLog::default();
+    device(&account, &mut seen, "a");
+    let known = seen.verify(&account.public()).unwrap().head().unwrap();
+    let empty = DeviceLog::default();
+    assert_eq!(
+        empty.verify_extends(&account.public(), Some(&known)).err(),
+        Some(ProtoError::Rollback)
+    );
+}
+
+#[test]
+fn mutual_revocation_keeps_first_in_chain() {
+    let account = AccountKey::generate();
+    let mut log = DeviceLog::default();
+    let a = device(&account, &mut log, "a");
+    let b = device(&account, &mut log, "b");
+    log.append_revoke_by_device(a.id, &a.keys, b.id, 200);
+    let settled = log.clone();
+    // B answers by revoking A, but B is already revoked when its entry is chained.
+    log.append_revoke_by_device(b.id, &b.keys, a.id, 201);
+    assert!(log.verify(&account.public()).is_err());
+    assert_eq!(active_ids(&settled, &account), vec![a.id]);
+}

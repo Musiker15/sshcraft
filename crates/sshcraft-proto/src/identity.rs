@@ -13,7 +13,7 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::ProtoError;
 use crate::encoding::{DOMAIN_AUTH, DOMAIN_DEVICE_CERT, DOMAIN_SAFETY, b64, signing_bytes};
@@ -66,16 +66,20 @@ impl AccountKey {
         let mut body = Zeroizing::new(Vec::with_capacity(32 + CHECKSUM_LEN));
         body.extend_from_slice(&seed[..]);
         body.extend_from_slice(&Sha256::digest(&seed[..])[..CHECKSUM_LEN]);
-        Zeroizing::new(format!("{EXPORT_PREFIX}{}", BASE32_NOPAD.encode(&body)))
+        // Sized up front, so no reallocation leaves a copy of the encoded seed behind.
+        let mut out = Zeroizing::new(String::with_capacity(
+            EXPORT_PREFIX.len() + BASE32_NOPAD.encode_len(body.len()),
+        ));
+        out.push_str(EXPORT_PREFIX);
+        BASE32_NOPAD.encode_append(&body, &mut out);
+        out
     }
 
     /// Accepts the exported text with any whitespace and in any letter case.
     pub fn import(text: &str) -> Result<Self, ProtoError> {
-        let compact: Zeroizing<String> = Zeroizing::new(
-            text.chars()
-                .filter(|c| !c.is_whitespace())
-                .collect::<String>(),
-        );
+        // The filtered text is never longer than the input, so the buffer never grows.
+        let mut compact = Zeroizing::new(String::with_capacity(text.len()));
+        compact.extend(text.chars().filter(|c| !c.is_whitespace()));
         let lower = Zeroizing::new(compact.to_lowercase());
         let body = lower
             .strip_prefix(EXPORT_PREFIX)
@@ -146,7 +150,9 @@ impl DeviceKeys {
     pub fn generate() -> Self {
         let (private, _) = X25519HkdfSha256::gen_keypair();
         let mut hpke = Zeroizing::new([0u8; 32]);
-        hpke.copy_from_slice(&private.to_bytes());
+        let mut bytes = private.to_bytes();
+        hpke.copy_from_slice(&bytes);
+        bytes.as_mut_slice().zeroize();
         Self {
             signing: SigningKey::from_bytes(&random_32()),
             hpke,
@@ -192,11 +198,18 @@ impl DeviceKeys {
         self.signing.sign(msg).to_bytes()
     }
 
-    /// Signature for logging in to a sync server with the challenge it sent.
-    pub fn sign_auth(&self, server_challenge: &[u8], device_id: Uuid) -> [u8; 64] {
+    /// Signature for logging in to a sync server with the challenge it sent. The server's
+    /// origin is signed too, so a server cannot pass the signature on to another one.
+    pub fn sign_auth(
+        &self,
+        server_challenge: &[u8],
+        device_id: Uuid,
+        server_origin: &str,
+    ) -> [u8; 64] {
+        let origin = normalize_origin(server_origin);
         self.sign(&signing_bytes(
             DOMAIN_AUTH,
-            &[server_challenge, device_id.as_bytes()],
+            &[server_challenge, device_id.as_bytes(), origin.as_bytes()],
         ))
     }
 }
@@ -265,15 +278,27 @@ impl DeviceCertificate {
         self.account.verify(&self.signed_bytes(), &self.signature)
     }
 
-    /// Checks a server login signature made by this device.
+    /// Checks a server login signature made by this device for this server.
+    ///
+    /// Precondition for a server: a valid signature only proves the key. The server must also
+    /// check that the device is active in the account's verified [`DeviceLog`](crate::devicelog::DeviceLog).
     pub fn verify_auth(
         &self,
         server_challenge: &[u8],
+        server_origin: &str,
         signature: &[u8; 64],
     ) -> Result<(), ProtoError> {
+        let origin = normalize_origin(server_origin);
         verify_ed25519(
             &self.keys.signing,
-            &signing_bytes(DOMAIN_AUTH, &[server_challenge, self.device_id.as_bytes()]),
+            &signing_bytes(
+                DOMAIN_AUTH,
+                &[
+                    server_challenge,
+                    self.device_id.as_bytes(),
+                    origin.as_bytes(),
+                ],
+            ),
             signature,
         )
     }
@@ -281,5 +306,37 @@ impl DeviceCertificate {
     /// Checks a signature made by this device's signing key.
     pub(crate) fn verify_signed(&self, msg: &[u8], signature: &[u8; 64]) -> Result<(), ProtoError> {
         verify_ed25519(&self.keys.signing, msg, signature)
+    }
+}
+
+/// The form of a server address that login signatures are bound to: scheme and host in lower
+/// case, the port only when it is not the scheme's default, no path, query or fragment.
+/// `HTTPS://Sync.Example.org:443/api/` becomes `https://sync.example.org`.
+pub fn normalize_origin(url: &str) -> String {
+    let url = url.trim();
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (Some(scheme.to_ascii_lowercase()), rest),
+        None => (None, url),
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.to_ascii_lowercase();
+    let default_port = match scheme.as_deref() {
+        Some("https") => Some("443"),
+        Some("http") => Some("80"),
+        _ => None,
+    };
+    // Drop a default port. In `[::1]:443` the port follows the bracket; a bare IPv6 address
+    // has colons of its own and no port to drop.
+    let host = match (default_port, authority.rsplit_once(':')) {
+        (Some(default), Some((host, port)))
+            if port == default && (!host.contains(':') || host.ends_with(']')) =>
+        {
+            host.to_owned()
+        }
+        _ => authority,
+    };
+    match scheme {
+        Some(scheme) => format!("{scheme}://{host}"),
+        None => host,
     }
 }

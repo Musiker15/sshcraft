@@ -1,6 +1,10 @@
 use sshcraft_proto::ProtoError;
-use sshcraft_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys, safety_number};
+use sshcraft_proto::identity::{
+    AccountKey, DeviceCertificate, DeviceKeys, normalize_origin, safety_number,
+};
 use uuid::Uuid;
+
+const ORIGIN: &str = "https://sync.example.org";
 
 fn cert(account: &AccountKey, keys: &DeviceKeys) -> DeviceCertificate {
     DeviceCertificate::issue(
@@ -141,21 +145,21 @@ fn auth_signature_verifies_only_for_its_challenge_and_device() {
     let account = AccountKey::generate();
     let keys = DeviceKeys::generate();
     let c = cert(&account, &keys);
-    let sig = keys.sign_auth(b"challenge-1", c.device_id);
-    assert!(c.verify_auth(b"challenge-1", &sig).is_ok());
+    let sig = keys.sign_auth(b"challenge-1", c.device_id, ORIGIN);
+    assert!(c.verify_auth(b"challenge-1", ORIGIN, &sig).is_ok());
     assert_eq!(
-        c.verify_auth(b"challenge-2", &sig).err(),
+        c.verify_auth(b"challenge-2", ORIGIN, &sig).err(),
         Some(ProtoError::BadSignature)
     );
     let other = cert(&account, &DeviceKeys::generate());
     assert_eq!(
-        other.verify_auth(b"challenge-1", &sig).err(),
+        other.verify_auth(b"challenge-1", ORIGIN, &sig).err(),
         Some(ProtoError::BadSignature)
     );
     let mut relabelled = c.clone();
     relabelled.device_id = Uuid::new_v4();
     assert_eq!(
-        relabelled.verify_auth(b"challenge-1", &sig).err(),
+        relabelled.verify_auth(b"challenge-1", ORIGIN, &sig).err(),
         Some(ProtoError::BadSignature)
     );
 }
@@ -167,4 +171,41 @@ fn certificate_json_roundtrip() {
     let back: DeviceCertificate = serde_json::from_str(&json).unwrap();
     assert!(back.verify().is_ok());
     assert_eq!(back, c);
+}
+
+#[test]
+fn auth_signature_is_bound_to_server_origin() {
+    let keys = DeviceKeys::generate();
+    let c = cert(&AccountKey::generate(), &keys);
+    let sig = keys.sign_auth(b"challenge", c.device_id, "https://a.example");
+    assert!(
+        c.verify_auth(b"challenge", "https://a.example", &sig)
+            .is_ok()
+    );
+    assert!(
+        c.verify_auth(b"challenge", "HTTPS://A.example:443/", &sig)
+            .is_ok()
+    );
+    assert_eq!(
+        c.verify_auth(b"challenge", "https://b.example", &sig).err(),
+        Some(ProtoError::BadSignature)
+    );
+}
+
+#[test]
+fn origin_is_normalized() {
+    assert_eq!(
+        normalize_origin("HTTPS://Sync.Example.org:443/path/?x=1#y"),
+        "https://sync.example.org"
+    );
+    assert_eq!(
+        normalize_origin("https://sync.example.org/"),
+        "https://sync.example.org"
+    );
+    assert_eq!(normalize_origin("http://Host:80"), "http://host");
+    assert_eq!(
+        normalize_origin("https://host:8443/api"),
+        "https://host:8443"
+    );
+    assert_eq!(normalize_origin("http://host:443"), "http://host:443");
 }
