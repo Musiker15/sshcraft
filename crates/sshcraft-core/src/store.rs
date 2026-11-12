@@ -29,9 +29,9 @@ pub struct Store {
     conn: rusqlite::Connection,
 }
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
-const SCHEMA_V1: &str = "
+pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -59,6 +59,18 @@ CREATE TABLE keys (
 );
 ";
 
+/// Version 2: app settings and the hosts connected to most recently.
+const SCHEMA_V2: &str = "
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE recent_hosts (
+    host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
+    connected_at INTEGER NOT NULL
+);
+";
+
 type KeyRow = (String, String, String, String, String, Vec<u8>);
 
 impl Store {
@@ -75,6 +87,10 @@ impl Store {
         let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
         if version < 1 {
             conn.execute_batch(SCHEMA_V1)?;
+            conn.pragma_update(None, "user_version", 1)?;
+        }
+        if version < 2 {
+            conn.execute_batch(SCHEMA_V2)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         Ok(Self { conn })
@@ -233,6 +249,43 @@ impl Store {
         self.conn
             .execute("DELETE FROM keys WHERE id = ?1", [id.0.to_string()])?;
         Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
+    pub fn put_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Notes a successful connection; `at_ms` is milliseconds since the Unix epoch.
+    pub fn touch_recent(&self, host: HostId, at_ms: i64) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO recent_hosts (host_id, connected_at) VALUES (?1, ?2)
+             ON CONFLICT(host_id) DO UPDATE SET connected_at = excluded.connected_at",
+            rusqlite::params![host.0.to_string(), at_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Hosts connected to most recently, newest first.
+    pub fn recent_hosts(&self, limit: u32) -> Result<Vec<HostId>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT host_id FROM recent_hosts ORDER BY connected_at DESC, host_id LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| r.get::<_, String>(0))?;
+        rows.map(|row| Ok(HostId(parse_uuid(&row?)?))).collect()
     }
 
     pub fn has_key_records(&self) -> Result<bool, StoreError> {

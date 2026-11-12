@@ -118,3 +118,19 @@ export const sessionAck = (id: string, bytes: number) => invoke<void>("session_a
 export const sessionClose = (id: string) => invoke<void>("session_close", { id });
 export const answerHostKey = (promptId: number, accept: boolean) =>
   invoke<void>("answer_host_key", { promptId, accept });
+
+export type AppTheme = "system" | "dark" | "light";
+export type HostView = "grid" | "list";
+export type AppSettings = {
+  language: "auto" | "en" | "de";
+  app_theme: AppTheme;
+  terminal_theme: string;
+  font_family: string;
+  font_size: number;
+  host_view: HostView;
+};
+export const getSettings = () => invoke<AppSettings>("get_settings");
+/** Returns what Rust stored, with values kept in their allowed ranges. */
+export const saveSettings = (settings: AppSettings) => invoke<AppSettings>("save_settings", { settings });
+export const systemLocale = () => invoke<string | null>("system_locale");
+export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });

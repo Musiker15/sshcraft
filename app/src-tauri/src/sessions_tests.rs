@@ -655,3 +655,16 @@ async fn hello_unavailable_is_reported_once() {
     b.wait_for(connected).await;
     assert_eq!(reported.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn connected_session_is_recent() {
+    let f = fixture(true).await;
+    assert!(f.store.lock().unwrap().recent_hosts(10).unwrap().is_empty());
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(f.host_id, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(
+        f.store.lock().unwrap().recent_hosts(10).unwrap(),
+        vec![f.host_id]
+    );
+}

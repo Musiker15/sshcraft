@@ -332,6 +332,19 @@ impl SessionManager {
     }
 }
 
+/// Marks the host as connected to just now, for "recent connections". A failure here must
+/// not end the session, so it is ignored.
+fn remember_connection(ctx: &Context, host_id: HostId) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    let _ = ctx
+        .store
+        .lock()
+        .expect("store lock")
+        .touch_recent(host_id, now_ms);
+}
+
 fn end(sink: &dyn SessionSink, reason: EndReason, code: Option<ErrorCode>, detail: Option<String>) {
     sink.status(SessionStatus::Ended {
         reason,
@@ -367,6 +380,7 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), shell_writer));
                 shared.flow.reset();
                 sink.status(SessionStatus::Connected);
+                remember_connection(&ctx, host_id);
                 ever_connected = true;
                 attempt = 0;
                 let mut reason = Disconnect::Lost("connection closed".into());

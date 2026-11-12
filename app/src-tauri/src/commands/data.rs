@@ -4,6 +4,7 @@ use sshcraft_core::model::{Group, GroupId, Host, HostId, effective_endpoint};
 use tauri::State;
 
 use super::{CommandError, CommandResult, ErrorCode};
+use crate::settings::{self, AppSettings};
 use crate::state::AppState;
 
 fn store(state: &AppState) -> std::sync::MutexGuard<'_, sshcraft_core::store::Store> {
@@ -38,6 +39,31 @@ pub fn save_host(state: State<'_, AppState>, host: Host) -> CommandResult<()> {
 #[tauri::command]
 pub fn delete_host(state: State<'_, AppState>, id: HostId) -> CommandResult<()> {
     Ok(store(&state).delete_host(id)?)
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> AppSettings {
+    settings::load(&store(&state))
+}
+
+#[tauri::command]
+pub fn save_settings(
+    state: State<'_, AppState>,
+    settings: AppSettings,
+) -> CommandResult<AppSettings> {
+    Ok(settings::save(&store(&state), settings)?)
+}
+
+/// The operating system's language, for the AUTO language setting.
+#[tauri::command]
+pub fn system_locale() -> Option<String> {
+    sys_locale::get_locale()
+}
+
+/// Ids of the hosts connected to most recently, newest first.
+#[tauri::command]
+pub fn list_recent(state: State<'_, AppState>, limit: u32) -> CommandResult<Vec<HostId>> {
+    Ok(store(&state).recent_hosts(limit.min(100))?)
 }
 
 /// Removes the stored host key for the host's effective address and port.

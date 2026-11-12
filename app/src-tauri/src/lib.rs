@@ -4,6 +4,7 @@ pub mod hello;
 pub mod passcli;
 pub mod prompts;
 pub mod sessions;
+pub mod settings;
 pub mod state;
 
 use tauri::Manager;
@@ -24,6 +25,10 @@ pub fn run() {
             commands::data::save_host,
             commands::data::delete_host,
             commands::data::forget_host_key,
+            commands::data::get_settings,
+            commands::data::save_settings,
+            commands::data::system_locale,
+            commands::data::list_recent,
             commands::sshconfig::ssh_config_preview,
             commands::sshconfig::ssh_config_import,
             commands::keys::vault_status,

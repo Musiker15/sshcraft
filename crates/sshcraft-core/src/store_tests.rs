@@ -103,3 +103,104 @@ fn data_survives_reopen() {
     let store = Store::open(&path).unwrap();
     assert_eq!(store.list_groups().unwrap(), vec![g]);
 }
+
+#[test]
+fn upgrade_from_v1_keeps_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("old.db");
+    let g = group("srv");
+    let h = host("root", Some(g.id));
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO groups (id, name, defaults) VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                g.id.0.to_string(),
+                g.name,
+                serde_json::to_string(&g.defaults).unwrap()
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO hosts (id, name, group_id, settings) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                h.id.0.to_string(),
+                h.name,
+                g.id.0.to_string(),
+                serde_json::to_string(&h.settings).unwrap()
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO known_hosts (address, port, fingerprint) VALUES ('example.org', 22, 'SHA256:x')",
+            [],
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.list_groups().unwrap(), vec![g]);
+    assert_eq!(store.list_hosts().unwrap(), vec![h.clone()]);
+    assert_eq!(
+        store.known_host("example.org", 22).unwrap().as_deref(),
+        Some("SHA256:x")
+    );
+    let version: i64 = store
+        .conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+    store.put_setting("app", "{}").unwrap();
+    store.touch_recent(h.id, 1).unwrap();
+    drop(store);
+    // Opening again must not run any migration a second time.
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.get_setting("app").unwrap().as_deref(), Some("{}"));
+    assert_eq!(store.recent_hosts(10).unwrap(), vec![h.id]);
+}
+
+#[test]
+fn settings_roundtrip_and_overwrite() {
+    let store = Store::open_in_memory().unwrap();
+    assert_eq!(store.get_setting("app").unwrap(), None);
+    store.put_setting("app", "a").unwrap();
+    store.put_setting("app", "b").unwrap();
+    assert_eq!(store.get_setting("app").unwrap().as_deref(), Some("b"));
+}
+
+#[test]
+fn recent_hosts_newest_first_and_limited() {
+    let store = Store::open_in_memory().unwrap();
+    let hosts: Vec<Host> = (0..4).map(|i| host(&format!("h{i}"), None)).collect();
+    for (i, h) in hosts.iter().enumerate() {
+        store.upsert_host(h).unwrap();
+        store.touch_recent(h.id, i as i64 * 10).unwrap();
+    }
+    assert_eq!(
+        store.recent_hosts(3).unwrap(),
+        vec![hosts[3].id, hosts[2].id, hosts[1].id]
+    );
+}
+
+#[test]
+fn touch_recent_twice_keeps_one_row() {
+    let store = Store::open_in_memory().unwrap();
+    let (a, b) = (host("a", None), host("b", None));
+    store.upsert_host(&a).unwrap();
+    store.upsert_host(&b).unwrap();
+    store.touch_recent(a.id, 1).unwrap();
+    store.touch_recent(b.id, 2).unwrap();
+    store.touch_recent(a.id, 3).unwrap();
+    assert_eq!(store.recent_hosts(10).unwrap(), vec![a.id, b.id]);
+}
+
+#[test]
+fn deleting_host_removes_recent() {
+    let store = Store::open_in_memory().unwrap();
+    let h = host("a", None);
+    store.upsert_host(&h).unwrap();
+    store.touch_recent(h.id, 1).unwrap();
+    store.delete_host(h.id).unwrap();
+    assert!(store.recent_hosts(10).unwrap().is_empty());
+}
