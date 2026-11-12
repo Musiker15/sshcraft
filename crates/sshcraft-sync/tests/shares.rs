@@ -531,3 +531,134 @@ async fn keys_go_along_only_when_asked() {
     let mine = a.hosts().into_iter().find(|h| h.id == one.id).unwrap();
     assert!(matches!(mine.settings.key, Some(KeyRef::Stored { .. })));
 }
+
+// ---------- Task 7: copies follow their original
+
+fn rename(dev: &Dev, id: sshcraft_core::model::HostId, name: &str, at: i64) {
+    let store = dev.store.lock().unwrap();
+    let mut host = store
+        .list_hosts()
+        .unwrap()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    host.name = name.into();
+    store.upsert_host(&host).unwrap();
+    record_local_change(&store, ItemKind::Host, &id.0.to_string(), at).unwrap();
+}
+
+/// A shares host "one" of its group as a selection with B (write); everyone synced.
+async fn selection_of_one(server: &TestServer) -> (Dev, Dev, Dev, Host) {
+    let (a, b, c) = three(server).await;
+    let (group, one, _) = local_group(&a);
+    sync(&a).await;
+    befriend(&a, &b, "b@example.org").await;
+    let mut e = engine(&a).await;
+    let what = ShareWhat::Selection {
+        group: group.id,
+        hosts: vec![one.id],
+    };
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        what,
+        vec![grant(&b, Role::Write)],
+        false,
+        5,
+    )
+    .await
+    .unwrap();
+    sync(&b).await;
+    (a, b, c, one)
+}
+
+#[tokio::test]
+async fn owner_edit_reaches_the_copy() {
+    let server = TestServer::start().await;
+    let (a, b, _c, one) = selection_of_one(&server).await;
+    rename(&a, one.id, "one-new", 100);
+    sync(&a).await;
+    sync(&b).await;
+    assert_eq!(b.hosts()[0].name, "one-new");
+}
+
+#[tokio::test]
+async fn writer_edit_on_a_copy_reaches_the_original() {
+    let server = TestServer::start().await;
+    let (a, b, c, one) = selection_of_one(&server).await;
+    befriend(&a, &c, "c@example.org").await;
+    let mut e = engine(&a).await;
+    share(
+        &mut e,
+        &a.store,
+        &a.vault,
+        ShareWhat::Host(one.id),
+        vec![grant(&c, Role::Read)],
+        false,
+        6,
+    )
+    .await
+    .unwrap();
+    sync(&c).await;
+    let copy = b.hosts()[0].id;
+    rename(&b, copy, "from-b", 100);
+    sync(&b).await;
+    sync(&a).await;
+    let original = a.hosts().into_iter().find(|h| h.id == one.id).unwrap();
+    assert_eq!(original.name, "from-b");
+    assert_eq!(
+        original.group_id, one.group_id,
+        "the original stays in its group"
+    );
+    sync(&c).await;
+    assert_eq!(c.hosts()[0].name, "from-b");
+}
+
+#[tokio::test]
+async fn concurrent_owner_and_writer_converge() {
+    let server = TestServer::start().await;
+    let (a, b, _c, one) = selection_of_one(&server).await;
+    let copy = b.hosts()[0].id;
+    rename(&a, one.id, "from-a", 1000);
+    rename(&b, copy, "from-b", 2000);
+    for _ in 0..2 {
+        sync(&a).await;
+        sync(&b).await;
+    }
+    let original = a.hosts().into_iter().find(|h| h.id == one.id).unwrap();
+    assert_eq!(original.name, "from-b");
+    assert_eq!(b.hosts()[0].name, "from-b");
+}
+
+#[tokio::test]
+async fn deleting_the_original_removes_the_copy() {
+    let server = TestServer::start().await;
+    let (a, b, _c, one) = selection_of_one(&server).await;
+    {
+        let store = a.store.lock().unwrap();
+        record_local_change(&store, ItemKind::Host, &one.id.0.to_string(), 100).unwrap();
+        store.delete_host(one.id).unwrap();
+    }
+    sync(&a).await;
+    sync(&b).await;
+    assert!(b.hosts().is_empty());
+}
+
+#[tokio::test]
+async fn newer_unsent_owner_change_beats_an_older_copy_change() {
+    let server = TestServer::start().await;
+    let (a, b, _c, one) = selection_of_one(&server).await;
+    let copy = b.hosts()[0].id;
+    rename(&b, copy, "from-b", 1000);
+    sync(&b).await;
+    // A changed the original later but has not sent it yet when B's change arrives.
+    rename(&a, one.id, "from-a", 2000);
+    for _ in 0..2 {
+        sync(&a).await;
+        sync(&b).await;
+    }
+    let original = a.hosts().into_iter().find(|h| h.id == one.id).unwrap();
+    assert_eq!(original.name, "from-a");
+    assert_eq!(b.hosts()[0].name, "from-a");
+}

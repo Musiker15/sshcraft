@@ -8,7 +8,7 @@ use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
 use crate::items::{ItemBody, SyncItem, apply_in, decode, encode, local_item, newer};
-use crate::shares::{ShareInfo, decode_share_info};
+use crate::shares::{ShareInfo, copy_item, decode_share_info};
 use sshcraft_core::model::ServerId;
 use sshcraft_core::store::{
     ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
@@ -41,6 +41,10 @@ pub fn record_local_change(
         return Ok(());
     };
     store.queue(server, kind, id, now_ms)?;
+    // Its copies in shares follow it.
+    for (_, copy) in store.copies_of(server, kind, id)? {
+        store.queue(server, kind, &copy, now_ms)?;
+    }
     Ok(())
 }
 
@@ -535,37 +539,56 @@ impl Engine {
                     let Some(queued) = guard.queued_at(self.server, kind, &id)? else {
                         break;
                     };
-                    let mut item = local_item(&guard, vault, kind, &id, queued)?;
-                    // Moved to another place (this device only, or another server): for this
-                    // server it is gone.
-                    if guard.location_of(kind, &id)? != Some(self.server) {
-                        item.body = ItemBody::Deleted {
-                            item_kind: kind,
-                            item_id: id.clone(),
-                        };
-                    }
-                    let known = guard.record_entry(self.server, kind, &id)?;
-                    let deleted = matches!(item.body, ItemBody::Deleted { .. });
-                    if deleted && known.is_none() {
-                        // Never reached the server: nothing to delete there.
-                        guard.dequeue(self.server, kind, &id)?;
-                        break;
-                    }
-                    // A deleted item is removed where its record is.
-                    let target = match (&known, deleted) {
-                        (Some(entry), true) => entry.area_id,
-                        _ => guard.area_for(self.server, kind, &id, personal)?,
-                    };
-                    strip_unsynced_keys(&guard, self.server, &mut item, target, personal)?;
-                    if let Some(warning) =
-                        refusal(&guard, self.server, target, deleted, known.is_none())?
-                    {
-                        guard.dequeue(self.server, kind, &id)?;
-                        Step::Refuse(warning, known)
-                    } else if let Some(entry) = known.clone().filter(|e| e.area_id != target) {
-                        Step::Leave(entry, item.modified_at)
+                    // A copy in an own share is built from its original and goes to its share.
+                    if let Some((area, original)) = guard.copy_entry(self.server, kind, &id)? {
+                        let mut item =
+                            copy_item(&guard, vault, self.server, area, kind, &original, queued)?;
+                        if guard.location_of(kind, &original)? != Some(self.server) {
+                            item.body = ItemBody::Deleted {
+                                item_kind: kind,
+                                item_id: id.clone(),
+                            };
+                        }
+                        let known = guard.record_entry(self.server, kind, &id)?;
+                        if matches!(item.body, ItemBody::Deleted { .. }) && known.is_none() {
+                            guard.dequeue(self.server, kind, &id)?;
+                            guard.remove_copy(self.server, kind, &id)?;
+                            break;
+                        }
+                        Step::Write(item, known, area, queued)
                     } else {
-                        Step::Write(item, known, target, queued)
+                        let mut item = local_item(&guard, vault, kind, &id, queued)?;
+                        // Moved to another place (this device only, or another server): for this
+                        // server it is gone.
+                        if guard.location_of(kind, &id)? != Some(self.server) {
+                            item.body = ItemBody::Deleted {
+                                item_kind: kind,
+                                item_id: id.clone(),
+                            };
+                        }
+                        let known = guard.record_entry(self.server, kind, &id)?;
+                        let deleted = matches!(item.body, ItemBody::Deleted { .. });
+                        if deleted && known.is_none() {
+                            // Never reached the server: nothing to delete there.
+                            guard.dequeue(self.server, kind, &id)?;
+                            break;
+                        }
+                        // A deleted item is removed where its record is.
+                        let target = match (&known, deleted) {
+                            (Some(entry), true) => entry.area_id,
+                            _ => guard.area_for(self.server, kind, &id, personal)?,
+                        };
+                        strip_unsynced_keys(&guard, self.server, &mut item, target, personal)?;
+                        if let Some(warning) =
+                            refusal(&guard, self.server, target, deleted, known.is_none())?
+                        {
+                            guard.dequeue(self.server, kind, &id)?;
+                            Step::Refuse(warning, known)
+                        } else if let Some(entry) = known.clone().filter(|e| e.area_id != target) {
+                            Step::Leave(entry, item.modified_at)
+                        } else {
+                            Step::Write(item, known, target, queued)
+                        }
                     }
                 };
                 let put = match step {
@@ -629,6 +652,10 @@ impl Engine {
                                 let guard = lock(store)?;
                                 guard.put_record_entry(self.server, &entry, kind, &id)?;
                                 guard.dequeue_if(self.server, kind, &id, queued)?;
+                                if matches!(item.body, ItemBody::Deleted { .. }) {
+                                    // A deleted copy is done with.
+                                    guard.remove_copy(self.server, kind, &id)?;
+                                }
                                 sent += 1;
                                 break;
                             }
@@ -715,13 +742,17 @@ impl Engine {
             modified_at: item.modified_at,
         };
         let deleted = matches!(item.body, ItemBody::Deleted { .. });
-        // On the owner's devices a copy in an own share is not an item of its own.
+        // On the owner's devices a copy in an own share is not an item of its own: a member's
+        // change goes into the original (and from there into every other copy).
         if store
             .share(self.server, area)?
             .is_some_and(|s| s.owned && s.kind != ShareKind::GroupAll)
         {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
-            return Ok(false);
+            if header.author_account == self.account || deleted {
+                return Ok(false);
+            }
+            return take_into_original(&store, self.server, area, &item);
         }
         // A deletion from an area the item has left (it moved into or out of a share) is not
         // about the item any more.
@@ -761,6 +792,98 @@ impl Engine {
         store.dequeue(self.server, kind, &item_id)?;
         Ok(true)
     }
+}
+
+/// The original of a copy in own share `area`; another device of the owner learns the pair
+/// here, from the copy id.
+fn find_original(
+    store: &Store,
+    server: ServerId,
+    area: Uuid,
+    kind: ItemKind,
+    copy: &str,
+) -> Result<Option<String>, SyncError> {
+    if let Some(original) = store.original_of(server, kind, copy)? {
+        return Ok(Some(original));
+    }
+    let ids: Vec<Uuid> = match kind {
+        ItemKind::Group => store.list_groups()?.into_iter().map(|g| g.id.0).collect(),
+        ItemKind::Host => store.list_hosts()?.into_iter().map(|h| h.id.0).collect(),
+        ItemKind::Key => store
+            .list_key_records()?
+            .into_iter()
+            .map(|k| k.id.0)
+            .collect(),
+    };
+    let Some(original) = ids
+        .into_iter()
+        .find(|id| sshcraft_core::store::copy_id(area, *id).to_string() == copy)
+    else {
+        return Ok(None);
+    };
+    store.put_copy(server, area, kind, &original.to_string(), copy)?;
+    Ok(Some(original.to_string()))
+}
+
+/// A member's change to a copy, written into the original unless a newer local change of the
+/// original waits to be sent. The original keeps its id, group and (unless the member picked
+/// another shared key) its key; then it and all its copies are sent again.
+fn take_into_original(
+    store: &Store,
+    server: ServerId,
+    area: Uuid,
+    item: &SyncItem,
+) -> Result<bool, SyncError> {
+    use sshcraft_core::model::KeyRef;
+    let (kind, copy) = item.item();
+    let Some(original) = find_original(store, server, area, kind, &copy)? else {
+        return Ok(false);
+    };
+    if store
+        .queued_at(server, kind, &original)?
+        .is_some_and(|queued| newer(queued, item.modified_at))
+    {
+        return Ok(false);
+    }
+    let original_key = |key: &Option<KeyRef>| -> Result<Option<KeyRef>, SyncError> {
+        match key {
+            Some(KeyRef::Stored { id }) => Ok(store
+                .original_of(server, ItemKind::Key, &id.0.to_string())?
+                .and_then(|o| Uuid::parse_str(&o).ok())
+                .map(|o| KeyRef::Stored {
+                    id: sshcraft_core::model::KeyId(o),
+                })),
+            _ => Ok(None),
+        }
+    };
+    let uuid = Uuid::parse_str(&original).map_err(|e| SyncError::Store(e.to_string()))?;
+    match &item.body {
+        ItemBody::Host { host } => {
+            let Some(mine) = store.list_hosts()?.into_iter().find(|h| h.id.0 == uuid) else {
+                return Ok(false);
+            };
+            let mut next = host.clone();
+            next.id = mine.id;
+            next.group_id = mine.group_id;
+            next.location = mine.location;
+            next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key);
+            store.upsert_host(&next)?;
+        }
+        ItemBody::Group { group } => {
+            let Some(mine) = store.list_groups()?.into_iter().find(|g| g.id.0 == uuid) else {
+                return Ok(false);
+            };
+            let mut next = group.clone();
+            next.id = mine.id;
+            next.location = mine.location;
+            next.defaults.key = original_key(&group.defaults.key)?.or(mine.defaults.key);
+            store.upsert_group(&next)?;
+        }
+        // Keys and deletions of copies are the owner's alone.
+        _ => return Ok(false),
+    }
+    record_local_change(store, kind, &original, item.modified_at)?;
+    Ok(true)
 }
 
 /// What `push` does with one queued item.

@@ -532,6 +532,26 @@ impl Store {
             .optional()?)
     }
 
+    /// The share area and original of a copy.
+    pub fn copy_entry(
+        &self,
+        server: ServerId,
+        kind: ItemKind,
+        copy_id: &str,
+    ) -> Result<Option<(Uuid, String)>, StoreError> {
+        let raw: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT area_id, original_id FROM sync_share_copies
+                 WHERE server_id = ?1 AND kind = ?2 AND copy_id = ?3",
+                params![server.0.to_string(), kind.as_str(), copy_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        raw.map(|(area, original)| Ok((parse_uuid(&area)?, original)))
+            .transpose()
+    }
+
     /// The copies in one share: kind, original and copy id.
     pub fn copies_in(
         &self,
