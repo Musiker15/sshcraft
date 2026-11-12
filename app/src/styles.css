@@ -98,6 +98,18 @@ textarea {
   width: 100%;
 }
 
+/* The open list of a select is drawn by the system: give it the theme's colours, else Windows
+   shows light text on white. */
+select option,
+select optgroup {
+  background-color: var(--bg-raised);
+  color: var(--text);
+}
+
+select option:checked {
+  background-color: var(--bg-hover);
+}
+
 textarea {
   font-family: Consolas, monospace;
   min-height: 120px;
@@ -489,9 +501,14 @@ button.icon:hover {
   font-size: 18px;
 }
 
-.dialog .buttons {
+/* A row of buttons, anywhere: never glued together. */
+.buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.dialog .buttons {
   justify-content: flex-end;
 }
 
