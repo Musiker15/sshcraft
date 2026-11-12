@@ -263,19 +263,30 @@ impl Store {
         if let Some(area) = self.item_area(server, kind, item_id)? {
             return Ok(Some(area));
         }
-        if kind != ItemKind::Host {
-            return Ok(None);
+        let above = |sql: &str, id: &str| -> Result<Option<String>, StoreError> {
+            Ok(self
+                .conn
+                .query_row(sql, [id], |r| r.get::<_, Option<String>>(0))
+                .optional()?
+                .flatten())
+        };
+        const PARENT: &str = "SELECT parent_id FROM groups WHERE id = ?1";
+        // A host follows its group, a group its parent, at any depth.
+        let mut next = match kind {
+            ItemKind::Host => above("SELECT group_id FROM hosts WHERE id = ?1", item_id)?,
+            ItemKind::Group => above(PARENT, item_id)?,
+            ItemKind::Key => None,
+        };
+        for _ in 0..crate::model::MAX_GROUP_DEPTH {
+            let Some(group) = next else {
+                return Ok(None);
+            };
+            if let Some(area) = self.item_area(server, ItemKind::Group, &group)? {
+                return Ok(Some(area));
+            }
+            next = above(PARENT, &group)?;
         }
-        let group: Option<Option<String>> = self
-            .conn
-            .query_row("SELECT group_id FROM hosts WHERE id = ?1", [item_id], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        match group.flatten() {
-            Some(group) => self.item_area(server, ItemKind::Group, &group),
-            None => Ok(None),
-        }
+        Ok(None)
     }
 
     /// The area an item goes to on `server`: [`Store::effective_area`], else `personal`.

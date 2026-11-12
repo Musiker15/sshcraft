@@ -12,6 +12,7 @@
   "errors.agent_refused": "Proton Pass refused to sign.",
   "errors.agent_unavailable": "Proton Pass is not reachable. Is the Proton Pass app running?",
   "errors.encrypted": "The key is protected by a passphrase. Remove it in Proton Pass or import the key as a file.",
+  "errors.group_cycle": "A group cannot be inside itself.",
   "errors.hello_declined": "Windows Hello was cancelled.",
   "errors.host_missing_address": "The host has no address, neither itself nor from its group.",
   "errors.host_missing_key": "The host has no key, neither itself nor from its group.",

@@ -153,7 +153,10 @@ pub fn apply_in(
                 )?;
             }
             store.upsert_group(&group)?;
-            if store.location_of(ItemKind::Group, &group.id.0.to_string())? != Some(server) {
+            // A subgroup takes its parent's location by itself.
+            if group.parent_id.is_none()
+                && store.location_of(ItemKind::Group, &group.id.0.to_string())? != Some(server)
+            {
                 store.set_location(ItemKind::Group, &group.id.0.to_string(), Some(server))?;
             }
         }

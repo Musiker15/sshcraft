@@ -200,8 +200,20 @@ pub fn note_change(
     {
         store.queue(old, kind, id, now)?;
         if kind == ItemKind::Group {
+            // Everything below goes away from the old server with the group.
+            let gid = sshcraft_core::model::GroupId(
+                uuid::Uuid::parse_str(id).map_err(|_| CommandError::code(ErrorCode::Store))?,
+            );
+            let mut groups = vec![id.to_owned()];
+            for sub in store.subgroups(gid)? {
+                store.queue(old, ItemKind::Group, &sub.0.to_string(), now)?;
+                groups.push(sub.0.to_string());
+            }
             for host in store.list_hosts()? {
-                if host.group_id.is_some_and(|g| g.0.to_string() == id) {
+                if host
+                    .group_id
+                    .is_some_and(|g| groups.contains(&g.0.to_string()))
+                {
                     store.queue(old, ItemKind::Host, &host.id.0.to_string(), now)?;
                 }
             }
@@ -396,6 +408,7 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::NotAllowed => ErrorCode::SyncNotAllowed,
         SyncError::ContactUnconfirmed => ErrorCode::ShareContactUnconfirmed,
         SyncError::AlreadyShared => ErrorCode::ShareAlreadyShared,
+        SyncError::GroupCycle => ErrorCode::GroupCycle,
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,
     };
     let detail = match err {

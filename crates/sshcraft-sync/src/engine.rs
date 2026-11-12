@@ -52,10 +52,21 @@ pub fn record_local_change(
     Ok(())
 }
 
-/// Queues every host of a group, for when the group moves or is deleted (its hosts go with it).
+/// Queues every subgroup and every host below a group, for when the group moves or is deleted
+/// (all of it goes with it).
 pub fn record_group_hosts(store: &Store, group_id: &str, now_ms: i64) -> Result<(), SyncError> {
+    let id = Uuid::parse_str(group_id).map_err(|e| SyncError::Store(e.to_string()))?;
+    let mut groups = vec![group_id.to_owned()];
+    for sub in store.subgroups(sshcraft_core::model::GroupId(id))? {
+        let sub = sub.0.to_string();
+        record_local_change(store, ItemKind::Group, &sub, now_ms)?;
+        groups.push(sub);
+    }
     for host in store.list_hosts()? {
-        if host.group_id.is_some_and(|g| g.0.to_string() == group_id) {
+        if host
+            .group_id
+            .is_some_and(|g| groups.contains(&g.0.to_string()))
+        {
             record_local_change(store, ItemKind::Host, &host.id.0.to_string(), now_ms)?;
         }
     }
@@ -564,6 +575,10 @@ impl Engine {
                             match self.take(store, vault, &record.header, &body, personal) {
                                 Ok(true) => report.applied += 1,
                                 Ok(false) => {}
+                                // Refused for good, not fetched again.
+                                Err(err @ SyncError::GroupCycle) => {
+                                    report.rejected.push(format!("record {record_id}: {err}"))
+                                }
                                 Err(err) => {
                                     tracker = before;
                                     retry_from =
@@ -1196,6 +1211,12 @@ impl Engine {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Ok(false);
         }
+        if let ItemBody::Group { group } = &item.body
+            && !settle_cycle(&store, self.server, group, item.modified_at)?
+        {
+            store.put_record_entry(self.server, &entry, kind, &item_id)?;
+            return Err(SyncError::GroupCycle);
+        }
         apply_in(&store, vault, self.server, &item, Some(area), personal)?;
         if deleted || Some(area) == personal {
             store.clear_item_area(self.server, kind, &item_id)?;
@@ -1353,6 +1374,48 @@ fn refusal(
         return Ok(Some("share_read_only"));
     }
     Ok(None)
+}
+
+/// A group from the server that would end up inside itself here (two devices nested two groups
+/// into each other at the same time): the later change wins. If it is the incoming one, the
+/// local group that closes the loop moves to the top level and is sent as a change of its own;
+/// otherwise the incoming one is refused. Returns whether the group may be applied.
+fn settle_cycle(
+    store: &Store,
+    server: ServerId,
+    group: &sshcraft_core::model::Group,
+    modified_at: i64,
+) -> Result<bool, SyncError> {
+    let Some(parent) = group.parent_id else {
+        return Ok(true);
+    };
+    if parent == group.id {
+        return Ok(false);
+    }
+    let groups = store.list_groups()?;
+    let above = sshcraft_core::model::group_chain(&groups, parent);
+    let Some(closing) = above.iter().find(|g| g.parent_id == Some(group.id)) else {
+        return Ok(true);
+    };
+    let id = closing.id.0.to_string();
+    let local = store
+        .queued_at(server, ItemKind::Group, &id)?
+        .into_iter()
+        .chain(
+            store
+                .record_entry(server, ItemKind::Group, &id)?
+                .map(|e| e.modified_at),
+        )
+        .max()
+        .unwrap_or(i64::MIN);
+    if newer(local, modified_at) {
+        return Ok(false);
+    }
+    let mut detached = closing.clone();
+    detached.parent_id = None;
+    store.upsert_group(&detached)?;
+    record_local_change(store, ItemKind::Group, &id, modified_at)?;
+    Ok(true)
 }
 
 /// Errors that make one area or record unusable but not the whole pull: it did not verify, or
