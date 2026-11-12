@@ -69,10 +69,53 @@ pub(crate) async fn readers(
         .cloned()
         .collect();
     for member in members {
-        let devices = engine.account_devices(store, &member.account).await?;
-        certs.extend(devices.active().cloned());
+        match engine.account_devices(store, &member.account).await {
+            Ok(devices) => certs.extend(devices.active().cloned()),
+            // A member whose account was deleted has no devices left to seal to.
+            Err(SyncError::Server { status: 404, .. }) => {}
+            Err(err) => return Err(err),
+        }
     }
     Ok(certs)
+}
+
+/// Keeps every own share in step with its members' devices (protocol: the owner's client
+/// notices changes in a member's device log): a new device gets an envelope, a device that had
+/// one and was revoked makes the key change.
+pub async fn check_member_devices(
+    engine: &Engine,
+    store: &Mutex<Store>,
+    vault: &Vault,
+    now: i64,
+) -> Result<(), SyncError> {
+    for (manifest, key) in engine.owned_areas(store)? {
+        if manifest.members.is_empty() {
+            continue;
+        }
+        let sealed = load_sealed(engine, store, manifest.area_id)?;
+        let active: HashSet<Uuid> = readers(engine, store, &manifest.members)
+            .await?
+            .iter()
+            .map(|cert| cert.device_id)
+            .collect();
+        let gone = sealed.key_version == manifest.key_version
+            && sealed.devices.iter().any(|d| !active.contains(d));
+        if gone {
+            let members = manifest.members.clone();
+            rotate(
+                engine,
+                store,
+                vault,
+                vec![(manifest, key, members)],
+                None,
+                now,
+            )
+            .await?;
+        } else {
+            reseal_envelopes(engine, store, manifest.area_id).await?;
+        }
+    }
+    Ok(())
 }
 
 fn seal_all(

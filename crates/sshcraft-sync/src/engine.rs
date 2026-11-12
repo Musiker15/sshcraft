@@ -488,6 +488,8 @@ impl Engine {
             }
         }
         self.save_state(store, &devices, &tracker)?;
+        // Members' devices come and go; own shares follow.
+        crate::areas::check_member_devices(self, store, vault, now_secs()).await?;
         Ok(report)
     }
 
