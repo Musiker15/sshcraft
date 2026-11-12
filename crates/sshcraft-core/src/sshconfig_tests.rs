@@ -308,3 +308,79 @@ fn proxy_none_is_not_a_proxy() {
     assert!(plan[0].warnings.is_empty(), "{:?}", plan[0].warnings);
     assert!(plan[1].warnings.is_empty(), "{:?}", plan[1].warnings);
 }
+
+fn imported(text: &str) -> crate::store::Store {
+    let parsed = parse(text);
+    let plan = plan_import(&parsed.hosts, &|_| None, Some(&[]));
+    let store = crate::store::Store::open_in_memory().unwrap();
+    crate::import::apply_import(&store, &plan, None).unwrap();
+    store
+}
+
+fn stored<'a>(hosts: &'a [crate::model::Host], name: &str) -> &'a crate::model::Host {
+    hosts.iter().find(|h| h.name == name).unwrap()
+}
+
+#[test]
+fn proxyjump_to_imported_alias_sets_jump_hosts() {
+    let text = "Host bastion\n  HostName gw.example.org\nHost inner\n  HostName 10.0.0.5\n  ProxyJump bastion\n";
+    let plan = plan_import(&parse(text).hosts, &|_| None, Some(&[]));
+    let inner = plan.iter().find(|c| c.name == "inner").unwrap();
+    assert!(inner.warnings.is_empty(), "{:?}", inner.warnings);
+    let store = imported(text);
+    let hosts = store.list_hosts().unwrap();
+    let bastion = stored(&hosts, "bastion");
+    assert_eq!(
+        stored(&hosts, "inner").settings.jump_hosts,
+        Some(vec![bastion.id])
+    );
+    assert_eq!(bastion.settings.jump_hosts, None);
+}
+
+#[test]
+fn proxyjump_chain_keeps_its_order() {
+    let text = "Host a\n  HostName a.org\nHost b\n  HostName b.org\nHost t\n  HostName t.org\n  ProxyJump b,a\n";
+    let store = imported(text);
+    let hosts = store.list_hosts().unwrap();
+    assert_eq!(
+        stored(&hosts, "t").settings.jump_hosts,
+        Some(vec![stored(&hosts, "b").id, stored(&hosts, "a").id])
+    );
+}
+
+#[test]
+fn proxyjump_to_unknown_keeps_warning() {
+    let text = "Host inner\n  HostName 10.0.0.5\n  ProxyJump admin@gw.example.org:2222\n";
+    let plan = plan_import(&parse(text).hosts, &|_| None, Some(&[]));
+    assert_eq!(
+        plan[0].warnings,
+        vec![ImportWarning::ProxyIgnored {
+            directive: "ProxyJump admin@gw.example.org:2222".into()
+        }]
+    );
+    let store = imported(text);
+    assert_eq!(store.list_hosts().unwrap()[0].settings.jump_hosts, None);
+}
+
+#[test]
+fn forwardagent_and_setenv_imported() {
+    let text = "Host web\n  HostName web.org\n  ForwardAgent yes\n  SetEnv LANG=de_DE.UTF-8 MOTTO=\"hallo welt\"\nHost db\n  HostName db.org\n  ForwardAgent no\n";
+    let store = imported(text);
+    let hosts = store.list_hosts().unwrap();
+    let web = stored(&hosts, "web");
+    assert_eq!(web.settings.agent_forwarding, Some(true));
+    let env: Vec<(String, String)> = web
+        .settings
+        .env
+        .iter()
+        .map(|v| (v.name.clone(), v.value.clone()))
+        .collect();
+    assert_eq!(
+        env,
+        vec![
+            ("LANG".to_owned(), "de_DE.UTF-8".to_owned()),
+            ("MOTTO".to_owned(), "hallo welt".to_owned()),
+        ]
+    );
+    assert_eq!(stored(&hosts, "db").settings.agent_forwarding, Some(false));
+}

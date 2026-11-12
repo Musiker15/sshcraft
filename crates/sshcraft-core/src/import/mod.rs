@@ -36,6 +36,10 @@ pub struct ImportCandidate {
     /// Things the preview should point out; candidates with warnings start unchecked.
     #[serde(default)]
     pub warnings: Vec<ImportWarning>,
+    /// Names of jump hosts (`ProxyJump`), in order: hosts of the same import, or hosts already
+    /// at the same place with that name. Resolved after all hosts exist.
+    #[serde(default)]
+    pub jump_aliases: Vec<String>,
 }
 
 /// Why a candidate has no key yet.
@@ -192,6 +196,8 @@ pub fn apply_import(
     let mut hosts = store.list_hosts()?;
     let before = hosts.len();
     let mut outcome = ImportOutcome::default();
+    let mut jumping: Vec<(HostId, &[String])> = Vec::new();
+    let mut created_names: Vec<(String, HostId)> = Vec::new();
     for candidate in candidates {
         let group_id = group_for(
             store,
@@ -245,7 +251,37 @@ pub fn apply_import(
         store.upsert_host(&host)?;
         outcome.created += 1;
         outcome.hosts.push(host.id);
+        if !candidate.jump_aliases.is_empty() {
+            jumping.push((host.id, &candidate.jump_aliases));
+        }
+        created_names.push((clean(&candidate.name), host.id));
         hosts.push(host);
+    }
+    // Jump hosts by name: first one created by this import, else one that was here before at
+    // the same place. A chain with a name that matches neither stays unset.
+    for (id, aliases) in jumping {
+        let resolved: Option<Vec<HostId>> = aliases
+            .iter()
+            .map(|alias| {
+                created_names
+                    .iter()
+                    .find(|(name, _)| name == alias)
+                    .map(|(_, id)| *id)
+                    .or_else(|| {
+                        hosts
+                            .iter()
+                            .take(before)
+                            .find(|h| h.name == *alias && h.location == location)
+                            .map(|h| h.id)
+                    })
+            })
+            .collect();
+        if let Some(jumps) = resolved
+            && let Some(host) = hosts.iter_mut().find(|h| h.id == id)
+        {
+            host.settings.jump_hosts = Some(jumps);
+            store.upsert_host(host)?;
+        }
     }
     Ok(outcome)
 }

@@ -46,6 +46,45 @@ struct SettingsOut {
     port: Option<u16>,
     username: Option<String>,
     key: Option<KeyOut>,
+    /// Only whether one is stored, never the password nor its id.
+    has_password: bool,
+    /// The identity by name.
+    identity: Option<String>,
+    jump_hosts: Option<Vec<String>>,
+    proxy: Option<ProxyOut>,
+    agent_forwarding: Option<bool>,
+    env: Vec<crate::model::EnvVar>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ProxyOut {
+    Direct,
+    Http(ProxyEndpointOut),
+    Socks5(ProxyEndpointOut),
+}
+
+#[derive(Serialize)]
+struct ProxyEndpointOut {
+    address: String,
+    port: u16,
+    username: Option<String>,
+    has_password: bool,
+}
+
+fn proxy_out(proxy: &Option<crate::model::Proxy>) -> Option<ProxyOut> {
+    use crate::model::Proxy;
+    let endpoint = |e: &crate::model::ProxyEndpoint| ProxyEndpointOut {
+        address: e.address.clone(),
+        port: e.port,
+        username: e.username.clone(),
+        has_password: e.password.is_some(),
+    };
+    proxy.as_ref().map(|p| match p {
+        Proxy::Direct => ProxyOut::Direct,
+        Proxy::Http(e) => ProxyOut::Http(endpoint(e)),
+        Proxy::Socks5(e) => ProxyOut::Socks5(endpoint(e)),
+    })
 }
 
 #[derive(Serialize)]
@@ -138,6 +177,22 @@ fn settings_out(store: &Store, s: &ConnectionSettings) -> Result<SettingsOut, St
         port: s.port,
         username: s.username.clone(),
         key: key_out(store, &s.key)?,
+        has_password: s.password.is_some(),
+        identity: match s.identity {
+            Some(id) => store
+                .list_identities()?
+                .into_iter()
+                .find(|i| i.id == id)
+                .map(|i| i.name),
+            None => None,
+        },
+        jump_hosts: s
+            .jump_hosts
+            .as_ref()
+            .map(|j| j.iter().map(|h| h.0.to_string()).collect()),
+        proxy: proxy_out(&s.proxy),
+        agent_forwarding: s.agent_forwarding,
+        env: s.env.clone(),
     })
 }
 

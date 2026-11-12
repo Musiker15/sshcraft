@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::model::{ConnectionSettings, KeyRef};
+use crate::model::{ConnectionSettings, EnvVar, KeyRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigHost {
@@ -14,8 +14,15 @@ pub struct ConfigHost {
     pub port: Option<u16>,
     pub user: Option<String>,
     pub identity_files: Vec<String>,
-    /// `ProxyJump` and `ProxyCommand` lines as written; SSHCraft does not follow them yet.
+    /// `ProxyJump` and `ProxyCommand` lines as written, for the warning when they cannot be
+    /// followed.
     pub proxies: Vec<String>,
+    /// The hops of `ProxyJump`, in order.
+    pub jump: Vec<String>,
+    /// `ForwardAgent yes` or `no`.
+    pub forward_agent: Option<bool>,
+    /// The variables of `SetEnv`.
+    pub set_env: Vec<EnvVar>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -102,7 +109,11 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
         user: None,
         identity_files: Vec::new(),
         proxies: Vec::new(),
+        jump: Vec::new(),
+        forward_agent: None,
+        set_env: Vec::new(),
     };
+    let mut env_seen = false;
     let mut port_seen = false;
     // First proxy directive wins, including an explicit `none`.
     let mut proxy_seen = false;
@@ -124,12 +135,29 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
                     // `none` switches the proxy off, so there is nothing to warn about.
                     if !value.eq_ignore_ascii_case("none") {
                         let name = if keyword == "proxyjump" {
+                            host.jump = value
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|hop| !hop.is_empty())
+                                .map(str::to_owned)
+                                .collect();
                             "ProxyJump"
                         } else {
                             "ProxyCommand"
                         };
                         host.proxies.push(format!("{name} {value}"));
                     }
+                }
+                "forwardagent" if host.forward_agent.is_none() => {
+                    host.forward_agent = match value.to_ascii_lowercase().as_str() {
+                        "yes" => Some(true),
+                        "no" => Some(false),
+                        _ => None,
+                    };
+                }
+                "setenv" if !env_seen => {
+                    env_seen = true;
+                    host.set_env = parse_set_env(value);
                 }
                 _ => {}
             }
@@ -246,6 +274,46 @@ fn expand_tokens(hostname: &str, alias: &str) -> (String, Vec<ImportWarning>) {
     (out, warnings)
 }
 
+/// `SetEnv A=1 B="x y"`: words split at blanks outside double quotes, each `NAME=value`.
+fn parse_set_env(value: &str) -> Vec<EnvVar> {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    for c in value.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    let vars: Vec<EnvVar> = words
+        .into_iter()
+        .filter_map(|w| {
+            let (name, value) = w.split_once('=')?;
+            Some(EnvVar {
+                name: name.to_owned(),
+                value: value.to_owned(),
+            })
+        })
+        .collect();
+    crate::model::normalize_env(&vars)
+}
+
 /// `agent_fingerprints` is `None` when the agent could not be reached.
 pub fn plan_import(
     hosts: &[ConfigHost],
@@ -256,6 +324,7 @@ pub fn plan_import(
         Some(name) => expand_tokens(name, &h.alias),
         None => (h.alias.clone(), Vec::new()),
     };
+    let aliases: Vec<&str> = hosts.iter().map(|h| h.alias.as_str()).collect();
     let mut per_address: HashMap<String, usize> = HashMap::new();
     for h in hosts {
         *per_address.entry(address(h).0).or_default() += 1;
@@ -265,10 +334,15 @@ pub fn plan_import(
         .iter()
         .map(|h| {
             let (address, mut warnings) = address(h);
+            // A ProxyJump through hosts of this same file becomes jump hosts; anything else
+            // (user@host:port, a host not in the file, ProxyCommand) stays a warning.
+            let jumps_known =
+                !h.jump.is_empty() && h.jump.iter().all(|hop| aliases.contains(&hop.as_str()));
             warnings.splice(
                 0..0,
                 h.proxies
                     .iter()
+                    .filter(|directive| !(jumps_known && directive.starts_with("ProxyJump ")))
                     .map(|directive| ImportWarning::ProxyIgnored {
                         directive: directive.clone(),
                     }),
@@ -298,7 +372,14 @@ pub fn plan_import(
                     port: h.port,
                     username: h.user.clone(),
                     key,
+                    agent_forwarding: h.forward_agent,
+                    env: h.set_env.clone(),
                     ..Default::default()
+                },
+                jump_aliases: if jumps_known {
+                    h.jump.clone()
+                } else {
+                    Vec::new()
                 },
                 key_note,
                 warnings,
