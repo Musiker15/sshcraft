@@ -25,7 +25,13 @@ impl Verifier {
 
 #[async_trait::async_trait]
 impl HostKeyVerifier for Verifier {
-    async fn verify(&self, _address: &str, _port: u16, fingerprint: &str) -> bool {
+    async fn verify(
+        &self,
+        _host_name: &str,
+        _address: &str,
+        _port: u16,
+        fingerprint: &str,
+    ) -> bool {
         self.seen.lock().unwrap().push(fingerprint.to_owned());
         self.answer
     }

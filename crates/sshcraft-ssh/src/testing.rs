@@ -172,6 +172,7 @@ impl server::Server for Factory {
             records: self.records.clone(),
             key_ok: false,
             kbd_round: 0,
+            tunnels: std::collections::HashSet::new(),
         }
     }
 }
@@ -182,6 +183,8 @@ struct Handler {
     /// The key was accepted and keyboard-interactive must follow.
     key_ok: bool,
     kbd_round: usize,
+    /// `direct-tcpip` channels: their bytes go to the tunnel, not to the echo.
+    tunnels: std::collections::HashSet<ChannelId>,
 }
 
 impl Handler {
@@ -275,6 +278,32 @@ impl server::Handler for Handler {
         }
     }
 
+    /// Jump host: connects to the wanted port on this machine and passes the bytes through.
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: server::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let Ok(port) = u16::try_from(port_to_connect) else {
+            return Ok(());
+        };
+        let Ok(mut tcp) = tokio::net::TcpStream::connect((host_to_connect, port)).await else {
+            return Ok(());
+        };
+        self.tunnels.insert(channel.id());
+        reply.accept().await;
+        tokio::spawn(async move {
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+        });
+        Ok(())
+    }
+
     async fn channel_open_session(
         &mut self,
         _channel: Channel<Msg>,
@@ -344,6 +373,9 @@ impl server::Handler for Handler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if self.tunnels.contains(&channel) {
+            return Ok(());
+        }
         let handle = session.handle();
         match data {
             b"exit\n" => {
@@ -440,4 +472,157 @@ impl russh::keys::agent::server::Agent for TestAgent {
             }
         }
     }
+}
+
+/// A proxy for tests, counting connections and noting where they went (`host:port` as asked).
+pub struct TestProxy {
+    pub port: u16,
+    connects: Arc<std::sync::atomic::AtomicUsize>,
+    targets: Arc<Mutex<Vec<String>>>,
+    task: JoinHandle<()>,
+}
+
+impl TestProxy {
+    pub fn connects(&self) -> usize {
+        self.connects.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn targets(&self) -> Vec<String> {
+        self.targets.lock().unwrap().clone()
+    }
+}
+
+impl Drop for TestProxy {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn spawn_proxy<F, Fut>(serve: F) -> TestProxy
+where
+    F: Fn(tokio::net::TcpStream, Arc<Mutex<Vec<String>>>) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = std::io::Result<()>> + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+    let port = listener.local_addr().expect("proxy addr").port();
+    let connects = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let targets = Arc::new(Mutex::new(Vec::new()));
+    let (c, t) = (connects.clone(), targets.clone());
+    let serve = Arc::new(serve);
+    let task = tokio::spawn(async move {
+        while let Ok((socket, _)) = listener.accept().await {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let fut = serve(socket, t.clone());
+            tokio::spawn(async move {
+                let _ = fut.await;
+            });
+        }
+    });
+    TestProxy {
+        port,
+        connects,
+        targets,
+        task,
+    }
+}
+
+/// An HTTP proxy that understands `CONNECT`; with credentials it wants Basic auth.
+pub async fn spawn_http_proxy(credentials: Option<(String, String)>) -> TestProxy {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let wanted = credentials.map(|(u, p)| {
+        let token = data_encoding::BASE64.encode(format!("{u}:{p}").as_bytes());
+        format!("proxy-authorization: basic {}", token.to_lowercase())
+    });
+    spawn_proxy(move |mut socket, targets| {
+        let wanted = wanted.clone();
+        async move {
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                head.push(socket.read_u8().await?);
+            }
+            let head = String::from_utf8_lossy(&head).to_string();
+            let target = head
+                .lines()
+                .next()
+                .and_then(|l| l.strip_prefix("CONNECT "))
+                .and_then(|l| l.split_whitespace().next())
+                .unwrap_or_default()
+                .to_owned();
+            if let Some(wanted) = wanted
+                && !head.to_lowercase().lines().any(|l| l == wanted)
+            {
+                socket
+                    .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+                    .await?;
+                return Ok(());
+            }
+            targets.lock().unwrap().push(target.clone());
+            let mut upstream = tokio::net::TcpStream::connect(target.as_str()).await?;
+            socket
+                .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                .await?;
+            tokio::io::copy_bidirectional(&mut socket, &mut upstream).await?;
+            Ok(())
+        }
+    })
+    .await
+}
+
+/// A SOCKS5 proxy (RFC 1928); with credentials it wants user and password (RFC 1929).
+pub async fn spawn_socks5_proxy(credentials: Option<(String, String)>) -> TestProxy {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    spawn_proxy(move |mut socket, targets| {
+        let credentials = credentials.clone();
+        async move {
+            let _version = socket.read_u8().await?;
+            let count = socket.read_u8().await?;
+            let mut methods = vec![0u8; count as usize];
+            socket.read_exact(&mut methods).await?;
+            match &credentials {
+                Some((user, password)) => {
+                    socket.write_all(&[5, 2]).await?;
+                    let _sub = socket.read_u8().await?;
+                    let len = socket.read_u8().await?;
+                    let mut u = vec![0u8; len as usize];
+                    socket.read_exact(&mut u).await?;
+                    let len = socket.read_u8().await?;
+                    let mut p = vec![0u8; len as usize];
+                    socket.read_exact(&mut p).await?;
+                    if u != user.as_bytes() || p != password.as_bytes() {
+                        socket.write_all(&[1, 1]).await?;
+                        return Ok(());
+                    }
+                    socket.write_all(&[1, 0]).await?;
+                }
+                None => socket.write_all(&[5, 0]).await?,
+            }
+            let mut request = [0u8; 4];
+            socket.read_exact(&mut request).await?;
+            let host = match request[3] {
+                1 => {
+                    let mut ip = [0u8; 4];
+                    socket.read_exact(&mut ip).await?;
+                    std::net::Ipv4Addr::from(ip).to_string()
+                }
+                3 => {
+                    let len = socket.read_u8().await?;
+                    let mut name = vec![0u8; len as usize];
+                    socket.read_exact(&mut name).await?;
+                    String::from_utf8_lossy(&name).into_owned()
+                }
+                _ => {
+                    let mut ip = [0u8; 16];
+                    socket.read_exact(&mut ip).await?;
+                    std::net::Ipv6Addr::from(ip).to_string()
+                }
+            };
+            let port = socket.read_u16().await?;
+            targets.lock().unwrap().push(format!("{host}:{port}"));
+            let mut upstream = tokio::net::TcpStream::connect((host.as_str(), port)).await?;
+            socket.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+            tokio::io::copy_bidirectional(&mut socket, &mut upstream).await?;
+            Ok(())
+        }
+    })
+    .await
 }

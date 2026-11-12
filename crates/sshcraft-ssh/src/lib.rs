@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 #[cfg(windows)]
 pub mod agent;
 mod auth;
+mod proxy;
 pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter};
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -82,6 +83,50 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const KEEPALIVE_MAX: usize = 3;
 const EVENT_BUFFER: usize = 1024;
 const EXEC_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long reaching one hop may take: TCP, a proxy's handshake or a channel through the hop
+/// before.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A byte stream an SSH connection can run over: TCP, a proxy tunnel or a channel through a jump
+/// host.
+pub trait Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> Io for T {}
+
+/// One host on the way: its name (for host key questions and errors), where it is and how to
+/// sign in there. Each hop only ever gets its own credentials.
+pub struct Hop {
+    pub host_name: String,
+    pub address: String,
+    pub port: u16,
+    pub username: String,
+    pub auth: Auth,
+}
+
+/// A proxy for the first connection of a route.
+pub enum ProxyConfig {
+    Http(ProxyTarget),
+    Socks5(ProxyTarget),
+}
+
+pub struct ProxyTarget {
+    pub address: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<zeroize::Zeroizing<String>>,
+}
+
+/// What a session does besides the shell itself.
+#[derive(Default)]
+pub struct SessionOptions {}
+
+/// How to reach a host: the proxy (for the first connection only), then each hop in turn, the
+/// last one being the target.
+pub struct RouteParams {
+    pub hops: Vec<Hop>,
+    pub proxy: Option<ProxyConfig>,
+    pub options: SessionOptions,
+    pub connect_timeout: Duration,
+}
 
 pub struct ConnectParams {
     pub address: String,
@@ -90,10 +135,11 @@ pub struct ConnectParams {
     pub auth: Auth,
 }
 
-/// Decides whether to trust the server's host key. Fingerprints look like `SHA256:…`.
+/// Decides whether to trust the server's host key. Fingerprints look like `SHA256:…`;
+/// `host_name` names the hop the question is about.
 #[async_trait::async_trait]
 pub trait HostKeyVerifier: Send + Sync {
-    async fn verify(&self, address: &str, port: u16, fingerprint: &str) -> bool;
+    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -118,6 +164,16 @@ pub enum SshError {
     AuthCancelled,
     #[error("the server rejected the password")]
     PasswordRejected,
+    #[error("the proxy failed: {0}")]
+    Proxy(String),
+    #[error("the proxy rejected the credentials")]
+    ProxyAuthFailed,
+    #[error("jump host {host_name}: {error}")]
+    Hop {
+        index: usize,
+        host_name: String,
+        error: Box<SshError>,
+    },
 }
 
 impl From<&SshError> for Disconnect {
@@ -132,6 +188,9 @@ impl From<&SshError> for Disconnect {
             | SshError::PasswordRejected => Disconnect::AuthFailed,
             SshError::Connect(m) | SshError::Protocol(m) => Disconnect::Lost(m.clone()),
             SshError::Timeout => Disconnect::Lost("timed out".into()),
+            SshError::ProxyAuthFailed => Disconnect::AuthFailed,
+            SshError::Proxy(m) => Disconnect::Lost(m.clone()),
+            SshError::Hop { error, .. } => Disconnect::from(error.as_ref()),
         }
     }
 }
@@ -148,6 +207,7 @@ pub enum ShellEvent {
 }
 
 struct ClientHandler {
+    host_name: String,
     address: String,
     port: u16,
     verifier: Arc<dyn HostKeyVerifier>,
@@ -168,7 +228,7 @@ impl client::Handler for ClientHandler {
         let fingerprint = key_data.fingerprint(HashAlg::Sha256).to_string();
         let trusted = self
             .verifier
-            .verify(&self.address, self.port, &fingerprint)
+            .verify(&self.host_name, &self.address, self.port, &fingerprint)
             .await;
         if !trusted {
             self.rejected.store(true, Ordering::SeqCst);
@@ -180,6 +240,8 @@ impl client::Handler for ClientHandler {
 /// An authenticated SSH connection. Shells opened from it keep it alive.
 pub struct Session {
     handle: Arc<client::Handle<ClientHandler>>,
+    /// The jump hosts' connections the session runs through, kept open while it lives.
+    jumps: Arc<Vec<client::Handle<ClientHandler>>>,
 }
 
 pub struct Shell {
@@ -192,45 +254,124 @@ pub struct Shell {
 pub struct ShellWriter {
     channel: Arc<ChannelWriteHalf<Msg>>,
     _session: Arc<client::Handle<ClientHandler>>,
+    _jumps: Arc<Vec<client::Handle<ClientHandler>>>,
 }
 
+/// The client settings for every hop: keep-alive, and russh's default algorithms, which put the
+/// post-quantum key exchange `mlkem768x25519-sha256` first.
+pub fn client_config() -> client::Config {
+    client::Config {
+        keepalive_interval: Some(KEEPALIVE_INTERVAL),
+        keepalive_max: KEEPALIVE_MAX,
+        ..Default::default()
+    }
+}
+
+/// Connects to one host directly.
 pub async fn connect(
     params: ConnectParams,
     verifier: Arc<dyn HostKeyVerifier>,
     prompter: Arc<dyn AuthPrompter>,
 ) -> Result<Session, SshError> {
-    let config = Arc::new(client::Config {
-        keepalive_interval: Some(KEEPALIVE_INTERVAL),
-        keepalive_max: KEEPALIVE_MAX,
-        ..Default::default()
-    });
-    let rejected = Arc::new(AtomicBool::new(false));
-    let handler = ClientHandler {
-        address: params.address.clone(),
+    let hop = Hop {
+        host_name: params.address.clone(),
+        address: params.address,
         port: params.port,
-        verifier,
-        rejected: rejected.clone(),
+        username: params.username,
+        auth: params.auth,
     };
-    let mut handle = client::connect(config, (params.address.as_str(), params.port), handler)
-        .await
-        .map_err(|e| {
-            if rejected.load(Ordering::SeqCst) {
-                SshError::HostKeyRejected
-            } else {
-                SshError::Connect(e.to_string())
-            }
-        })?;
-    let host_name = params.address.clone();
-    auth::authenticate(
-        &mut handle,
-        &params.username,
-        &host_name,
-        params.auth,
-        prompter.as_ref(),
+    connect_route(
+        RouteParams {
+            hops: vec![hop],
+            proxy: None,
+            options: SessionOptions::default(),
+            connect_timeout: CONNECT_TIMEOUT,
+        },
+        verifier,
+        prompter,
     )
-    .await?;
+    .await
+}
+
+/// Connects along a route: the first hop over TCP or the proxy, each further hop through a
+/// `direct-tcpip` channel of the one before. Each hop checks its own host key and signs in with
+/// its own credentials. A failure at a jump host comes as [`SshError::Hop`].
+pub async fn connect_route(
+    params: RouteParams,
+    verifier: Arc<dyn HostKeyVerifier>,
+    prompter: Arc<dyn AuthPrompter>,
+) -> Result<Session, SshError> {
+    let config = Arc::new(client_config());
+    let last = params
+        .hops
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| SshError::Connect("no host to connect to".into()))?;
+    let timeout = params.connect_timeout;
+    let mut connected: Vec<client::Handle<ClientHandler>> = Vec::new();
+    for (index, hop) in params.hops.into_iter().enumerate() {
+        let host_name = hop.host_name.clone();
+        let wrap = |error: SshError| {
+            if index < last {
+                SshError::Hop {
+                    index,
+                    host_name: host_name.clone(),
+                    error: Box::new(error),
+                }
+            } else {
+                error
+            }
+        };
+        let stream: Box<dyn Io> = match connected.last() {
+            None => proxy::open(params.proxy.as_ref(), &hop.address, hop.port, timeout)
+                .await
+                .map_err(wrap)?,
+            Some(before) => {
+                let opened = before.channel_open_direct_tcpip(
+                    hop.address.clone(),
+                    u32::from(hop.port),
+                    "127.0.0.1",
+                    0,
+                );
+                let channel = tokio::time::timeout(timeout, opened)
+                    .await
+                    .map_err(|_| wrap(SshError::Connect("timed out".into())))?
+                    .map_err(|e| wrap(SshError::Connect(e.to_string())))?;
+                Box::new(channel.into_stream())
+            }
+        };
+        let rejected = Arc::new(AtomicBool::new(false));
+        let handler = ClientHandler {
+            host_name: hop.host_name.clone(),
+            address: hop.address.clone(),
+            port: hop.port,
+            verifier: verifier.clone(),
+            rejected: rejected.clone(),
+        };
+        let mut handle = client::connect_stream(config.clone(), stream, handler)
+            .await
+            .map_err(|e| {
+                wrap(if rejected.load(Ordering::SeqCst) {
+                    SshError::HostKeyRejected
+                } else {
+                    SshError::Connect(e.to_string())
+                })
+            })?;
+        auth::authenticate(
+            &mut handle,
+            &hop.username,
+            &hop.host_name,
+            hop.auth,
+            prompter.as_ref(),
+        )
+        .await
+        .map_err(wrap)?;
+        connected.push(handle);
+    }
+    let handle = connected.pop().expect("at least one hop");
     Ok(Session {
         handle: Arc::new(handle),
+        jumps: Arc::new(connected),
     })
 }
 
@@ -304,6 +445,7 @@ impl Session {
             writer: ShellWriter {
                 channel: Arc::new(write),
                 _session: self.handle.clone(),
+                _jumps: self.jumps.clone(),
             },
         })
     }
@@ -313,6 +455,11 @@ impl Session {
             .handle
             .disconnect(russh::Disconnect::ByApplication, "", "en")
             .await;
+        for jump in self.jumps.iter().rev() {
+            let _ = jump
+                .disconnect(russh::Disconnect::ByApplication, "", "en")
+                .await;
+        }
     }
 }
 

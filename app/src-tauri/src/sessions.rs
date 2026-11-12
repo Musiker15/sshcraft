@@ -514,7 +514,6 @@ async fn connect_once(
     let verifier = Arc::new(StoreVerifier {
         store: ctx.store.clone(),
         prompter: ctx.prompter.clone(),
-        host_name: resolved.name.clone(),
         mismatch: Mutex::new(None),
     });
     let params = ConnectParams {
@@ -658,13 +657,12 @@ fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Op
 struct StoreVerifier {
     store: Arc<Mutex<Store>>,
     prompter: Arc<dyn HostKeyPrompter>,
-    host_name: String,
     mismatch: Mutex<Option<String>>,
 }
 
 #[async_trait::async_trait]
 impl HostKeyVerifier for StoreVerifier {
-    async fn verify(&self, address: &str, port: u16, fingerprint: &str) -> bool {
+    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
         let known = {
             let store = self.store.lock().expect("store lock");
             match store.known_host(address, port) {
@@ -682,7 +680,7 @@ impl HostKeyVerifier for StoreVerifier {
             HostKeyStatus::Unknown => {
                 let accepted = self
                     .prompter
-                    .ask(&self.host_name, address, port, fingerprint)
+                    .ask(host_name, address, port, fingerprint)
                     .await;
                 if accepted {
                     let store = self.store.lock().expect("store lock");

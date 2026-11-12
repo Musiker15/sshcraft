@@ -17,6 +17,8 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 zeroize = { workspace = true }
+tokio-socks = "0.5.3"
+data-encoding = { workspace = true }
 rand = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 

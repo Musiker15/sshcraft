@@ -13,7 +13,13 @@ struct Trust;
 
 #[async_trait::async_trait]
 impl HostKeyVerifier for Trust {
-    async fn verify(&self, _address: &str, _port: u16, _fingerprint: &str) -> bool {
+    async fn verify(
+        &self,
+        _host_name: &str,
+        _address: &str,
+        _port: u16,
+        _fingerprint: &str,
+    ) -> bool {
         true
     }
 }
