@@ -133,6 +133,7 @@ impl Fixture {
                         .fingerprint(russh::keys::HashAlg::Sha256)
                         .to_string(),
                 }),
+                ..Default::default()
             },
             tags: Vec::new(),
             os: None,
@@ -150,6 +151,7 @@ impl Fixture {
             self.store.clone(),
             Some(self.vault.clone()),
             self.prompter.clone(),
+            Arc::new(sshcraft_ssh::NoPrompter),
             Arc::new(TestAgents {
                 keys: vec![self.key.clone()],
                 reachable: true,
@@ -164,6 +166,7 @@ impl Fixture {
             self.store.clone(),
             vault,
             self.prompter.clone(),
+            Arc::new(sshcraft_ssh::NoPrompter),
             Arc::new(TestAgents {
                 keys: vec![self.key.clone()],
                 reachable: agent_reachable,
@@ -197,6 +200,7 @@ async fn fixture(answer: bool) -> Fixture {
             port: Some(server.port),
             username: Some("tester".into()),
             key: Some(KeyRef::Stored { id: info.id }),
+            ..Default::default()
         },
         tags: Vec::new(),
         os: None,
@@ -212,6 +216,7 @@ async fn fixture(answer: bool) -> Fixture {
         store.clone(),
         Some(vault.clone()),
         prompter.clone(),
+        Arc::new(sshcraft_ssh::NoPrompter),
         Arc::new(TestAgents {
             keys: vec![key.clone()],
             reachable: true,
@@ -231,7 +236,9 @@ async fn fixture(answer: bool) -> Fixture {
 }
 
 fn connected(statuses: &[SessionStatus]) -> bool {
-    statuses.contains(&SessionStatus::Connected)
+    statuses
+        .iter()
+        .any(|s| matches!(s, SessionStatus::Connected { .. }))
 }
 
 #[tokio::test]
@@ -243,9 +250,19 @@ async fn stored_key_asks_hello_once_per_run() {
         Arc::new(RecordingSink::default()),
         Arc::new(RecordingSink::default()),
     );
-    manager.open(f.host_id, 80, 24, a.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        a.clone(),
+    );
     a.wait_for(connected).await;
-    manager.open(f.host_id, 80, 24, b.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        b.clone(),
+    );
     b.wait_for(connected).await;
     assert_eq!(presence.asked(), 1);
 }
@@ -256,7 +273,12 @@ async fn declined_hello_ends_without_connecting() {
     let presence = Arc::new(FakePresence::new(&[Presence::Declined]));
     let manager = f.manager_with_presence(presence.clone());
     let sink = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, sink.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| ended(s).is_some()).await;
     let statuses = sink.statuses();
     assert_eq!(ended(&statuses), Some(EndReason::Error));
@@ -275,10 +297,20 @@ async fn declined_hello_asks_again_next_time() {
     let presence = Arc::new(FakePresence::new(&[Presence::Declined, Presence::Verified]));
     let manager = f.manager_with_presence(presence.clone());
     let first = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, first.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        first.clone(),
+    );
     first.wait_for(|s| ended(s).is_some()).await;
     let second = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, second.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        second.clone(),
+    );
     second.wait_for(connected).await;
     assert_eq!(presence.asked(), 2);
 }
@@ -289,7 +321,12 @@ async fn unavailable_hello_connects_and_flags() {
     let presence = Arc::new(FakePresence::new(&[Presence::Unavailable]));
     let manager = f.manager_with_presence(presence.clone());
     let sink = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, sink.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(connected).await;
     assert!(manager.hello_missing());
 }
@@ -301,7 +338,7 @@ async fn agent_key_does_not_ask_hello() {
     let presence = Arc::new(FakePresence::new(&[Presence::Declined]));
     let manager = f.manager_with_presence(presence.clone());
     let sink = Arc::new(RecordingSink::default());
-    manager.open(host, 80, 24, sink.clone());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
     sink.wait_for(connected).await;
     assert_eq!(presence.asked(), 0);
 }
@@ -311,7 +348,8 @@ async fn agent_key_connects() {
     let f = fixture(true).await;
     let host = f.agent_host();
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(host, 80, 24, sink.clone());
+    f.manager
+        .open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
     sink.wait_for(|s| connected_count(s) == 1).await;
 }
 
@@ -321,7 +359,7 @@ async fn agent_unavailable_ends_with_error_and_no_retry() {
     let host = f.agent_host();
     let manager = f.manager_with(None, false);
     let sink = Arc::new(RecordingSink::default());
-    manager.open(host, 80, 24, sink.clone());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
     sink.wait_for(|s| ended(s).is_some()).await;
     let statuses = sink.statuses();
     assert_eq!(ended(&statuses), Some(EndReason::Error));
@@ -339,7 +377,7 @@ async fn agent_key_needs_no_vault() {
     let host = f.agent_host();
     let manager = f.manager_with(None, true);
     let sink = Arc::new(RecordingSink::default());
-    manager.open(host, 80, 24, sink.clone());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
     sink.wait_for(|s| connected_count(s) == 1).await;
 }
 
@@ -377,7 +415,8 @@ async fn first_failed_attempt_is_connect_failed() {
         store.upsert_host(&host).unwrap();
     }
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(host_id, 80, 24, sink.clone());
+    f.manager
+        .open(SessionTarget::Host { host_id }, 80, 24, sink.clone());
     sink.wait_for(|s| ended(s).is_some()).await;
     let statuses = sink.statuses();
     assert_eq!(ended(&statuses), Some(EndReason::ConnectFailed));
@@ -392,7 +431,7 @@ async fn first_failed_attempt_is_connect_failed() {
 fn connected_count(statuses: &[SessionStatus]) -> usize {
     statuses
         .iter()
-        .filter(|s| **s == SessionStatus::Connected)
+        .filter(|s| matches!(s, SessionStatus::Connected { .. }))
         .count()
 }
 
@@ -400,7 +439,12 @@ fn connected_count(statuses: &[SessionStatus]) -> usize {
 async fn unknown_host_key_asks_and_stores_on_accept() {
     let f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     assert_eq!(f.prompter.asked.load(Ordering::SeqCst), 1);
     let stored = f
@@ -421,7 +465,12 @@ async fn known_host_key_does_not_ask() {
         .set_known_host("127.0.0.1", f.server.port, &f.server.host_fingerprint)
         .unwrap();
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     assert_eq!(f.prompter.asked.load(Ordering::SeqCst), 0);
 }
@@ -430,7 +479,12 @@ async fn known_host_key_does_not_ask() {
 async fn unknown_host_key_declined_ends_rejected() {
     let f = fixture(false).await;
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::HostKeyRejected));
     let stored = f
@@ -451,7 +505,12 @@ async fn mismatch_ends_without_prompt() {
         .set_known_host("127.0.0.1", f.server.port, "SHA256:other")
         .unwrap();
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::HostKeyMismatch));
     assert_eq!(f.prompter.asked.load(Ordering::SeqCst), 0);
@@ -461,7 +520,12 @@ async fn mismatch_ends_without_prompt() {
 async fn lost_connection_reconnects() {
     let mut f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     f.server.restart(false).await;
     sink.wait_for(|s| connected_count(s) == 2).await;
@@ -477,7 +541,12 @@ async fn lost_connection_reconnects() {
 async fn reconnect_into_changed_host_key_stops() {
     let mut f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     f.server.restart(true).await;
     sink.wait_for(|s| ended(s).is_some()).await;
@@ -490,7 +559,12 @@ async fn reconnect_into_changed_host_key_stops() {
 async fn exit_does_not_reconnect() {
     let f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    let id = f.manager.open(f.host_id, 80, 24, sink.clone());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     f.manager.write(id, b"exit\n").unwrap();
     sink.wait_for(|s| ended(s).is_some()).await;
@@ -507,7 +581,12 @@ async fn exit_does_not_reconnect() {
 async fn output_reaches_sink() {
     let f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    let id = f.manager.open(f.host_id, 80, 24, sink.clone());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     f.manager.write(id, b"ping\n").unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
@@ -522,7 +601,12 @@ async fn missing_vault_ends_with_error() {
     let f = fixture(true).await;
     let manager = f.manager_with(None, true);
     let sink = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, sink.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::Error));
     assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::VaultLocked));
@@ -532,7 +616,12 @@ async fn missing_vault_ends_with_error() {
 async fn writes_are_delivered_in_order() {
     let f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    let id = f.manager.open(f.host_id, 80, 24, sink.clone());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     let mut expected = Vec::new();
     for i in 0..300 {
@@ -552,7 +641,12 @@ async fn writes_are_delivered_in_order() {
 async fn output_waits_for_acknowledgement() {
     let f = fixture(true).await;
     let sink = Arc::new(RecordingSink::default());
-    let id = f.manager.open(f.host_id, 80, 24, sink.clone());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| connected_count(s) == 1).await;
     f.manager.write(id, b"flood\n").unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -622,7 +716,12 @@ async fn closing_tab_cancels_hello() {
     let f = fixture(true).await;
     let presence = Arc::new(PendingThenVerified::default());
     let manager = f.manager_with_any_presence(presence.clone());
-    let id = manager.open(f.host_id, 80, 24, Arc::new(RecordingSink::default()));
+    let id = manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        Arc::new(RecordingSink::default()),
+    );
     wait_until(|| presence.asked.load(Ordering::SeqCst) == 1).await;
     manager.close(id);
     wait_until(|| presence.dropped.load(Ordering::SeqCst) == 1).await;
@@ -633,10 +732,20 @@ async fn waiting_tab_asks_again_after_other_tab_closed() {
     let f = fixture(true).await;
     let presence = Arc::new(PendingThenVerified::default());
     let manager = f.manager_with_any_presence(presence.clone());
-    let first = manager.open(f.host_id, 80, 24, Arc::new(RecordingSink::default()));
+    let first = manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        Arc::new(RecordingSink::default()),
+    );
     wait_until(|| presence.asked.load(Ordering::SeqCst) == 1).await;
     let second = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, second.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        second.clone(),
+    );
     manager.close(first);
     second.wait_for(connected).await;
     assert_eq!(presence.asked.load(Ordering::SeqCst), 2);
@@ -655,9 +764,19 @@ async fn hello_unavailable_is_reported_once() {
         Arc::new(RecordingSink::default()),
         Arc::new(RecordingSink::default()),
     );
-    manager.open(f.host_id, 80, 24, a.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        a.clone(),
+    );
     a.wait_for(connected).await;
-    manager.open(f.host_id, 80, 24, b.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        b.clone(),
+    );
     b.wait_for(connected).await;
     assert_eq!(reported.load(Ordering::SeqCst), 1);
 }
@@ -667,7 +786,12 @@ async fn connected_session_is_recent() {
     let f = fixture(true).await;
     assert!(f.store.lock().unwrap().recent_hosts(10).unwrap().is_empty());
     let sink = Arc::new(RecordingSink::default());
-    f.manager.open(f.host_id, 80, 24, sink.clone());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(connected).await;
     assert_eq!(
         f.store.lock().unwrap().recent_hosts(10).unwrap(),
@@ -701,7 +825,12 @@ async fn a_key_not_on_this_device_ends_before_hello() {
     let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
     let manager = f.manager_with_presence(presence.clone());
     let sink = Arc::new(RecordingSink::default());
-    manager.open(f.host_id, 80, 24, sink.clone());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(
         ended_code(&sink.statuses()),
@@ -733,4 +862,504 @@ fn os_probe_runs_once() {
         !needs_os(&store, host.id),
         "a host whose system was not recognized is asked once"
     );
+}
+
+// ---- Passwords, routes and sign-in questions ----
+
+use crate::prompts::PromptRegistry;
+use crate::prompts::tests::{FakeEmitter, first_auth_question};
+use sshcraft_core::model::PasswordId;
+use sshcraft_ssh::testing::TestAuth;
+
+/// A store with a vault and hosts that sign in with passwords.
+struct PasswordWorld {
+    store: Arc<Mutex<Store>>,
+    vault: Arc<Vault>,
+}
+
+impl PasswordWorld {
+    fn new() -> Self {
+        let store = Store::open_in_memory().unwrap();
+        let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+        Self {
+            store: Arc::new(Mutex::new(store)),
+            vault: Arc::new(vault),
+        }
+    }
+
+    /// A host at `port` with a stored password (if given) and jump hosts.
+    fn host(&self, port: u16, password: Option<&str>, jumps: Vec<HostId>) -> HostId {
+        let store = self.store.lock().unwrap();
+        let password_id = password.map(|p| {
+            let id = PasswordId::new();
+            self.vault.store_password(&store, id, p, None).unwrap();
+            id
+        });
+        let host = Host {
+            location: None,
+            id: HostId::new(),
+            name: format!("host-{port}"),
+            group_id: None,
+            settings: ConnectionSettings {
+                address: Some("127.0.0.1".into()),
+                port: Some(port),
+                username: Some("tester".into()),
+                password: password_id,
+                jump_hosts: (!jumps.is_empty()).then_some(jumps),
+                ..Default::default()
+            },
+            tags: Vec::new(),
+            os: None,
+        };
+        store.upsert_host(&host).unwrap();
+        host.id
+    }
+
+    /// Trusts the server's host key beforehand, as after an earlier connection.
+    fn trust(&self, server: &TestServer) {
+        self.store
+            .lock()
+            .unwrap()
+            .set_known_host("127.0.0.1", server.port, &server.host_fingerprint)
+            .unwrap();
+    }
+
+    fn set(&self, host: HostId, change: impl FnOnce(&mut ConnectionSettings)) {
+        let store = self.store.lock().unwrap();
+        let mut h = store
+            .list_hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == host)
+            .unwrap();
+        change(&mut h.settings);
+        store.upsert_host(&h).unwrap();
+    }
+
+    fn manager(
+        &self,
+        vault: Option<Arc<Vault>>,
+        host_keys: Arc<FixedPrompter>,
+        auth: Arc<dyn sshcraft_ssh::AuthPrompter>,
+        presence: Arc<FakePresence>,
+    ) -> SessionManager {
+        SessionManager::with_delay_scale(
+            self.store.clone(),
+            vault,
+            host_keys,
+            auth,
+            Arc::new(TestAgents {
+                keys: Vec::new(),
+                reachable: false,
+            }),
+            presence,
+            0.01,
+        )
+    }
+}
+
+fn trusting() -> Arc<FixedPrompter> {
+    Arc::new(FixedPrompter {
+        answer: true,
+        asked: AtomicUsize::new(0),
+    })
+}
+
+fn verified() -> Arc<FakePresence> {
+    Arc::new(FakePresence::new(&[Presence::Verified]))
+}
+
+async fn password_server(password: &str) -> TestServer {
+    TestServer::start_with(TestAuth {
+        password: Some(password.into()),
+        ..Default::default()
+    })
+    .await
+}
+
+async fn kbd_server(answer: &str) -> TestServer {
+    TestServer::start_with(TestAuth {
+        kbd: vec![vec![("Code: ".into(), true, answer.into())]],
+        ..Default::default()
+    })
+    .await
+}
+
+#[tokio::test]
+async fn password_host_connects() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(server.received_passwords(), vec!["pw".to_owned()]);
+}
+
+#[tokio::test]
+async fn jump_route_connects() {
+    let jump = password_server("a").await;
+    let target = password_server("b").await;
+    let w = PasswordWorld::new();
+    w.trust(&jump);
+    w.trust(&target);
+    let via = w.host(jump.port, Some("a"), Vec::new());
+    let host = w.host(target.port, Some("b"), vec![via]);
+    let host_keys = trusting();
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        host_keys.clone(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(host_keys.asked.load(Ordering::SeqCst), 0);
+    assert_eq!(jump.received_passwords(), vec!["a".to_owned()]);
+    assert_eq!(target.received_passwords(), vec!["b".to_owned()]);
+}
+
+#[tokio::test]
+async fn kbd_prompt_reaches_registry_and_answer_logs_in() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    let prompt = first_auth_question(&registry).await;
+    assert_eq!(prompt.prompts[0].text, "Code: ");
+    assert_eq!(prompt.username, "tester");
+    registry.answer_auth(prompt.prompt_id, Some(vec!["42".into()]));
+    sink.wait_for(connected).await;
+}
+
+#[tokio::test]
+async fn closing_tab_withdraws_auth_prompt() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    let id = manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    let prompt = first_auth_question(&registry).await;
+    manager.close(id);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !registry
+        .emitter()
+        .withdrawn
+        .lock()
+        .unwrap()
+        .contains(&prompt.prompt_id)
+    {
+        assert!(tokio::time::Instant::now() < deadline, "not withdrawn");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn cancel_ends_without_reconnect() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    let prompt = first_auth_question(&registry).await;
+    registry.answer_auth(prompt.prompt_id, None);
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::AuthCancelled));
+    assert!(
+        !sink
+            .statuses()
+            .iter()
+            .any(|s| matches!(s, SessionStatus::Reconnecting { .. }))
+    );
+}
+
+#[tokio::test]
+async fn vault_locked_with_password_reports_vault_locked() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        None,
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::VaultLocked));
+    assert!(server.received_passwords().is_empty());
+}
+
+#[tokio::test]
+async fn hello_asked_before_password_use() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let presence = verified();
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        presence.clone(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(presence.asked(), 1);
+}
+
+#[tokio::test]
+async fn declined_hello_keeps_password_back() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        Arc::new(FakePresence::new(&[Presence::Declined])),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::HelloDeclined));
+    assert!(server.received_passwords().is_empty());
+}
+
+// ---- Local shells and serial ports ----
+
+impl RecordingSink {
+    fn data_text(&self) -> String {
+        String::from_utf8_lossy(&self.data.lock().unwrap()).into_owned()
+    }
+}
+
+#[tokio::test]
+async fn local_target_runs_and_ends() {
+    let w = PasswordWorld::new();
+    let manager = w.manager(
+        None,
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let shell = if cfg!(windows) {
+        sshcraft_local::pty::ShellCommand {
+            program: "cmd.exe".into(),
+            args: vec!["/c".into(), "echo sshcraft-tab".into()],
+            label: "echo".into(),
+        }
+    } else {
+        sshcraft_local::pty::ShellCommand {
+            program: "sh".into(),
+            args: vec!["-c".into(), "echo sshcraft-tab".into()],
+            label: "echo".into(),
+        }
+    };
+    let sink = Arc::new(RecordingSink::default());
+    let id = manager.open(SessionTarget::Local { shell }, 80, 24, sink.clone());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut answered = false;
+    while ended(&sink.statuses()).is_none() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{:?}",
+            sink.statuses()
+        );
+        // ConPTY waits for the cursor position; xterm.js answers it in the app.
+        if !answered && sink.data_text().contains("\u{1b}[6n") {
+            manager.write(id, b"\x1b[1;1R").unwrap();
+            answered = true;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::Exited));
+    assert!(sink.data_text().contains("sshcraft-tab"));
+    assert!(
+        !sink
+            .statuses()
+            .iter()
+            .any(|s| matches!(s, SessionStatus::Reconnecting { .. }))
+    );
+    assert!(w.store.lock().unwrap().recent_hosts(10).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn serial_with_invalid_settings_ends_with_error() {
+    let w = PasswordWorld::new();
+    let manager = w.manager(
+        None,
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    let settings = sshcraft_local::serial::SerialSettings {
+        port: "COM1".into(),
+        data_bits: 9,
+        ..Default::default()
+    };
+    manager.open(SessionTarget::Serial { settings }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::Error));
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::SerialFailed));
+}
+
+#[tokio::test]
+async fn missing_serial_port_fails_without_retrying() {
+    let w = PasswordWorld::new();
+    let manager = w.manager(
+        None,
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    let settings = sshcraft_local::serial::SerialSettings {
+        port: "sshcraft-no-such-port".into(),
+        ..Default::default()
+    };
+    manager.open(SessionTarget::Serial { settings }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::ConnectFailed));
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::SerialFailed));
+}
+
+// ---- Review fixes ----
+
+fn ended_detail(statuses: &[SessionStatus]) -> Option<String> {
+    statuses.iter().find_map(|s| match s {
+        SessionStatus::Ended { detail, .. } => detail.clone(),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn first_contact_withholds_stored_password() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::AuthCancelled));
+    assert!(server.received_passwords().is_empty());
+}
+
+#[tokio::test]
+async fn jump_failure_keeps_its_code_and_names_the_hop() {
+    let jump = password_server("a").await;
+    let target = password_server("b").await;
+    let w = PasswordWorld::new();
+    w.trust(&jump);
+    w.trust(&target);
+    let via = w.host(jump.port, Some("wrong"), Vec::new());
+    let host = w.host(target.port, Some("b"), vec![via]);
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(
+        ended_code(&sink.statuses()),
+        Some(ErrorCode::PasswordRejected)
+    );
+    assert_eq!(
+        ended_detail(&sink.statuses()),
+        Some(format!("host-{}", jump.port))
+    );
+}
+
+#[tokio::test]
+async fn missing_key_of_a_jump_host_names_the_hop() {
+    let jump = password_server("a").await;
+    let target = password_server("b").await;
+    let w = PasswordWorld::new();
+    let via = w.host(jump.port, None, Vec::new());
+    w.set(via, |s| {
+        s.key = Some(KeyRef::Stored {
+            id: sshcraft_core::model::KeyId::new(),
+        })
+    });
+    let host = w.host(target.port, Some("b"), vec![via]);
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(
+        ended_code(&sink.statuses()),
+        Some(ErrorCode::KeyNotOnDevice)
+    );
+    assert_eq!(
+        ended_detail(&sink.statuses()),
+        Some(format!("host-{}", jump.port))
+    );
+}
+
+#[tokio::test]
+async fn forwarding_without_an_agent_is_noted() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    w.set(host, |s| s.agent_forwarding = Some(true));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert!(sink.statuses().contains(&SessionStatus::Connected {
+        notice: Some(ErrorCode::AgentForwardingUnavailable)
+    }));
 }

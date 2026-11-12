@@ -1,0 +1,18 @@
+[package]
+name = "sshcraft-local"
+description = "Local terminal and serial connections for the SSHCraft desktop client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sshcraft-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+portable-pty = "0.9.0"
+# Without libudev: ports are listed from sysfs on Linux, no system library needed to build.
+serialport = { version = "4.10.1", default-features = false }
+
+[dev-dependencies]
+serde_json = { workspace = true }

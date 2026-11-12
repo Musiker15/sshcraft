@@ -175,6 +175,7 @@ pub fn parse(text: &str) -> ImportPlan {
                 port,
                 username,
                 key: None,
+                ..Default::default()
             },
             tags,
             os: os_from(&field(columns.os)),

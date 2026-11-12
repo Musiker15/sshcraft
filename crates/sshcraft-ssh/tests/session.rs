@@ -5,8 +5,8 @@ use russh::keys::{Algorithm, PrivateKey};
 use sshcraft_core::policy::Disconnect;
 use sshcraft_ssh::testing::{TestServer, flood_pattern, spawn_agent, spawn_stalled_agent};
 use sshcraft_ssh::{
-    ConnectParams, Credential, HostKeyVerifier, Shell, ShellEvent, SshError, connect,
-    list_agent_keys,
+    Auth, ConnectParams, Credential, HostKeyVerifier, NoPrompter, Shell, ShellEvent, SshError,
+    connect, list_agent_keys,
 };
 
 struct Verifier {
@@ -25,7 +25,13 @@ impl Verifier {
 
 #[async_trait::async_trait]
 impl HostKeyVerifier for Verifier {
-    async fn verify(&self, _address: &str, _port: u16, fingerprint: &str) -> bool {
+    async fn verify(
+        &self,
+        _host_name: &str,
+        _address: &str,
+        _port: u16,
+        fingerprint: &str,
+    ) -> bool {
         self.seen.lock().unwrap().push(fingerprint.to_owned());
         self.answer
     }
@@ -40,7 +46,7 @@ fn params(port: u16, key: PrivateKey) -> ConnectParams {
         address: "127.0.0.1".into(),
         port,
         username: "tester".into(),
-        credential: Credential::Key(key),
+        auth: Auth::key(Credential::Key(key)),
     }
 }
 
@@ -58,10 +64,10 @@ async fn agent_params(
         address: "127.0.0.1".into(),
         port,
         username: "tester".into(),
-        credential: Credential::Agent {
+        auth: Auth::key(Credential::Agent {
             fingerprint: fingerprint(wanted),
             agent: spawn_agent(agent_keys, confirm).await,
-        },
+        }),
     }
 }
 
@@ -94,9 +100,13 @@ async fn collect_until(
 #[tokio::test]
 async fn connects_and_echoes() {
     let (server, k) = setup().await;
-    let session = connect(params(server.port, k), Verifier::new(true))
-        .await
-        .unwrap();
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
     let mut shell = session.open_shell(80, 24).await.unwrap();
     shell.write(b"hi\n").await.unwrap();
     let (data, _) = collect_until(&mut shell, |b| b.windows(2).any(|w| w == b"hi")).await;
@@ -106,14 +116,24 @@ async fn connects_and_echoes() {
 #[tokio::test]
 async fn rejects_wrong_client_key() {
     let (server, _) = setup().await;
-    let result = connect(params(server.port, key()), Verifier::new(true)).await;
+    let result = connect(
+        params(server.port, key()),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await;
     assert_eq!(result.err(), Some(SshError::AuthFailed));
 }
 
 #[tokio::test]
 async fn verifier_false_aborts() {
     let (server, k) = setup().await;
-    let result = connect(params(server.port, k), Verifier::new(false)).await;
+    let result = connect(
+        params(server.port, k),
+        Verifier::new(false),
+        Arc::new(NoPrompter),
+    )
+    .await;
     assert_eq!(result.err(), Some(SshError::HostKeyRejected));
 }
 
@@ -121,9 +141,13 @@ async fn verifier_false_aborts() {
 async fn verifier_sees_server_fingerprint() {
     let (server, k) = setup().await;
     let verifier = Verifier::new(true);
-    connect(params(server.port, k), verifier.clone())
-        .await
-        .unwrap();
+    connect(
+        params(server.port, k),
+        verifier.clone(),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         *verifier.seen.lock().unwrap(),
         vec![server.host_fingerprint.clone()]
@@ -133,9 +157,13 @@ async fn verifier_sees_server_fingerprint() {
 #[tokio::test]
 async fn exit_yields_exited() {
     let (server, k) = setup().await;
-    let session = connect(params(server.port, k), Verifier::new(true))
-        .await
-        .unwrap();
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
     let mut shell = session.open_shell(80, 24).await.unwrap();
     shell.write(b"exit\n").await.unwrap();
     let (_, end) = collect_until(&mut shell, |_| false).await;
@@ -145,9 +173,13 @@ async fn exit_yields_exited() {
 #[tokio::test]
 async fn server_drop_yields_lost() {
     let (mut server, k) = setup().await;
-    let session = connect(params(server.port, k), Verifier::new(true))
-        .await
-        .unwrap();
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
     let mut shell = session.open_shell(80, 24).await.unwrap();
     server.stop();
     let (_, end) =
@@ -160,9 +192,13 @@ async fn server_drop_yields_lost() {
 #[tokio::test]
 async fn large_output_arrives_complete_and_in_order() {
     let (server, k) = setup().await;
-    let session = connect(params(server.port, k), Verifier::new(true))
-        .await
-        .unwrap();
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
     let mut shell = session.open_shell(80, 24).await.unwrap();
     let expected = flood_pattern();
     shell.write(b"flood\n").await.unwrap();
@@ -175,7 +211,11 @@ async fn large_output_arrives_complete_and_in_order() {
 async fn connects_with_agent_key() {
     let (server, k) = setup().await;
     let p = agent_params(server.port, std::slice::from_ref(&k), true, &k).await;
-    assert!(connect(p, Verifier::new(true)).await.is_ok());
+    assert!(
+        connect(p, Verifier::new(true), Arc::new(NoPrompter))
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]
@@ -184,7 +224,9 @@ async fn agent_without_that_key_fails() {
     let other = key();
     let p = agent_params(server.port, std::slice::from_ref(&other), true, &k).await;
     assert_eq!(
-        connect(p, Verifier::new(true)).await.err(),
+        connect(p, Verifier::new(true), Arc::new(NoPrompter))
+            .await
+            .err(),
         Some(SshError::AgentKeyMissing)
     );
 }
@@ -193,9 +235,12 @@ async fn agent_without_that_key_fails() {
 async fn agent_refusing_to_sign_fails() {
     let (server, k) = setup().await;
     let p = agent_params(server.port, std::slice::from_ref(&k), false, &k).await;
-    let result = tokio::time::timeout(Duration::from_secs(5), connect(p, Verifier::new(true)))
-        .await
-        .expect("must not hang");
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        connect(p, Verifier::new(true), Arc::new(NoPrompter)),
+    )
+    .await
+    .expect("must not hang");
     assert_eq!(result.err(), Some(SshError::AgentRefused));
 }
 
@@ -219,14 +264,17 @@ async fn stalled_agent_times_out_on_connect() {
         address: "127.0.0.1".into(),
         port: server.port,
         username: "tester".into(),
-        credential: Credential::Agent {
+        auth: Auth::key(Credential::Agent {
             fingerprint: fingerprint(&k),
             agent: spawn_stalled_agent(std::slice::from_ref(&k)).await,
-        },
+        }),
     };
-    let result = tokio::time::timeout(Duration::from_secs(8), connect(p, Verifier::new(true)))
-        .await
-        .expect("a stalled agent must not hang the connect");
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        connect(p, Verifier::new(true), Arc::new(NoPrompter)),
+    )
+    .await
+    .expect("a stalled agent must not hang the connect");
     assert!(
         matches!(result, Err(SshError::AgentUnavailable(_))),
         "{:?}",
@@ -246,9 +294,13 @@ async fn stalled_agent_times_out_on_list() {
 #[tokio::test]
 async fn exec_returns_output() {
     let (server, k) = setup().await;
-    let session = connect(params(server.port, k), Verifier::new(true))
-        .await
-        .unwrap();
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
     let out = session.exec("cat /etc/os-release", 4096).await.unwrap();
     assert_eq!(out, sshcraft_ssh::testing::TEST_EXEC_OUTPUT.as_bytes());
     let short = session.exec("cat /etc/os-release", 4).await.unwrap();

@@ -12,7 +12,7 @@ use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use serde::Serialize;
 use zeroize::Zeroizing;
 
-use crate::model::{KeyId, ServerId};
+use crate::model::{KeyId, PasswordId, ServerId};
 use crate::store::{KeyRecord, Store, StoreError};
 
 const FORMAT_VERSION: u8 = 1;
@@ -196,6 +196,26 @@ impl Vault {
         self.open_with(&secret_aad(label), sealed)
     }
 
+    /// Seals and stores a password under `id`, at `location`.
+    pub fn store_password(
+        &self,
+        store: &Store,
+        id: PasswordId,
+        secret: &str,
+        location: Option<ServerId>,
+    ) -> Result<(), VaultError> {
+        let sealed = self.seal_with(&password_aad(id), secret.as_bytes())?;
+        store.put_password_record(id, &sealed, location)?;
+        Ok(())
+    }
+
+    pub fn password(&self, store: &Store, id: PasswordId) -> Result<Zeroizing<String>, VaultError> {
+        let (sealed, _) = store.password_record(id)?.ok_or(VaultError::NotFound)?;
+        let plain = self.open_with(&password_aad(id), &sealed)?;
+        let text = std::str::from_utf8(&plain).map_err(|_| VaultError::Corrupt)?;
+        Ok(Zeroizing::new(text.to_owned()))
+    }
+
     pub fn generate_ed25519(&self, store: &Store, name: &str) -> Result<KeyInfo, VaultError> {
         let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
             .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
@@ -345,6 +365,12 @@ pub fn delete_key(store: &Store, id: KeyId) -> Result<(), VaultError> {
 #[cfg(test)]
 #[path = "vault_tests.rs"]
 mod tests;
+
+/// Binds a sealed password to its id, so it cannot be passed off as another password, a key or
+/// another secret.
+fn password_aad(id: PasswordId) -> Vec<u8> {
+    format!("password:{}", id.0).into_bytes()
+}
 
 /// Associated data for [`Vault::seal_secret`]; the prefix keeps it apart from key ids (16 bytes).
 fn secret_aad(label: &str) -> Vec<u8> {

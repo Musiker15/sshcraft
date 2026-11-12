@@ -21,6 +21,7 @@ fn host(key: Option<KeyRef>) -> Host {
             port: None,
             username: Some("root".into()),
             key,
+            ..Default::default()
         },
         location: None,
         tags: Vec::new(),

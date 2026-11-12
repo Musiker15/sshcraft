@@ -98,6 +98,18 @@ textarea {
   width: 100%;
 }
 
+/* The open list of a select is drawn by the system: give it the theme's colours, else Windows
+   shows light text on white. */
+select option,
+select optgroup {
+  background-color: var(--bg-raised);
+  color: var(--text);
+}
+
+select option:checked {
+  background-color: var(--bg-hover);
+}
+
 textarea {
   font-family: Consolas, monospace;
   min-height: 120px;
@@ -489,9 +501,14 @@ button.icon:hover {
   font-size: 18px;
 }
 
-.dialog .buttons {
+/* A row of buttons, anywhere: never glued together. */
+.buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.dialog .buttons {
   justify-content: flex-end;
 }
 
@@ -923,4 +940,89 @@ button.link[aria-current="page"] {
 }
 .import-dialog .row-form label {
   flex: 1;
+}
+
+/* Connection options in the host and group forms */
+.connection-more {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.connection-more[open] summary {
+  margin-bottom: 4px;
+}
+
+.connection-more summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.jump-list,
+.env-list {
+  display: grid;
+  gap: 6px;
+}
+
+.jump-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jump-row span {
+  flex: 1;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.env-row .error {
+  grid-column: 1 / -1;
+}
+
+.env-row input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.password-field {
+  display: grid;
+  gap: 4px;
+}
+
+.field-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.group-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Serial settings on the new tab page */
+.serial-form {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.serial-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
 }

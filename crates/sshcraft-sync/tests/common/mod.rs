@@ -287,6 +287,7 @@ pub fn sample_host(name: &str) -> Host {
             port: None,
             username: Some("root".into()),
             key: None,
+            ..Default::default()
         },
         location: None,
         tags: Vec::new(),

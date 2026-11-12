@@ -11,7 +11,12 @@ export function SessionStatusLine({ status }: { status: SessionStatus }) {
     case "connecting":
       return <div className="statusline">{t("session.status.connecting")}</div>;
     case "connected":
-      return <div className="statusline">{t("session.status.connected")}</div>;
+      return (
+        <div className="statusline">
+          {t("session.status.connected")}
+          {status.notice && <span className="warning-text"> · {t(`errors.${status.notice}`)}</span>}
+        </div>
+      );
     case "reconnecting":
       return (
         <div className="statusline warning">

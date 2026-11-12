@@ -67,3 +67,7 @@ Limits on purpose:
 
 No export contains a private key, a passphrase or anything else from the vault. A stored key
 appears only with its name and fingerprint, an agent key only with its fingerprint.
+
+How a host connects (passwords, identities, jump hosts, proxies, agent forwarding, environment
+variables) is in [connections.md](connections.md). The JSON export carries those settings too,
+with `has_password` instead of any password and identities by name.

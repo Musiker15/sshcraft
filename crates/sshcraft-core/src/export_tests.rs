@@ -171,3 +171,33 @@ fn json_subtree_keeps_inherited_values() {
         "kunden.example.org"
     );
 }
+
+#[test]
+fn export_json_has_no_password_ids() {
+    use crate::model::{PasswordId, Proxy, ProxyEndpoint};
+    let store = Store::open_in_memory().unwrap();
+    let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+    let (own, proxy) = (PasswordId::new(), PasswordId::new());
+    vault
+        .store_password(&store, own, "hunter2-sshcraft", None)
+        .unwrap();
+    vault
+        .store_password(&store, proxy, "hunter2-sshcraft", None)
+        .unwrap();
+    let mut h = host("web", None, None);
+    h.settings.password = Some(own);
+    h.settings.proxy = Some(Proxy::Socks5(ProxyEndpoint {
+        address: "proxy.example.org".into(),
+        port: 1080,
+        username: Some("p".into()),
+        password: Some(proxy),
+    }));
+    h.settings.agent_forwarding = Some(true);
+    store.upsert_host(&h).unwrap();
+    let json = export_json(&store, &ExportFilter::default()).unwrap();
+    assert!(json.contains("\"has_password\": true"), "{json}");
+    assert!(json.contains("proxy.example.org"));
+    assert!(!json.contains("hunter2"));
+    assert!(!json.contains(&own.0.to_string()), "{json}");
+    assert!(!json.contains(&proxy.0.to_string()), "{json}");
+}

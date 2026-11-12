@@ -173,6 +173,7 @@ pub fn candidates(sessions: &[Session]) -> ImportPlan {
                 port: port.filter(|p| *p != crate::model::DEFAULT_PORT),
                 username,
                 key: None,
+                ..Default::default()
             },
             key_note: Some(if key_file.is_empty() {
                 KeyNote::NoIdentityFile

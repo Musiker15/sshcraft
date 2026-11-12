@@ -1,18 +1,22 @@
-//! SSH session engine for SSHCraft: connect with a private key, verify the server's host key
-//! through the caller, run an interactive shell and stream its raw output bytes.
+//! SSH session engine for SSHCraft: connect with a key, a password or keyboard-interactive
+//! answers, verify the server's host key through the caller, run an interactive shell and stream
+//! its raw output bytes.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use russh::client::{self, Msg};
-use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{HashAlg, PrivateKey, PublicKeyOrCertificate};
 use russh::{ChannelMsg, ChannelWriteHalf};
 use sshcraft_core::policy::Disconnect;
 use tokio::sync::mpsc;
 
 #[cfg(windows)]
 pub mod agent;
+mod auth;
+mod proxy;
+pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter};
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -44,9 +48,9 @@ pub struct AgentKey {
 /// How long the agent may take to list its keys.
 const AGENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a signature may take; generous, because the user may have to confirm it.
-const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
 
-async fn agent_identities(
+pub(crate) async fn agent_identities(
     agent: &mut DynAgent,
 ) -> Result<Vec<russh::keys::agent::AgentIdentity>, SshError> {
     tokio::time::timeout(AGENT_REQUEST_TIMEOUT, agent.request_identities())
@@ -79,18 +83,83 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const KEEPALIVE_MAX: usize = 3;
 const EVENT_BUFFER: usize = 1024;
 const EXEC_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long reaching one hop may take: TCP, a proxy's handshake or a channel through the hop
+/// before.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A byte stream an SSH connection can run over: TCP, a proxy tunnel or a channel through a jump
+/// host.
+pub trait Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> Io for T {}
+
+/// One host on the way: its name (for host key questions and errors), where it is and how to
+/// sign in there. Each hop only ever gets its own credentials.
+pub struct Hop {
+    pub host_name: String,
+    pub address: String,
+    pub port: u16,
+    pub username: String,
+    pub auth: Auth,
+}
+
+/// A proxy for the first connection of a route.
+pub enum ProxyConfig {
+    Http(ProxyTarget),
+    Socks5(ProxyTarget),
+}
+
+pub struct ProxyTarget {
+    pub address: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<zeroize::Zeroizing<String>>,
+}
+
+/// Opens a fresh connection to the SSH agent whose keys a session may forward (the system agent,
+/// Proton Pass on Windows; never SSHCraft's own vault).
+#[async_trait::async_trait]
+pub trait AgentOpener: Send + Sync {
+    async fn open(&self) -> Result<Box<dyn Io>, SshError>;
+}
+
+/// What a session does besides the shell itself.
+#[derive(Default)]
+pub struct SessionOptions {
+    /// Forward this agent to the target (never to a jump host). `None`: no forwarding, and an
+    /// agent channel the server opens anyway is refused.
+    pub agent_forwarding: Option<Arc<dyn AgentOpener>>,
+    /// Sent before the shell starts; the server takes only what its `AcceptEnv` allows.
+    pub env: Vec<(String, String)>,
+}
+
+/// How to reach a host: the proxy (for the first connection only), then each hop in turn, the
+/// last one being the target.
+pub struct RouteParams {
+    pub hops: Vec<Hop>,
+    pub proxy: Option<ProxyConfig>,
+    pub options: SessionOptions,
+    pub connect_timeout: Duration,
+}
 
 pub struct ConnectParams {
     pub address: String,
     pub port: u16,
     pub username: String,
-    pub credential: Credential,
+    pub auth: Auth,
 }
 
-/// Decides whether to trust the server's host key. Fingerprints look like `SHA256:…`.
+/// Decides whether to trust the server's host key. Fingerprints look like `SHA256:…`;
+/// `host_name` names the hop the question is about.
 #[async_trait::async_trait]
 pub trait HostKeyVerifier: Send + Sync {
-    async fn verify(&self, address: &str, port: u16, fingerprint: &str) -> bool;
+    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
+
+    /// Whether the host key of this server was trusted only during this connection (a first
+    /// contact). A stored password never goes to such a server: the address may have been
+    /// changed by someone else, so the user is asked instead.
+    fn first_contact(&self, _address: &str, _port: u16) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -111,6 +180,20 @@ pub enum SshError {
     AgentRefused,
     #[error("the command did not finish in time")]
     Timeout,
+    #[error("sign-in was cancelled")]
+    AuthCancelled,
+    #[error("the server rejected the password")]
+    PasswordRejected,
+    #[error("the proxy failed: {0}")]
+    Proxy(String),
+    #[error("the proxy rejected the credentials")]
+    ProxyAuthFailed,
+    #[error("jump host {host_name}: {error}")]
+    Hop {
+        index: usize,
+        host_name: String,
+        error: Box<SshError>,
+    },
 }
 
 impl From<&SshError> for Disconnect {
@@ -120,25 +203,28 @@ impl From<&SshError> for Disconnect {
             SshError::AuthFailed
             | SshError::AgentUnavailable(_)
             | SshError::AgentKeyMissing
-            | SshError::AgentRefused => Disconnect::AuthFailed,
+            | SshError::AgentRefused
+            | SshError::AuthCancelled
+            | SshError::PasswordRejected => Disconnect::AuthFailed,
             SshError::Connect(m) | SshError::Protocol(m) => Disconnect::Lost(m.clone()),
             SshError::Timeout => Disconnect::Lost("timed out".into()),
+            SshError::ProxyAuthFailed => Disconnect::AuthFailed,
+            SshError::Proxy(m) => Disconnect::Lost(m.clone()),
+            SshError::Hop { error, .. } => Disconnect::from(error.as_ref()),
         }
     }
 }
 
-fn protocol(e: impl std::fmt::Display) -> SshError {
+pub(crate) fn protocol(e: impl std::fmt::Display) -> SshError {
     SshError::Protocol(e.to_string())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ShellEvent {
-    /// Raw bytes from the remote terminal, not decoded.
-    Data(Vec<u8>),
-    Ended(Disconnect),
-}
+pub use sshcraft_core::policy::ShellEvent;
 
 struct ClientHandler {
+    /// Set on the target when forwarding is on; jump hosts never get the agent.
+    agent: Option<Arc<dyn AgentOpener>>,
+    host_name: String,
     address: String,
     port: u16,
     verifier: Arc<dyn HostKeyVerifier>,
@@ -159,18 +245,44 @@ impl client::Handler for ClientHandler {
         let fingerprint = key_data.fingerprint(HashAlg::Sha256).to_string();
         let trusted = self
             .verifier
-            .verify(&self.address, self.port, &fingerprint)
+            .verify(&self.host_name, &self.address, self.port, &fingerprint)
             .await;
         if !trusted {
             self.rejected.store(true, Ordering::SeqCst);
         }
         Ok(trusted)
     }
+
+    /// Only the target with forwarding switched on gets a channel to the agent; dropping the
+    /// reply refuses it.
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(opener) = self.agent.clone() else {
+            return Ok(());
+        };
+        let Ok(mut agent) = opener.open().await else {
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut agent).await;
+        });
+        Ok(())
+    }
 }
 
 /// An authenticated SSH connection. Shells opened from it keep it alive.
 pub struct Session {
     handle: Arc<client::Handle<ClientHandler>>,
+    env: Arc<Vec<(String, String)>>,
+    forward_agent: bool,
+    /// The jump hosts' connections the session runs through, kept open while it lives.
+    jumps: Arc<Vec<client::Handle<ClientHandler>>>,
 }
 
 pub struct Shell {
@@ -183,80 +295,135 @@ pub struct Shell {
 pub struct ShellWriter {
     channel: Arc<ChannelWriteHalf<Msg>>,
     _session: Arc<client::Handle<ClientHandler>>,
+    _jumps: Arc<Vec<client::Handle<ClientHandler>>>,
 }
 
-pub async fn connect(
-    params: ConnectParams,
-    verifier: Arc<dyn HostKeyVerifier>,
-) -> Result<Session, SshError> {
-    let config = Arc::new(client::Config {
+/// The client settings for every hop: keep-alive, and russh's default algorithms, which put the
+/// post-quantum key exchange `mlkem768x25519-sha256` first.
+pub fn client_config() -> client::Config {
+    client::Config {
         keepalive_interval: Some(KEEPALIVE_INTERVAL),
         keepalive_max: KEEPALIVE_MAX,
         ..Default::default()
-    });
-    let rejected = Arc::new(AtomicBool::new(false));
-    let handler = ClientHandler {
-        address: params.address.clone(),
-        port: params.port,
-        verifier,
-        rejected: rejected.clone(),
-    };
-    let mut handle = client::connect(config, (params.address.as_str(), params.port), handler)
-        .await
-        .map_err(|e| {
-            if rejected.load(Ordering::SeqCst) {
-                SshError::HostKeyRejected
-            } else {
-                SshError::Connect(e.to_string())
-            }
-        })?;
-    let hash = handle
-        .best_supported_rsa_hash()
-        .await
-        .map_err(protocol)?
-        .flatten();
-    let auth = match params.credential {
-        Credential::Key(key) => handle
-            .authenticate_publickey(
-                params.username,
-                PrivateKeyWithHashAlg::new(Arc::new(key), hash),
-            )
-            .await
-            .map_err(protocol)?,
-        Credential::Agent {
-            fingerprint,
-            mut agent,
-        } => {
-            let identities = agent_identities(&mut agent).await?;
-            let identity = identities
-                .into_iter()
-                .find(|i| i.public_key().fingerprint(HashAlg::Sha256).to_string() == fingerprint)
-                .ok_or(SshError::AgentKeyMissing)?;
-            let signed = handle.authenticate_publickey_with(
-                params.username,
-                identity.public_key().into_owned(),
-                hash,
-                &mut agent,
-            );
-            tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
-                .await
-                .map_err(|_| SshError::AgentUnavailable("no answer while signing".into()))?
-                .map_err(|e| match e {
-                    russh::AgentAuthError::Key(russh::keys::Error::AgentFailure) => {
-                        SshError::AgentRefused
-                    }
-                    russh::AgentAuthError::Key(other) => {
-                        SshError::AgentUnavailable(other.to_string())
-                    }
-                    other => protocol(other),
-                })?
-        }
-    };
-    if !auth.success() {
-        return Err(SshError::AuthFailed);
     }
+}
+
+/// Connects to one host directly.
+pub async fn connect(
+    params: ConnectParams,
+    verifier: Arc<dyn HostKeyVerifier>,
+    prompter: Arc<dyn AuthPrompter>,
+) -> Result<Session, SshError> {
+    let hop = Hop {
+        host_name: params.address.clone(),
+        address: params.address,
+        port: params.port,
+        username: params.username,
+        auth: params.auth,
+    };
+    connect_route(
+        RouteParams {
+            hops: vec![hop],
+            proxy: None,
+            options: SessionOptions::default(),
+            connect_timeout: CONNECT_TIMEOUT,
+        },
+        verifier,
+        prompter,
+    )
+    .await
+}
+
+/// Connects along a route: the first hop over TCP or the proxy, each further hop through a
+/// `direct-tcpip` channel of the one before. Each hop checks its own host key and signs in with
+/// its own credentials. A failure at a jump host comes as [`SshError::Hop`].
+pub async fn connect_route(
+    params: RouteParams,
+    verifier: Arc<dyn HostKeyVerifier>,
+    prompter: Arc<dyn AuthPrompter>,
+) -> Result<Session, SshError> {
+    let config = Arc::new(client_config());
+    let last = params
+        .hops
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| SshError::Connect("no host to connect to".into()))?;
+    let timeout = params.connect_timeout;
+    let mut connected: Vec<client::Handle<ClientHandler>> = Vec::new();
+    for (index, hop) in params.hops.into_iter().enumerate() {
+        let host_name = hop.host_name.clone();
+        let wrap = |error: SshError| {
+            if index < last {
+                SshError::Hop {
+                    index,
+                    host_name: host_name.clone(),
+                    error: Box::new(error),
+                }
+            } else {
+                error
+            }
+        };
+        let stream: Box<dyn Io> = match connected.last() {
+            None => proxy::open(params.proxy.as_ref(), &hop.address, hop.port, timeout)
+                .await
+                .map_err(wrap)?,
+            Some(before) => {
+                let opened = before.channel_open_direct_tcpip(
+                    hop.address.clone(),
+                    u32::from(hop.port),
+                    "127.0.0.1",
+                    0,
+                );
+                let channel = tokio::time::timeout(timeout, opened)
+                    .await
+                    .map_err(|_| wrap(SshError::Connect("timed out".into())))?
+                    .map_err(|e| wrap(SshError::Connect(e.to_string())))?;
+                Box::new(channel.into_stream())
+            }
+        };
+        let rejected = Arc::new(AtomicBool::new(false));
+        let handler = ClientHandler {
+            agent: if index == last {
+                params.options.agent_forwarding.clone()
+            } else {
+                None
+            },
+            host_name: hop.host_name.clone(),
+            address: hop.address.clone(),
+            port: hop.port,
+            verifier: verifier.clone(),
+            rejected: rejected.clone(),
+        };
+        let mut handle = client::connect_stream(config.clone(), stream, handler)
+            .await
+            .map_err(|e| {
+                wrap(if rejected.load(Ordering::SeqCst) {
+                    SshError::HostKeyRejected
+                } else {
+                    SshError::Connect(e.to_string())
+                })
+            })?;
+        let mut credentials = hop.auth;
+        if verifier.first_contact(&hop.address, hop.port) {
+            credentials.password = None;
+        }
+        auth::authenticate(
+            &mut handle,
+            &hop.username,
+            &hop.host_name,
+            credentials,
+            prompter.as_ref(),
+        )
+        .await
+        .map_err(wrap)?;
+        connected.push(handle);
+    }
+    let handle = connected.pop().expect("at least one hop");
     Ok(Session {
         handle: Arc::new(handle),
+        env: Arc::new(params.options.env),
+        forward_agent: params.options.agent_forwarding.is_some(),
+        jumps: Arc::new(connected),
     })
 }
 
@@ -295,6 +462,15 @@ impl Session {
             .request_pty(false, TERM, cols, rows, 0, 0, &[])
             .await
             .map_err(protocol)?;
+        for (name, value) in self.env.iter() {
+            channel
+                .set_env(false, name.as_str(), value.as_str())
+                .await
+                .map_err(protocol)?;
+        }
+        if self.forward_agent {
+            channel.agent_forward(false).await.map_err(protocol)?;
+        }
         channel.request_shell(false).await.map_err(protocol)?;
         let (mut read, write) = channel.split();
         let (tx, rx) = mpsc::channel(EVENT_BUFFER);
@@ -330,6 +506,7 @@ impl Session {
             writer: ShellWriter {
                 channel: Arc::new(write),
                 _session: self.handle.clone(),
+                _jumps: self.jumps.clone(),
             },
         })
     }
@@ -339,6 +516,11 @@ impl Session {
             .handle
             .disconnect(russh::Disconnect::ByApplication, "", "en")
             .await;
+        for jump in self.jumps.iter().rev() {
+            let _ = jump
+                .disconnect(russh::Disconnect::ByApplication, "", "en")
+                .await;
+        }
     }
 }
 

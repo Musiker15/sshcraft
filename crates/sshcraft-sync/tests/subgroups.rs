@@ -78,7 +78,7 @@ async fn subgroups_reach_other_devices() {
     assert_eq!(on_y.tags, vec!["prod".to_owned()]);
     assert_eq!(on_y.os, Some(sshcraft_core::model::HostOs::Debian));
     let refs: Vec<&Group> = chain.iter().collect();
-    let resolved = resolve(&on_y, &refs).unwrap();
+    let resolved = resolve(&on_y, &refs, &[]).unwrap();
     assert_eq!(
         (resolved.address.as_str(), resolved.username.as_str()),
         ("top.example.org", "deploy")

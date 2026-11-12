@@ -31,6 +31,7 @@ encrypted vault.
 | Roadmap (German) | [docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md](docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md) |
 | Protocol and cryptography | [docs/protocol.md](docs/protocol.md) |
 | Hosts, groups, import and export | [docs/hosts.md](docs/hosts.md) |
+| Connections: passwords, identities, jump hosts, proxies, local and serial | [docs/connections.md](docs/connections.md) |
 | Sync on the device | [docs/sync.md](docs/sync.md) |
 | Running the sync server | [docs/server.md](docs/server.md) |
 | Sync server API | [docs/server-api.md](docs/server-api.md) |

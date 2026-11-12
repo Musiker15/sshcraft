@@ -46,10 +46,12 @@ the account key uses it to read the area keys.
 
 ## What syncs
 
-Per server you can switch **Sync** on or off and choose whether **keys** sync too. With key sync
-off, keys stay on the device; a synced host that uses a key shows *Key missing on this device*
-on the other devices until you assign one there. Keys from the Proton Pass agent never sync,
-only the reference to them.
+Per server you can switch **Sync** on or off and choose whether **keys and passwords** sync too.
+With that off, keys and stored passwords stay on the device; a synced host that uses a key shows
+*Key missing on this device* on the other devices until you assign one there, and asks for its
+password when connecting. Keys from the Proton Pass agent never sync, only the reference to them.
+Identities always sync; their key and password go along only under the same rule. A password
+lives where its host, group or identity lives and moves with it.
 
 Everything is sealed on the device before it leaves it: the server sees ciphertext, version
 numbers and who wrote what, never names, addresses, users or keys.
@@ -130,6 +132,13 @@ device log on its next sync and replaces the share's key.
 first recipient who may change it (see [server.md](server.md)). That recipient's app signs the
 share anew as its owner with a new key; the other recipients accept the change only because the
 new owner was a recipient with *read and change* before.
+
+**Passwords and identities in shares.** Passwords (of hosts, groups, identities and proxies)
+follow the *with keys* choice exactly like keys: shared with keys, recipients get them; without,
+they do not. Identities always go along with a group shared with all hosts, so recipients have
+the user; in a selection or a single host, the copies carry the identity's values instead of the
+identity. Recipients cannot change keys, passwords or identities of a share, also not with write;
+a record of one of them that does not come from the owner is refused.
 
 ## What the app refuses
 

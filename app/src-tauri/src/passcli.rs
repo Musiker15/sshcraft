@@ -77,12 +77,66 @@ fn malformed() -> PassCliError {
     PassCliError::Failed("unerwartete Ausgabe".into())
 }
 
+/// The share ids of `pass-cli vault list --output json`.
+pub fn parse_vault_list(json: &str) -> Result<Vec<String>, PassCliError> {
+    let value: Value = serde_json::from_str(json).map_err(|_| malformed())?;
+    let vaults = value["vaults"].as_array().ok_or_else(malformed)?;
+    Ok(vaults
+        .iter()
+        .filter_map(|v| v["share_id"].as_str().map(str::to_owned))
+        .collect())
+}
+
+/// Lists the active SSH keys of one vault. Since pass-cli 2.7, `item list` needs a vault.
+pub fn item_list_args(share_id: &str) -> Vec<&str> {
+    vec![
+        "item",
+        "list",
+        "--share-id",
+        share_id,
+        "--filter-type",
+        "ssh-key",
+        "--filter-state",
+        "active",
+        "--output",
+        "json",
+    ]
+}
+
+/// The keys of every vault that could be listed, by title; a vault that fails (no rights, for
+/// example) is skipped. Only when every vault fails is that an error.
+pub fn merge_key_lists(
+    lists: Vec<Result<Vec<PassKey>, PassCliError>>,
+) -> Result<Vec<PassKey>, PassCliError> {
+    let mut keys = Vec::new();
+    let mut first_error = None;
+    let mut any_ok = lists.is_empty();
+    for list in lists {
+        match list {
+            Ok(list) => {
+                any_ok = true;
+                keys.extend(list);
+            }
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    if !any_ok && let Some(e) = first_error {
+        return Err(e);
+    }
+    keys.sort_by_key(|k| k.title.to_lowercase());
+    Ok(keys)
+}
+
 pub fn parse_key_list(json: &str) -> Result<Vec<PassKey>, PassCliError> {
     let value: Value = serde_json::from_str(json).map_err(|_| malformed())?;
     let items = value["items"].as_array().ok_or_else(malformed)?;
     Ok(items
         .iter()
         .filter(|item| item["item_type"] == "ssh_key")
+        // Older pass-cli versions have no state; only an explicit "trashed" is left out.
+        .filter(|item| item["state"] != "trashed")
         .filter_map(|item| {
             Some(PassKey {
                 share_id: item["share_id"].as_str()?.to_owned(),
@@ -301,10 +355,28 @@ impl PassCli for PassCliProcess {
         }
     }
 
+    /// Every vault's active SSH keys; the vaults are asked at the same time, each call of
+    /// pass-cli takes a second or more.
     fn list_ssh_keys(&self) -> Result<Vec<PassKey>, PassCliError> {
         ensure_ready(self.status())?;
-        let out = self.run(&["item", "list", "--output", "json"], None, QUICK_LIMIT)?;
-        parse_key_list(&String::from_utf8_lossy(&out))
+        let vaults = self.run(&["vault", "list", "--output", "json"], None, QUICK_LIMIT)?;
+        let shares = parse_vault_list(&String::from_utf8_lossy(&vaults))?;
+        let lists: Vec<Result<Vec<PassKey>, PassCliError>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = shares
+                .iter()
+                .map(|share| {
+                    scope.spawn(move || {
+                        let out = self.run(&item_list_args(share), None, QUICK_LIMIT)?;
+                        parse_key_list(&String::from_utf8_lossy(&out))
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_else(|_| Err(malformed())))
+                .collect()
+        });
+        merge_key_lists(lists)
     }
 
     fn private_key(

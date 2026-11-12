@@ -7,6 +7,7 @@ pub mod account;
 pub mod areas;
 pub mod client;
 pub mod contacts;
+pub mod creds;
 pub mod devices;
 pub mod engine;
 pub mod items;
