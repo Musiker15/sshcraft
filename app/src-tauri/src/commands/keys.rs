@@ -8,14 +8,15 @@ use sshcraft_core::vault::{self, KeyInfo, Vault};
 use tauri::State;
 use zeroize::Zeroizing;
 
-use super::{CommandError, CommandResult};
+use super::{CommandError, CommandResult, ErrorCode};
 use crate::passcli::{self, PassCli, PassCliError, PassCliProcess, PassCliStatus, PassKey};
 use crate::state::AppState;
 
 #[derive(Serialize)]
 pub struct VaultStatus {
     ok: bool,
-    error: Option<String>,
+    code: Option<ErrorCode>,
+    detail: Option<String>,
 }
 
 #[tauri::command]
@@ -23,20 +24,22 @@ pub fn vault_status(state: State<'_, AppState>) -> VaultStatus {
     match &state.vault {
         Ok(_) => VaultStatus {
             ok: true,
-            error: None,
+            code: None,
+            detail: None,
         },
         Err(e) => VaultStatus {
             ok: false,
-            error: Some(e.clone()),
+            code: Some(e.code),
+            detail: e.detail.clone(),
         },
     }
 }
 
 fn unlocked(state: &AppState) -> CommandResult<Arc<Vault>> {
-    state
-        .vault
-        .clone()
-        .map_err(|e| CommandError::new("vault_locked", e))
+    state.vault.clone().map_err(|e| CommandError {
+        code: ErrorCode::VaultLocked,
+        detail: e.detail,
+    })
 }
 
 /// Runs blocking key work off the main thread, so the window and terminals stay responsive.
@@ -45,7 +48,7 @@ async fn blocking<T: Send + 'static>(
 ) -> CommandResult<T> {
     tokio::task::spawn_blocking(work)
         .await
-        .map_err(|e| CommandError::new("internal", e))?
+        .map_err(|e| CommandError::new(ErrorCode::Internal, e))?
 }
 
 #[derive(Serialize)]
@@ -142,8 +145,8 @@ pub async fn list_agent_keys() -> CommandResult<Vec<sshcraft_ssh::AgentKey>> {
     let mut agent = WindowsAgent
         .connect()
         .await
-        .map_err(|e| CommandError::new("agent_unavailable", e))?;
+        .map_err(|e| CommandError::new(ErrorCode::AgentUnavailable, e))?;
     sshcraft_ssh::list_agent_keys(&mut agent)
         .await
-        .map_err(|e| CommandError::new("agent_unavailable", e))
+        .map_err(|e| CommandError::new(ErrorCode::AgentUnavailable, e))
 }

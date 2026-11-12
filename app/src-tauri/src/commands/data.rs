@@ -1,9 +1,9 @@
 //! Groups, hosts and stored host keys.
 
-use sshcraft_core::model::{DEFAULT_PORT, Group, GroupId, Host, HostId};
+use sshcraft_core::model::{Group, GroupId, Host, HostId, effective_endpoint};
 use tauri::State;
 
-use super::{CommandError, CommandResult};
+use super::{CommandError, CommandResult, ErrorCode};
 use crate::state::AppState;
 
 fn store(state: &AppState) -> std::sync::MutexGuard<'_, sshcraft_core::store::Store> {
@@ -48,26 +48,11 @@ pub fn forget_host_key(state: State<'_, AppState>, host_id: HostId) -> CommandRe
         .list_hosts()?
         .into_iter()
         .find(|h| h.id == host_id)
-        .ok_or_else(|| CommandError::new("not_found", "host not found"))?;
+        .ok_or_else(|| CommandError::code(ErrorCode::NotFound))?;
     let group = match host.group_id {
         Some(gid) => store.list_groups()?.into_iter().find(|g| g.id == gid),
         None => None,
     };
-    let inherited = group.as_ref().map(|g| &g.defaults);
-    let address = [
-        host.settings.address.as_deref(),
-        inherited.and_then(|d| d.address.as_deref()),
-    ]
-    .into_iter()
-    .flatten()
-    .map(str::trim)
-    .find(|a| !a.is_empty())
-    .ok_or_else(|| CommandError::new("incomplete", "host has no address"))?
-    .to_owned();
-    let port = host
-        .settings
-        .port
-        .or_else(|| inherited.and_then(|d| d.port))
-        .unwrap_or(DEFAULT_PORT);
+    let (address, port) = effective_endpoint(&host, group.as_ref())?;
     Ok(store.forget_known_host(&address, port)?)
 }

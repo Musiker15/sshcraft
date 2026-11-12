@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { errorMessage, saveGroup, type Group, type KeyInfo } from "../api";
+import { saveGroup, type Group, type KeyInfo } from "../api";
+import { errorText } from "../i18n/errors";
+import { useT } from "../i18n/i18n";
 import { fromConnectionSettings, toConnectionSettings } from "../forms/hostForm";
 import { SettingsFields } from "./SettingsFields";
 
 type Props = { group?: Group; keys: KeyInfo[]; onDone: () => void; onCancel: () => void };
 
 export function GroupForm({ group, keys, onDone, onCancel }: Props) {
+  const t = useT();
   const [name, setName] = useState(group?.name ?? "");
   const [values, setValues] = useState(
     fromConnectionSettings(group?.defaults ?? { address: null, port: null, username: null, key: null }),
@@ -18,7 +21,7 @@ export function GroupForm({ group, keys, onDone, onCancel }: Props) {
       await saveGroup({ id: group?.id ?? crypto.randomUUID(), name: name.trim(), defaults: toConnectionSettings(values) });
       onDone();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(errorText(t, e));
     }
   }
 

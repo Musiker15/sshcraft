@@ -4,7 +4,6 @@ import {
   answerHostKey,
   deleteGroup,
   deleteHost,
-  errorMessage,
   listGroups,
   listHosts,
   listKeys,
@@ -14,7 +13,10 @@ import {
   type Host,
   type HostKeyPrompt,
   type KeyInfo,
+  type VaultStatus,
 } from "./api";
+import { errorText } from "./i18n/errors";
+import { useT } from "./i18n/i18n";
 import { GroupForm } from "./components/GroupForm";
 import { HostForm } from "./components/HostForm";
 import { HostKeyDialog } from "./components/HostKeyDialog";
@@ -32,10 +34,11 @@ type Editor =
   | null;
 
 function App() {
+  const t = useT();
   const [groups, setGroups] = useState<Group[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
-  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [vault, setVault] = useState<VaultStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor>(null);
   const [prompts, setPrompts] = useState<HostKeyPrompt[]>([]);
@@ -57,13 +60,13 @@ function App() {
       setKeys(k);
       setLoadError(null);
     } catch (e) {
-      setLoadError(errorMessage(e));
+      setLoadError(errorText(t, e));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();
-    void vaultStatus().then((s) => setVaultError(s.ok ? null : s.error));
+    void vaultStatus().then((s) => setVault(s.ok ? null : s));
     const unlisten = listen<HostKeyPrompt>("host-key-prompt", (event) =>
       setPrompts((queue) => [...queue, event.payload]),
     );
@@ -82,7 +85,7 @@ function App() {
       await action();
       await reload();
     } catch (e) {
-      alert(errorMessage(e));
+      alert(errorText(t, e));
     }
   }
 
@@ -109,20 +112,19 @@ function App() {
         onSshConfig={() => setEditor({ kind: "sshconfig" })}
       />
       <main className="main">
-        {vaultError && (
+        {vault && (
           <div className="banner">
-            Die gespeicherten Schlüssel lassen sich nicht entschlüsseln: Der Hauptschlüssel fehlt in der
-            Windows-Anmeldeinformationsverwaltung (Eintrag „de.musiker15.sshcraft“). Stellst du ihn wieder her und
-            startest SSHCraft neu, sind alle Schlüssel wieder da. ({vaultError})
+            {vault.code === "master_key_missing"
+              ? t("banner.vault.master_key_missing")
+              : t("banner.vault.other", { reason: errorText(t, vault) })}
           </div>
         )}
         {loadError && <div className="banner">{loadError}</div>}
         {helloMissing && !helloDismissed && (
           <div className="banner">
-            Windows Hello ist auf diesem PC nicht eingerichtet. Gespeicherte Schlüssel sind dann nur durch dein
-            Windows-Konto geschützt.{" "}
+            {t("banner.hello")}{" "}
             <button className="link" onClick={() => setHelloDismissed(true)}>
-              Ausblenden
+              {t("common.dismiss")}
             </button>
           </div>
         )}

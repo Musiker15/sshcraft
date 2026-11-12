@@ -25,6 +25,7 @@ directories = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
+strum = { version = "0.28.0", features = ["derive"] }
 
 russh = { workspace = true }
 

@@ -6,7 +6,7 @@ use sshcraft_core::model::HostId;
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
-use super::{CommandError, CommandResult};
+use super::{CommandError, CommandResult, ErrorCode};
 use crate::sessions::{SessionId, SessionSink, SessionStatus};
 use crate::state::AppState;
 
@@ -51,7 +51,7 @@ pub fn session_write(
     state
         .sessions
         .write(id, &data)
-        .map_err(|e| CommandError::new("session", e))
+        .map_err(|e| CommandError::new(ErrorCode::Session, e))
 }
 
 /// The UI has rendered `bytes` output bytes of this session.
@@ -71,7 +71,7 @@ pub async fn session_resize(
         .sessions
         .resize(id, cols, rows)
         .await
-        .map_err(|e| CommandError::new("session", e))
+        .map_err(|e| CommandError::new(ErrorCode::Session, e))
 }
 
 #[tauri::command]

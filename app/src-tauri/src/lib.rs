@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod errors;
 pub mod hello;
 pub mod passcli;
 pub mod sessions;

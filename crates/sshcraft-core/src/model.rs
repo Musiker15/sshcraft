@@ -99,15 +99,9 @@ pub fn resolve(host: &Host, group: Option<&Group>) -> Result<ResolvedHost, Resol
         non_empty(own).or_else(|| from_group.and_then(non_empty))
     };
 
-    let address = text(&host.settings.address, inherited.map(|d| &d.address))
-        .ok_or(ResolveError::MissingAddress)?;
+    let (address, port) = endpoint(host, inherited)?;
     let username = text(&host.settings.username, inherited.map(|d| &d.username))
         .ok_or(ResolveError::MissingUsername)?;
-    let port = host
-        .settings
-        .port
-        .or_else(|| inherited.and_then(|d| d.port))
-        .unwrap_or(DEFAULT_PORT);
     let key = host
         .settings
         .key
@@ -123,6 +117,35 @@ pub fn resolve(host: &Host, group: Option<&Group>) -> Result<ResolvedHost, Resol
         username,
         key,
     })
+}
+
+/// Address and port of a host after inheriting from its group. Needs neither a username nor a
+/// key, so it also works for half-filled hosts (for example to forget a stored host key).
+pub fn effective_endpoint(
+    host: &Host,
+    group: Option<&Group>,
+) -> Result<(String, u16), ResolveError> {
+    if let Some(g) = group
+        && host.group_id != Some(g.id)
+    {
+        return Err(ResolveError::WrongGroup);
+    }
+    endpoint(host, group.map(|g| &g.defaults))
+}
+
+fn endpoint(
+    host: &Host,
+    inherited: Option<&ConnectionSettings>,
+) -> Result<(String, u16), ResolveError> {
+    let address = non_empty(&host.settings.address)
+        .or_else(|| inherited.and_then(|d| non_empty(&d.address)))
+        .ok_or(ResolveError::MissingAddress)?;
+    let port = host
+        .settings
+        .port
+        .or_else(|| inherited.and_then(|d| d.port))
+        .unwrap_or(DEFAULT_PORT);
+    Ok((address, port))
 }
 
 fn non_empty(value: &Option<String>) -> Option<String> {
@@ -274,5 +297,40 @@ mod tests {
         let g = full_group(&agent);
         let h = host_in(&g, ConnectionSettings::default());
         assert_eq!(resolve(&h, Some(&g)).unwrap().key, agent);
+    }
+
+    #[test]
+    fn effective_endpoint_inherits_address_and_port() {
+        let g = group(ConnectionSettings {
+            address: Some("10.0.0.5".into()),
+            port: Some(2222),
+            ..Default::default()
+        });
+        let h = host_in(&g, ConnectionSettings::default());
+        assert_eq!(
+            effective_endpoint(&h, Some(&g)).unwrap(),
+            ("10.0.0.5".to_owned(), 2222)
+        );
+    }
+
+    #[test]
+    fn effective_endpoint_needs_no_username_or_key() {
+        let mut h = host_in(
+            &group(ConnectionSettings::default()),
+            ConnectionSettings {
+                address: Some(" example.org ".into()),
+                ..Default::default()
+            },
+        );
+        h.group_id = None;
+        assert_eq!(
+            effective_endpoint(&h, None).unwrap(),
+            ("example.org".to_owned(), 22)
+        );
+        h.settings.address = Some("  ".into());
+        assert_eq!(
+            effective_endpoint(&h, None),
+            Err(ResolveError::MissingAddress)
+        );
     }
 }

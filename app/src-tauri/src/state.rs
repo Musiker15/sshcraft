@@ -15,7 +15,7 @@ use crate::sessions::{HostKeyPrompter, SessionManager, WindowsAgent};
 
 pub struct AppState {
     pub store: Arc<Mutex<Store>>,
-    pub vault: Result<Arc<Vault>, String>,
+    pub vault: Result<Arc<Vault>, crate::errors::CommandError>,
     pub sessions: SessionManager,
     pub prompter: Arc<TauriPrompter>,
 }
@@ -28,7 +28,7 @@ impl AppState {
         let store = Store::open(&dirs.data_dir().join("sshcraft.db"))?;
         let vault = Vault::unlock(&store, Box::new(KeyringMasterKey))
             .map(Arc::new)
-            .map_err(|e| e.to_string());
+            .map_err(crate::errors::CommandError::from);
         let store = Arc::new(Mutex::new(store));
         let prompter = Arc::new(TauriPrompter::new(app.clone()));
         let sessions = SessionManager::new(

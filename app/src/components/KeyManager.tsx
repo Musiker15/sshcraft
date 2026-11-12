@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { deleteKey, errorMessage, generateKey, importKey, type KeyInfo } from "../api";
+import { deleteKey, generateKey, importKey, type KeyInfo } from "../api";
+import { errorText } from "../i18n/errors";
+import { useT } from "../i18n/i18n";
 import { ProtonPassImport } from "./ProtonPassImport";
 
 type Props = { keys: KeyInfo[]; onChanged: () => void; onClose: () => void };
 
 export function KeyManager({ keys, onChanged, onClose }: Props) {
+  const t = useT();
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [passphrase, setPassphrase] = useState("");
@@ -21,7 +24,7 @@ export function KeyManager({ keys, onChanged, onClose }: Props) {
       setName("");
       onChanged();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(errorText(t, e));
     } finally {
       setBusy(false);
     }

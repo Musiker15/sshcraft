@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
-import { errorMessage, importFromPassCli, passCliListKeys, passCliStatus, type PassCliStatus, type PassKey } from "../api";
+import { importFromPassCli, passCliListKeys, passCliStatus, type PassCliStatus, type PassKey } from "../api";
+import { errorText } from "../i18n/errors";
+import { useT } from "../i18n/i18n";
 
 /** Lists SSH keys in Proton Pass (via pass-cli) and imports a chosen one into the vault. */
 export function ProtonPassImport({ onImported }: { onImported: () => void }) {
+  const t = useT();
   const [status, setStatus] = useState<PassCliStatus | "loading">("loading");
   const [keys, setKeys] = useState<PassKey[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -12,11 +15,11 @@ export function ProtonPassImport({ onImported }: { onImported: () => void }) {
     passCliStatus().then(
       (s) => {
         setStatus(s);
-        if (s === "ready") passCliListKeys().then(setKeys, (e) => setMessage(errorMessage(e)));
+        if (s === "ready") passCliListKeys().then(setKeys, (e) => setMessage(errorText(t, e)));
       },
       (e) => {
         setStatus("not_installed");
-        setMessage(errorMessage(e));
+        setMessage(errorText(t, e));
       },
     );
   }, []);
@@ -29,7 +32,7 @@ export function ProtonPassImport({ onImported }: { onImported: () => void }) {
       setMessage(`„${key.title}“ wurde in den Tresor übernommen.`);
       onImported();
     } catch (e) {
-      setMessage(errorMessage(e));
+      setMessage(errorText(t, e));
     } finally {
       setBusy(null);
     }

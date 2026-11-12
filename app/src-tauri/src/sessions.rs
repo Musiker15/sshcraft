@@ -15,6 +15,7 @@ use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use crate::errors::ErrorCode;
 use crate::hello::{Presence, UserPresence};
 
 pub type SessionId = Uuid;
@@ -27,6 +28,8 @@ pub enum EndReason {
     HostKeyRejected,
     HostKeyMismatch,
     AuthFailed,
+    /// The very first attempt could not reach the server; nothing to reconnect to.
+    ConnectFailed,
     /// Could not even start: host incomplete, key missing, vault locked.
     Error,
 }
@@ -42,6 +45,9 @@ pub enum SessionStatus {
     },
     Ended {
         reason: EndReason,
+        /// Translatable cause, if there is a more specific one than `reason`.
+        code: Option<ErrorCode>,
+        /// Technical detail in English, shown untranslated.
         detail: Option<String>,
     },
 }
@@ -142,7 +148,7 @@ impl KeyGate {
     }
 
     /// Concurrent callers wait on the same lock, so one prompt serves them all.
-    async fn ensure(&self) -> Result<(), String> {
+    async fn ensure(&self) -> Result<(), ErrorCode> {
         let mut verified = self.verified.lock().await;
         if *verified {
             return Ok(());
@@ -158,7 +164,7 @@ impl KeyGate {
                 *verified = true;
                 Ok(())
             }
-            Presence::Declined => Err("Windows Hello wurde abgebrochen.".into()),
+            Presence::Declined => Err(ErrorCode::HelloDeclined),
         }
     }
 }
@@ -187,10 +193,6 @@ impl AgentConnector for WindowsAgent {
         }
     }
 }
-
-const AGENT_UNAVAILABLE: &str = "Proton Pass ist nicht erreichbar. Läuft die Proton-Pass-App?";
-const AGENT_KEY_MISSING: &str = "Der Schlüssel ist nicht mehr in Proton Pass.";
-const AGENT_REFUSED: &str = "Proton Pass hat die Signatur abgelehnt.";
 
 /// What `run` shares with the manager for one session.
 struct Shared {
@@ -309,8 +311,12 @@ impl SessionManager {
     }
 }
 
-fn end(sink: &dyn SessionSink, reason: EndReason, detail: Option<String>) {
-    sink.status(SessionStatus::Ended { reason, detail });
+fn end(sink: &dyn SessionSink, reason: EndReason, code: Option<ErrorCode>, detail: Option<String>) {
+    sink.status(SessionStatus::Ended {
+        reason,
+        code,
+        detail,
+    });
 }
 
 /// Forwards queued input to one connection, in order. Aborted when the connection ends,
@@ -361,9 +367,16 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
                 *shared.writer.lock().expect("writer lock") = None;
                 reason
             }
-            Err(Failure::End(reason, detail)) => return end(sink.as_ref(), reason, detail),
+            Err(Failure::End(reason, code, detail)) => {
+                return end(sink.as_ref(), reason, code, detail);
+            }
             Err(Failure::Lost(detail)) if !ever_connected => {
-                return end(sink.as_ref(), EndReason::Lost, Some(detail));
+                return end(
+                    sink.as_ref(),
+                    EndReason::ConnectFailed,
+                    Some(ErrorCode::Network),
+                    Some(detail),
+                );
             }
             Err(Failure::Lost(detail)) => Disconnect::Lost(detail),
         };
@@ -378,13 +391,13 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
                 tokio::time::sleep(delay.mul_f32(ctx.delay_scale)).await;
             }
             None => {
-                let (reason, detail) = match reason {
-                    Disconnect::Exited(_) => (EndReason::Exited, None),
-                    Disconnect::Lost(d) => (EndReason::Lost, Some(d)),
-                    Disconnect::HostKeyRejected => (EndReason::HostKeyRejected, None),
-                    Disconnect::AuthFailed => (EndReason::AuthFailed, None),
+                let (reason, code, detail) = match reason {
+                    Disconnect::Exited(_) => (EndReason::Exited, None, None),
+                    Disconnect::Lost(d) => (EndReason::Lost, Some(ErrorCode::Network), Some(d)),
+                    Disconnect::HostKeyRejected => (EndReason::HostKeyRejected, None, None),
+                    Disconnect::AuthFailed => (EndReason::AuthFailed, None, None),
                 };
-                return end(sink.as_ref(), reason, detail);
+                return end(sink.as_ref(), reason, code, detail);
             }
         }
     }
@@ -392,7 +405,7 @@ async fn run(ctx: Arc<Context>, host_id: HostId, shared: Shared) {
 
 enum Failure {
     /// Do not retry.
-    End(EndReason, Option<String>),
+    End(EndReason, Option<ErrorCode>, Option<String>),
     /// Network trouble, may retry.
     Lost(String),
 }
@@ -402,22 +415,25 @@ async fn connect_once(
     host_id: HostId,
     size: &Mutex<(u32, u32)>,
 ) -> Result<(ShellWriter, tokio::sync::mpsc::Receiver<ShellEvent>), Failure> {
-    let error = |msg: String| Failure::End(EndReason::Error, Some(msg));
+    let error = |code: ErrorCode, detail: Option<String>| {
+        Failure::End(EndReason::Error, Some(code), detail)
+    };
     let resolved = {
         let store = ctx.store.lock().expect("store lock");
-        lookup(&store, host_id).map_err(error)?
+        lookup(&store, host_id).map_err(|(code, detail)| error(code, detail))?
     };
     let credential = match &resolved.key {
         KeyRef::Stored { id } => {
             let vault = ctx
                 .vault
                 .as_ref()
-                .ok_or_else(|| error("the key vault is locked".into()))?;
-            ctx.gate.ensure().await.map_err(error)?;
+                .ok_or_else(|| error(ErrorCode::VaultLocked, None))?;
+            ctx.gate.ensure().await.map_err(|code| error(code, None))?;
             let store = ctx.store.lock().expect("store lock");
-            let key = vault
-                .private_key(&store, *id)
-                .map_err(|e| error(e.to_string()))?;
+            let key = vault.private_key(&store, *id).map_err(|e| {
+                let e = crate::errors::CommandError::from(e);
+                error(e.code, e.detail)
+            })?;
             sshcraft_ssh::Credential::Key(key)
         }
         KeyRef::Agent { fingerprint } => sshcraft_ssh::Credential::Agent {
@@ -426,7 +442,7 @@ async fn connect_once(
                 .agent
                 .connect()
                 .await
-                .map_err(|_| error(AGENT_UNAVAILABLE.into()))?,
+                .map_err(|e| error(ErrorCode::AgentUnavailable, Some(e.to_string())))?,
         },
     };
 
@@ -447,17 +463,22 @@ async fn connect_once(
         Err(SshError::HostKeyRejected) => {
             let mismatch = verifier.mismatch.lock().expect("mismatch lock").take();
             return Err(match mismatch {
-                Some(detail) => Failure::End(EndReason::HostKeyMismatch, Some(detail)),
-                None => Failure::End(EndReason::HostKeyRejected, None),
+                Some(detail) => Failure::End(EndReason::HostKeyMismatch, None, Some(detail)),
+                None => Failure::End(EndReason::HostKeyRejected, None, None),
             });
         }
-        Err(SshError::AuthFailed) => return Err(Failure::End(EndReason::AuthFailed, None)),
-        Err(SshError::AgentUnavailable(_)) => return Err(error(AGENT_UNAVAILABLE.into())),
-        Err(SshError::AgentKeyMissing) => return Err(error(AGENT_KEY_MISSING.into())),
+        Err(SshError::AuthFailed) => {
+            return Err(Failure::End(EndReason::AuthFailed, None, None));
+        }
+        Err(SshError::AgentUnavailable(e)) => {
+            return Err(error(ErrorCode::AgentUnavailable, Some(e)));
+        }
+        Err(SshError::AgentKeyMissing) => return Err(error(ErrorCode::AgentKeyMissing, None)),
         Err(SshError::AgentRefused) => {
             return Err(Failure::End(
                 EndReason::AuthFailed,
-                Some(AGENT_REFUSED.into()),
+                Some(ErrorCode::AgentRefused),
+                None,
             ));
         }
         Err(e) => return Err(Failure::Lost(e.to_string())),
@@ -470,22 +491,23 @@ async fn connect_once(
     Ok(shell.split())
 }
 
-fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, String> {
+fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Option<String>)> {
+    let store_error = |e: sshcraft_core::store::StoreError| (ErrorCode::Store, Some(e.to_string()));
     let host = store
         .list_hosts()
-        .map_err(|e| e.to_string())?
+        .map_err(store_error)?
         .into_iter()
         .find(|h| h.id == host_id)
-        .ok_or("host not found")?;
+        .ok_or((ErrorCode::NotFound, None))?;
     let group = match host.group_id {
         Some(gid) => store
             .list_groups()
-            .map_err(|e| e.to_string())?
+            .map_err(store_error)?
             .into_iter()
             .find(|g| g.id == gid),
         None => None,
     };
-    resolve(&host, group.as_ref()).map_err(|e| e.to_string())
+    resolve(&host, group.as_ref()).map_err(|e| (ErrorCode::from(&e), None))
 }
 
 struct StoreVerifier {

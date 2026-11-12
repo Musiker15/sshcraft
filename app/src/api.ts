@@ -35,13 +35,14 @@ export type EndReason =
   | "host_key_rejected"
   | "host_key_mismatch"
   | "auth_failed"
+  | "connect_failed"
   | "error";
 
 export type SessionStatus =
   | { state: "connecting" }
   | { state: "connected" }
   | { state: "reconnecting"; attempt: number; delay_secs: number }
-  | { state: "ended"; reason: EndReason; detail: string | null };
+  | { state: "ended"; reason: EndReason; code: string | null; detail: string | null };
 
 export type HostKeyPrompt = {
   prompt_id: number;
@@ -51,12 +52,7 @@ export type HostKeyPrompt = {
   fingerprint: string;
 };
 
-export type CommandError = { code: string; message: string };
-
-export function errorMessage(e: unknown): string {
-  if (e && typeof e === "object" && "message" in e) return String((e as CommandError).message);
-  return String(e);
-}
+export type { CommandError } from "./i18n/errors";
 
 export const listGroups = () => invoke<Group[]>("list_groups");
 export const saveGroup = (group: Group) => invoke<void>("save_group", { group });
@@ -67,7 +63,8 @@ export const deleteHost = (id: string) => invoke<void>("delete_host", { id });
 export const forgetHostKey = (hostId: string) => invoke<void>("forget_host_key", { hostId });
 
 export const helloStatus = () => invoke<{ missing: boolean }>("hello_status");
-export const vaultStatus = () => invoke<{ ok: boolean; error: string | null }>("vault_status");
+export type VaultStatus = { ok: boolean; code: string | null; detail: string | null };
+export const vaultStatus = () => invoke<VaultStatus>("vault_status");
 export const listKeys = () => invoke<KeyInfo[]>("list_keys");
 export const importKey = (name: string, text: string, passphrase: string | null) =>
   invoke<KeyInfo>("import_key", { name, text, passphrase });

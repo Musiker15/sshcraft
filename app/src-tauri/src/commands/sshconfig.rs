@@ -6,7 +6,7 @@ use serde::Serialize;
 use sshcraft_core::sshconfig::{self, ImportCandidate};
 use tauri::State;
 
-use super::{CommandError, CommandResult};
+use super::{CommandError, CommandResult, ErrorCode};
 use crate::sessions::{AgentConnector, WindowsAgent};
 use crate::state::AppState;
 
@@ -60,11 +60,11 @@ async fn agent_fingerprints() -> Vec<String> {
 async fn preview() -> CommandResult<SshConfigPreview> {
     let path = home()
         .map(|h| h.join(".ssh").join("config"))
-        .ok_or_else(|| CommandError::new("io", "no home directory"))?;
+        .ok_or_else(|| CommandError::new(ErrorCode::Io, "no home directory"))?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(CommandError::new("io", e)),
+        Err(e) => return Err(CommandError::new(ErrorCode::Io, e)),
     };
     let parsed = sshconfig::parse(&text);
     let agent = agent_fingerprints().await;

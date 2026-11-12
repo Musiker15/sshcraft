@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { errorMessage, forgetHostKey, saveHost, type Group, type Host, type KeyInfo } from "../api";
+import { forgetHostKey, saveHost, type Group, type Host, type KeyInfo } from "../api";
+import { errorText } from "../i18n/errors";
+import { useT } from "../i18n/i18n";
 import { fromConnectionSettings, toConnectionSettings } from "../forms/hostForm";
 import { SettingsFields } from "./SettingsFields";
 
 type Props = { host?: Host; groups: Group[]; keys: KeyInfo[]; onDone: () => void; onCancel: () => void };
 
 export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
+  const t = useT();
   const [name, setName] = useState(host?.name ?? "");
   const [groupId, setGroupId] = useState(host?.group_id ?? "");
   const [values, setValues] = useState(
@@ -26,7 +29,7 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
       });
       onDone();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(errorText(t, e));
     }
   }
 
@@ -36,7 +39,7 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
       await forgetHostKey(host.id);
       setNotice("Der gespeicherte Fingerprint ist vergessen. Beim nächsten Verbinden wirst du gefragt.");
     } catch (e) {
-      setError(errorMessage(e));
+      setError(errorText(t, e));
     }
   }
 

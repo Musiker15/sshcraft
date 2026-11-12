@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { sessionAck, sessionClose, sessionOpen, sessionResize, sessionWrite, type SessionStatus } from "../api";
+import { errorDetail } from "../i18n/errors";
 import type { Tab } from "../state/tabs";
 
 type Props = {
@@ -63,7 +64,13 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
           unacked = 0;
         }
       },
-      (e) => callbacks.current.onStatus({ state: "ended", reason: "error", detail: String(e?.message ?? e) }),
+      (e) =>
+        callbacks.current.onStatus({
+          state: "ended",
+          reason: "error",
+          code: typeof e?.code === "string" ? e.code : null,
+          detail: errorDetail(e),
+        }),
     );
 
     const input = terminal.onData((data) => {

@@ -8,6 +8,7 @@ use sshcraft_core::vault::MemoryMasterKey;
 use sshcraft_ssh::testing::TestServer;
 
 use super::*;
+use crate::errors::ErrorCode;
 use crate::hello::{Presence, UserPresence};
 
 #[derive(Default)]
@@ -249,6 +250,7 @@ async fn declined_hello_ends_without_connecting() {
     sink.wait_for(|s| ended(s).is_some()).await;
     let statuses = sink.statuses();
     assert_eq!(ended(&statuses), Some(EndReason::Error));
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::HelloDeclined));
     assert!(!connected(&statuses));
     assert!(
         !statuses
@@ -313,11 +315,7 @@ async fn agent_unavailable_ends_with_error_and_no_retry() {
     sink.wait_for(|s| ended(s).is_some()).await;
     let statuses = sink.statuses();
     assert_eq!(ended(&statuses), Some(EndReason::Error));
-    let detail = statuses.iter().find_map(|s| match s {
-        SessionStatus::Ended { detail, .. } => detail.clone(),
-        _ => None,
-    });
-    assert!(detail.unwrap_or_default().contains("Proton Pass"));
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::AgentUnavailable));
     assert!(
         !statuses
             .iter()
@@ -340,6 +338,45 @@ fn ended(statuses: &[SessionStatus]) -> Option<EndReason> {
         SessionStatus::Ended { reason, .. } => Some(*reason),
         _ => None,
     })
+}
+
+fn ended_code(statuses: &[SessionStatus]) -> Option<ErrorCode> {
+    statuses.iter().find_map(|s| match s {
+        SessionStatus::Ended { code, .. } => *code,
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn first_failed_attempt_is_connect_failed() {
+    let f = fixture(true).await;
+    let closed_port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let host_id = f.agent_host();
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store
+            .list_hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == host_id)
+            .unwrap();
+        host.settings.port = Some(closed_port);
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(host_id, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    let statuses = sink.statuses();
+    assert_eq!(ended(&statuses), Some(EndReason::ConnectFailed));
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::Network));
+    assert!(
+        !statuses
+            .iter()
+            .any(|s| matches!(s, SessionStatus::Reconnecting { .. }))
+    );
 }
 
 fn connected_count(statuses: &[SessionStatus]) -> usize {
@@ -478,6 +515,7 @@ async fn missing_vault_ends_with_error() {
     manager.open(f.host_id, 80, 24, sink.clone());
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::Error));
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::VaultLocked));
 }
 
 #[tokio::test]

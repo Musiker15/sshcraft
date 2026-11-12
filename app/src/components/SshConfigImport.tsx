@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { errorMessage, sshConfigImport, sshConfigPreview, type SshConfigPreview } from "../api";
+import { sshConfigImport, sshConfigPreview, type SshConfigPreview } from "../api";
+import { errorText } from "../i18n/errors";
+import { useT } from "../i18n/i18n";
 
 type Props = { onDone: () => void; onCancel: () => void };
 
 /** Shows the hosts found in ~/.ssh/config and imports the selected ones. */
 export function SshConfigImport({ onDone, onCancel }: Props) {
+  const t = useT();
   const [preview, setPreview] = useState<SshConfigPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +19,7 @@ export function SshConfigImport({ onDone, onCancel }: Props) {
         setPreview(p);
         setSelected(new Set(p.candidates.map((c) => c.alias)));
       },
-      (e) => setError(errorMessage(e)),
+      (e) => setError(errorText(t, e)),
     );
   }, []);
 
@@ -38,7 +41,7 @@ export function SshConfigImport({ onDone, onCancel }: Props) {
       alert(`${result.created} Host(s) angelegt.`);
       onDone();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(errorText(t, e));
     } finally {
       setBusy(false);
     }

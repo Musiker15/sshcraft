@@ -1,5 +1,7 @@
 import { useEffect, useState, type Dispatch } from "react";
-import type { SessionStatus } from "../api";
+import type { EndReason, SessionStatus } from "../api";
+import { errorText } from "../i18n/errors";
+import { useT } from "../i18n/i18n";
 import type { TabsAction, TabsState } from "../state/tabs";
 import { TerminalView } from "./TerminalView";
 
@@ -67,32 +69,21 @@ function StatusLine({ status }: { status: SessionStatus }) {
         </div>
       );
     case "ended":
-      return <EndedLine reason={status.reason} detail={status.detail} />;
+      return <EndedLine reason={status.reason} code={status.code} detail={status.detail} />;
   }
 }
 
-export function EndedLine({ reason, detail }: { reason: string; detail: string | null }) {
-  switch (reason) {
-    case "exited":
-      return <div className="statusline">Sitzung beendet</div>;
-    case "host_key_mismatch":
-      return (
-        <div className="statusline danger">
-          {"Achtung: Der Server meldet sich mit einem anderen Schlüssel als beim letzten Mal. " +
-            "Das kann eine Neuinstallation sein oder ein Angriff. Die Verbindung wurde abgebrochen.\n" +
-            (detail ?? "") +
-            "\nWenn du sicher bist, dass der neue Schlüssel stimmt: Host bearbeiten, Fingerprint vergessen."}
-        </div>
-      );
-    case "host_key_rejected":
-      return <div className="statusline danger">Server-Schlüssel abgelehnt, nicht verbunden.</div>;
-    case "auth_failed":
-      return <div className="statusline danger">{detail ?? "Der Server hat den Schlüssel nicht angenommen."}</div>;
-    case "lost":
-      return <div className="statusline danger">Verbindung verloren{detail ? `: ${detail}` : ""}</div>;
-    default:
-      return <div className="statusline danger">Fehler{detail ? `: ${detail}` : ""}</div>;
-  }
+export function EndedLine({ reason, code, detail }: { reason: EndReason; code: string | null; detail: string | null }) {
+  const t = useT();
+  const headline = t(`session.ended.${reason}`);
+  // For these reasons the code says it all; elsewhere it explains the headline.
+  const text = !code ? headline : reason === "error" || reason === "auth_failed" ? errorText(t, { code, detail }) : `${headline}: ${errorText(t, { code, detail })}`;
+  return (
+    <div className={reason === "exited" ? "statusline" : "statusline danger"}>
+      <span>{text}</span>
+      {detail && <code className="detail">{detail}</code>}
+    </div>
+  );
 }
 
 function useCountdown(seconds: number | null, key: unknown): number {
