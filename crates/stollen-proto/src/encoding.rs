@@ -12,8 +12,6 @@ pub const DOMAIN_AUTH: &str = "stollen/server-auth/v1";
 
 /// The domain, then every field as a big-endian `u32` length followed by its bytes.
 /// Field boundaries stay unambiguous, also for empty fields.
-// TODO(task 2): remove once identity.rs signs with it.
-#[allow(dead_code)]
 pub(crate) fn signing_bytes(domain: &str, fields: &[&[u8]]) -> Vec<u8> {
     let total = domain.len() + 4 + fields.iter().map(|f| 4 + f.len()).sum::<usize>();
     let mut out = Vec::with_capacity(total);

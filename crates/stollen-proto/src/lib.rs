@@ -4,6 +4,7 @@
 //! the server only ever sees headers (ids, versions, public keys) and ciphertext.
 
 pub mod encoding;
+pub mod identity;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtoError {
