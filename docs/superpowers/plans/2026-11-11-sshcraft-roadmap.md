@@ -14,7 +14,7 @@ mit dem Wissen aus den vorherigen.
 | 3 | Protokoll- und Krypto-Crate | `sshcraft-proto`: Konto- und Geräteschlüssel, Geräteprotokoll, Bereichsschlüssel, signierte und verschlüsselte Datensätze, Rückfallschutz | fertig, auf `main` |
 | 4 | Oberfläche nach Termius-Vorbild und Sprachen | neuer Aufbau mit Seitenleiste (Hosts, Schlüssel, Snippets, Portweiterleitung, Protokolle, Einstellungen), Befehlspalette, Neuer-Tab-Seite, Themes und Schriften, Übersetzung Englisch und Deutsch mit AUTO; Fehlercodes aus Rust statt Texten | fertig, auf `main` |
 | 5 | Sync-Server | `sshcraft-server`: axum, SQLite und PostgreSQL, API-Key, Challenge-Anmeldung, Konten, Geräteprotokolle, Datensätze, Push per WebSocket, Verwaltungsbefehle, Docker-Image, Beispiele für Apache und nginx | fertig, auf `main` |
-| 6 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | offen |
+| 6 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | fertig, auf `main` |
 | 7 | Teilen | Freigaben für Host und Gruppe, Auswahl, mit oder ohne Schlüssel, lesen oder schreiben, Sicherheitsnummer, Entziehen mit Schlüsseltausch | offen |
 | 8 | Hosts und Ordnung | Untergruppen, Tags, Host-Symbole, Import aus `known_hosts`, Schlüsseldateien, CSV, PuTTY, MobaXterm, SecureCRT, Export als CSV und JSON | offen |
 | 9 | Verbindungen | Passwort und keyboard-interactive, Identitäten, Sprung-Hosts, HTTP- und SOCKS5-Proxy, Agent-Weiterleitung, Umgebungsvariablen, serielle Verbindung, lokales Terminal | offen |
