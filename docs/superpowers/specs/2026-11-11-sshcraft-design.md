@@ -1,6 +1,7 @@
 # SSHCraft: Design
 
-Stand: 11.11.2026. Ergebnis des Brainstormings mit Moritz Kohm (GitHub `musiker15`).
+Stand: 11.11.2026, Umfang erweitert am 12.11.2026 (Abschnitt 2, "Funktionsumfang nach
+Termius-Vorbild"). Ergebnis des Brainstormings mit Moritz Kohm (GitHub `musiker15`).
 Entscheidungen von Moritz stehen ohne Zusatz. Was ich (Claude) entschieden habe, weil es
 offen blieb, ist mit **[Claudes Entscheidung]** markiert und darf beim Lesen widersprochen
 werden.
@@ -8,7 +9,9 @@ werden.
 ## 1. Worum es geht und warum
 
 SSHCraft ist ein SSH-Client für Windows, Android und iOS mit eigenem, selbst betriebenem
-Sync-Server. Vorbild ist Termius, aber ohne dessen Beiwerk (SFTP, FTP und Ähnliches).
+Sync-Server. Vorbild ist Termius: SSHCraft soll ihm in Aussehen und Funktionen weitgehend
+entsprechen, nur verbessert und angepasst. Der Name folgt den vielen Nachbauten auf GitHub, die
+"Craft" im Namen tragen (Moritz, 12.11.2026; vorher hieß das Projekt "Stollen").
 
 Der Anlass: Termius verlangt monatliche Gebühren, damit Hosts und Schlüssel zwischen Geräten
 synchronisiert werden. Ohne Abo muss auf jedem neuen Gerät alles neu angelegt werden, und
@@ -37,15 +40,18 @@ Andere sollen es mit ihrem eigenen Server betreiben können.
   lesend oder schreibend, live aktualisiert.
 - Zusatzleiste über der Handy-Tastatur.
 - App-Sperre auf dem Handy per PIN, Fingerabdruck oder Face ID.
+- Der Funktionsumfang von Termius ohne SFTP, siehe "Funktionsumfang nach Termius-Vorbild".
+- Oberfläche auf Englisch und Deutsch, Vorgabe AUTO.
 
 Erfolg heißt: Mit der ersten Version kann Moritz Termius kündigen.
 
 ### Nicht-Ziele
 
-- **Nie:** SFTP, FTP, Dateiübertragung allgemein.
-- **Später, nicht in der ersten Version** [Claudes Entscheidung, weil nicht besprochen]:
-  Portweiterleitung, Sprung-Hosts (ProxyJump), Agent-Weiterleitung, Mosh, gespeicherte Befehle
-  (Snippets), Sitzungsaufzeichnung.
+- **Später, nicht in der ersten Version** (Moritz, 12.11.2026): SFTP, Multiplayer (mehrere
+  Personen im selben Terminal), Import aus AWS, DigitalOcean und Azure, KI-Funktionen, Mosh,
+  Telnet.
+- Bis 12.11.2026 stand hier "Nie: SFTP" und "später: Portweiterleitung, Sprung-Hosts,
+  Agent-Weiterleitung, Mosh, Snippets, Sitzungsaufzeichnung"; das gilt nicht mehr.
 - Keine Web-Oberfläche für den Server-Betreiber, Verwaltung nur per Befehl.
 
 ### Anti-Ziele (wäre ein Fehlschlag, auch wenn es technisch läuft)
@@ -54,6 +60,90 @@ Erfolg heißt: Mit der ersten Version kann Moritz Termius kündigen.
   Einbruchs auf dem Server.
 - Ein privater Schlüssel liegt unverschlüsselt als Datei auf einem Gerät.
 - Sync ist Pflicht oder lässt sich nicht fein einstellen.
+
+### Funktionsumfang nach Termius-Vorbild (Version 1)
+
+Moritz, 12.11.2026: SSHCraft soll Termius in Aussehen und Funktionen weitgehend entsprechen, nur
+verbessert und angepasst; SFTP kommt später, alles andere gehört in Version 1. Grundlage ist eine
+Bestandsaufnahme der Termius-Doku (docs.termius.com, Stand November 2026). Was dort an Termius'
+eigener Cloud hängt, ersetzt der selbst betriebene Sync-Server.
+
+**Verbindungen**
+- SSH mit Schlüssel **und Passwort** (auch keyboard-interactive); Passwörter liegen verschlüsselt
+  im Tresor und werden wie Schlüssel synchronisiert.
+- **Identitäten:** wiederverwendbare Bündel aus Benutzer, Passwort und/oder Schlüssel für Hosts
+  und Gruppen.
+- Sprung-Hosts (Host-Ketten) je Host oder Gruppe, von Gruppen vererbt.
+- HTTP- und SOCKS5-Proxy je Host, mit optionalen Zugangsdaten.
+- Agent-Weiterleitung.
+- Umgebungsvariablen je Host.
+- **Seriell** (nur Desktop): Baudrate, Datenbits, Stoppbits, Parität, Flusskontrolle.
+- **Lokales Terminal** (nur Desktop): PowerShell, cmd, WSL oder eine eingestellte Shell als Tab.
+- Post-Quanten-Schlüsseltausch und ML-DSA, sobald `russh` sie unterstützt
+  [Claudes Entscheidung, hängt an der Bibliothek].
+
+**Terminal und Arbeitsfläche**
+- Tabs, Befehlspalette (Hosts zuerst), Neuer-Tab-Seite mit Suche und letzten Verbindungen.
+- **Workspaces** (Desktop): 2 bis 16 Sitzungen nebeneinander (Split) oder als Hauptansicht mit
+  Seitenleiste (Fokus), Bereiche ziehen und in der Größe ändern; **Broadcast** einer Eingabe an
+  alle Terminals des Workspace; **Workspace-Vorlagen**, die Verbindungen, Namen, Anordnung,
+  Arbeitsverzeichnis und laufenden Befehl merken.
+- Statuspunkte je Bereich (neue Ausgabe, Eingabe erwartet, Fehler).
+- Themes und Schriften, Terminaltyp wählbar (z. B. xterm-256color, linux, vt100), OSC 52
+  (Zwischenablage), Links mit Strg-Klick öffnen, frei belegbare Tastenkürzel.
+- Seitenleiste im Terminal mit Snippets und Verlauf.
+- **Autovervollständigung** aus Verlauf, Pfaden, Snippets und bekannten Befehlen samt Argumenten,
+  ohne KI.
+- Handy: Zusatzleiste (Abschnitt 9), dazu Gesten (Wischen für Pfeiltasten, Zwei-Finger-Zoom) und
+  Lautstärketasten als Tasten.
+
+**Hosts und Ordnung**
+- Gruppen mit **Untergruppen** (verschachtelt), Vererbung über alle Ebenen, **Tags**,
+  Host-Symbole nach Betriebssystem oder Distribution.
+- **Import:** `~/.ssh/config` (vorhanden), `known_hosts`, Schlüsseldateien, CSV, PuTTY (unter
+  Windows direkt aus der Registry, sonst `.reg`), MobaXterm, SecureCRT.
+- **Export** von Hosts und Gruppen als CSV und JSON, ohne Geheimnisse
+  [Claudes Entscheidung, bei Termius nicht dokumentiert, gehört zu "verbessert"].
+
+**Schlüssel**
+- Erzeugen und Importieren von Ed25519, ECDSA und RSA, Passphrase wahlweise speichern.
+- Öffentlichen Schlüssel per Klick in `authorized_keys` des Servers eintragen.
+- SSH-Zertifikate, gespeichert zusammen mit dem privaten Schlüssel.
+- **FIDO2-Hardwareschlüssel** (YubiKey und ähnliche), mit Berührung und PIN.
+- **Gerätegebundene Schlüssel**, die das Gerät nie verlassen und nicht synchronisiert werden:
+  Windows Hello (TPM), Android Keystore, iOS Secure Enclave.
+
+**Portweiterleitung**
+- Lokal, entfernt und dynamisch (SOCKS), Regeln auf einer eigenen Seite, Start und Stopp per
+  Doppelklick, Assistent zum Anlegen.
+
+**Snippets**
+- Snippets in Paketen (Ordnern), auf mehreren Hosts ausführen (neue Verbindungen oder alle
+  offenen Tabs), Standardziele je Snippet, Snippets in der Autovervollständigung.
+
+**Sitzungsprotokolle**
+- Aufzeichnung je Host für SSH, seriell und lokales Terminal, Lesezeichen und Kommentare,
+  durchsuchbar, verschlüsselt und mit Sync; Ansicht auf dem Desktop.
+- Anders als bei Termius: Protokolle lassen sich löschen und exportieren, die Aufbewahrung ist
+  einstellbar [Claudes Entscheidung, "verbessert"].
+
+**Aussehen**
+- Aufbau und Bedienung eng an Termius angelehnt (Seitenleiste mit Bereichen für Hosts,
+  Schlüssel, Snippets, Portweiterleitung und Protokolle; Tabs; Dialoge; Abläufe).
+- Logo, Icons, Farben, Grafiken und Texte sind eigene Gestaltung, keine Kopie von Termius
+  [Claudes Entscheidung: das Aussehen von Termius ist geschütztes Design, und SSHCraft ist
+  öffentlich].
+
+### Sprachen
+
+- Englisch und Deutsch sind eingebaut; in den Einstellungen wählbar: **AUTO** (Vorgabe), Englisch,
+  Deutsch.
+- AUTO nimmt die Sprache des Betriebssystems; ist sie weder Deutsch noch Englisch, gilt Englisch
+  [Claudes Entscheidung für den Rückfall].
+- Alle Oberflächentexte und Fehlermeldungen laufen über Übersetzungsdateien; Fehler aus dem
+  Rust-Kern kommen als Code an der Oberfläche an und werden dort übersetzt
+  [Claudes Entscheidung].
+- Weitere Sprachen lassen sich durch eine zusätzliche Übersetzungsdatei ergänzen.
 
 ## 3. Technik
 
@@ -105,7 +195,7 @@ für ein internationales Publikum ist Englisch naheliegend.
 - **Konto:** ein Benutzer auf einem Sync-Server, mit Name, E-Mail und Kontoschlüssel.
 - **Freigabe:** ein geteilter Host oder eine geteilte Gruppe (Abschnitt 8).
 
-Ob Gruppen verschachtelt werden können, bleibt dem Builder überlassen.
+Gruppen können verschachtelt werden (Untergruppen, seit 12.11.2026 Pflicht, siehe Abschnitt 2).
 
 ## 5. Schlüsselquellen
 
@@ -421,5 +511,5 @@ Apache-Beispiel [Claudes Entscheidung].
 - Aufteilung des Repositorys und Wahl der Unterbibliotheken.
 - Konkrete Krypto-Verfahren (mit etablierten Bibliotheken).
 - Push-Mechanismus, Konfliktauflösung über "letzte Änderung gewinnt" hinaus.
-- Gestaltung der Oberfläche im Einzelnen, verschachtelte Gruppen ja oder nein.
+- Gestaltung der Oberfläche im Einzelnen, im Rahmen von "Aussehen" in Abschnitt 2.
 - Sprache von README und Doku.

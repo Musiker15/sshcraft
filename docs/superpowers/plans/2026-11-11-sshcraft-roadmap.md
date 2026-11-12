@@ -1,35 +1,43 @@
 # SSHCraft: Fahrplan der Teilpläne
 
-Design: `docs/superpowers/specs/2026-11-11-sshcraft-design.md` (freigegeben am 11.11.2026).
+Design: `docs/superpowers/specs/2026-11-11-sshcraft-design.md` (freigegeben am 11.11.2026, Umfang
+erweitert am 12.11.2026 auf den Funktionsumfang von Termius ohne SFTP, dazu Englisch und Deutsch).
 
 Das Design umfasst mehrere voneinander trennbare Teilsysteme. Jeder Teilplan unten ergibt für
 sich lauffähige, getestete Software. Ausführlich geschrieben wird immer nur der nächste Teilplan,
 mit dem Wissen aus den vorherigen.
 
-| Nr. | Teilplan | Ergebnis | Design-Abschnitte | Stand |
-|---|---|---|---|---|
-| 1 | Desktop-Grundlage | Windows-App: Gruppen und Hosts anlegen, eigene Schlüssel importieren oder erzeugen (verschlüsselt gespeichert), Terminal in Tabs, Host-Fingerprint-Prüfung, Keep-Alive, Wiederverbinden | 3, 4, 5 (eigener Schlüssel), 9, 11 | fertig, auf `main` |
-| 2 | Schlüsselquellen und Windows-Anbindung | Proton-Pass-Agent über die Named Pipe, Import über `pass-cli`, Import aus `~/.ssh/config`, Entsperren mit Windows Hello | 5, 9, 10 (Windows Hello) | fertig, auf `main` |
-| 3 | Protokoll- und Krypto-Crate | `sshcraft-proto`: Konto- und Geräteschlüssel, Signaturen, Bereichsschlüssel, verschlüsselte und signierte Datensätze mit Versionen, Prüfung gegen Rückfall | 6, 7 | offen |
-| 4 | Sync-Server | `sshcraft-server`: axum, SQLite und PostgreSQL, API-Key, Challenge-Anmeldung, Konten, Geräte, Datensätze, Push per WebSocket, Verwaltungsbefehle, Docker-Image, Apache-Beispiel | 6, 7, 12 | offen |
-| 5 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | 4 (Orte), 6, 7 | offen |
-| 6 | Teilen | Freigaben für Host und Gruppe, Auswahl, mit oder ohne Schlüssel, lesen oder schreiben, Fingerprint-Vergleich, Entziehen mit Schlüsseltausch, Verhalten bei gesperrtem oder gelöschtem Eigentümer | 8, 12 | offen |
-| 7 | Agent-Anbindung | Lokale Verbindung zum Client, `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | 10 | offen |
-| 8 | Releases für Windows und Server | GitHub-Actions-Releases: Windows-Installer, Server-Programm für Linux, Docker-Image | 3 (Verteilung) | offen |
-| 9 | Android-Spike (Wegwerf) | Antwort auf das Risiko "Tastatur mit xterm.js im Webview": Tauri-2-App auf Android, Terminal, Zusatzleiste als Rohbau, Urteil gut genug oder nicht | 13 | angefangen, Zweig `spike/android` |
-| 10 | Android vollständig | Android-Keystore, Zusatzleiste, Vordergrund-Dienst, App-Sperre, APK in den Releases | 3 (Verteilung), 9, 11 | offen |
-| 11 | iOS | Keychain, Face ID, Wiederverbinden beim Zurückkehren, IPA-Bau auf macOS-Runner, Anleitung zum Sideloading | 9, 11, 13 | offen |
+| Nr. | Teilplan | Ergebnis | Stand |
+|---|---|---|---|
+| 1 | Desktop-Grundlage | Windows-App: Gruppen und Hosts, eigene Schlüssel (verschlüsselt gespeichert), Terminal in Tabs, Host-Fingerprint-Prüfung, Keep-Alive, Wiederverbinden | fertig, auf `main` |
+| 2 | Schlüsselquellen und Windows-Anbindung | Proton-Pass-Agent, Import über `pass-cli`, Import aus `~/.ssh/config`, Windows Hello | fertig, auf `main` |
+| 3 | Protokoll- und Krypto-Crate | `sshcraft-proto`: Konto- und Geräteschlüssel, Geräteprotokoll, Bereichsschlüssel, signierte und verschlüsselte Datensätze, Rückfallschutz | in Arbeit, Zweig `feat/protokoll` |
+| 4 | Oberfläche nach Termius-Vorbild und Sprachen | neuer Aufbau mit Seitenleiste (Hosts, Schlüssel, Snippets, Portweiterleitung, Protokolle, Einstellungen), Befehlspalette, Neuer-Tab-Seite, Themes und Schriften, Übersetzung Englisch und Deutsch mit AUTO; Fehlercodes aus Rust statt Texten | offen |
+| 5 | Sync-Server | `sshcraft-server`: axum, SQLite und PostgreSQL, API-Key, Challenge-Anmeldung, Konten, Geräteprotokolle, Datensätze, Push per WebSocket, Verwaltungsbefehle, Docker-Image, Apache-Beispiel | offen |
+| 6 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | offen |
+| 7 | Teilen | Freigaben für Host und Gruppe, Auswahl, mit oder ohne Schlüssel, lesen oder schreiben, Sicherheitsnummer, Entziehen mit Schlüsseltausch | offen |
+| 8 | Hosts und Ordnung | Untergruppen, Tags, Host-Symbole, Import aus `known_hosts`, Schlüsseldateien, CSV, PuTTY, MobaXterm, SecureCRT, Export als CSV und JSON | offen |
+| 9 | Verbindungen | Passwort und keyboard-interactive, Identitäten, Sprung-Hosts, HTTP- und SOCKS5-Proxy, Agent-Weiterleitung, Umgebungsvariablen, serielle Verbindung, lokales Terminal | offen |
+| 10 | Schlüssel erweitert | ECDSA und RSA erzeugen, Passphrase speichern, öffentlichen Schlüssel in `authorized_keys` eintragen, SSH-Zertifikate, FIDO2-Hardwareschlüssel, gerätegebundene Schlüssel (Windows Hello mit TPM) | offen |
+| 11 | Workspaces | Split und Fokus mit 2 bis 16 Sitzungen, Broadcast, Workspace-Vorlagen, Statuspunkte, Tastenkürzel, Terminaltyp, OSC 52, Links | offen |
+| 12 | Portweiterleitung | lokal, entfernt, dynamisch (SOCKS), Regelseite, Assistent | offen |
+| 13 | Snippets und Autovervollständigung | Snippets in Paketen, auf mehreren Hosts ausführen, Seitenleiste mit Verlauf, Autovervollständigung aus Verlauf, Pfaden, Snippets und Befehlen (ohne KI) | offen |
+| 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | offen |
+| 15 | Agent-Anbindung | `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | offen |
+| 16 | Releases für Windows und Server | GitHub-Actions-Releases: Windows-Installer, Server-Programm für Linux, Docker-Image | offen |
+| 17 | Android-Spike (Wegwerf) | Urteil zur Handytastatur mit xterm.js im Webview | angefangen, Zweig `spike/android` |
+| 18 | Android vollständig | Keystore, Zusatzleiste, Gesten, Lautstärketasten, Vordergrund-Dienst, App-Sperre, gerätegebundene Schlüssel, APK in den Releases | offen |
+| 19 | iOS | Keychain, Face ID, Secure Enclave, Wiederverbinden beim Zurückkehren, IPA-Bau auf macOS-Runner, Anleitung zum Sideloading | offen |
 
-Reihenfolge (Moritz, 12.11.2026): erst Windows und Server, also 2 bis 8, danach Android und iOS.
-Bewusst in Kauf genommen: Das Risiko der Handytastatur wird erst mit Teilplan 9 geklärt. Weil die
-Oberfläche fürs Handy ohnehin eigene Bedienelemente braucht, ist der Schaden klein, falls das
-Terminal dort anders gelöst werden muss. Die Android-Werkzeuge (SDK, NDK 30.0.16248370, Rust-Ziele)
-sind schon installiert, `ANDROID_HOME` ist `G:\Android\Sdk`.
+**Reihenfolge** (Moritz, 12.11.2026): erst Windows und Server, danach Android und iOS. Teilplan 4
+steht vorn [Claudes Entscheidung]: Der neue Aufbau und die Übersetzung kommen, bevor die vielen
+neuen Bildschirme der Teilpläne 8 bis 14 entstehen, sonst müsste jeder davon zweimal angefasst
+werden. Bewusst in Kauf genommen: Das Risiko der Handytastatur klärt sich erst mit Teilplan 17;
+die Android-Werkzeuge (SDK, NDK 30.0.16248370, Rust-Ziele) sind schon installiert,
+`ANDROID_HOME` ist `G:\Android\Sdk`.
 
 Der Zweig `spike/android` enthält einen Tresor-Ersatz für Android, der den Hauptschlüssel als
 Klartext-Datei ablegt. Er ist nur für den Spike gedacht und darf so nie nach `main`.
 
-Nicht in einem Teilplan, weil im Design als "später" geführt: Portweiterleitung, Sprung-Hosts,
-Agent-Weiterleitung, Mosh, Snippets, Sitzungsaufzeichnung. Ebenfalls nicht geplant, weil im
-Design nicht vorgesehen: Anmeldung am SSH-Server per Passwort (SSHCraft arbeitet nur mit
-Schlüsseln; nachrüstbar, falls gewünscht).
+**Nach Version 1** (Moritz, 12.11.2026): SFTP, Multiplayer, Import aus AWS, DigitalOcean und
+Azure, KI-Funktionen, Mosh, Telnet.
