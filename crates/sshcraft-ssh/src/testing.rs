@@ -75,6 +75,10 @@ struct Records {
     agent: Mutex<Option<Option<usize>>>,
     /// How many certificates clients offered.
     certificates: Mutex<usize>,
+    /// Commands clients ran over `exec`, in order.
+    commands: Mutex<Vec<String>>,
+    /// What `exec` answers; `None`: [`TEST_EXEC_OUTPUT`].
+    exec_output: Mutex<Option<String>>,
 }
 
 pub struct TestServer {
@@ -112,6 +116,16 @@ impl TestServer {
     /// Passwords and keyboard-interactive answers clients sent, in order.
     pub fn received_passwords(&self) -> Vec<String> {
         self.records.passwords.lock().unwrap().clone()
+    }
+
+    /// Answers every later `exec` with `output`.
+    pub fn set_exec_output(&self, output: &str) {
+        *self.records.exec_output.lock().unwrap() = Some(output.to_owned());
+    }
+
+    /// Commands clients ran over `exec`, in order.
+    pub fn received_commands(&self) -> Vec<String> {
+        self.records.commands.lock().unwrap().clone()
     }
 
     /// How many certificates clients offered.
@@ -473,15 +487,25 @@ impl server::Handler for Handler {
     async fn exec_request(
         &mut self,
         channel: ChannelId,
-        _data: &[u8],
+        data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
+        self.records
+            .commands
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(data).into_owned());
+        let output = self
+            .records
+            .exec_output
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| TEST_EXEC_OUTPUT.to_owned());
         let handle = session.handle();
         tokio::spawn(async move {
-            let _ = handle
-                .data(channel, Bytes::from_static(TEST_EXEC_OUTPUT.as_bytes()))
-                .await;
+            let _ = handle.data(channel, Bytes::from(output.into_bytes())).await;
             let _ = handle.exit_status_request(channel, 0).await;
             let _ = handle.eof(channel).await;
             let _ = handle.close(channel).await;
