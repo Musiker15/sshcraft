@@ -31,6 +31,8 @@ pub enum ProtoError {
     NotAllowed,
     #[error("decryption failed")]
     Decrypt,
+    #[error("the area key does not match the one the owner committed to")]
+    WrongAreaKey,
     #[error("malformed data: {0}")]
     Malformed(String),
 }

@@ -138,27 +138,67 @@ struct Seen {
     digest: [u8; 32],
 }
 
-/// Remembers the highest version seen per id, so a server cannot serve older or forked states.
+/// Remembers the highest accepted version per record and per area manifest, so a server cannot
+/// serve older or forked states. Records and manifests are only counted after they verified,
+/// so nothing unverified can move a counter; the two kinds are tracked separately.
+///
+/// Rules for clients and servers (see docs/protocol.md): the server only accepts version
+/// `previous + 1` for an id (compare and swap), and a client counts its own writes only after
+/// the server acknowledged them, so a lost race is a conflict to resolve, not a fork.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionTracker {
-    seen: HashMap<Uuid, Seen>,
+    records: HashMap<Uuid, Seen>,
+    manifests: HashMap<Uuid, Seen>,
+}
+
+fn check(
+    map: &mut HashMap<Uuid, Seen>,
+    id: Uuid,
+    version: u64,
+    digest: [u8; 32],
+) -> Result<Freshness, ProtoError> {
+    match map.get(&id) {
+        Some(seen) if version < seen.version => Err(ProtoError::Rollback),
+        Some(seen) if version == seen.version && digest != seen.digest => Err(ProtoError::Fork),
+        Some(seen) if version == seen.version => Ok(Freshness::Unchanged),
+        _ => {
+            map.insert(id, Seen { version, digest });
+            Ok(Freshness::New)
+        }
+    }
 }
 
 impl VersionTracker {
-    pub fn check(
+    /// Opens the record (all checks of [`SealedRecord::open`]) and only then counts it.
+    pub fn accept_record(
         &mut self,
-        id: Uuid,
-        version: u64,
-        digest: [u8; 32],
+        record: &SealedRecord,
+        key: &AreaKey,
+        manifest: &AreaManifest,
+        author_devices: &DeviceSet,
+    ) -> Result<(Freshness, Zeroizing<Vec<u8>>), ProtoError> {
+        let body = record.open(key, manifest, author_devices)?;
+        let freshness = check(
+            &mut self.records,
+            record.header.record_id,
+            record.header.version,
+            record.digest(),
+        )?;
+        Ok((freshness, body))
+    }
+
+    /// Verifies the manifest against its owner's devices and only then counts it.
+    pub fn accept_manifest(
+        &mut self,
+        manifest: &AreaManifest,
+        owner_devices: &DeviceSet,
     ) -> Result<Freshness, ProtoError> {
-        match self.seen.get(&id) {
-            Some(seen) if version < seen.version => Err(ProtoError::Rollback),
-            Some(seen) if version == seen.version && digest != seen.digest => Err(ProtoError::Fork),
-            Some(seen) if version == seen.version => Ok(Freshness::Unchanged),
-            _ => {
-                self.seen.insert(id, Seen { version, digest });
-                Ok(Freshness::New)
-            }
-        }
+        manifest.verify(owner_devices)?;
+        check(
+            &mut self.manifests,
+            manifest.area_id.0,
+            manifest.version,
+            manifest.digest(),
+        )
     }
 }

@@ -62,3 +62,14 @@ fn write_permission_follows_roles() {
     assert!(!w.manifest.can_write(&w.reader.public()));
     assert!(!w.manifest.can_write(&w.stranger.public()));
 }
+
+#[test]
+fn manifest_with_changed_key_commitment_is_rejected() {
+    let w = World::new();
+    let mut m = w.manifest.clone();
+    m.key_commitment[0] ^= 1;
+    assert_eq!(
+        m.verify(&w.owner.set()).err(),
+        Some(ProtoError::BadSignature)
+    );
+}

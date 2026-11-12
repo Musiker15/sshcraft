@@ -76,10 +76,12 @@ impl World {
         let reader = Person::new(1);
         let stranger = Person::new(1);
         let area = AreaId(Uuid::new_v4());
+        let key = AreaKey::generate();
         let manifest = AreaManifest::sign(
             area,
             1,
             1,
+            &key,
             owner.public(),
             vec![
                 Member {
@@ -100,7 +102,7 @@ impl World {
             reader,
             stranger,
             area,
-            key: AreaKey::generate(),
+            key,
             manifest,
         }
     }

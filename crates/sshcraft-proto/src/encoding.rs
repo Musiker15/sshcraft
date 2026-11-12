@@ -9,6 +9,7 @@ pub const DOMAIN_ENVELOPE_INFO: &str = "sshcraft/area-key/v1";
 pub const DOMAIN_SAFETY: &str = "sshcraft/safety-number/v1";
 pub const DOMAIN_LOG_HASH: &str = "sshcraft/device-log-hash/v1";
 pub const DOMAIN_AUTH: &str = "sshcraft/server-auth/v1";
+pub const DOMAIN_KEY_CHECK: &str = "sshcraft/area-key-check/v1";
 
 /// The domain, then every field as a big-endian `u32` length followed by its bytes.
 /// Field boundaries stay unambiguous, also for empty fields.

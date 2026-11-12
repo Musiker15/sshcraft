@@ -41,6 +41,7 @@ Every kind of object has its own domain, so a signature for one kind never verif
 | `sshcraft/area-key/v1` | HPKE `info` and associated data of key envelopes |
 | `sshcraft/safety-number/v1` | safety number |
 | `sshcraft/server-auth/v1` | server login signature |
+| `sshcraft/area-key-check/v1` | commitment to an area key, inside the manifest |
 
 ## Keys
 
@@ -81,8 +82,15 @@ A client accepts a log only if, replayed from the start:
 - a *revoke* is signed by the account key or by a device that is active **at that point** of the
   log, and targets an active device.
 
-A revoked device can sign nothing afterwards. If two devices revoke each other, the first entry
-wins and the second makes the whole log invalid, so a server cannot quietly pick a winner.
+A revoked device can sign nothing afterwards. If two devices revoke each other at the same time,
+both entries point to the same predecessor and only one of them can become the next entry; the
+other can never be chained. **The server decides which one that is.** A server working with a
+thief who holds a stolen device can therefore keep the stolen device and drop the legitimate one.
+The way out is the account key: it can revoke any device and enroll a new one (under a new
+device id, ids are never reused).
+
+A server must run the full log verification on every append. One invalid entry would make the
+append-only log unverifiable for every client.
 
 A client remembers the last head (`seq`, hash) it accepted. A later log that is shorter is a
 **rollback**; one with a different entry at that position is a **fork**. Both are refused.
@@ -95,10 +103,25 @@ device's HPKE key with `info = "sshcraft/area-key/v1"` and associated data
 `signing_bytes(sshcraft/area-key/v1, [area id, key version, device id])`. A key envelope moved to
 another area, key version or device does not open.
 
+Envelopes are **not authenticated**: anyone who knows a device's public HPKE key, the server
+included, can seal one. What ties a key to the owner is the **key commitment** in the signed
+manifest: SHA-256 over `signing_bytes(sshcraft/area-key-check/v1, [area id, key version, key])`.
+A client opens an envelope only against a verified manifest and refuses a key whose commitment
+does not match (`WrongAreaKey`). Without this, a server could hand a device a key it knows and
+read everything that device writes afterwards.
+
 The **area manifest** names the owner account, the members with their role (`read` or `write`),
 the key version and a version number. It is signed by one of the owner's active devices. A
 personal area has no members. Rotating the key (after revoking a device or a member) means a new
 key version, new envelopes for everyone who still has access, and a new manifest.
+
+Only the owner's devices can sign a manifest, so only the owner can rotate an area. When a
+member revokes one of their own devices, the owner's client has to notice it in the member's
+device log and rotate every area it shares with that member.
+
+After a rotation, and after a device is revoked, records written under the old key version or
+by the revoked device no longer open: `open` requires the current key version and an active
+author device. They have to be re-sealed by an active device under the new key.
 
 ## Records
 
@@ -115,9 +138,19 @@ A client opens a record only after these checks, in this order:
 4. the signature is valid;
 5. the body decrypts.
 
-**Versions.** A client keeps, per record id (and per manifest), the highest version it has
-accepted and a digest of it (SHA-256 of the signature). A lower version is a rollback; the same
-version with a different digest is a fork. Both are refused.
+**Versions.** A client keeps, per record id and, separately, per area manifest, the highest
+version it has accepted and a digest of it (SHA-256 of the signature). A lower version is a
+rollback; the same version with a different digest is a fork. Both are refused. Only records
+that opened and manifests that verified are counted (`VersionTracker::accept_record` and
+`accept_manifest` do both steps), so nothing unverified can move a counter.
+
+Two rules keep normal offline edits from looking like a fork:
+
+- the server accepts a new version of an id only as `previous + 1` (compare and swap) and
+  rejects the second of two concurrent writes;
+- a client counts its own write only after the server acknowledged it. A rejected write is a
+  conflict: the client fetches the current version, merges ("last change wins" per item) and
+  writes `current + 1`.
 
 ## What the server sees
 

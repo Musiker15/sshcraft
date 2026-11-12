@@ -15,7 +15,9 @@ use zeroize::Zeroizing;
 
 use crate::ProtoError;
 use crate::devicelog::DeviceSet;
-use crate::encoding::{DOMAIN_ENVELOPE_INFO, DOMAIN_MANIFEST, b64, signing_bytes};
+use crate::encoding::{
+    DOMAIN_ENVELOPE_INFO, DOMAIN_KEY_CHECK, DOMAIN_MANIFEST, b64, signing_bytes,
+};
 use crate::identity::{AccountPublic, DeviceCertificate, DeviceKeys};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -98,12 +100,33 @@ pub fn seal_area_key(
     })
 }
 
+/// Commitment to an area key, kept in the signed manifest. Envelopes are not authenticated
+/// (anyone with a device's public key can seal one), so this is what ties a key to the owner.
+pub fn key_commitment(area_id: AreaId, key_version: u32, key: &AreaKey) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(signing_bytes(
+        DOMAIN_KEY_CHECK,
+        &[
+            area_id.0.as_bytes(),
+            &key_version.to_be_bytes(),
+            key.bytes(),
+        ],
+    ))
+    .into()
+}
+
+/// Opens an envelope for this device and checks the key against the owner's commitment in
+/// `manifest`, which the caller must already have verified with [`AreaManifest::verify`].
 pub fn open_area_key(
     envelope: &KeyEnvelope,
     device_id: Uuid,
     keys: &DeviceKeys,
+    manifest: &AreaManifest,
 ) -> Result<AreaKey, ProtoError> {
-    if envelope.device_id != device_id {
+    if envelope.device_id != device_id
+        || envelope.area_id != manifest.area_id
+        || envelope.key_version != manifest.key_version
+    {
         return Err(ProtoError::NotAllowed);
     }
     let encapped = <X25519HkdfSha256 as Kem>::EncappedKey::from_bytes(&envelope.encapped)
@@ -121,7 +144,11 @@ pub fn open_area_key(
         .map_err(|_| ProtoError::Decrypt)?,
     );
     let bytes: [u8; 32] = plain[..].try_into().map_err(|_| ProtoError::Decrypt)?;
-    Ok(AreaKey(Zeroizing::new(bytes)))
+    let key = AreaKey(Zeroizing::new(bytes));
+    if key_commitment(manifest.area_id, manifest.key_version, &key) != manifest.key_commitment {
+        return Err(ProtoError::WrongAreaKey);
+    }
+    Ok(key)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +171,9 @@ pub struct AreaManifest {
     pub area_id: AreaId,
     pub version: u64,
     pub key_version: u32,
+    /// [`key_commitment`] of the area key for `key_version`.
+    #[serde(with = "b64")]
+    pub key_commitment: [u8; 32],
     pub owner: AccountPublic,
     pub members: Vec<Member>,
     pub author_device: Uuid,
@@ -157,6 +187,7 @@ impl AreaManifest {
         area_id: AreaId,
         version: u64,
         key_version: u32,
+        key: &AreaKey,
         owner: AccountPublic,
         members: Vec<Member>,
         author_device: Uuid,
@@ -166,6 +197,7 @@ impl AreaManifest {
             area_id,
             version,
             key_version,
+            key_commitment: key_commitment(area_id, key_version, key),
             owner,
             members,
             author_device,
@@ -193,6 +225,7 @@ impl AreaManifest {
                 self.area_id.0.as_bytes(),
                 &self.version.to_be_bytes(),
                 &self.key_version.to_be_bytes(),
+                &self.key_commitment,
                 &self.owner.0,
                 &members,
                 self.author_device.as_bytes(),
