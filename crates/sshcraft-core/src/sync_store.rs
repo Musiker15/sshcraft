@@ -15,6 +15,8 @@ pub enum ItemKind {
     Group,
     Host,
     Key,
+    Identity,
+    Password,
 }
 
 impl ItemKind {
@@ -23,6 +25,8 @@ impl ItemKind {
             Self::Group => "group",
             Self::Host => "host",
             Self::Key => "key",
+            Self::Identity => "identity",
+            Self::Password => "password",
         }
     }
 
@@ -31,6 +35,8 @@ impl ItemKind {
             "group" => Ok(Self::Group),
             "host" => Ok(Self::Host),
             "key" => Ok(Self::Key),
+            "identity" => Ok(Self::Identity),
+            "password" => Ok(Self::Password),
             other => Err(StoreError::Malformed(format!("unknown item kind {other}"))),
         }
     }
@@ -40,6 +46,8 @@ impl ItemKind {
             Self::Group => "groups",
             Self::Host => "hosts",
             Self::Key => "keys",
+            Self::Identity => "identities",
+            Self::Password => "passwords",
         }
     }
 }
@@ -301,6 +309,7 @@ impl Store {
                 )?;
             }
         }
+        super::carry_passwords(&tx, kind, id)?;
         tx.commit()?;
         Ok(())
     }

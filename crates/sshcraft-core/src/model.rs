@@ -65,6 +65,17 @@ pub struct ConnectionSettings {
     pub env: Vec<EnvVar>,
 }
 
+impl ConnectionSettings {
+    /// Every password these settings refer to: their own and the proxy's.
+    pub fn password_ids(&self) -> Vec<PasswordId> {
+        let proxy = match &self.proxy {
+            Some(Proxy::Http(e) | Proxy::Socks5(e)) => e.password,
+            _ => None,
+        };
+        self.password.into_iter().chain(proxy).collect()
+    }
+}
+
 /// How the first connection leaves this device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

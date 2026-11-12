@@ -275,7 +275,7 @@ impl Store {
         let mut next = match kind {
             ItemKind::Host => above("SELECT group_id FROM hosts WHERE id = ?1", item_id)?,
             ItemKind::Group => above(PARENT, item_id)?,
-            ItemKind::Key => None,
+            ItemKind::Key | ItemKind::Identity | ItemKind::Password => None,
         };
         for _ in 0..crate::model::MAX_GROUP_DEPTH {
             let Some(group) = next else {

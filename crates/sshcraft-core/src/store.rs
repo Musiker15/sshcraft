@@ -37,7 +37,7 @@ pub struct Store {
     conn: rusqlite::Connection,
 }
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -185,6 +185,12 @@ impl Store {
         if version < 5 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V5)?;
+            tx.pragma_update(None, "user_version", 5)?;
+            tx.commit()?;
+        }
+        if version < 6 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(credential_store::SCHEMA_V6)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -251,7 +257,7 @@ impl Store {
             rusqlite::params![
                 id,
                 group.name,
-                to_json(&group.defaults)?,
+                to_json(&normalized(&group.defaults))?,
                 group.location.map(|s| s.0.to_string()),
                 group.parent_id.map(|p| p.0.to_string()),
                 to_json(&crate::model::normalize_tags(&group.tags))?
@@ -276,6 +282,7 @@ impl Store {
             "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
             rusqlite::params![id, location],
         )?;
+        carry_passwords(&tx, ItemKind::Group, &id)?;
         tx.commit()?;
         Ok(())
     }
@@ -325,7 +332,8 @@ impl Store {
     }
 
     pub fn upsert_host(&self, host: &Host) -> Result<(), StoreError> {
-        self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             // A host in a group always lives where its group lives.
             "INSERT INTO hosts (id, name, group_id, settings, location, tags, os)
              VALUES (?1, ?2, ?3, ?4,
@@ -340,12 +348,14 @@ impl Store {
                 host.id.0.to_string(),
                 host.name,
                 host.group_id.map(|g| g.0.to_string()),
-                to_json(&host.settings)?,
+                to_json(&normalized(&host.settings))?,
                 host.location.map(|s| s.0.to_string()),
                 to_json(&crate::model::normalize_tags(&host.tags))?,
                 host.os.map(|os| to_json(&os)).transpose()?
             ],
         )?;
+        carry_passwords(&tx, ItemKind::Host, &host.id.0.to_string())?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -555,6 +565,14 @@ fn subgroups_of(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, St
     Ok(rows)
 }
 
+/// Settings as they are stored: environment variables normalized.
+fn normalized(settings: &crate::model::ConnectionSettings) -> crate::model::ConnectionSettings {
+    crate::model::ConnectionSettings {
+        env: crate::model::normalize_env(&settings.env),
+        ..settings.clone()
+    }
+}
+
 fn to_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
     serde_json::to_string(value).map_err(|e| StoreError::Malformed(e.to_string()))
 }
@@ -571,10 +589,13 @@ pub(crate) fn parse_uuid(text: &str) -> Result<uuid::Uuid, StoreError> {
     uuid::Uuid::parse_str(text).map_err(|e| StoreError::Malformed(e.to_string()))
 }
 
+#[path = "credential_store.rs"]
+mod credential_store;
 #[path = "share_store.rs"]
 mod share_store;
 #[path = "sync_store.rs"]
 mod sync_store;
+use credential_store::carry_passwords;
 pub use share_store::{Contact, ShareKind, ShareRole, ShareRow, copy_id};
 pub use sync_store::{AreaState, ItemKind, RecordEntry, ServerRow};
 
@@ -585,3 +606,7 @@ mod tree_tests;
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "credentials_tests.rs"]
+mod credentials_tests;
