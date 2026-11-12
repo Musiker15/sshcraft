@@ -7,7 +7,7 @@
 use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
-use crate::items::{ItemBody, apply, decode, encode, local_item, newer};
+use crate::items::{ItemBody, SyncItem, apply, decode, encode, local_item, newer};
 use crate::shares::{ShareInfo, decode_share_info};
 use sshcraft_core::model::ServerId;
 use sshcraft_core::store::{
@@ -68,6 +68,7 @@ pub struct Engine {
     pub(crate) device_id: Uuid,
     pub(crate) keys: DeviceKeys,
     pub(crate) account: AccountPublic,
+    warnings: Vec<String>,
 }
 
 fn now_secs() -> i64 {
@@ -109,6 +110,7 @@ impl Engine {
             device_id: row.device_id,
             keys,
             account: AccountPublic(row.account),
+            warnings: Vec::new(),
         };
         let login = client.login(row.device_id, &engine.keys).await;
         engine.revoked_check(store, login)?;
@@ -497,14 +499,23 @@ impl Engine {
             .ok_or(SyncError::NotSetUp)
     }
 
-    /// Sends every queued local change. A conflict (someone wrote first) is settled by
-    /// fetching and "last change wins"; a network error leaves the outbox as it is.
+    /// Warnings of the last push: changes it refused to send (`share_read_only`,
+    /// `share_no_add_remove`) and reset to the server's state.
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    /// Sends every queued local change into the area its item lives in. A conflict (someone
+    /// wrote first) is settled by fetching and "last change wins"; a network error leaves the
+    /// outbox as it is. A change this account may not make in a share it received is not sent
+    /// and the item goes back to the server's state.
     pub async fn push(
         &mut self,
         store: &Mutex<Store>,
         vault: &Vault,
         _now_ms: i64,
     ) -> Result<usize, SyncError> {
+        self.warnings.clear();
         let sync_keys = lock(store)?
             .server(self.server)?
             .ok_or(SyncError::NotSetUp)?
@@ -516,9 +527,10 @@ impl Engine {
                 lock(store)?.dequeue(self.server, kind, &id)?;
                 continue;
             }
-            for _ in 0..CONFLICT_ROUNDS {
-                let (manifest, key) = self.personal_area(store)?;
-                let (record, entry, sent_at) = {
+            let mut conflicts = 0;
+            while conflicts < CONFLICT_ROUNDS {
+                let personal = self.personal_area(store)?.0.area_id.0;
+                let step = {
                     let guard = lock(store)?;
                     let Some(queued) = guard.queued_at(self.server, kind, &id)? else {
                         break;
@@ -534,53 +546,152 @@ impl Engine {
                         };
                     }
                     let known = guard.record_entry(self.server, kind, &id)?;
-                    if matches!(item.body, ItemBody::Deleted { .. }) && known.is_none() {
+                    let deleted = matches!(item.body, ItemBody::Deleted { .. });
+                    if deleted && known.is_none() {
                         // Never reached the server: nothing to delete there.
                         guard.dequeue(self.server, kind, &id)?;
                         break;
                     }
-                    let (record_id, version) = known
-                        .as_ref()
-                        .map_or_else(|| (Uuid::new_v4(), 1), |e| (e.record_id, e.version + 1));
-                    let header = RecordHeader {
-                        record_id,
-                        area_id: manifest.area_id,
-                        version,
-                        key_version: manifest.key_version,
-                        author_account: self.account,
-                        author_device: self.device_id,
+                    // A deleted item is removed where its record is.
+                    let target = match (&known, deleted) {
+                        (Some(entry), true) => entry.area_id,
+                        _ => guard.area_for(self.server, kind, &id, personal)?,
                     };
-                    let record = SealedRecord::seal(header, &encode(&item)?, &key, &self.keys);
-                    let entry = RecordEntry {
-                        record_id,
-                        area_id: manifest.area_id.0,
-                        version,
-                        modified_at: item.modified_at,
-                    };
-                    (record, entry, queued)
+                    if let Some(warning) =
+                        refusal(&guard, self.server, target, deleted, known.is_none())?
+                    {
+                        guard.dequeue(self.server, kind, &id)?;
+                        Step::Refuse(warning, known)
+                    } else if let Some(entry) = known.clone().filter(|e| e.area_id != target) {
+                        Step::Leave(entry, item.modified_at)
+                    } else {
+                        Step::Write(item, known, target, queued)
+                    }
                 };
-                match self.client.put_record(&record).await {
-                    Ok(_) => {
-                        let guard = lock(store)?;
-                        guard.put_record_entry(self.server, &entry, kind, &id)?;
-                        guard.dequeue_if(self.server, kind, &id, sent_at)?;
-                        sent += 1;
+                let put = match step {
+                    Step::Refuse(warning, known) => {
+                        self.warnings.push(warning.to_owned());
+                        self.restore(store, vault, kind, &id, known).await?;
                         break;
                     }
-                    // 409: someone wrote first. 400: the area moved on to a new key (a rotation)
-                    // or the stored manifest is stale. Either way fetch first, then try again.
+                    Step::Leave(entry, modified_at) => {
+                        // Moved into or out of a share: first gone from the old area.
+                        let Ok((manifest, key)) = self.stored_area(store, entry.area_id) else {
+                            lock(store)?.remove_record_entry(self.server, kind, &id)?;
+                            continue;
+                        };
+                        let item = SyncItem {
+                            modified_at,
+                            body: ItemBody::Deleted {
+                                item_kind: kind,
+                                item_id: id.clone(),
+                            },
+                        };
+                        let header = RecordHeader {
+                            record_id: entry.record_id,
+                            area_id: manifest.area_id,
+                            version: entry.version + 1,
+                            key_version: manifest.key_version,
+                            author_account: self.account,
+                            author_device: self.device_id,
+                        };
+                        let record = SealedRecord::seal(header, &encode(&item)?, &key, &self.keys);
+                        match self.client.put_record(&record).await {
+                            Ok(_) => {
+                                lock(store)?.remove_record_entry(self.server, kind, &id)?;
+                                continue;
+                            }
+                            Err(err) => Err(err),
+                        }
+                    }
+                    Step::Write(item, known, target, queued) => {
+                        let (manifest, key) = self.stored_area(store, target)?;
+                        let (record_id, version) = known
+                            .as_ref()
+                            .map_or_else(|| (Uuid::new_v4(), 1), |e| (e.record_id, e.version + 1));
+                        let header = RecordHeader {
+                            record_id,
+                            area_id: manifest.area_id,
+                            version,
+                            key_version: manifest.key_version,
+                            author_account: self.account,
+                            author_device: self.device_id,
+                        };
+                        let record = SealedRecord::seal(header, &encode(&item)?, &key, &self.keys);
+                        let entry = RecordEntry {
+                            record_id,
+                            area_id: manifest.area_id.0,
+                            version,
+                            modified_at: item.modified_at,
+                        };
+                        match self.client.put_record(&record).await {
+                            Ok(_) => {
+                                let guard = lock(store)?;
+                                guard.put_record_entry(self.server, &entry, kind, &id)?;
+                                guard.dequeue_if(self.server, kind, &id, queued)?;
+                                sent += 1;
+                                break;
+                            }
+                            Err(err) => Err(err),
+                        }
+                    }
+                };
+                match put {
+                    // 409: someone wrote first. 400: the area moved on to a new key (a
+                    // rotation) or the stored manifest is stale. Either way fetch first, then
+                    // try again (the item may be gone from the outbox if the server's state won).
                     Err(SyncError::Server {
                         status: 409 | 400, ..
                     }) => {
-                        // Someone wrote first: fetch, then decide again (the item may be gone
-                        // from the outbox if the server's state won).
+                        conflicts += 1;
                         self.pull(store, vault).await?;
                     }
                     Err(err) => return self.revoked_check(store, Err(err)),
+                    Ok(()) => {}
                 }
             }
         }
         Ok(sent)
+    }
+
+    /// Puts an item back to the server's state after a refused change: a new item goes, a
+    /// changed or deleted one gets the server's record again.
+    async fn restore(
+        &self,
+        store: &Mutex<Store>,
+        vault: &Vault,
+        kind: ItemKind,
+        id: &str,
+        known: Option<RecordEntry>,
+    ) -> Result<(), SyncError> {
+        let Some(entry) = known else {
+            let guard = lock(store)?;
+            remove_item(&guard, kind, id)?;
+            guard.clear_item_area(self.server, kind, id)?;
+            return Ok(());
+        };
+        let (manifest, key) = self.stored_area(store, entry.area_id)?;
+        let personal = self.personal_area(store).ok().map(|(m, _)| m.area_id.0);
+        let mut since = 0;
+        loop {
+            let page = self.client.records(manifest.area_id, since, PAGE).await;
+            let (records, more) = self.revoked_check(store, page)?;
+            for (seq, record) in records {
+                since = since.max(seq);
+                if record.header.record_id != entry.record_id {
+                    continue;
+                }
+                let devices = self
+                    .account_devices(store, &record.header.author_account)
+                    .await?;
+                let body = record.open(&key, &manifest, &devices)?;
+                self.take(store, vault, &record.header, &body, personal)?;
+                return Ok(());
+            }
+            if !more {
+                return Ok(());
+            }
+        }
     }
 
     /// Applies a verified record unless a newer local change is waiting to be sent; either way
@@ -642,6 +753,36 @@ impl Engine {
         store.dequeue(self.server, kind, &item_id)?;
         Ok(true)
     }
+}
+
+/// What `push` does with one queued item.
+enum Step {
+    /// Not this account's to change: back to the server's state.
+    Refuse(&'static str, Option<RecordEntry>),
+    /// The item moved to another area: its old record says it is gone first.
+    Leave(RecordEntry, i64),
+    Write(crate::items::SyncItem, Option<RecordEntry>, Uuid, i64),
+}
+
+/// Why this account may not send a change into `area`, if it may not: a received share it may
+/// only read, or a received selection (or single host) that may only be changed.
+fn refusal(
+    store: &Store,
+    server: ServerId,
+    area: Uuid,
+    deleted: bool,
+    new: bool,
+) -> Result<Option<&'static str>, SyncError> {
+    let Some(share) = store.share(server, area)?.filter(|s| !s.owned) else {
+        return Ok(None);
+    };
+    if share.role != Some(ShareRole::Write) {
+        return Ok(Some("share_read_only"));
+    }
+    if share.kind != ShareKind::GroupAll && (deleted || new) {
+        return Ok(Some("share_no_add_remove"));
+    }
+    Ok(None)
 }
 
 /// Errors that make one area or record unusable but not the whole pull: it did not verify, or

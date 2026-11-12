@@ -425,6 +425,19 @@ impl Store {
         Ok(())
     }
 
+    pub fn remove_record_entry(
+        &self,
+        server: ServerId,
+        kind: ItemKind,
+        item_id: &str,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM sync_records WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3",
+            params![server.0.to_string(), kind.as_str(), item_id],
+        )?;
+        Ok(())
+    }
+
     /// Notes that an item changed locally and still has to go to `server`; the time is the
     /// latest change, which "last change wins" compares against the server's state.
     pub fn queue(
