@@ -6,6 +6,7 @@
 pub mod account;
 pub mod areas;
 pub mod client;
+pub mod contacts;
 pub mod devices;
 pub mod engine;
 pub mod items;
@@ -53,6 +54,9 @@ pub enum SyncError {
     /// The action is not allowed (revoking this device or the recovery device, for example).
     #[error("not allowed")]
     NotAllowed,
+    /// Sharing needs a contact whose safety number the user confirmed.
+    #[error("the recipient's safety number is not confirmed")]
+    ContactUnconfirmed,
 }
 
 impl SyncError {

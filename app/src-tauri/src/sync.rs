@@ -261,6 +261,7 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::Blocked => ErrorCode::SyncBlocked,
         SyncError::NotSetUp => ErrorCode::NotFound,
         SyncError::NotAllowed => ErrorCode::SyncNotAllowed,
+        SyncError::ContactUnconfirmed => ErrorCode::SyncNotAllowed,
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,
     };
     let detail = match err {
