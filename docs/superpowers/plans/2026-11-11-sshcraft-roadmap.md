@@ -12,7 +12,7 @@ mit dem Wissen aus den vorherigen.
 | 1 | Desktop-Grundlage | Windows-App: Gruppen und Hosts, eigene Schlüssel (verschlüsselt gespeichert), Terminal in Tabs, Host-Fingerprint-Prüfung, Keep-Alive, Wiederverbinden | fertig, auf `main` |
 | 2 | Schlüsselquellen und Windows-Anbindung | Proton-Pass-Agent, Import über `pass-cli`, Import aus `~/.ssh/config`, Windows Hello | fertig, auf `main` |
 | 3 | Protokoll- und Krypto-Crate | `sshcraft-proto`: Konto- und Geräteschlüssel, Geräteprotokoll, Bereichsschlüssel, signierte und verschlüsselte Datensätze, Rückfallschutz | fertig, auf `main` |
-| 4 | Oberfläche nach Termius-Vorbild und Sprachen | neuer Aufbau mit Seitenleiste (Hosts, Schlüssel, Snippets, Portweiterleitung, Protokolle, Einstellungen), Befehlspalette, Neuer-Tab-Seite, Themes und Schriften, Übersetzung Englisch und Deutsch mit AUTO; Fehlercodes aus Rust statt Texten | offen |
+| 4 | Oberfläche nach Termius-Vorbild und Sprachen | neuer Aufbau mit Seitenleiste (Hosts, Schlüssel, Snippets, Portweiterleitung, Protokolle, Einstellungen), Befehlspalette, Neuer-Tab-Seite, Themes und Schriften, Übersetzung Englisch und Deutsch mit AUTO; Fehlercodes aus Rust statt Texten | fertig, auf `main` |
 | 5 | Sync-Server | `sshcraft-server`: axum, SQLite und PostgreSQL, API-Key, Challenge-Anmeldung, Konten, Geräteprotokolle, Datensätze, Push per WebSocket, Verwaltungsbefehle, Docker-Image, Apache-Beispiel | offen |
 | 6 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | offen |
 | 7 | Teilen | Freigaben für Host und Gruppe, Auswahl, mit oder ohne Schlüssel, lesen oder schreiben, Sicherheitsnummer, Entziehen mit Schlüsseltausch | offen |
