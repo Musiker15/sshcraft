@@ -33,6 +33,14 @@ pub enum Disconnect {
     AuthFailed,
 }
 
+/// What a terminal session (SSH, local or serial) reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellEvent {
+    /// Raw bytes from the terminal, not decoded.
+    Data(Vec<u8>),
+    Ended(Disconnect),
+}
+
 /// Delay before reconnect attempt `attempt` (1-based), or `None` to give up.
 /// Only a lost connection is retried.
 pub fn next_reconnect_delay(reason: &Disconnect, attempt: u32) -> Option<Duration> {

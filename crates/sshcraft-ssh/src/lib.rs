@@ -212,12 +212,7 @@ pub(crate) fn protocol(e: impl std::fmt::Display) -> SshError {
     SshError::Protocol(e.to_string())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ShellEvent {
-    /// Raw bytes from the remote terminal, not decoded.
-    Data(Vec<u8>),
-    Ended(Disconnect),
-}
+pub use sshcraft_core::policy::ShellEvent;
 
 struct ClientHandler {
     /// Set on the target when forwarding is on; jump hosts never get the agent.
