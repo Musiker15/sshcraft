@@ -219,5 +219,8 @@ pub fn apply_import(
     Ok(outcome)
 }
 
+pub mod keyfiles;
+pub mod knownhosts;
+
 #[cfg(test)]
 mod tests;

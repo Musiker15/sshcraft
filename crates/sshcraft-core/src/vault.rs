@@ -306,6 +306,18 @@ pub fn parse_private_key(
     passphrase: Option<&str>,
 ) -> Result<PrivateKey, VaultError> {
     let normalized = Zeroizing::new(openssh_private_key.replace("\r\n", "\n"));
+    // PEM (PKCS#1, PKCS#8) and PuTTY keys go through russh, which reads both.
+    if !normalized
+        .trim_start()
+        .starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+    {
+        let encrypted = normalized.contains("ENCRYPTED") || normalized.contains("Encryption: aes");
+        return match russh::keys::decode_secret_key(normalized.trim(), passphrase) {
+            Ok(key) => Ok(key),
+            Err(_) if encrypted => Err(VaultError::WrongPassphrase),
+            Err(e) => Err(VaultError::InvalidKey(e.to_string())),
+        };
+    }
     let parsed = PrivateKey::from_openssh(normalized.trim())
         .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
     if parsed.is_encrypted() {
