@@ -7,6 +7,7 @@ pub mod area;
 pub mod devicelog;
 pub mod encoding;
 pub mod identity;
+pub mod record;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtoError {

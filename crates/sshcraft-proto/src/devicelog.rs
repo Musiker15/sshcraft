@@ -95,6 +95,7 @@ impl LogEntry {
 pub struct DeviceSet {
     order: Vec<Uuid>,
     active: HashMap<Uuid, DeviceCertificate>,
+    revoked: HashSet<Uuid>,
     head: Option<LogHead>,
 }
 
@@ -105,6 +106,15 @@ impl DeviceSet {
 
     pub fn get_active(&self, id: Uuid) -> Option<&DeviceCertificate> {
         self.active.get(&id)
+    }
+
+    /// The active device `id`, or why it cannot act: revoked, or never part of this account.
+    pub fn require_active(&self, id: Uuid) -> Result<&DeviceCertificate, ProtoError> {
+        match self.active.get(&id) {
+            Some(cert) => Ok(cert),
+            None if self.revoked.contains(&id) => Err(ProtoError::DeviceRevoked),
+            None => Err(ProtoError::UnknownDevice),
+        }
     }
 
     /// The last entry; `None` for an empty log.
@@ -249,6 +259,7 @@ impl DeviceLog {
                     if set.active.remove(device_id).is_none() {
                         return Err(broken("revoked device is not active"));
                     }
+                    set.revoked.insert(*device_id);
                 }
             }
             prev = entry.hash();

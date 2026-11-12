@@ -14,8 +14,9 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::ProtoError;
-use crate::encoding::{DOMAIN_ENVELOPE_INFO, b64, signing_bytes};
-use crate::identity::{DeviceCertificate, DeviceKeys};
+use crate::devicelog::DeviceSet;
+use crate::encoding::{DOMAIN_ENVELOPE_INFO, DOMAIN_MANIFEST, b64, signing_bytes};
+use crate::identity::{AccountPublic, DeviceCertificate, DeviceKeys};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -121,4 +122,104 @@ pub fn open_area_key(
     );
     let bytes: [u8; 32] = plain[..].try_into().map_err(|_| ProtoError::Decrypt)?;
     Ok(AreaKey(Zeroizing::new(bytes)))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Member {
+    pub account: AccountPublic,
+    pub role: Role,
+}
+
+/// Who owns an area and who may read or write it, signed by one of the owner's devices.
+/// A personal area has no members.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AreaManifest {
+    pub area_id: AreaId,
+    pub version: u64,
+    pub key_version: u32,
+    pub owner: AccountPublic,
+    pub members: Vec<Member>,
+    pub author_device: Uuid,
+    #[serde(with = "b64")]
+    pub signature: [u8; 64],
+}
+
+impl AreaManifest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn sign(
+        area_id: AreaId,
+        version: u64,
+        key_version: u32,
+        owner: AccountPublic,
+        members: Vec<Member>,
+        author_device: Uuid,
+        keys: &DeviceKeys,
+    ) -> Self {
+        let mut manifest = Self {
+            area_id,
+            version,
+            key_version,
+            owner,
+            members,
+            author_device,
+            signature: [0; 64],
+        };
+        manifest.signature = keys.sign(&manifest.signed_bytes());
+        manifest
+    }
+
+    fn signed_bytes(&self) -> Vec<u8> {
+        let members: Vec<u8> = self
+            .members
+            .iter()
+            .flat_map(|m| {
+                let role: &[u8] = match m.role {
+                    Role::Read => b"read",
+                    Role::Write => b"write",
+                };
+                signing_bytes("member", &[&m.account.0, role])
+            })
+            .collect();
+        signing_bytes(
+            DOMAIN_MANIFEST,
+            &[
+                self.area_id.0.as_bytes(),
+                &self.version.to_be_bytes(),
+                &self.key_version.to_be_bytes(),
+                &self.owner.0,
+                &members,
+                self.author_device.as_bytes(),
+            ],
+        )
+    }
+
+    /// `owner_devices` must be the verified device set of `owner`.
+    pub fn verify(&self, owner_devices: &DeviceSet) -> Result<(), ProtoError> {
+        let device = owner_devices.require_active(self.author_device)?;
+        if device.account != self.owner {
+            return Err(ProtoError::NotAllowed);
+        }
+        device.verify_signed(&self.signed_bytes(), &self.signature)
+    }
+
+    pub fn can_write(&self, account: &AccountPublic) -> bool {
+        *account == self.owner
+            || self
+                .members
+                .iter()
+                .any(|m| m.account == *account && m.role == Role::Write)
+    }
+
+    /// For [`VersionTracker`](crate::record::VersionTracker).
+    pub fn digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(self.signature).into()
+    }
 }
