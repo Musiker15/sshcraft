@@ -2,9 +2,10 @@
 
 Self-hosted SSH client with end-to-end encrypted sync and native Proton Pass support.
 
-SSHCraft is an SSH client for Windows, macOS, Linux, FreeBSD, Android, iOS and iPadOS. Hosts, groups and keys can be synced
-through your own server, encrypted on the device so the server never sees them. On the desktop,
-keys can come straight from the Proton Pass SSH agent.
+SSHCraft is an SSH client for Windows, macOS, Linux, FreeBSD, Android, iOS and iPadOS. Hosts,
+groups and keys can be synced through your own server, encrypted on the device so the server
+never sees them. On the desktop, keys can come straight from the Proton Pass SSH agent. The app
+speaks English and German and follows the system language unless you pick one.
 
 **Status:** early development. Nothing here is ready for daily use yet.
 
@@ -27,6 +28,8 @@ encrypted vault.
 | Design (German) | [docs/superpowers/specs/2026-11-11-sshcraft-design.md](docs/superpowers/specs/2026-11-11-sshcraft-design.md) |
 | Roadmap (German) | [docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md](docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md) |
 | Protocol and cryptography | [docs/protocol.md](docs/protocol.md) |
+| Keyboard shortcuts | [docs/shortcuts.md](docs/shortcuts.md) |
+| Security notes | [docs/security.md](docs/security.md) |
 
 ## Help and contributing
 

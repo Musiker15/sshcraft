@@ -7,10 +7,6 @@ const sources = import.meta.glob(["../**/*.tsx", "!../**/*.test.tsx"], {
   eager: true,
 }) as Record<string, string>;
 
-/** Files that still carry fixed texts; each UI task removes the files it migrates. */
-const PENDING = new Set<string>([
-]);
-
 const ALLOWED = new Set(["SSHCraft"]);
 const LETTERS = /[A-Za-zÄÖÜäöüß]{2,}/;
 
@@ -32,14 +28,14 @@ export function findHardcodedText(source: string): string[] {
 
 test("no fixed user-facing text outside the translation files", () => {
   const offenders = Object.entries(sources)
-    .filter(([path]) => !PENDING.has(path))
     .map(([path, source]) => [path, findHardcodedText(source)] as const)
     .filter(([, found]) => found.length > 0);
   expect(offenders).toEqual([]);
 });
 
-test("every pending file still exists", () => {
-  for (const path of PENDING) expect(Object.keys(sources)).toContain(path);
+test("the scan covers the app's components", () => {
+  expect(Object.keys(sources)).toContain("../shell/AppShell.tsx");
+  expect(Object.keys(sources).length).toBeGreaterThan(20);
 });
 
 test("the scanner finds JSX text, attributes and dialogs", () => {
