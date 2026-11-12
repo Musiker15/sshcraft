@@ -37,6 +37,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 subtle = "2.6.1"
 hmac = "0.13.0"
+hkdf = "0.13.0"
 tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"] }
 deadpool-postgres = "0.14.2"
 tower = { version = "0.5.3", features = ["util"] }

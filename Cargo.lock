@@ -5058,6 +5058,7 @@ dependencies = [
  "chacha20poly1305",
  "data-encoding",
  "ed25519-dalek",
+ "hkdf",
  "hpke",
  "rand 0.10.3",
  "serde",

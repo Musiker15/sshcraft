@@ -16,9 +16,15 @@ use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::ProtoError;
-use crate::encoding::{DOMAIN_AUTH, DOMAIN_DEVICE_CERT, DOMAIN_SAFETY, b64, signing_bytes};
+use crate::encoding::{
+    DOMAIN_AUTH, DOMAIN_DEVICE_CERT, DOMAIN_RECOVERY_DEVICE, DOMAIN_RECOVERY_ID, DOMAIN_SAFETY,
+    b64, signing_bytes,
+};
 
 const EXPORT_PREFIX: &str = "sshcraft-account-1:";
+
+/// Platform name of the recovery device (see [`AccountKey::recovery_device`]).
+pub const RECOVERY_PLATFORM: &str = "recovery";
 const CHECKSUM_LEN: usize = 4;
 
 fn random_32() -> Zeroizing<[u8; 32]> {
@@ -54,6 +60,19 @@ impl AccountKey {
         Self {
             signing: SigningKey::from_bytes(&random_32()),
         }
+    }
+
+    /// The recovery device of this account: an ordinary device whose keys follow from the
+    /// account key. Area keys are sealed to it like to every device, so whoever holds the account
+    /// key can open them again on a new device even when no other device is left.
+    pub fn recovery_device(&self) -> (Uuid, DeviceKeys) {
+        let seed = Zeroizing::new(self.signing.to_bytes());
+        let mut okm = Zeroizing::new([0u8; 64]);
+        hkdf::Hkdf::<Sha256>::new(None, &seed[..])
+            .expand(DOMAIN_RECOVERY_DEVICE.as_bytes(), &mut okm[..])
+            .expect("64 bytes is a valid HKDF-SHA256 output length");
+        let keys = DeviceKeys::from_bytes(&okm).expect("any 32 bytes are an X25519 key");
+        (recovery_device_id(&self.public()), keys)
     }
 
     pub fn public(&self) -> AccountPublic {
@@ -339,4 +358,18 @@ pub fn normalize_origin(url: &str) -> String {
         Some(scheme) => format!("{scheme}://{host}"),
         None => host,
     }
+}
+
+/// The device id of an account's recovery device: a UUID (version 8) from a hash of the account.
+pub fn recovery_device_id(account: &AccountPublic) -> Uuid {
+    let hash = Sha256::digest(signing_bytes(DOMAIN_RECOVERY_ID, &[&account.0]));
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&hash[..16]);
+    uuid::Builder::from_custom_bytes(bytes).into_uuid()
+}
+
+/// Whether a certificate is its account's recovery device: the platform alone is not enough, the
+/// id must be the one derived from the account, so no ordinary device can pass for it.
+pub fn is_recovery(cert: &DeviceCertificate) -> bool {
+    cert.platform == RECOVERY_PLATFORM && cert.device_id == recovery_device_id(&cert.account)
 }

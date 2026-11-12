@@ -209,3 +209,80 @@ fn origin_is_normalized() {
     );
     assert_eq!(normalize_origin("http://host:443"), "http://host:443");
 }
+
+mod recovery {
+    use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, open_area_key, seal_area_key};
+    use sshcraft_proto::identity::{
+        AccountKey, DeviceCertificate, DeviceKeys, RECOVERY_PLATFORM, is_recovery,
+    };
+    use uuid::Uuid;
+
+    fn recovery_cert(account: &AccountKey) -> (DeviceCertificate, DeviceKeys) {
+        let (id, keys) = account.recovery_device();
+        let cert = DeviceCertificate::issue(
+            account,
+            id,
+            keys.public(),
+            "Account key",
+            RECOVERY_PLATFORM,
+            1,
+        );
+        (cert, keys)
+    }
+
+    #[test]
+    fn recovery_device_is_stable() {
+        let account = AccountKey::generate();
+        let again = AccountKey::import(&account.export()).unwrap();
+        let (id_a, keys_a) = account.recovery_device();
+        let (id_b, keys_b) = again.recovery_device();
+        assert_eq!(id_a, id_b);
+        assert_eq!(keys_a.public(), keys_b.public());
+        assert_eq!(id_a.get_version_num(), 8);
+    }
+
+    #[test]
+    fn recovery_device_differs_per_account() {
+        let (a, _) = AccountKey::generate().recovery_device();
+        let (b, _) = AccountKey::generate().recovery_device();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn recovery_device_opens_its_envelope() {
+        let account = AccountKey::generate();
+        let (cert, _) = recovery_cert(&account);
+        let owner = DeviceKeys::generate();
+        let owner_id = Uuid::new_v4();
+        let area = AreaId(Uuid::new_v4());
+        let key = AreaKey::generate();
+        let manifest =
+            AreaManifest::sign(area, 1, 1, &key, account.public(), vec![], owner_id, &owner);
+        let envelope = seal_area_key(&key, area, 1, &cert).unwrap();
+        let (id, keys) = AccountKey::import(&account.export())
+            .unwrap()
+            .recovery_device();
+        let opened = open_area_key(&envelope, id, &keys, &manifest).unwrap();
+        assert!(opened.same_key_as(&key));
+    }
+
+    #[test]
+    fn is_recovery_needs_the_derived_id() {
+        let account = AccountKey::generate();
+        let (cert, _) = recovery_cert(&account);
+        assert!(is_recovery(&cert));
+        let keys = DeviceKeys::generate();
+        let fake = DeviceCertificate::issue(
+            &account,
+            Uuid::new_v4(),
+            keys.public(),
+            "x",
+            RECOVERY_PLATFORM,
+            1,
+        );
+        assert!(!is_recovery(&fake));
+        let other =
+            DeviceCertificate::issue(&account, cert.device_id, keys.public(), "x", "linux", 1);
+        assert!(!is_recovery(&other));
+    }
+}

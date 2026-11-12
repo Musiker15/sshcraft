@@ -74,6 +74,17 @@ server. Device keys are still meant for one server each: every server has its ow
 A valid login signature only proves the key. The server must also check that the device is
 active in the account's verified device log before it accepts the login.
 
+**Recovery device.** Area keys go only to devices. So that the account key alone can reach the
+data again when no device is left, every account has a recovery device whose keys follow from
+the account key: 64 bytes from HKDF-SHA256 (no salt, `info = "sshcraft/recovery-device/v1"`,
+input the 32-byte account seed), the first half the signing seed, the second half the X25519
+key. Its device id is a UUID version 8 made from the first 16 bytes of SHA-256 over
+`signing_bytes(sshcraft/recovery-device-id/v1, [account public key])`; its platform is
+`recovery`. A client adds it to the log when it creates the account and seals every envelope to
+it as well. A certificate counts as the recovery device only if both platform and derived id
+match (`is_recovery`). Whoever holds the account key holds this device too, which grants nothing
+the account key does not already grant.
+
 ## Device log
 
 Each account has an append-only log. Entry fields: `seq`, `prev_hash`, `action` (add a device
