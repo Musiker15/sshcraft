@@ -132,6 +132,16 @@ export const serialPorts = () => invoke<SerialPortInfo[]>("serial_ports");
 export const serialLast = () => invoke<SerialSettings | null>("serial_last");
 export const serialRemember = (settings: SerialSettings) => invoke<void>("serial_remember", { settings });
 
+export type CertificateInfo = {
+  key_id: string;
+  principals: string[];
+  /** Unix seconds. */
+  valid_after: number;
+  /** Unix seconds; the largest u64 means "no end". */
+  valid_before: number;
+  ca_fingerprint: string;
+};
+
 export type KeyInfo = {
   id: string;
   name: string;
@@ -139,7 +149,18 @@ export type KeyInfo = {
   fingerprint: string;
   public_key: string;
   location?: string | null;
+  /** "device": bound to this device (Windows Hello), never synced. */
+  kind?: "vault" | "device";
+  /** The passphrase is asked on each use. */
+  protected?: boolean;
+  certificate?: CertificateInfo | null;
 };
+
+export type EcdsaCurve = "nistp256" | "nistp384" | "nistp521";
+export type KeySpec = { type: "ed25519" } | { type: "ecdsa"; curve: EcdsaCurve } | { type: "rsa"; bits: number };
+export type SkAlgorithm = "ecdsa_p256" | "ed25519";
+export type SecurityKeyKind = "fido2" | "hello";
+export type InstallOutcome = "added" | "already_present";
 
 export type EndReason =
   | "exited"
@@ -172,6 +193,8 @@ export type AuthPrompt = {
   name: string;
   instructions: string;
   prompts: { text: string; echo: boolean }[];
+  /** SSHCraft asks for the passphrase of the key with this name. */
+  passphrase_for?: string;
 };
 
 export type { CommandError } from "./i18n/errors";
@@ -188,9 +211,19 @@ export const helloStatus = () => invoke<{ missing: boolean }>("hello_status");
 export type VaultStatus = { ok: boolean; code: string | null; detail: string | null };
 export const vaultStatus = () => invoke<VaultStatus>("vault_status");
 export const listKeys = () => invoke<KeyInfo[]>("list_keys");
-export const importKey = (name: string, text: string, passphrase: string | null) =>
-  invoke<KeyInfo>("import_key", { name, text, passphrase });
-export const generateKey = (name: string) => invoke<KeyInfo>("generate_key", { name });
+export const importKey = (name: string, text: string, passphrase: string | null, savePassphrase = true) =>
+  invoke<KeyInfo>("import_key", { name, text, passphrase, savePassphrase });
+export const generateKey = (name: string, spec: KeySpec, passphrase: string | null) =>
+  invoke<KeyInfo>("generate_key", { name, spec, passphrase });
+export const securityKeySupport = () => invoke<{ fido2: boolean; hello: boolean }>("security_key_support");
+export const createSecurityKey = (name: string, kind: SecurityKeyKind, algorithm: SkAlgorithm, verifyUser: boolean) =>
+  invoke<KeyInfo>("create_security_key", { name, kind, algorithm, verifyUser });
+export const attachCertificate = (id: string, text: string) => invoke<KeyInfo>("attach_certificate", { id, text });
+export const detachCertificate = (id: string) => invoke<KeyInfo>("detach_certificate", { id });
+export const rememberPassphrase = (id: string, passphrase: string) =>
+  invoke<KeyInfo>("remember_passphrase", { id, passphrase });
+export const protectKey = (id: string, passphrase: string) => invoke<KeyInfo>("protect_key", { id, passphrase });
+export const installKey = (hostId: string, key: KeyRef) => invoke<InstallOutcome>("install_key", { hostId, key });
 export const deleteKey = (id: string) => invoke<void>("delete_key", { id });
 export const listAgentKeys = () => invoke<AgentKey[]>("list_agent_keys");
 

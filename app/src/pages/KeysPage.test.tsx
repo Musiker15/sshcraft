@@ -74,3 +74,31 @@ test("identities are listed and can be deleted", async () => {
   fireEvent.click(confirm);
   expect(invoke).toHaveBeenCalledWith("identity_delete", { id: "i1" });
 });
+
+test("a key bound to this device cannot move and says so", () => {
+  render(
+    <I18nProvider language="en">
+      <KeysPage
+        keys={[{ ...key, kind: "device" }]}
+        onChanged={() => {}}
+        servers={[server("s1", "home", true)]}
+        onMove={vi.fn()}
+      />
+    </I18nProvider>,
+  );
+  expect(screen.getByText(en["keys.deviceBound"])).toBeTruthy();
+  fireEvent.contextMenu(screen.getByText("deploy"));
+  expect(screen.queryByText(en["sync.moveTo"].replace("{place}", "home"))).toBeNull();
+});
+
+test("the passphrase action follows whether it is saved", () => {
+  render(
+    <I18nProvider language="en">
+      <KeysPage keys={[{ ...key, protected: true }]} onChanged={() => {}} />
+    </I18nProvider>,
+  );
+  expect(screen.getByText(en["keys.passphraseAsked"])).toBeTruthy();
+  fireEvent.contextMenu(screen.getByText("deploy"));
+  expect(screen.getByText(en["keys.rememberPassphrase"])).toBeTruthy();
+  expect(screen.queryByText(en["keys.protect"])).toBeNull();
+});

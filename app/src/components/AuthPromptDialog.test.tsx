@@ -36,3 +36,13 @@ test("cancel answers null", () => {
   fireEvent.click(screen.getByRole("button", { name: en["common.cancel"] }));
   expect(onAnswer).toHaveBeenCalledWith(null);
 });
+
+test("the passphrase question names the key", () => {
+  render(
+    <AuthPromptDialog
+      prompt={{ ...prompt, prompts: [{ text: "Passphrase:", echo: false }], passphrase_for: "deploy" }}
+      onAnswer={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading").textContent).toBe(en["auth.passphraseTitle"].replace("{name}", "deploy"));
+});

@@ -1,8 +1,18 @@
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { deleteKey, listAgentKeys, type AgentKey, type Identity, type KeyInfo, type ServerView } from "../api";
+import {
+  deleteKey,
+  detachCertificate,
+  listAgentKeys,
+  type AgentKey,
+  type Identity,
+  type KeyInfo,
+  type KeyRef,
+  type ServerView,
+} from "../api";
 import { IdentitiesSection } from "../components/IdentitiesSection";
-import { KeyGenerateForm, KeyImportForm } from "../components/KeyForms";
+import { CertificateDialog, PassphraseDialog } from "../components/KeyDialogs";
+import { KeyGenerateForm, KeyImportForm, SecurityKeyForm } from "../components/KeyForms";
 import { ProtonPassImport } from "../components/ProtonPassImport";
 import { useLanguage, useT } from "../i18n/i18n";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
@@ -11,7 +21,16 @@ import { Drawer } from "../shell/Drawer";
 import { ErrorMessage } from "../shell/ErrorMessage";
 import { sortByName } from "./hostsView";
 
-type Panel = "import" | "generate" | "protonpass" | null;
+type Panel =
+  | "import"
+  | "generate"
+  | "security"
+  | "protonpass"
+  | { kind: "remember" | "protect" | "certificate"; key: KeyInfo }
+  | null;
+
+/** The largest u64, which a certificate uses for "no end". */
+const NO_END = 2 ** 64 - 1;
 type Menu = { items: MenuItem[]; at: { x: number; y: number } };
 
 /** Keys in this vault (with secret) and keys the Proton Pass agent offers (never copied). */
@@ -22,9 +41,16 @@ type Props = {
   servers?: ServerView[];
   onMove?: (id: string, location: string | null) => void;
   identities?: Identity[];
+  /** Opens "add to authorized_keys" for this key. */
+  onInstall?: (key: KeyRef) => void;
 };
 
-export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [] }: Props) {
+/** FIDO2 and Windows Hello keys sign through an authenticator; no passphrase to keep. */
+function isSecurityKey(key: KeyInfo): boolean {
+  return key.algorithm.startsWith("sk-");
+}
+
+export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [], onInstall }: Props) {
   const t = useT();
   const lang = useLanguage();
   const [panel, setPanel] = useState<Panel>(null);
@@ -55,9 +81,28 @@ export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [
   }
 
   const serverName = (id: string | null | undefined) => servers.find((s) => s.id === id)?.name;
+
+  /** Short facts under a key: where it may go, how it signs, its passphrase and certificate. */
+  const keyNotes = (key: KeyInfo): string[] => {
+    const notes: string[] = [];
+    if (key.kind === "device") notes.push(t("keys.deviceBound"));
+    else if (isSecurityKey(key)) notes.push(t("keys.securityKey"));
+    if (key.protected) notes.push(t("keys.passphraseAsked"));
+    if (key.certificate) {
+      notes.push(
+        key.certificate.valid_before >= NO_END
+          ? t("keys.certificateNoEnd")
+          : t("keys.certificateUntil", {
+              date: new Date(key.certificate.valid_before * 1000).toLocaleDateString(lang),
+            }),
+      );
+    }
+    return notes;
+  };
   /** "Move to": this device only, or a server that syncs keys; not where the key is now. */
   const moveItems = (key: KeyInfo) => {
-    if (!onMove) return [];
+    // A key bound to this device (Windows Hello) never goes to a server.
+    if (!onMove || key.kind === "device") return [];
     const places: { id: string | null; name: string }[] = [
       { id: null, name: t("sync.localOnly") },
       ...servers.filter((s) => s.sync_keys && !s.revoked).map((s) => ({ id: s.id, name: s.name })),
@@ -75,6 +120,7 @@ export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [
         <div className="page-actions">
           <button onClick={() => setPanel("protonpass")}>{t("keys.fromProtonPass")}</button>
           <button onClick={() => setPanel("import")}>{t("keys.import")}</button>
+          <button onClick={() => setPanel("security")}>{t("keys.newSecurityKey")}</button>
           <button className="primary" onClick={() => setPanel("generate")}>
             {t("keys.generate")}
           </button>
@@ -97,6 +143,23 @@ export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [
                   at: { x: e.clientX, y: e.clientY },
                   items: [
                     { label: t("keys.copyPublic"), onSelect: () => void navigator.clipboard.writeText(key.public_key) },
+                    ...(onInstall ? [{ label: t("keys.install"), onSelect: () => onInstall({ kind: "stored", id: key.id }) }] : []),
+                    ...(isSecurityKey(key)
+                      ? []
+                      : [
+                          key.protected
+                            ? { label: t("keys.rememberPassphrase"), onSelect: () => setPanel({ kind: "remember", key }) }
+                            : { label: t("keys.protect"), onSelect: () => setPanel({ kind: "protect", key }) },
+                        ]),
+                    { label: t("keys.attachCertificate"), onSelect: () => setPanel({ kind: "certificate", key }) },
+                    ...(key.certificate
+                      ? [
+                          {
+                            label: t("keys.detachCertificate"),
+                            onSelect: () => void detachCertificate(key.id).then(onChanged, setProblem),
+                          },
+                        ]
+                      : []),
                     ...moveItems(key),
                     { label: t("common.delete"), onSelect: () => setDeleting(key), danger: true },
                   ],
@@ -113,6 +176,7 @@ export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [
                 </span>
                 <span className="card-sub">{key.algorithm}</span>
                 <span className="card-sub mono">{key.fingerprint}</span>
+                {keyNotes(key).length > 0 && <span className="card-sub">{keyNotes(key).join(" · ")}</span>}
               </span>
             </div>
           ))}
@@ -146,6 +210,13 @@ export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [
         <Drawer onClose={closePanel}>
           {panel === "import" && <KeyImportForm onDone={done} onCancel={closePanel} />}
           {panel === "generate" && <KeyGenerateForm onDone={done} onCancel={closePanel} />}
+          {panel === "security" && <SecurityKeyForm onDone={done} onCancel={closePanel} />}
+          {typeof panel === "object" && (panel.kind === "remember" || panel.kind === "protect") && (
+            <PassphraseDialog keyInfo={panel.key} mode={panel.kind} onDone={done} onCancel={closePanel} />
+          )}
+          {typeof panel === "object" && panel.kind === "certificate" && (
+            <CertificateDialog keyInfo={panel.key} onDone={done} onCancel={closePanel} />
+          )}
           {panel === "protonpass" && (
             <div className="dialog">
               <ProtonPassImport onImported={onChanged} />
