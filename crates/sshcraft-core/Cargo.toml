@@ -21,3 +21,4 @@ csv = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+data-encoding = { workspace = true }
