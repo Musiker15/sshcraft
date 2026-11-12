@@ -5,10 +5,7 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-
-use crate::model::{ConnectionSettings, Group, GroupId, Host, HostId, KeyRef};
-use crate::store::{Store, StoreError};
+use crate::model::{ConnectionSettings, KeyRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigHost {
@@ -28,37 +25,7 @@ pub struct ParsedConfig {
     pub skipped: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportCandidate {
-    pub alias: String,
-    pub group: Option<String>,
-    pub settings: ConnectionSettings,
-    pub key_note: Option<KeyNote>,
-    /// Things the preview should point out; candidates with warnings start unchecked.
-    #[serde(default)]
-    pub warnings: Vec<ImportWarning>,
-}
-
-/// Why a candidate has no key yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum KeyNote {
-    /// The block names no `IdentityFile`.
-    NoIdentityFile,
-    /// The agent is reachable but holds none of the named keys.
-    NotInAgent,
-    /// The agent could not be asked, so it is unknown whether it holds the key.
-    AgentUnavailable,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ImportWarning {
-    /// `ProxyJump` or `ProxyCommand` is not followed; the host would connect directly.
-    ProxyIgnored { directive: String },
-    /// A `%` token in `HostName` other than `%h` and `%%`, left as written.
-    UnsupportedToken { token: String },
-}
+pub use crate::import::{ImportCandidate, ImportWarning, KeyNote};
 
 struct Block {
     patterns: Vec<String>,
@@ -320,8 +287,12 @@ pub fn plan_import(
                 (None, false, Some(_)) => Some(KeyNote::NotInAgent),
             };
             ImportCandidate {
-                alias: h.alias.clone(),
-                group: grouped.then(|| address.clone()),
+                name: h.alias.clone(),
+                group_path: grouped.then(|| address.clone()).into_iter().collect(),
+                group_defaults: ConnectionSettings {
+                    address: grouped.then(|| address.clone()),
+                    ..Default::default()
+                },
                 settings: ConnectionSettings {
                     address: (!grouped).then_some(address),
                     port: h.port,
@@ -330,73 +301,10 @@ pub fn plan_import(
                 },
                 key_note,
                 warnings,
+                ..ImportCandidate::default()
             }
         })
         .collect()
-}
-
-/// Creates exactly the given candidates (as confirmed in the preview) and the groups they
-/// name. A host that already exists with the same name and address is skipped; a group with
-/// the same name is reused. Returns the number of hosts created.
-pub fn apply_import(store: &Store, candidates: &[ImportCandidate]) -> Result<usize, StoreError> {
-    let mut groups = store.list_groups()?;
-    let hosts = store.list_hosts()?;
-    let mut created = 0;
-
-    for candidate in candidates {
-        let group_id = match &candidate.group {
-            Some(name) => Some(match groups.iter().find(|g| &g.name == name) {
-                Some(g) => g.id,
-                None => {
-                    let group = Group {
-                        location: None,
-                        id: GroupId::new(),
-                        name: name.clone(),
-                        defaults: ConnectionSettings {
-                            address: Some(name.clone()),
-                            ..Default::default()
-                        },
-                        parent_id: None,
-                        tags: Vec::new(),
-                    };
-                    store.upsert_group(&group)?;
-                    let id = group.id;
-                    groups.push(group);
-                    id
-                }
-            }),
-            None => None,
-        };
-        let address_of = |h: &Host| {
-            h.settings.address.clone().or_else(|| {
-                h.group_id
-                    .and_then(|gid| groups.iter().find(|g| g.id == gid))
-                    .and_then(|g| g.defaults.address.clone())
-            })
-        };
-        let new_address = candidate
-            .settings
-            .address
-            .clone()
-            .or_else(|| candidate.group.clone());
-        let exists = hosts
-            .iter()
-            .any(|h| h.name == candidate.alias && address_of(h) == new_address);
-        if exists {
-            continue;
-        }
-        store.upsert_host(&Host {
-            location: None,
-            id: HostId::new(),
-            name: candidate.alias.clone(),
-            group_id,
-            settings: candidate.settings.clone(),
-            tags: Vec::new(),
-            os: None,
-        })?;
-        created += 1;
-    }
-    Ok(created)
 }
 
 #[cfg(test)]

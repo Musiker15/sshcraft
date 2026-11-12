@@ -86,6 +86,6 @@ pub fn ssh_config_import(
 ) -> CommandResult<SshConfigImportResult> {
     let store = state.store.lock().expect("store lock");
     Ok(SshConfigImportResult {
-        created: sshconfig::apply_import(&store, &candidates)?,
+        created: sshcraft_core::import::apply_import(&store, &candidates, None)?.created,
     })
 }
