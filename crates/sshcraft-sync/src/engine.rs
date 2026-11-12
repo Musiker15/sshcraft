@@ -59,9 +59,41 @@ pub fn record_local_change(
         store.queue(server, kind, &copy, now_ms)?;
     }
     // Copies below a group carry values from it: they follow too.
-    if kind == ItemKind::Group
+    if kind == ItemKind::Group {
+        queue_group_copies(store, server, id, now_ms)?;
+    }
+    // Copies carry the values of the identities their originals use.
+    if kind == ItemKind::Identity
         && let Ok(uuid) = Uuid::parse_str(id)
     {
+        let identity = Some(sshcraft_core::model::IdentityId(uuid));
+        for group in store.list_groups()? {
+            if group.defaults.identity == identity {
+                queue_group_copies(store, server, &group.id.0.to_string(), now_ms)?;
+            }
+        }
+        for host in store.list_hosts()? {
+            if host.settings.identity == identity {
+                for (_, copy) in store.copies_of(server, ItemKind::Host, &host.id.0.to_string())? {
+                    store.queue(server, ItemKind::Host, &copy, now_ms)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Queues the copies of a group, of its subgroups and of every host below it.
+fn queue_group_copies(
+    store: &Store,
+    server: ServerId,
+    id: &str,
+    now_ms: i64,
+) -> Result<(), SyncError> {
+    for (_, copy) in store.copies_of(server, ItemKind::Group, id)? {
+        store.queue(server, ItemKind::Group, &copy, now_ms)?;
+    }
+    if let Ok(uuid) = Uuid::parse_str(id) {
         let mut tree: Vec<String> = store
             .subgroups(sshcraft_core::model::GroupId(uuid))?
             .iter()
@@ -906,7 +938,18 @@ impl Engine {
                     guard.upsert_group(&group)?;
                 }
             }
-            ItemKind::Key | ItemKind::Identity | ItemKind::Password => {}
+            ItemKind::Identity => {
+                if let Some(mut identity) = guard
+                    .list_identities()?
+                    .into_iter()
+                    .find(|i| i.id.0 == uuid)
+                {
+                    identity.key = assignment.key.clone();
+                    identity.password = assignment.password;
+                    guard.upsert_identity(&identity)?;
+                }
+            }
+            ItemKind::Key | ItemKind::Password => {}
         }
         Ok(())
     }
@@ -1255,8 +1298,9 @@ impl Engine {
                 }
                 ItemBody::Group { group } => outside(group.parent_id)?,
                 ItemBody::Host { host } => outside(host.group_id)?,
+                // Keys, passwords and identities of a share are the owner's alone.
                 ItemBody::Key { .. } | ItemBody::Identity { .. } | ItemBody::Password { .. } => {
-                    false
+                    true
                 }
             };
             if refuse {
@@ -1275,7 +1319,7 @@ impl Engine {
             if header.author_account == self.account || deleted {
                 return Ok(false);
             }
-            return take_into_original(&store, self.server, area, &item);
+            return take_into_original(&store, vault, self.server, area, &item);
         }
         // In a received selection only the owner adds or removes items; other members only
         // change existing ones (a first version is a new record).
@@ -1285,6 +1329,14 @@ impl Engine {
             && header.author_account.0 != share.owner
             && (deleted || header.version == 1)
         {
+            return Ok(false);
+        }
+        // Keys, passwords and identities of a received share come from its owner only.
+        if (is_secret(kind) || kind == ItemKind::Identity)
+            && let Some(share) = store.share(self.server, area)?.filter(|s| !s.owned)
+            && header.author_account.0 != share.owner
+        {
+            store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Ok(false);
         }
         // A deletion from an area the item has left (it moved into or out of a share) is not
@@ -1375,15 +1427,18 @@ fn find_original(
 }
 
 /// A member's change to a copy, written into the original unless a newer local change of the
-/// original waits to be sent. The original keeps its id, group and (unless the member picked
-/// another shared key) its key; then it and all its copies are sent again.
+/// original waits to be sent. A field the member left as it was sent keeps the original's own
+/// value (inherited stays inherited, the identity stays); a changed one becomes the original's
+/// own, with references to copies turned back into the originals. Then the original and all its
+/// copies are sent again.
 fn take_into_original(
     store: &Store,
+    vault: &Vault,
     server: ServerId,
     area: Uuid,
     item: &SyncItem,
 ) -> Result<bool, SyncError> {
-    use sshcraft_core::model::KeyRef;
+    use sshcraft_core::model::{KeyId, KeyRef, PasswordId, Proxy};
     let (kind, copy) = item.item();
     let Some(original) = find_original(store, server, area, kind, &copy)? else {
         return Ok(false);
@@ -1394,16 +1449,16 @@ fn take_into_original(
     {
         return Ok(false);
     }
-    let original_key = |key: &Option<KeyRef>| -> Result<Option<KeyRef>, SyncError> {
-        match key {
-            Some(KeyRef::Stored { id }) => Ok(store
-                .original_of(server, ItemKind::Key, &id.0.to_string())?
-                .and_then(|o| Uuid::parse_str(&o).ok())
-                .map(|o| KeyRef::Stored {
-                    id: sshcraft_core::model::KeyId(o),
-                })),
-            _ => Ok(None),
-        }
+    let back = |kind: ItemKind, id: Uuid| -> Result<Option<Uuid>, SyncError> {
+        Ok(store
+            .original_of(server, kind, &id.to_string())?
+            .and_then(|o| Uuid::parse_str(&o).ok()))
+    };
+    let back_password = |p: Option<PasswordId>| -> Result<Option<PasswordId>, SyncError> {
+        Ok(match p {
+            Some(p) => back(ItemKind::Password, p.0)?.map(PasswordId),
+            None => None,
+        })
     };
     let uuid = Uuid::parse_str(&original).map_err(|e| SyncError::Store(e.to_string()))?;
     match &item.body {
@@ -1411,33 +1466,70 @@ fn take_into_original(
             let Some(mine) = store.list_hosts()?.into_iter().find(|h| h.id.0 == uuid) else {
                 return Ok(false);
             };
+            let ItemBody::Host { host: sent } =
+                copy_item(store, vault, server, area, ItemKind::Host, &original, 0)?.body
+            else {
+                return Ok(false);
+            };
+            let (edited, sent) = (&host.settings, &sent.settings);
+            let mut settings = mine.settings.clone();
+            if edited.address != sent.address {
+                settings.address = edited.address.clone();
+            }
+            if edited.port != sent.port {
+                settings.port = edited.port;
+            }
+            if edited.username != sent.username {
+                settings.username = edited.username.clone();
+            }
+            if edited.key != sent.key {
+                let picked = match &edited.key {
+                    Some(KeyRef::Stored { id }) => {
+                        back(ItemKind::Key, id.0)?.map(|o| KeyRef::Stored { id: KeyId(o) })
+                    }
+                    _ => None,
+                };
+                settings.key = picked.or(mine.settings.key.clone());
+            }
+            if edited.password != sent.password {
+                settings.password = back_password(edited.password)?.or(mine.settings.password);
+            }
+            if edited.proxy != sent.proxy {
+                let mut proxy = edited.proxy.clone();
+                if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut proxy {
+                    e.password = back_password(e.password)?;
+                }
+                settings.proxy = proxy;
+            }
+            if edited.agent_forwarding != sent.agent_forwarding {
+                settings.agent_forwarding = edited.agent_forwarding;
+            }
+            if edited.env != sent.env {
+                settings.env = edited.env.clone();
+            }
+            if edited.jump_hosts != sent.jump_hosts {
+                settings.jump_hosts = match &edited.jump_hosts {
+                    Some(jumps) => Some(
+                        jumps
+                            .iter()
+                            .map(|j| {
+                                Ok(back(ItemKind::Host, j.0)?
+                                    .map_or(*j, sshcraft_core::model::HostId))
+                            })
+                            .collect::<Result<Vec<_>, SyncError>>()?,
+                    ),
+                    None => None,
+                };
+            }
             let mut next = host.clone();
             next.id = mine.id;
             next.group_id = mine.group_id;
             next.location = mine.location;
-            next.settings.key = original_key(&host.settings.key)?.or(mine.settings.key.clone());
-            // What the copy only carried because the original inherits it stays inherited.
-            let shared = store.share(server, area)?.and_then(|s| s.group_id);
-            let baked =
-                crate::shares::intermediate_defaults(store, mine.group_id, shared.as_deref())?;
-            let own = &mine.settings;
-            let settings = &mut next.settings;
-            if own.address.is_none() && settings.address == baked.address {
-                settings.address = None;
-            }
-            if own.port.is_none() && settings.port == baked.port {
-                settings.port = None;
-            }
-            if own.username.is_none() && settings.username == baked.username {
-                settings.username = None;
-            }
-            if own.key.is_none() && settings.key == baked.key {
-                settings.key = None;
-            }
+            next.settings = settings;
             store.upsert_host(&next)?;
         }
-        // The group, keys and deletions of copies are the owner's alone (a selection only lets
-        // members change hosts).
+        // The group, keys, passwords and deletions of copies are the owner's alone (a selection
+        // only lets members change hosts).
         _ => return Ok(false),
     }
     record_local_change(store, kind, &original, item.modified_at)?;
@@ -1469,7 +1561,16 @@ fn own_assignment(
             .into_iter()
             .find(|g| g.id.0.to_string() == id)
             .map(|g| CredentialRefs::of_settings(&g.defaults)),
-        ItemKind::Key | ItemKind::Identity | ItemKind::Password => None,
+        ItemKind::Identity => store
+            .list_identities()?
+            .into_iter()
+            .find(|i| i.id.0.to_string() == id)
+            .map(|i| CredentialRefs {
+                key: i.key,
+                password: i.password,
+                ..Default::default()
+            }),
+        ItemKind::Key | ItemKind::Password => None,
     };
     Ok(refs)
 }
@@ -1502,7 +1603,8 @@ fn refusal(
     let Some(share) = store.share(server, area)?.filter(|s| !s.owned) else {
         return Ok(None);
     };
-    if share.role != Some(ShareRole::Write) || kind == ItemKind::Key {
+    // Keys, passwords and identities of a share are the owner's alone.
+    if share.role != Some(ShareRole::Write) || is_secret(kind) || kind == ItemKind::Identity {
         return Ok(Some("share_read_only"));
     }
     if share.kind != ShareKind::GroupAll && (deleted || new) {

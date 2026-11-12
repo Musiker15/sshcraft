@@ -457,3 +457,29 @@ fn proxy_json_shape() {
         r#"{"kind":"direct"}"#
     );
 }
+
+#[test]
+fn flatten_resolves_identities_level_by_level() {
+    // Nearer group: its own user; farther group: an identity with user and password.
+    let p = PasswordId::new();
+    let id = identity("far-user", None, Some(p));
+    let near = ConnectionSettings {
+        username: Some("near-user".into()),
+        ..Default::default()
+    };
+    let far = ConnectionSettings {
+        identity: Some(id.id),
+        env: env(&[("A", "1")]),
+        ..Default::default()
+    };
+    let host = ConnectionSettings {
+        env: env(&[("B", "2")]),
+        ..Default::default()
+    };
+    let flat = flatten(&[&host, &near, &far], &[id]);
+    assert_eq!(flat.username.as_deref(), Some("near-user"));
+    assert_eq!(flat.password, Some(p));
+    assert_eq!(flat.identity, None);
+    assert_eq!(flat.env, env(&[("A", "1"), ("B", "2")]));
+    assert_eq!(flat.address, None);
+}

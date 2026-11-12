@@ -7,7 +7,10 @@ use crate::contacts::require_confirmed;
 use crate::engine::{Engine, from_json, lock, record_local_change};
 use crate::items::{ItemBody, SyncItem, encode, local_item};
 use serde::{Deserialize, Serialize};
-use sshcraft_core::model::{Group, GroupId, Host, HostId, KeyId, KeyRef, ServerId};
+use sshcraft_core::model::{
+    ConnectionSettings, Group, GroupId, Host, HostId, IdentityId, KeyId, KeyRef, PasswordId, Proxy,
+    ServerId, flatten, group_chain,
+};
 use sshcraft_core::store::{ItemKind, RecordEntry, ShareKind, ShareRole, ShareRow, Store, copy_id};
 use sshcraft_core::vault::Vault;
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role};
@@ -201,17 +204,27 @@ fn plan(
     Ok((kind, group, picked))
 }
 
-/// The stored keys the shared items use (at this server), and how many use an agent key: the
-/// hosts' own, those of every group a shared host takes values from (all groups of a tree
-/// shared with all hosts; for copies every group above the host, as those values are written
-/// into the copies).
-fn used_keys(
+/// What the shared items use and this account may share along (at this server, not from
+/// someone else's share): stored keys, passwords (also of proxies) and identities, the keys and
+/// passwords of those identities included; and how many references point to an agent key.
+#[derive(Default)]
+struct Credentials {
+    keys: Vec<KeyId>,
+    passwords: Vec<PasswordId>,
+    identities: Vec<IdentityId>,
+    agent: usize,
+}
+
+/// The credentials of the hosts' own settings and of every group a shared host takes values
+/// from (all groups of a tree shared with all hosts; for copies every group above the host, as
+/// those values are written into the copies).
+fn used_credentials(
     server: ServerId,
     store: &Store,
     kind: ShareKind,
     group: &Option<Group>,
     hosts: &[Host],
-) -> Result<(Vec<KeyId>, usize), SyncError> {
+) -> Result<Credentials, SyncError> {
     let all_groups = store.list_groups()?;
     let mut groups: Vec<Group> = Vec::new();
     match (kind, group) {
@@ -223,7 +236,7 @@ fn used_keys(
         _ => {
             for host in hosts {
                 if let Some(start) = host.group_id {
-                    for g in sshcraft_core::model::group_chain(&all_groups, start) {
+                    for g in group_chain(&all_groups, start) {
                         if !groups.iter().any(|known| known.id == g.id) {
                             groups.push(g);
                         }
@@ -231,7 +244,7 @@ fn used_keys(
                 }
             }
             if let Some(root) = group {
-                for g in sshcraft_core::model::group_chain(&all_groups, root.id) {
+                for g in group_chain(&all_groups, root.id) {
                     if !groups.iter().any(|known| known.id == g.id) {
                         groups.push(g);
                     }
@@ -239,28 +252,49 @@ fn used_keys(
             }
         }
     }
-    let mut refs: Vec<&Option<KeyRef>> = hosts.iter().map(|h| &h.settings.key).collect();
-    refs.extend(groups.iter().map(|g| &g.defaults.key));
-    let mut keys = Vec::new();
-    let mut agent = 0;
-    for key in refs.into_iter().flatten() {
+    // An item that came in someone else's share is theirs to share, not this account's.
+    let own = |kind: ItemKind, id: &str| -> Result<bool, SyncError> {
+        Ok(store.location_of(kind, id)? == Some(server)
+            && store.received_share_of(server, kind, id)?.is_none())
+    };
+    let identities = store.list_identities()?;
+    let mut out = Credentials::default();
+    let mut keys: Vec<KeyRef> = Vec::new();
+    let mut passwords: Vec<PasswordId> = Vec::new();
+    let settings = hosts
+        .iter()
+        .map(|h| &h.settings)
+        .chain(groups.iter().map(|g| &g.defaults));
+    for s in settings {
+        keys.extend(s.key.clone());
+        passwords.extend(s.password_ids());
+        if let Some(id) = s.identity
+            && own(ItemKind::Identity, &id.0.to_string())?
+            && !out.identities.contains(&id)
+        {
+            out.identities.push(id);
+            if let Some(identity) = identities.iter().find(|i| i.id == id) {
+                keys.extend(identity.key.clone());
+                passwords.extend(identity.password);
+            }
+        }
+    }
+    for key in keys {
         match key {
-            KeyRef::Agent { .. } => agent += 1,
+            KeyRef::Agent { .. } => out.agent += 1,
             KeyRef::Stored { id } => {
-                // A key that came in someone else's share is theirs to share, not this account's.
-                let key = id.0.to_string();
-                if store.location_of(ItemKind::Key, &key)? == Some(server)
-                    && store
-                        .received_share_of(server, ItemKind::Key, &key)?
-                        .is_none()
-                    && !keys.contains(id)
-                {
-                    keys.push(*id);
+                if own(ItemKind::Key, &id.0.to_string())? && !out.keys.contains(&id) {
+                    out.keys.push(id);
                 }
             }
         }
     }
-    Ok((keys, agent))
+    for id in passwords {
+        if own(ItemKind::Password, &id.0.to_string())? && !out.passwords.contains(&id) {
+            out.passwords.push(id);
+        }
+    }
+    Ok(out)
 }
 
 /// Seals a body into an area and sends it as `record_id` at `version`.
@@ -287,23 +321,77 @@ pub(crate) async fn write_record(
     Ok(())
 }
 
-/// The key a copy points to: the copy of a shared stored key, nothing otherwise (an agent key
-/// or a key that was not shared).
-fn copy_key(
+/// The copy in share `area` of the item `id`, if there is one.
+fn copy_in(
     store: &Store,
     server: ServerId,
     area: Uuid,
-    key: Option<KeyRef>,
-) -> Result<Option<KeyRef>, SyncError> {
-    let Some(KeyRef::Stored { id }) = key else {
-        return Ok(None);
-    };
+    kind: ItemKind,
+    id: Uuid,
+) -> Result<Option<Uuid>, SyncError> {
     Ok(store
-        .copies_of(server, ItemKind::Key, &id.0.to_string())?
+        .copies_of(server, kind, &id.to_string())?
         .into_iter()
         .find(|(a, _)| *a == area)
-        .and_then(|(_, copy)| Uuid::parse_str(&copy).ok())
-        .map(|copy| KeyRef::Stored { id: KeyId(copy) }))
+        .and_then(|(_, copy)| Uuid::parse_str(&copy).ok()))
+}
+
+/// The references a copy carries: the copies of shared stored keys and passwords, nothing for
+/// what was not shared (an agent key, a key or password shared without keys), no identity (the
+/// copy carries its values), and jump hosts pointing to their copies where there are some.
+fn to_copy_refs(
+    store: &Store,
+    server: ServerId,
+    area: Uuid,
+    settings: &mut ConnectionSettings,
+) -> Result<(), SyncError> {
+    let password = |p: Option<PasswordId>| -> Result<Option<PasswordId>, SyncError> {
+        Ok(match p {
+            Some(p) => copy_in(store, server, area, ItemKind::Password, p.0)?.map(PasswordId),
+            None => None,
+        })
+    };
+    settings.key = match settings.key.take() {
+        Some(KeyRef::Stored { id }) => copy_in(store, server, area, ItemKind::Key, id.0)?
+            .map(|copy| KeyRef::Stored { id: KeyId(copy) }),
+        _ => None,
+    };
+    settings.password = password(settings.password)?;
+    if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut settings.proxy {
+        e.password = password(e.password)?;
+    }
+    settings.identity = None;
+    if let Some(jumps) = &mut settings.jump_hosts {
+        for jump in jumps.iter_mut() {
+            if let Some(copy) = copy_in(store, server, area, ItemKind::Host, jump.0)? {
+                *jump = HostId(copy);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The settings a host's copy starts from: its own and those of the groups between its group
+/// and the shared group `shared` (its own group counts, the shared group does not; with nothing
+/// shared as a group, the whole chain), identities resolved.
+fn host_copy_settings(
+    store: &Store,
+    host: &Host,
+    shared: Option<&str>,
+) -> Result<ConnectionSettings, SyncError> {
+    let groups = store.list_groups()?;
+    let chain = match host.group_id {
+        Some(start) => group_chain(&groups, start),
+        None => Vec::new(),
+    };
+    let mut levels = vec![&host.settings];
+    for group in &chain {
+        if shared.is_some_and(|shared| group.id.0.to_string() == shared) {
+            break;
+        }
+        levels.push(&group.defaults);
+    }
+    Ok(flatten(&levels, &store.list_identities()?))
 }
 
 /// The current content of the copy of an original in share `area`, built from the original
@@ -324,44 +412,22 @@ pub(crate) fn copy_item(
     match &mut item.body {
         ItemBody::Group { group } => {
             // The copy is a top-level group for members: it carries what the original takes
-            // from the groups above it.
+            // from the groups above it and from identities.
             let groups = store.list_groups()?;
-            let above = sshcraft_core::model::group_chain(&groups, group.id);
-            for ancestor in above.iter().skip(1) {
-                let d = &mut group.defaults;
-                let set = |v: &Option<String>| {
-                    v.as_deref()
-                        .map(str::trim)
-                        .filter(|v| !v.is_empty())
-                        .map(str::to_owned)
-                };
-                if set(&d.address).is_none() {
-                    d.address = set(&ancestor.defaults.address);
-                }
-                d.port = d.port.or(ancestor.defaults.port);
-                if set(&d.username).is_none() {
-                    d.username = set(&ancestor.defaults.username);
-                }
-                if d.key.is_none() {
-                    d.key = ancestor.defaults.key.clone();
-                }
-            }
+            let chain = group_chain(&groups, group.id);
+            let levels: Vec<&ConnectionSettings> = chain.iter().map(|g| &g.defaults).collect();
+            group.defaults = flatten(&levels, &store.list_identities()?);
             group.parent_id = None;
             group.id = GroupId(copy_uuid);
-            group.defaults.key = copy_key(store, server, area, group.defaults.key.take())?;
+            to_copy_refs(store, server, area, &mut group.defaults)?;
         }
         ItemBody::Host { host } => {
             // A host from a subgroup lands flat in the copy of the shared group, with what it
             // inherits from the groups in between written into it.
             let shared = store.share(server, area)?.and_then(|s| s.group_id);
-            let baked = intermediate_defaults(store, host.group_id, shared.as_deref())?;
-            let settings = &mut host.settings;
-            settings.address = settings.address.take().or(baked.address);
-            settings.port = settings.port.or(baked.port);
-            settings.username = settings.username.take().or(baked.username);
-            let key = settings.key.take().or(baked.key);
+            host.settings = host_copy_settings(store, host, shared.as_deref())?;
+            to_copy_refs(store, server, area, &mut host.settings)?;
             host.id = HostId(copy_uuid);
-            host.settings.key = copy_key(store, server, area, key)?;
             host.group_id = match (host.group_id, shared) {
                 (Some(_), Some(group)) => store
                     .copies_of(server, ItemKind::Group, &group)?
@@ -373,53 +439,11 @@ pub(crate) fn copy_item(
             };
         }
         ItemBody::Key { id, .. } => *id = KeyId(copy_uuid),
-        ItemBody::Identity { identity } => {
-            identity.id = sshcraft_core::model::IdentityId(copy_uuid)
-        }
-        ItemBody::Password { id, .. } => *id = sshcraft_core::model::PasswordId(copy_uuid),
+        ItemBody::Identity { identity } => identity.id = IdentityId(copy_uuid),
+        ItemBody::Password { id, .. } => *id = PasswordId(copy_uuid),
         ItemBody::Deleted { item_id, .. } => *item_id = copy,
     }
     Ok(item)
-}
-
-/// What a host inherits from the groups between its own group and the shared group `shared`
-/// (both excluded from nothing: its own group counts, the shared group does not). Empty when the
-/// host sits right in the shared group or nothing is shared as a group.
-pub(crate) fn intermediate_defaults(
-    store: &Store,
-    host_group: Option<GroupId>,
-    shared: Option<&str>,
-) -> Result<sshcraft_core::model::ConnectionSettings, SyncError> {
-    let mut out = sshcraft_core::model::ConnectionSettings::default();
-    let Some(start) = host_group else {
-        return Ok(out);
-    };
-    let groups = store.list_groups()?;
-    // A single host (nothing shared as a group) takes everything from its whole chain.
-    for group in sshcraft_core::model::group_chain(&groups, start) {
-        if shared.is_some_and(|shared| group.id.0.to_string() == shared) {
-            break;
-        }
-        let set = |v: &Option<String>| {
-            v.as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_owned)
-        };
-        if out.address.is_none() {
-            out.address = set(&group.defaults.address);
-        }
-        if out.port.is_none() {
-            out.port = group.defaults.port;
-        }
-        if out.username.is_none() {
-            out.username = set(&group.defaults.username);
-        }
-        if out.key.is_none() {
-            out.key = group.defaults.key.clone();
-        }
-    }
-    Ok(out)
 }
 
 /// Shares a group or hosts with other accounts of this server: a new area with the grants as
@@ -442,8 +466,8 @@ pub async fn share(
         require_confirmed(store, engine.server, &grant.account)?;
     }
     let (kind, group, hosts) = plan(&*lock(store)?, engine.server, &what)?;
-    let (keys, agent_keys_skipped) =
-        used_keys(engine.server, &*lock(store)?, kind, &group, &hosts)?;
+    let credentials = used_credentials(engine.server, &*lock(store)?, kind, &group, &hosts)?;
+    let agent_keys_skipped = credentials.agent;
     let members = grants
         .iter()
         .map(|g| Member {
@@ -496,21 +520,50 @@ pub async fn share(
                 guard.clear_item_area(server, ItemKind::Host, &host.id.0.to_string())?;
             }
             crate::engine::record_group_hosts(&guard, &group_id, now_ms)?;
+            // Identities always go along (without them members lack the user); keys and
+            // passwords only with keys. Without, the identities go without theirs.
+            let mut along: Vec<(ItemKind, String)> = credentials
+                .identities
+                .iter()
+                .map(|i| (ItemKind::Identity, i.0.to_string()))
+                .collect();
             if with_keys {
-                for key_id in &keys {
-                    let id = key_id.0.to_string();
-                    guard.set_item_area(server, ItemKind::Key, &id, area)?;
-                    record_local_change(&guard, ItemKind::Key, &id, now_ms)?;
-                }
+                along.extend(
+                    credentials
+                        .keys
+                        .iter()
+                        .map(|k| (ItemKind::Key, k.0.to_string())),
+                );
+                along.extend(
+                    credentials
+                        .passwords
+                        .iter()
+                        .map(|p| (ItemKind::Password, p.0.to_string())),
+                );
+            }
+            for (item_kind, id) in &along {
+                guard.set_item_area(server, *item_kind, id, area)?;
+                record_local_change(&guard, *item_kind, id, now_ms)?;
             }
         }
         engine.push(store, vault, now_ms).await?;
     } else {
-        // The copies: keys first, then the group, then the hosts, so a member can apply each
-        // as it comes.
+        // The copies: keys and passwords first, then the group, then the hosts, so a member
+        // can apply each as it comes. Identities are not copied: the copies carry their values.
         let mut originals: Vec<(ItemKind, String)> = Vec::new();
         if with_keys {
-            originals.extend(keys.iter().map(|k| (ItemKind::Key, k.0.to_string())));
+            originals.extend(
+                credentials
+                    .keys
+                    .iter()
+                    .map(|k| (ItemKind::Key, k.0.to_string())),
+            );
+            originals.extend(
+                credentials
+                    .passwords
+                    .iter()
+                    .map(|p| (ItemKind::Password, p.0.to_string())),
+            );
         }
         if kind == ShareKind::Selection
             && let Some(group) = &group

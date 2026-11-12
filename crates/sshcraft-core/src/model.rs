@@ -402,6 +402,54 @@ pub fn resolve(
     })
 }
 
+/// What `levels` (nearest first: a host or group, then the groups above it) give, written as
+/// values of one level: identities resolved into user, key and password, the nearest set value
+/// of every other field, environment variables merged. Unset stays unset. Copies in a share use
+/// it, so a member needs neither the identity nor the groups the copy was cut from.
+pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> ConnectionSettings {
+    let identity = |settings: &ConnectionSettings| {
+        settings
+            .identity
+            .and_then(|id| identities.iter().find(|i| i.id == id))
+    };
+    let levels: Vec<Level> = levels
+        .iter()
+        .map(|settings| Level {
+            settings,
+            identity: identity(settings),
+        })
+        .collect();
+    let env: Vec<EnvVar> = levels
+        .iter()
+        .rev()
+        .flat_map(|l| l.settings.env.iter().cloned())
+        .collect();
+    ConnectionSettings {
+        address: levels.iter().find_map(|l| non_empty(&l.settings.address)),
+        port: levels.iter().find_map(|l| l.settings.port),
+        username: levels.iter().find_map(|l| {
+            non_empty(&l.settings.username)
+                .or_else(|| l.identity.and_then(|i| non_empty(&i.username)))
+        }),
+        key: levels.iter().find_map(|l| {
+            l.settings
+                .key
+                .clone()
+                .or_else(|| l.identity.and_then(|i| i.key.clone()))
+        }),
+        password: levels.iter().find_map(|l| {
+            l.settings
+                .password
+                .or_else(|| l.identity.and_then(|i| i.password))
+        }),
+        identity: None,
+        jump_hosts: levels.iter().find_map(|l| l.settings.jump_hosts.clone()),
+        proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
+        agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
+        env: normalize_env(&env),
+    }
+}
+
 /// Resolves one host of the directory with its groups.
 fn resolve_in(dir: &Directory, host_id: HostId) -> Result<ResolvedHost, ResolveError> {
     let host = dir
