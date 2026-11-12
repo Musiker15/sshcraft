@@ -395,6 +395,17 @@ impl Store {
         kind: ItemKind,
         item_id: &str,
     ) -> Result<(), StoreError> {
+        // An item that moved to another area has a new record: the old one no longer holds it.
+        self.conn.execute(
+            "DELETE FROM sync_records WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3
+             AND record_id != ?4",
+            params![
+                server.0.to_string(),
+                kind.as_str(),
+                item_id,
+                entry.record_id.to_string()
+            ],
+        )?;
         self.conn.execute(
             "INSERT INTO sync_records (server_id, record_id, area_id, kind, item_id, version, modified_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)

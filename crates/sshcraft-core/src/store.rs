@@ -31,7 +31,7 @@ pub struct Store {
     conn: rusqlite::Connection,
 }
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -159,6 +159,12 @@ impl Store {
         if version < 3 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V3)?;
+            tx.pragma_update(None, "user_version", 3)?;
+            tx.commit()?;
+        }
+        if version < 4 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(share_store::SCHEMA_V4)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -430,8 +436,11 @@ pub(crate) fn parse_uuid(text: &str) -> Result<uuid::Uuid, StoreError> {
     uuid::Uuid::parse_str(text).map_err(|e| StoreError::Malformed(e.to_string()))
 }
 
+#[path = "share_store.rs"]
+mod share_store;
 #[path = "sync_store.rs"]
 mod sync_store;
+pub use share_store::{Contact, ShareKind, ShareRole, ShareRow, copy_id};
 pub use sync_store::{AreaState, ItemKind, RecordEntry, ServerRow};
 
 #[cfg(test)]
