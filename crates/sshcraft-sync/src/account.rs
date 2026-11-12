@@ -41,6 +41,11 @@ pub struct JoinAccount {
 }
 
 /// Vault label of a server's device keys.
+/// The setting that holds the id of the personal area on a server.
+pub fn personal_setting(server: ServerId) -> String {
+    format!("sync.personal.{}", server.0)
+}
+
 pub fn device_label(server: ServerId) -> String {
     format!("sync-device:{}", server.0)
 }
@@ -106,6 +111,10 @@ fn save_server(
             &to_json(manifest)?,
             &to_json(envelope)?,
         )?;
+    }
+    // With a single area that is the personal one; with more, the first sync finds it.
+    if let [(manifest, _)] = areas {
+        store.put_setting(&personal_setting(id), &manifest.area_id.0.to_string())?;
     }
     Ok(id)
 }

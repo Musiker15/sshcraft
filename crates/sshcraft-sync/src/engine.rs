@@ -8,13 +8,13 @@ use crate::SyncError;
 use crate::account::device_keys;
 use crate::client::ServerClient;
 use crate::items::{ItemBody, SyncItem, apply_in, decode, encode, local_item, newer};
-use crate::shares::{ShareInfo, copy_item, decode_share_info};
+use crate::shares::{ShareInfo, copy_item, decode_share_info, share_info_record_id};
 use sshcraft_core::model::ServerId;
 use sshcraft_core::store::{
     ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
 };
 use sshcraft_core::vault::Vault;
-use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, Role, open_area_key};
+use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, KeyEnvelope, Role, open_area_key};
 use sshcraft_proto::devicelog::{DeviceLog, DeviceSet, LogHead};
 use sshcraft_proto::identity::{AccountPublic, DeviceKeys};
 use sshcraft_proto::record::{Freshness, RecordHeader, SealedRecord, VersionTracker};
@@ -322,9 +322,10 @@ impl Engine {
 
     /// Remembers what this device learns about a share from its verified manifest.
     fn note_share(&self, store: &Mutex<Store>, manifest: &AreaManifest) -> Result<(), SyncError> {
+        let personal = self.personal_id(store)?;
         let guard = lock(store)?;
         let owned = manifest.owner == self.account;
-        if owned && manifest.members.is_empty() {
+        if owned && Some(manifest.area_id.0) == personal {
             return Ok(());
         }
         let role = if owned {
@@ -411,13 +412,27 @@ impl Engine {
         }
         let listed: HashSet<Uuid> = listings.iter().map(|l| l.manifest.area_id.0).collect();
         self.drop_lost_shares(store, &listed)?;
-        let personal = self.personal_area(store).ok().map(|(m, _)| m.area_id.0);
+        let personal = self.settle_personal(store).await?;
         let sync_keys = lock(store)?
             .server(self.server)?
             .is_some_and(|row| row.sync_keys);
+        // The personal area first: originals are there before their copies in own shares.
+        listings.sort_by_key(|l| Some(l.manifest.area_id.0) != personal);
         for listing in listings {
             let area_id = listing.manifest.area_id;
             let owner = listing.manifest.owner;
+            // An area of this account that the server now gives someone else, while this account
+            // exists: a server taking it away. Refused and reported.
+            if let Ok((old, _)) = self.stored_area(store, area_id.0)
+                && old.owner == self.account
+                && owner != self.account
+            {
+                report.rejected.push(format!(
+                    "area {}: handed to another account while this one exists",
+                    area_id.0
+                ));
+                continue;
+            }
             // A new owner must have been a member who may write (the only one the server may
             // hand an area to); anything else is a server making someone else owner.
             let known = self.stored_area(store, area_id.0).ok().map(|(m, _)| m);
@@ -526,23 +541,79 @@ impl Engine {
         Ok(report)
     }
 
-    /// This account's personal area with its key: the own area without members that is no
-    /// share (a share always has members, unless it was taken over from a deleted owner).
-    pub(crate) fn personal_area(
-        &self,
-        store: &Mutex<Store>,
-    ) -> Result<(AreaManifest, AreaKey), SyncError> {
+    /// The personal area's id as this device stored it, if it did.
+    pub(crate) fn personal_id(&self, store: &Mutex<Store>) -> Result<Option<Uuid>, SyncError> {
+        let setting = crate::account::personal_setting(self.server);
+        Ok(lock(store)?
+            .get_setting(&setting)?
+            .and_then(|text| Uuid::parse_str(&text).ok()))
+    }
+
+    /// Own areas that could be the personal one: no members and no known share.
+    fn personal_candidates(&self, store: &Mutex<Store>) -> Result<Vec<Uuid>, SyncError> {
         let shares: HashSet<Uuid> = lock(store)?
             .shares(self.server)?
             .into_iter()
             .map(|s| s.area_id)
             .collect();
-        self.owned_areas(store)?
+        Ok(self
+            .owned_areas(store)?
             .into_iter()
-            .find(|(manifest, _)| {
-                manifest.members.is_empty() && !shares.contains(&manifest.area_id.0)
-            })
-            .ok_or(SyncError::NotSetUp)
+            .filter(|(m, _)| m.members.is_empty() && !shares.contains(&m.area_id.0))
+            .map(|(m, _)| m.area_id.0)
+            .collect())
+    }
+
+    /// Finds and stores the personal area's id once (a device set up before it was stored, or
+    /// one that joined): an own area without members whose records hold no share info (a
+    /// share taken over from a deleted owner can have no members left).
+    async fn settle_personal(&self, store: &Mutex<Store>) -> Result<Option<Uuid>, SyncError> {
+        if let Some(id) = self.personal_id(store)? {
+            return Ok(Some(id));
+        }
+        let candidates = self.personal_candidates(store)?;
+        let mut found = None;
+        for area in candidates {
+            let mut since = 0;
+            let mut share = false;
+            loop {
+                let page = self.client.records(AreaId(area), since, PAGE).await;
+                let (records, more) = self.revoked_check(store, page)?;
+                for (seq, record) in records {
+                    since = since.max(seq);
+                    share |= record.header.record_id == share_info_record_id(area);
+                }
+                if share || !more {
+                    break;
+                }
+            }
+            if !share {
+                found = Some(area);
+                break;
+            }
+        }
+        if let Some(id) = found {
+            lock(store)?.put_setting(
+                &crate::account::personal_setting(self.server),
+                &id.to_string(),
+            )?;
+        }
+        Ok(found)
+    }
+
+    /// This account's personal area with its key.
+    pub(crate) fn personal_area(
+        &self,
+        store: &Mutex<Store>,
+    ) -> Result<(AreaManifest, AreaKey), SyncError> {
+        let id = match self.personal_id(store)? {
+            Some(id) => id,
+            None => *self
+                .personal_candidates(store)?
+                .first()
+                .ok_or(SyncError::NotSetUp)?,
+        };
+        self.stored_area(store, id)
     }
 
     /// Takes over an area whose owner was deleted, if this account may: the manifest this device
@@ -566,6 +637,12 @@ impl Engine {
         {
             return Ok(false);
         }
+        // Only an owner the server has deleted is replaced: its log must be gone.
+        match self.client.log(&old.owner, 0).await {
+            Err(SyncError::Server { status: 404, .. }) => {}
+            Err(err @ SyncError::Network(_)) => return Err(err),
+            _ => return Ok(false),
+        }
         let members = old
             .members
             .iter()
@@ -582,25 +659,61 @@ impl Engine {
         )
         .await?;
         // The items stay where they are; they are this account's own now, not copies.
-        let guard = lock(store)?;
-        let group = guard
-            .items_in_area(self.server, area)?
-            .into_iter()
-            .find(|(kind, _)| *kind == ItemKind::Group)
-            .map(|(_, id)| id);
-        let with_keys = guard.share(self.server, area)?.is_some_and(|s| s.with_keys);
-        guard.put_share(
-            self.server,
-            &ShareRow {
-                area_id: area,
-                kind: ShareKind::GroupAll,
-                group_id: group,
-                with_keys,
-                owned: true,
-                role: None,
-                owner: self.account.0,
-            },
-        )?;
+        let (group, with_keys) = {
+            let guard = lock(store)?;
+            let group = guard
+                .items_in_area(self.server, area)?
+                .into_iter()
+                .find(|(kind, _)| *kind == ItemKind::Group)
+                .map(|(_, id)| id);
+            let with_keys = guard.share(self.server, area)?.is_some_and(|s| s.with_keys);
+            guard.put_share(
+                self.server,
+                &ShareRow {
+                    area_id: area,
+                    kind: ShareKind::GroupAll,
+                    group_id: group.clone(),
+                    with_keys,
+                    owned: true,
+                    role: None,
+                    owner: self.account.0,
+                },
+            )?;
+            (group, with_keys)
+        };
+        // The new owner's word on what the share holds, for its other devices.
+        let info = ShareInfo {
+            kind: ShareKind::GroupAll,
+            group,
+            with_keys,
+        };
+        let record_id = share_info_record_id(area);
+        let mut version = 1;
+        let mut since = 0;
+        loop {
+            let page = self.client.records(AreaId(area), since, PAGE).await;
+            let (records, more) = self.revoked_check(store, page)?;
+            for (seq, record) in records {
+                since = since.max(seq);
+                if record.header.record_id == record_id {
+                    version = record.header.version + 1;
+                }
+            }
+            if !more {
+                break;
+            }
+        }
+        let (manifest, key) = self.stored_area(store, area)?;
+        crate::shares::write_record(
+            self,
+            store,
+            &manifest,
+            &key,
+            record_id,
+            version,
+            &crate::shares::encode_share_info(&info),
+        )
+        .await?;
         Ok(true)
     }
 
@@ -865,6 +978,7 @@ impl Engine {
         if store
             .share(self.server, area)?
             .is_some_and(|s| s.owned && s.kind != ShareKind::GroupAll)
+            && find_original(&store, self.server, area, kind, &item_id)?.is_some()
         {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
             if header.author_account == self.account || deleted {
