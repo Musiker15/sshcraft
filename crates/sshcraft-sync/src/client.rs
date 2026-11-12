@@ -12,6 +12,7 @@ use sshcraft_proto::identity::{AccountPublic, DeviceKeys, normalize_origin};
 use sshcraft_proto::record::SealedRecord;
 use std::time::Duration;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 /// Time limit for one request.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -24,10 +25,18 @@ pub struct ServerInfo {
     pub origin: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Session {
-    pub token: String,
+    pub token: Zeroizing<String>,
     pub expires_at: i64,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,8 +71,8 @@ struct ErrorBody {
 pub struct ServerClient {
     http: reqwest::Client,
     origin: String,
-    api_key: Option<String>,
-    token: Option<String>,
+    api_key: Option<Zeroizing<String>>,
+    token: Option<Zeroizing<String>>,
 }
 
 impl ServerClient {
@@ -102,17 +111,17 @@ impl ServerClient {
     }
 
     pub fn with_api_key(mut self, key: String) -> Self {
-        self.api_key = Some(key);
+        self.api_key = Some(Zeroizing::new(key));
         self
     }
 
     pub fn with_token(mut self, token: String) -> Self {
-        self.token = Some(token);
+        self.token = Some(Zeroizing::new(token));
         self
     }
 
     pub fn token(&self) -> Option<&str> {
-        self.token.as_deref()
+        self.token.as_deref().map(String::as_str)
     }
 
     /// `ws://` or `wss://` address of the event stream.
@@ -133,10 +142,10 @@ impl ServerClient {
     fn request(&self, method: Method, path: &str, api_key: bool) -> RequestBuilder {
         let mut builder = self.http.request(method, format!("{}{path}", self.origin));
         if api_key && let Some(key) = &self.api_key {
-            builder = builder.header("x-api-key", key);
+            builder = builder.header("x-api-key", key.as_str());
         }
         if !api_key && let Some(token) = &self.token {
-            builder = builder.bearer_auth(token);
+            builder = builder.bearer_auth(token.as_str());
         }
         builder
     }

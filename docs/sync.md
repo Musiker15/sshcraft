@@ -15,6 +15,7 @@ to* to change its place:
 - Moving an item off a server removes it there (and so on your other devices); it stays on the
   device that moved it.
 - Removing a server in the settings keeps its items on this device, as local items.
+- Keys move on the *Keys* page, and only to a server with key sync on.
 
 ## Setting up a server
 
@@ -31,8 +32,10 @@ In *Settings → Sync → Add server* there are two ways:
 *Add device* shows a pasted account key as a QR code for a phone, without storing it.
 
 If a step fails (server not reachable, wrong API key, email already taken, typo in the account
-key), nothing is kept on this device. A failed account creation can leave the account on the
-server; trying again with the same email then reports it as taken.
+key), nothing is kept on this device. If the account was already created on the server when a
+later step failed, the app still shows the account key: keep it and add the server again with
+*Join with account key*, which finishes the setup. A join that fails halfway takes the device it
+added out of the account again, so retrying leaves no stray devices.
 
 ### The recovery device
 
@@ -73,6 +76,15 @@ was last active. Revoking a device:
 SSH keys that were already on the revoked device may have been copied. Replace them as well.
 A device that was revoked while it was offline notices on its next connection, stops syncing
 and keeps its local data.
+
+If the rotation is interrupted (network, app closed), the app stored what it was doing and
+finishes it on the next sync, so the account never ends up without a usable key.
+
+A device the server's **operator** blocked is not revoked: it shows *Blocked by the server's
+operator*, keeps trying, and syncs again once the block is lifted.
+
+With key sync off, the key a host uses is chosen on each device: it is not sent to the server,
+and another device's choice does not replace it.
 
 ## What the app refuses
 

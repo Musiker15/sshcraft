@@ -11,6 +11,7 @@ use sshcraft_sync::devices::{DeviceInfo, list_devices, revoke_device};
 use sshcraft_sync::engine::Engine;
 use tauri::State;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use super::{CommandError, CommandResult};
 use crate::state::AppState;
@@ -27,32 +28,50 @@ pub struct ServerView {
     pub status: StatusView,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct CreateInput {
     pub server_name: String,
     pub origin: String,
-    pub api_key: String,
+    pub api_key: Zeroizing<String>,
     pub name: String,
     pub email: String,
     pub device_name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct JoinInput {
     pub server_name: String,
     pub origin: String,
-    pub api_key: String,
-    pub account_key: String,
+    pub api_key: Zeroizing<String>,
+    pub account_key: Zeroizing<String>,
     pub device_name: String,
 }
 
+impl std::fmt::Debug for CreateInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateInput")
+            .field("server_name", &self.server_name)
+            .field("origin", &self.origin)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for JoinInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JoinInput")
+            .field("server_name", &self.server_name)
+            .field("origin", &self.origin)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Shown once after an account was created; the key is not stored anywhere.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Serialize)]
 pub struct AccountCreated {
     /// `None` when the account exists but setting it up here did not finish: the user keeps
     /// the key and finishes by joining with it.
     pub server_id: Option<ServerId>,
-    pub account_key: String,
+    pub account_key: Zeroizing<String>,
     pub qr_svg: String,
     /// Why the setup did not finish, if it did not.
     pub unfinished: Option<CommandError>,
@@ -92,7 +111,7 @@ pub async fn create_sync_account(
     let new = NewAccount {
         server_name: input.server_name,
         origin: input.origin,
-        api_key: input.api_key,
+        api_key: input.api_key.to_string(),
         name: input.name,
         email: input.email,
         device_name: input.device_name,
@@ -111,7 +130,7 @@ pub async fn create_sync_account(
     Ok(AccountCreated {
         server_id,
         qr_svg: account_key_qr_svg(&export),
-        account_key: export.to_string(),
+        account_key: export,
         unfinished,
     })
 }
@@ -125,8 +144,8 @@ pub async fn join_sync_account(
     let join = JoinAccount {
         server_name: input.server_name,
         origin: input.origin,
-        api_key: input.api_key,
-        account_key: input.account_key,
+        api_key: input.api_key.to_string(),
+        account_key: input.account_key.to_string(),
         device_name: input.device_name,
         platform: platform().to_owned(),
     };

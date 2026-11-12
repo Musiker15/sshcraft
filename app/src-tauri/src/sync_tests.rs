@@ -161,3 +161,36 @@ fn a_revoked_server_shows_revoked_without_a_runtime() {
     assert_eq!(server_status(false, StatusView::Off), StatusView::Off);
     assert_eq!(server_status(false, StatusView::Idle), StatusView::Idle);
 }
+
+#[test]
+fn only_known_server_codes_reach_the_window() {
+    let err = sync_error(SyncError::Server {
+        status: 400,
+        code: "<b>call me</b>".into(),
+        current: None,
+    });
+    assert_eq!(err.detail.as_deref(), Some("unknown"));
+    let err = sync_error(SyncError::Server {
+        status: 503,
+        code: "busy".into(),
+        current: None,
+    });
+    assert_eq!(err.detail.as_deref(), Some("busy"));
+}
+
+#[test]
+fn inputs_never_show_their_secrets() {
+    let input: crate::commands::sync::JoinInput = serde_json::from_value(serde_json::json!({
+        "server_name": "home",
+        "origin": "https://sync.example.org",
+        "api_key": "api-secret",
+        "account_key": "sshcraft-account-1:SECRET",
+        "device_name": "laptop",
+    }))
+    .unwrap();
+    let shown = format!("{input:?}");
+    assert!(
+        !shown.contains("api-secret") && !shown.contains("SECRET"),
+        "{shown}"
+    );
+}

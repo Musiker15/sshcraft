@@ -219,6 +219,26 @@ pub fn note_change(
     Ok(servers)
 }
 
+/// Error codes of the sync server (docs/server-api.md).
+const KNOWN_SERVER_CODES: &[&str] = &[
+    "bad_api_key",
+    "unauthorized",
+    "forbidden",
+    "account_locked",
+    "device_inactive",
+    "device_blocked",
+    "not_found",
+    "method_not_allowed",
+    "conflict",
+    "email_taken",
+    "account_exists",
+    "device_id_taken",
+    "invalid",
+    "too_large",
+    "busy",
+    "internal",
+];
+
 /// The window's error code for a sync error.
 pub fn sync_error(err: SyncError) -> CommandError {
     let code = match &err {
@@ -244,7 +264,9 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,
     };
     let detail = match err {
-        SyncError::Server { code, .. } => code,
+        // The code comes from the server: only ones this app knows reach the window.
+        SyncError::Server { code, .. } if KNOWN_SERVER_CODES.contains(&code.as_str()) => code,
+        SyncError::Server { .. } => "unknown".to_owned(),
         other => other.to_string(),
     };
     CommandError::new(code, detail)
