@@ -1,0 +1,28 @@
+[package]
+name = "sshcraft-fido"
+description = "FIDO2 security keys and Windows Hello for SSHCraft: OpenSSH sk- keys over WebAuthn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# A software authenticator that signs like a token, for tests.
+testing = ["dep:ed25519-dalek"]
+
+[dependencies]
+sshcraft-ssh = { workspace = true }
+russh = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+ciborium = "0.2.2"
+p256 = "0.14.0"
+ed25519-dalek = { workspace = true, optional = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+sshcraft-fido = { path = ".", features = ["testing"] }
+sshcraft-ssh = { workspace = true, features = ["testing"] }
+rand = { workspace = true }
