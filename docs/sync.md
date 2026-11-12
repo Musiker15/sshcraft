@@ -50,6 +50,9 @@ Per server you can switch **Sync** on or off and choose whether **keys and passw
 With that off, keys and stored passwords stay on the device; a synced host that uses a key shows
 *Key missing on this device* on the other devices until you assign one there, and asks for its
 password when connecting. Keys from the Proton Pass agent never sync, only the reference to them.
+A key syncs as it is stored: with a passphrase that is not saved it stays encrypted with it, and
+its certificate goes along. Windows Hello keys never sync and never go into a share, see
+[keys.md](keys.md).
 Identities always sync; their key and password go along only under the same rule. A password
 lives where its host, group or identity lives and moves with it.
 

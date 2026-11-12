@@ -19,6 +19,17 @@ created after the page has loaded. Scripts stay limited to the app's own files.
 Only one SSHCraft runs at a time. A second start brings the open window to the front and exits,
 so the local database and the key vault are never opened twice.
 
+## Keys
+
+Private keys are sealed in the vault with XChaCha20-Poly1305, bound to their id. A key whose
+passphrase is not saved stays encrypted with that passphrase inside the vault too; the decrypted
+key never reaches the disk, and the passphrase is asked at most three times per connection and
+kept only in memory. Windows Hello guards only keys whose secret lies open in the vault: a key
+with a passphrase asks for the passphrase instead, and a FIDO2 or Windows Hello key is checked by
+its authenticator. Windows Hello keys never leave the device: they are refused as a sync item,
+skipped in shares and cannot move to a server. *Add to authorized_keys* sends one fixed `sh`
+command built from the key itself, never from text typed in the UI. See [keys.md](keys.md).
+
 ## Passwords and agent forwarding
 
 Stored passwords are sealed with the vault's key (XChaCha20-Poly1305), bound to their id, and

@@ -32,6 +32,7 @@ encrypted vault.
 | Protocol and cryptography | [docs/protocol.md](docs/protocol.md) |
 | Hosts, groups, import and export | [docs/hosts.md](docs/hosts.md) |
 | Connections: passwords, identities, jump hosts, proxies, local and serial | [docs/connections.md](docs/connections.md) |
+| Keys: types, passphrase, certificates, authorized_keys, FIDO2, Windows Hello | [docs/keys.md](docs/keys.md) |
 | Sync on the device | [docs/sync.md](docs/sync.md) |
 | Running the sync server | [docs/server.md](docs/server.md) |
 | Sync server API | [docs/server-api.md](docs/server-api.md) |
