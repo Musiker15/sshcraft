@@ -43,6 +43,10 @@ pub struct TestAuth {
 struct Records {
     /// Passwords and keyboard-interactive answers, in the order they came.
     passwords: Mutex<Vec<String>>,
+    /// Environment variables clients asked for.
+    env: Mutex<Vec<(String, String)>>,
+    /// The first try to use a forwarded agent: how many keys it listed, `None` if refused.
+    agent: Mutex<Option<Option<usize>>>,
 }
 
 pub struct TestServer {
@@ -80,6 +84,16 @@ impl TestServer {
     /// Passwords and keyboard-interactive answers clients sent, in order.
     pub fn received_passwords(&self) -> Vec<String> {
         self.records.passwords.lock().unwrap().clone()
+    }
+
+    pub fn received_env(&self) -> Vec<(String, String)> {
+        self.records.env.lock().unwrap().clone()
+    }
+
+    /// `None` while the server has not tried the agent yet; then whether it got one (and how
+    /// many keys it lists).
+    pub fn agent_attempt(&self) -> Option<Option<usize>> {
+        *self.records.agent.lock().unwrap()
     }
 
     /// Drops every connection and stops listening.
@@ -276,6 +290,62 @@ impl server::Handler for Handler {
         } else {
             Ok(self.kbd_question())
         }
+    }
+
+    /// After every sign-in the server tries to use a forwarded agent, asked for or not, and
+    /// notes whether the client let it.
+    async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
+        let handle = session.handle();
+        let records = self.records.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // `None`: the client refused the channel; `Some(0)` also when it opened one but no
+            // agent answered behind it.
+            let result = match handle.channel_open_agent().await {
+                Err(_) => None,
+                Ok(channel) => {
+                    let mut agent =
+                        russh::keys::agent::client::AgentClient::connect(channel.into_stream());
+                    let listed = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        agent.request_identities(),
+                    )
+                    .await;
+                    Some(match listed {
+                        Ok(Ok(keys)) => keys.len(),
+                        _ => 0,
+                    })
+                }
+            };
+            let mut slot = records.agent.lock().unwrap();
+            if slot.is_none() {
+                *slot = Some(result);
+            }
+        });
+        Ok(())
+    }
+
+    async fn env_request(
+        &mut self,
+        _channel: ChannelId,
+        name: &str,
+        value: &str,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.records
+            .env
+            .lock()
+            .unwrap()
+            .push((name.to_owned(), value.to_owned()));
+        Ok(())
+    }
+
+    async fn agent_request(
+        &mut self,
+        _channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 
     /// Jump host: connects to the wanted port on this machine and passes the bytes through.
@@ -625,4 +695,43 @@ pub async fn spawn_socks5_proxy(credentials: Option<(String, String)>) -> TestPr
         }
     })
     .await
+}
+
+/// An agent holding `keys`, opened afresh for each forwarded channel.
+pub fn agent_opener(keys: &[PrivateKey]) -> Arc<dyn crate::AgentOpener> {
+    Arc::new(TestAgentOpener {
+        keys: keys.to_vec(),
+    })
+}
+
+struct TestAgentOpener {
+    keys: Vec<PrivateKey>,
+}
+
+#[async_trait::async_trait]
+impl crate::AgentOpener for TestAgentOpener {
+    async fn open(&self) -> Result<Box<dyn crate::Io>, crate::SshError> {
+        use russh::keys::agent::client::AgentClient;
+        // One agent, two connections: the first loads the keys, the second is forwarded.
+        let (load, load_server) = tokio::io::duplex(64 * 1024);
+        let (forward, forward_server) = tokio::io::duplex(64 * 1024);
+        let listener = futures::stream::iter(vec![
+            Ok::<_, std::io::Error>(load_server),
+            Ok(forward_server),
+        ]);
+        tokio::spawn(async move {
+            let agent = TestAgent {
+                mode: AgentMode::Normal,
+            };
+            let _ = russh::keys::agent::server::serve(listener, agent).await;
+        });
+        let mut client = AgentClient::connect(load);
+        for key in &self.keys {
+            client
+                .add_identity(key, &[])
+                .await
+                .map_err(|e| crate::SshError::AgentUnavailable(e.to_string()))?;
+        }
+        Ok(Box::new(forward))
+    }
 }

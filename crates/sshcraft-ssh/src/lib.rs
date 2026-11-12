@@ -115,9 +115,22 @@ pub struct ProxyTarget {
     pub password: Option<zeroize::Zeroizing<String>>,
 }
 
+/// Opens a fresh connection to the SSH agent whose keys a session may forward (the system agent,
+/// Proton Pass on Windows; never SSHCraft's own vault).
+#[async_trait::async_trait]
+pub trait AgentOpener: Send + Sync {
+    async fn open(&self) -> Result<Box<dyn Io>, SshError>;
+}
+
 /// What a session does besides the shell itself.
 #[derive(Default)]
-pub struct SessionOptions {}
+pub struct SessionOptions {
+    /// Forward this agent to the target (never to a jump host). `None`: no forwarding, and an
+    /// agent channel the server opens anyway is refused.
+    pub agent_forwarding: Option<Arc<dyn AgentOpener>>,
+    /// Sent before the shell starts; the server takes only what its `AcceptEnv` allows.
+    pub env: Vec<(String, String)>,
+}
 
 /// How to reach a host: the proxy (for the first connection only), then each hop in turn, the
 /// last one being the target.
@@ -207,6 +220,8 @@ pub enum ShellEvent {
 }
 
 struct ClientHandler {
+    /// Set on the target when forwarding is on; jump hosts never get the agent.
+    agent: Option<Arc<dyn AgentOpener>>,
     host_name: String,
     address: String,
     port: u16,
@@ -235,11 +250,35 @@ impl client::Handler for ClientHandler {
         }
         Ok(trusted)
     }
+
+    /// Only the target with forwarding switched on gets a channel to the agent; dropping the
+    /// reply refuses it.
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(opener) = self.agent.clone() else {
+            return Ok(());
+        };
+        let Ok(mut agent) = opener.open().await else {
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut agent).await;
+        });
+        Ok(())
+    }
 }
 
 /// An authenticated SSH connection. Shells opened from it keep it alive.
 pub struct Session {
     handle: Arc<client::Handle<ClientHandler>>,
+    env: Arc<Vec<(String, String)>>,
+    forward_agent: bool,
     /// The jump hosts' connections the session runs through, kept open while it lives.
     jumps: Arc<Vec<client::Handle<ClientHandler>>>,
 }
@@ -342,6 +381,11 @@ pub async fn connect_route(
         };
         let rejected = Arc::new(AtomicBool::new(false));
         let handler = ClientHandler {
+            agent: if index == last {
+                params.options.agent_forwarding.clone()
+            } else {
+                None
+            },
             host_name: hop.host_name.clone(),
             address: hop.address.clone(),
             port: hop.port,
@@ -371,6 +415,8 @@ pub async fn connect_route(
     let handle = connected.pop().expect("at least one hop");
     Ok(Session {
         handle: Arc::new(handle),
+        env: Arc::new(params.options.env),
+        forward_agent: params.options.agent_forwarding.is_some(),
         jumps: Arc::new(connected),
     })
 }
@@ -410,6 +456,15 @@ impl Session {
             .request_pty(false, TERM, cols, rows, 0, 0, &[])
             .await
             .map_err(protocol)?;
+        for (name, value) in self.env.iter() {
+            channel
+                .set_env(false, name.as_str(), value.as_str())
+                .await
+                .map_err(protocol)?;
+        }
+        if self.forward_agent {
+            channel.agent_forward(false).await.map_err(protocol)?;
+        }
         channel.request_shell(false).await.map_err(protocol)?;
         let (mut read, write) = channel.split();
         let (tx, rx) = mpsc::channel(EVENT_BUFFER);
