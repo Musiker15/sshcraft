@@ -245,7 +245,7 @@ impl DeviceCertificate {
         cert
     }
 
-    fn signed_bytes(&self) -> Vec<u8> {
+    pub(crate) fn signed_bytes(&self) -> Vec<u8> {
         signing_bytes(
             DOMAIN_DEVICE_CERT,
             &[
@@ -279,8 +279,6 @@ impl DeviceCertificate {
     }
 
     /// Checks a signature made by this device's signing key.
-    // TODO(task 3): remove once the device log verifies with it.
-    #[allow(dead_code)]
     pub(crate) fn verify_signed(&self, msg: &[u8], signature: &[u8; 64]) -> Result<(), ProtoError> {
         verify_ed25519(&self.keys.signing, msg, signature)
     }
