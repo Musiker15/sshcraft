@@ -93,8 +93,9 @@ right-click it on the hosts page and choose *Share*. Each share is an area of it
 recipients as members; the server sees who shares with whom, never what.
 
 **What goes along.** A group can be shared with *all hosts*: the group itself moves into the
-share, and hosts added to it later go along. Or with *only these hosts*: the share then holds
-copies of the group and the picked hosts, and a single host is shared the same way. The owner's
+share with its subgroups, and hosts and subgroups added to it later go along. Or with *only these hosts*: the share then holds
+copies of the group and the picked hosts (also from subgroups, laid out flat in the copied group
+with what they inherit in between written into them), and a single host is shared the same way. The owner's
 devices keep each copy in step with its original in both directions, last change wins. Keys go
 along only when asked for, and keys from the SSH agent (Proton Pass) never do; the recipient then
 assigns a key of their own, which stays on their device. The key the owner uses for a shared
