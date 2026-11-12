@@ -82,6 +82,47 @@ modules: `proxy`, `proxy_http`, `ssl`, `headers`.
 </VirtualHost>
 ```
 
+## nginx as reverse proxy
+
+nginx forwards the WebSocket once the `Upgrade` and `Connection` headers are passed on. The `map`
+belongs in the `http` block, for example in its own file under `/etc/nginx/conf.d/`.
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name sync.example.org;
+
+    ssl_certificate     /etc/ssl/certs/sync.example.org.pem;
+    ssl_certificate_key /etc/ssl/private/sync.example.org.key;
+
+    # The server refuses bodies over 1 MiB itself; nginx may stop them earlier.
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8470;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        # Open WebSockets stay idle between pings (every 30 s).
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+}
+```
+
+`http2 on;` needs nginx 1.25.1 or newer; on older versions write `listen 443 ssl http2;` instead.
+The WebSocket itself always runs over HTTP/1.1 between nginx and the server, which is what
+`proxy_http_version 1.1` sets.
+
 ## Operator commands
 
 All commands work on the database directly and take the same `--database-url`. They do not need
