@@ -55,6 +55,9 @@ const EVENT_BUFFER: usize = 1024;
 const READ_CHUNK: usize = 4096;
 /// How long one read waits; a timeout is not an error, it only lets the reader look up.
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
+/// This many empty reads in a row mean the port is gone (about a second).
+const MAX_EMPTY_READS: u32 = 50;
+const EMPTY_PAUSE: Duration = Duration::from_millis(20);
 
 impl Default for SerialSettings {
     /// 115200 baud, 8 data bits, no parity, 1 stop bit, no flow control.
@@ -115,10 +118,24 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
 /// (an adapter pulled out, a port gone).
 pub(crate) fn pump<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<ShellEvent>) {
     let mut buf = vec![0u8; READ_CHUNK];
+    let mut empty = 0;
     loop {
         match reader.read(&mut buf) {
-            Ok(0) => {}
+            // A port that keeps answering with nothing (end of file after a hang-up on some
+            // systems) is gone; a short pause keeps this from spinning meanwhile.
+            Ok(0) => {
+                empty += 1;
+                if empty >= MAX_EMPTY_READS {
+                    let _ = tx.blocking_send(ShellEvent::Ended(Disconnect::Lost(
+                        "the port closed".into(),
+                    )));
+                    return;
+                }
+                std::thread::sleep(EMPTY_PAUSE);
+                continue;
+            }
             Ok(n) => {
+                empty = 0;
                 if tx
                     .blocking_send(ShellEvent::Data(buf[..n].to_vec()))
                     .is_err()
@@ -314,6 +331,28 @@ mod tests {
         assert_eq!(got[0], ShellEvent::Data(b"one".to_vec()));
         assert_eq!(got[1], ShellEvent::Data(b"two".to_vec()));
         assert!(matches!(got[2], ShellEvent::Ended(Disconnect::Lost(_))));
+    }
+
+    /// Reads that always return nothing, like a port that reports end of file after a hang-up.
+    struct Empty;
+
+    impl Read for Empty {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Ok(0)
+        }
+    }
+
+    #[tokio::test]
+    async fn endless_empty_reads_end_as_lost() {
+        let (tx, mut rx) = mpsc::channel(16);
+        std::thread::spawn(move || pump(Empty, tx));
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the pump must not spin forever");
+        assert!(matches!(
+            event,
+            Some(ShellEvent::Ended(Disconnect::Lost(_)))
+        ));
     }
 
     #[test]

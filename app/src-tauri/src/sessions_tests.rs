@@ -236,7 +236,9 @@ async fn fixture(answer: bool) -> Fixture {
 }
 
 fn connected(statuses: &[SessionStatus]) -> bool {
-    statuses.contains(&SessionStatus::Connected)
+    statuses
+        .iter()
+        .any(|s| matches!(s, SessionStatus::Connected { .. }))
 }
 
 #[tokio::test]
@@ -429,7 +431,7 @@ async fn first_failed_attempt_is_connect_failed() {
 fn connected_count(statuses: &[SessionStatus]) -> usize {
     statuses
         .iter()
-        .filter(|s| **s == SessionStatus::Connected)
+        .filter(|s| matches!(s, SessionStatus::Connected { .. }))
         .count()
 }
 
@@ -913,6 +915,27 @@ impl PasswordWorld {
         host.id
     }
 
+    /// Trusts the server's host key beforehand, as after an earlier connection.
+    fn trust(&self, server: &TestServer) {
+        self.store
+            .lock()
+            .unwrap()
+            .set_known_host("127.0.0.1", server.port, &server.host_fingerprint)
+            .unwrap();
+    }
+
+    fn set(&self, host: HostId, change: impl FnOnce(&mut ConnectionSettings)) {
+        let store = self.store.lock().unwrap();
+        let mut h = store
+            .list_hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == host)
+            .unwrap();
+        change(&mut h.settings);
+        store.upsert_host(&h).unwrap();
+    }
+
     fn manager(
         &self,
         vault: Option<Arc<Vault>>,
@@ -966,6 +989,7 @@ async fn kbd_server(answer: &str) -> TestServer {
 async fn password_host_connects() {
     let server = password_server("pw").await;
     let w = PasswordWorld::new();
+    w.trust(&server);
     let host = w.host(server.port, Some("pw"), Vec::new());
     let manager = w.manager(
         Some(w.vault.clone()),
@@ -984,6 +1008,8 @@ async fn jump_route_connects() {
     let jump = password_server("a").await;
     let target = password_server("b").await;
     let w = PasswordWorld::new();
+    w.trust(&jump);
+    w.trust(&target);
     let via = w.host(jump.port, Some("a"), Vec::new());
     let host = w.host(target.port, Some("b"), vec![via]);
     let host_keys = trusting();
@@ -996,7 +1022,7 @@ async fn jump_route_connects() {
     let sink = Arc::new(RecordingSink::default());
     manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
     sink.wait_for(connected).await;
-    assert_eq!(host_keys.asked.load(Ordering::SeqCst), 2);
+    assert_eq!(host_keys.asked.load(Ordering::SeqCst), 0);
     assert_eq!(jump.received_passwords(), vec!["a".to_owned()]);
     assert_eq!(target.received_passwords(), vec!["b".to_owned()]);
 }
@@ -1099,6 +1125,7 @@ async fn vault_locked_with_password_reports_vault_locked() {
 async fn hello_asked_before_password_use() {
     let server = password_server("pw").await;
     let w = PasswordWorld::new();
+    w.trust(&server);
     let host = w.host(server.port, Some("pw"), Vec::new());
     let presence = verified();
     let manager = w.manager(
@@ -1228,4 +1255,111 @@ async fn missing_serial_port_fails_without_retrying() {
     sink.wait_for(|s| ended(s).is_some()).await;
     assert_eq!(ended(&sink.statuses()), Some(EndReason::ConnectFailed));
     assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::SerialFailed));
+}
+
+// ---- Review fixes ----
+
+fn ended_detail(statuses: &[SessionStatus]) -> Option<String> {
+    statuses.iter().find_map(|s| match s {
+        SessionStatus::Ended { detail, .. } => detail.clone(),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn first_contact_withholds_stored_password() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::AuthCancelled));
+    assert!(server.received_passwords().is_empty());
+}
+
+#[tokio::test]
+async fn jump_failure_keeps_its_code_and_names_the_hop() {
+    let jump = password_server("a").await;
+    let target = password_server("b").await;
+    let w = PasswordWorld::new();
+    w.trust(&jump);
+    w.trust(&target);
+    let via = w.host(jump.port, Some("wrong"), Vec::new());
+    let host = w.host(target.port, Some("b"), vec![via]);
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(
+        ended_code(&sink.statuses()),
+        Some(ErrorCode::PasswordRejected)
+    );
+    assert_eq!(
+        ended_detail(&sink.statuses()),
+        Some(format!("host-{}", jump.port))
+    );
+}
+
+#[tokio::test]
+async fn missing_key_of_a_jump_host_names_the_hop() {
+    let jump = password_server("a").await;
+    let target = password_server("b").await;
+    let w = PasswordWorld::new();
+    let via = w.host(jump.port, None, Vec::new());
+    w.set(via, |s| {
+        s.key = Some(KeyRef::Stored {
+            id: sshcraft_core::model::KeyId::new(),
+        })
+    });
+    let host = w.host(target.port, Some("b"), vec![via]);
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(
+        ended_code(&sink.statuses()),
+        Some(ErrorCode::KeyNotOnDevice)
+    );
+    assert_eq!(
+        ended_detail(&sink.statuses()),
+        Some(format!("host-{}", jump.port))
+    );
+}
+
+#[tokio::test]
+async fn forwarding_without_an_agent_is_noted() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    w.set(host, |s| s.agent_forwarding = Some(true));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert!(sink.statuses().contains(&SessionStatus::Connected {
+        notice: Some(ErrorCode::AgentForwardingUnavailable)
+    }));
 }

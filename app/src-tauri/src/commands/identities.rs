@@ -70,6 +70,10 @@ pub(crate) fn save_identity(
     input: IdentityInput,
 ) -> Result<(IdentityView, Touched), CommandError> {
     let id = input.id.unwrap_or_default();
+    // Nothing is written when the password cannot be stored.
+    if matches!(input.password, PasswordChange::Set { .. }) && vault.is_none() {
+        return Err(CommandError::code(ErrorCode::VaultLocked));
+    }
     let existing = find(store, id)?;
     if existing.is_some() {
         check_rights(store, id)?;

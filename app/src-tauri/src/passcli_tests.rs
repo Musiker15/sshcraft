@@ -342,3 +342,24 @@ fn live_list_counts_keys() {
     println!("{} keys in {:?}", keys.len(), started.elapsed());
     assert!(!keys.is_empty());
 }
+
+#[test]
+fn a_vault_that_fails_is_skipped() {
+    let key = |title: &str| PassKey {
+        share_id: "s".into(),
+        item_id: title.into(),
+        title: title.into(),
+    };
+    let lists = vec![
+        Ok(vec![key("b")]),
+        Err(PassCliError::Failed("no rights".into())),
+        Ok(vec![key("A")]),
+    ];
+    let keys = merge_key_lists(lists).unwrap();
+    assert_eq!(
+        keys.iter().map(|k| k.title.as_str()).collect::<Vec<_>>(),
+        vec!["A", "b"]
+    );
+    assert!(merge_key_lists(vec![Err(PassCliError::Failed("x".into()))]).is_err());
+    assert!(merge_key_lists(Vec::new()).unwrap().is_empty());
+}

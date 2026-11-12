@@ -103,6 +103,32 @@ pub fn item_list_args(share_id: &str) -> Vec<&str> {
     ]
 }
 
+/// The keys of every vault that could be listed, by title; a vault that fails (no rights, for
+/// example) is skipped. Only when every vault fails is that an error.
+pub fn merge_key_lists(
+    lists: Vec<Result<Vec<PassKey>, PassCliError>>,
+) -> Result<Vec<PassKey>, PassCliError> {
+    let mut keys = Vec::new();
+    let mut first_error = None;
+    let mut any_ok = lists.is_empty();
+    for list in lists {
+        match list {
+            Ok(list) => {
+                any_ok = true;
+                keys.extend(list);
+            }
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    if !any_ok && let Some(e) = first_error {
+        return Err(e);
+    }
+    keys.sort_by_key(|k| k.title.to_lowercase());
+    Ok(keys)
+}
+
 pub fn parse_key_list(json: &str) -> Result<Vec<PassKey>, PassCliError> {
     let value: Value = serde_json::from_str(json).map_err(|_| malformed())?;
     let items = value["items"].as_array().ok_or_else(malformed)?;
@@ -350,12 +376,7 @@ impl PassCli for PassCliProcess {
                 .map(|h| h.join().unwrap_or_else(|_| Err(malformed())))
                 .collect()
         });
-        let mut keys = Vec::new();
-        for list in lists {
-            keys.extend(list?);
-        }
-        keys.sort_by_key(|k| k.title.to_lowercase());
-        Ok(keys)
+        merge_key_lists(lists)
     }
 
     fn private_key(

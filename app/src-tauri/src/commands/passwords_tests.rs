@@ -217,7 +217,7 @@ fn read_only_share_refuses_password_set() {
                 group_id: None,
                 with_keys: true,
                 owned: false,
-                role: Some(ShareRole::Write),
+                role: Some(ShareRole::Read),
                 owner: [9; 32],
             },
         )
@@ -237,4 +237,130 @@ fn read_only_share_refuses_password_set() {
         ErrorCode::ShareReadOnly
     );
     assert!(store.list_password_ids().unwrap().is_empty());
+}
+
+/// A host in a share this account received with `role`.
+fn received_host(role: ShareRole) -> (Store, Vault, Host, ServerId, Uuid) {
+    let (store, vault) = setup();
+    let server = ServerId::new();
+    store
+        .add_server(&sshcraft_core::store::ServerRow {
+            id: server,
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [1; 32],
+            device_id: Uuid::new_v4(),
+            sealed_device: vec![0],
+            sync_enabled: true,
+            sync_keys: true,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    let host = new_host(&store, ConnectionSettings::default());
+    store
+        .set_location(ItemKind::Host, &host.id.0.to_string(), Some(server))
+        .unwrap();
+    let area = Uuid::new_v4();
+    store
+        .put_share(
+            server,
+            &ShareRow {
+                area_id: area,
+                kind: ShareKind::Host,
+                group_id: None,
+                with_keys: false,
+                owned: false,
+                role: Some(role),
+                owner: [9; 32],
+            },
+        )
+        .unwrap();
+    store
+        .set_item_area(server, ItemKind::Host, &host.id.0.to_string(), area)
+        .unwrap();
+    (store, vault, host, server, area)
+}
+
+#[test]
+fn write_share_without_keys_allows_own_password() {
+    let (store, vault, host, _, _) = received_host(ShareRole::Write);
+    set_password(&store, &vault, PasswordOwner::Host { id: host.id }, SECRET).unwrap();
+    let id = stored(&store, host.id).settings.password.unwrap();
+    assert_eq!(vault.password(&store, id).unwrap().as_str(), SECRET);
+}
+
+#[test]
+fn shared_password_cannot_be_changed() {
+    let (store, vault, host, server, area) = received_host(ShareRole::Write);
+    let owner = PasswordOwner::Host { id: host.id };
+    set_password(&store, &vault, owner, SECRET).unwrap();
+    let id = stored(&store, host.id).settings.password.unwrap();
+    // As if the password had come with the share.
+    store
+        .set_item_area(server, ItemKind::Password, &id.0.to_string(), area)
+        .unwrap();
+    assert_eq!(
+        set_password(&store, &vault, owner, "other")
+            .unwrap_err()
+            .code,
+        ErrorCode::ShareReadOnly
+    );
+}
+
+#[test]
+fn form_changing_proxy_address_drops_proxy_password() {
+    let (store, vault) = setup();
+    let host = new_host(
+        &store,
+        ConnectionSettings {
+            proxy: Some(socks()),
+            ..Default::default()
+        },
+    );
+    set_password(
+        &store,
+        &vault,
+        PasswordOwner::HostProxy { id: host.id },
+        SECRET,
+    )
+    .unwrap();
+    let before = stored(&store, host.id);
+    let mut from_form = host_view(before.clone()).host;
+    from_form.settings.proxy = Some(Proxy::Socks5(ProxyEndpoint {
+        address: "elsewhere.example.org".into(),
+        port: 1080,
+        username: Some("u".into()),
+        password: None,
+    }));
+    let orphans = keep_passwords(Some(&before.settings), &mut from_form.settings);
+    assert_eq!(
+        orphans,
+        vec![proxy_password(&before.settings).unwrap().unwrap()]
+    );
+    assert_eq!(proxy_password(&from_form.settings).unwrap(), None);
+}
+
+#[test]
+fn locked_vault_saves_no_identity() {
+    let (store, _vault) = setup();
+    let err = save_identity(
+        &store,
+        None,
+        IdentityInput {
+            id: None,
+            name: "ops".into(),
+            username: Some("deploy".into()),
+            key: None,
+            location: None,
+            password: PasswordChange::Set {
+                secret: SECRET.into(),
+            },
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::VaultLocked);
+    assert!(store.list_identities().unwrap().is_empty());
 }

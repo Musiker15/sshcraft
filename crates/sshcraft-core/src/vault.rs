@@ -366,13 +366,13 @@ pub fn delete_key(store: &Store, id: KeyId) -> Result<(), VaultError> {
 #[path = "vault_tests.rs"]
 mod tests;
 
-/// Associated data for [`Vault::seal_secret`]; the prefix keeps it apart from key ids (16 bytes).
 /// Binds a sealed password to its id, so it cannot be passed off as another password, a key or
 /// another secret.
 fn password_aad(id: PasswordId) -> Vec<u8> {
     format!("password:{}", id.0).into_bytes()
 }
 
+/// Associated data for [`Vault::seal_secret`]; the prefix keeps it apart from key ids (16 bytes).
 fn secret_aad(label: &str) -> Vec<u8> {
     let mut aad = b"sshcraft/secret/".to_vec();
     aad.extend_from_slice(label.as_bytes());

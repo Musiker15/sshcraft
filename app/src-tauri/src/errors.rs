@@ -67,6 +67,8 @@ pub enum ErrorCode {
     NotSupported,
     LocalShellFailed,
     SerialFailed,
+    JumpIncomplete,
+    AgentForwardingUnavailable,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -79,7 +81,7 @@ impl From<&ResolveError> for ErrorCode {
             ResolveError::JumpLoop => Self::JumpLoop,
             ResolveError::TooManyJumps => Self::TooManyJumps,
             ResolveError::JumpMissing => Self::JumpMissing,
-            ResolveError::Jump { .. } => Self::JumpFailed,
+            ResolveError::Jump { .. } => Self::JumpIncomplete,
         }
     }
 }

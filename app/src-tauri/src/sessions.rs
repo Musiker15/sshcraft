@@ -48,7 +48,11 @@ pub enum EndReason {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SessionStatus {
     Connecting,
-    Connected,
+    Connected {
+        /// Something to point out while connected (agent forwarding not possible here).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notice: Option<ErrorCode>,
+    },
     Reconnecting {
         attempt: u32,
         delay_secs: u64,
@@ -137,6 +141,8 @@ pub enum SessionTarget {
 pub(crate) trait TermWriter: Send + Sync {
     async fn write(&self, data: &[u8]) -> Result<(), String>;
     async fn resize(&self, cols: u32, rows: u32) -> Result<(), String>;
+    /// The tab is closed: end what runs behind it now (a local shell).
+    fn close(&self) {}
 }
 
 #[async_trait::async_trait]
@@ -174,6 +180,10 @@ impl TermWriter for sshcraft_local::pty::LocalWriter {
     async fn resize(&self, cols: u32, rows: u32) -> Result<(), String> {
         sshcraft_local::pty::LocalWriter::resize(self, to_u16(cols), to_u16(rows))
             .map_err(|e| e.to_string())
+    }
+
+    fn close(&self) {
+        sshcraft_local::pty::LocalWriter::close(self);
     }
 }
 
@@ -447,6 +457,9 @@ impl SessionManager {
 
     pub fn close(&self, id: SessionId) {
         if let Some(live) = self.sessions.lock().expect("sessions lock").remove(&id) {
+            if let Some(writer) = live.writer.lock().expect("writer lock").clone() {
+                writer.close();
+            }
             live.task.abort();
         }
     }
@@ -495,11 +508,11 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     loop {
         sink.status(SessionStatus::Connecting);
         let reason = match connect_target(&ctx, &target, &shared.size).await {
-            Ok((writer, mut events)) => {
+            Ok((writer, mut events, notice)) => {
                 *shared.writer.lock().expect("writer lock") = Some(writer.clone());
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
                 shared.flow.reset();
-                sink.status(SessionStatus::Connected);
+                sink.status(SessionStatus::Connected { notice });
                 if let SessionTarget::Host { host_id } = &target {
                     remember_connection(&ctx, *host_id);
                 }
@@ -714,18 +727,23 @@ fn failure(e: SshError, verifier: &StoreVerifier) -> Failure {
             kept @ Failure::End(EndReason::HostKeyRejected | EndReason::HostKeyMismatch, ..) => {
                 kept
             }
-            Failure::End(reason, _, _) => {
-                Failure::End(reason, Some(ErrorCode::JumpFailed), Some(host_name))
-            }
-            Failure::Lost(_, detail) => {
-                Failure::Lost(ErrorCode::JumpFailed, format!("{host_name}: {detail}"))
-            }
+            // What went wrong stays; the detail names the jump host.
+            Failure::End(reason, code, _) => Failure::End(
+                reason,
+                Some(code.unwrap_or(ErrorCode::JumpFailed)),
+                Some(host_name),
+            ),
+            Failure::Lost(code, detail) => Failure::Lost(code, format!("{host_name}: {detail}")),
         },
         other => Failure::Lost(ErrorCode::Network, other.to_string()),
     }
 }
 
-type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>);
+type Connected = (
+    Writer,
+    tokio::sync::mpsc::Receiver<ShellEvent>,
+    Option<ErrorCode>,
+);
 
 async fn connect_target(
     ctx: &Context,
@@ -739,7 +757,7 @@ async fn connect_target(
             let (cols, rows) = *size.lock().expect("size lock");
             let (writer, events) = sshcraft_local::pty::spawn(shell, to_u16(cols), to_u16(rows))
                 .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
-            Ok((Arc::new(writer), events))
+            Ok((Arc::new(writer), events, None))
         }
         #[cfg(desktop)]
         SessionTarget::Serial { settings } => {
@@ -750,7 +768,7 @@ async fn connect_target(
             // lost connection once it was open.
             let (writer, events) = sshcraft_local::serial::open(settings)
                 .map_err(|e| Failure::Lost(ErrorCode::SerialFailed, e.to_string()))?;
-            Ok((Arc::new(writer), events))
+            Ok((Arc::new(writer), events, None))
         }
     }
 }
@@ -765,9 +783,16 @@ async fn connect_once(
         lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
     };
     let mut hops = Vec::new();
-    for resolved in route.jumps.iter().chain(std::iter::once(&route.target)) {
-        hops.push(hop(ctx, resolved).await?);
+    for resolved in &route.jumps {
+        // A jump host that cannot be used is named.
+        hops.push(hop(ctx, resolved).await.map_err(|f| match f {
+            Failure::End(reason, code, None) => {
+                Failure::End(reason, code, Some(resolved.name.clone()))
+            }
+            other => other,
+        })?);
     }
+    hops.push(hop(ctx, &route.target).await?);
     let proxy = match &route.target.proxy {
         Some(Proxy::Http(endpoint)) => Some(ProxyConfig::Http(proxy_target(ctx, endpoint).await?)),
         Some(Proxy::Socks5(endpoint)) => {
@@ -775,12 +800,15 @@ async fn connect_once(
         }
         _ => None,
     };
+    let opener = if route.target.agent_forwarding {
+        ctx.agent.opener()
+    } else {
+        None
+    };
+    let notice = (route.target.agent_forwarding && opener.is_none())
+        .then_some(ErrorCode::AgentForwardingUnavailable);
     let options = SessionOptions {
-        agent_forwarding: if route.target.agent_forwarding {
-            ctx.agent.opener()
-        } else {
-            None
-        },
+        agent_forwarding: opener,
         env: route
             .target
             .env
@@ -792,6 +820,7 @@ async fn connect_once(
         store: ctx.store.clone(),
         prompter: ctx.prompter.clone(),
         mismatch: Mutex::new(None),
+        first: Mutex::new(Vec::new()),
     });
     let params = RouteParams {
         hops,
@@ -811,7 +840,7 @@ async fn connect_once(
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
     }
     let (writer, events) = shell.split();
-    Ok((Arc::new(writer), events))
+    Ok((Arc::new(writer), events, notice))
 }
 
 fn probed_setting(host_id: HostId) -> String {
@@ -920,6 +949,8 @@ struct StoreVerifier {
     store: Arc<Mutex<Store>>,
     prompter: Arc<dyn HostKeyPrompter>,
     mismatch: Mutex<Option<String>>,
+    /// Servers whose host key the user trusted during this connection.
+    first: Mutex<Vec<(String, u16)>>,
 }
 
 #[async_trait::async_trait]
@@ -949,10 +980,22 @@ impl HostKeyVerifier for StoreVerifier {
                     if store.set_known_host(address, port, fingerprint).is_err() {
                         return false;
                     }
+                    self.first
+                        .lock()
+                        .expect("first lock")
+                        .push((address.to_owned(), port));
                 }
                 accepted
             }
         }
+    }
+
+    fn first_contact(&self, address: &str, port: u16) -> bool {
+        self.first
+            .lock()
+            .expect("first lock")
+            .iter()
+            .any(|(a, p)| a == address && *p == port)
     }
 }
 

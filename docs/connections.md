@@ -15,8 +15,16 @@ A host signs in with what it has, in this order:
    questions at once) goes to you in a dialog;
 4. with no stored password and a server that only offers `password`, SSHCraft asks you once.
 
-A server that accepts the key but wants a second factor (partial success) gets the key first and
-then the questions. What you type is not kept: after a reconnect you are asked again. Cancel ends
+A server that accepts the key or the password but wants a second factor (partial success) gets
+that first and then the questions; a stored password never answers the second factor.
+
+**First contact.** A stored password never goes to a server whose host key you trust for the
+first time in that very connection: the address may have been changed (by a member of a share,
+or a group it inherits from), so SSHCraft asks for the password instead. From the second
+connection on, the stored password is used. The same holds for each jump host. A stored proxy
+password stays only while the proxy keeps its kind, address, port and user; when someone (you, or
+a member of a share) points the proxy elsewhere, the password is dropped and has to be entered
+again. What you type is not kept: after a reconnect you are asked again. Cancel ends
 the tab without retrying.
 
 Passwords are sealed in the vault like keys (see [security.md](security.md)). The forms show only
@@ -41,6 +49,9 @@ gets the target's credentials and the other way round. A jump host's own jump ho
 not apply when it is used as a hop: what counts is set on the target. At most 8 jump hosts; a list
 with the target itself, a host twice or a deleted host is refused before anything connects.
 
+When something fails at a jump host (a wrong password, a missing key, no connection), the status
+line says what failed and names that jump host.
+
 *From the group* inherits, *None* stops the inheritance.
 
 ## Proxy
@@ -54,7 +65,8 @@ most 15 seconds.
 ## Agent forwarding
 
 Off unless switched on for a host or group. When on, the target (never a jump host) may use the
-SSH agent of this device, Proton Pass on Windows, while the session is open. Keys from SSHCraft's
+SSH agent of this device, Proton Pass on Windows, while the session is open. Where no agent can be
+forwarded yet (macOS, Linux and FreeBSD for now), the status line under the terminal says so. Keys from SSHCraft's
 own vault are never forwarded. Anyone with root on the server can use the forwarded agent in that
 time, so switch it on only where you need it. A server that opens an agent channel without
 forwarding switched on is refused.

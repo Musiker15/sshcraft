@@ -127,6 +127,8 @@ type Shared<T> = Arc<Mutex<Option<T>>>;
 struct Pty {
     /// Taken with the master once the shell has ended.
     writer: Shared<Box<dyn Write + Send>>,
+    /// Set once the shell has ended; a write that was under way drops the writer afterwards.
+    ended: Arc<std::sync::atomic::AtomicBool>,
     /// Taken (and dropped) once the shell has ended, which ends the reader.
     master: Shared<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -147,14 +149,24 @@ pub struct LocalWriter {
 
 impl LocalWriter {
     pub fn write(&self, data: &[u8]) -> Result<(), LocalError> {
-        let mut writer = self.pty.writer.lock().expect("writer lock");
-        let Some(writer) = writer.as_mut() else {
+        let mut slot = self.pty.writer.lock().expect("writer lock");
+        let Some(writer) = slot.as_mut() else {
             return Err(LocalError::Io("the shell has ended".into()));
         };
-        writer
+        let written = writer
             .write_all(data)
             .and_then(|()| writer.flush())
-            .map_err(|e| LocalError::Io(e.to_string()))
+            .map_err(|e| LocalError::Io(e.to_string()));
+        // The waiter could not take the writer while this write held it.
+        if self.pty.ended.load(std::sync::atomic::Ordering::SeqCst) {
+            slot.take();
+        }
+        written
+    }
+
+    /// Ends the shell now, even while other clones (a write under way) still live.
+    pub fn close(&self) {
+        let _ = self.pty.killer.lock().expect("killer lock").kill();
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), LocalError> {
@@ -205,17 +217,22 @@ pub fn spawn(
         .map_err(|e| LocalError::Spawn(e.to_string()))?;
     // Only the child holds the other end now, so the reader sees the end when it exits.
     drop(pair.slave);
-    let mut reader = pair
+    let mut killer = child.clone_killer();
+    let handles = pair
         .master
         .try_clone_reader()
-        .map_err(|e| LocalError::Io(e.to_string()))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| LocalError::Io(e.to_string()))?;
-    let killer = child.clone_killer();
+        .and_then(|reader| Ok((reader, pair.master.take_writer()?)));
+    let (mut reader, writer) = match handles {
+        Ok(handles) => handles,
+        Err(e) => {
+            // No terminal to talk to it: the shell must not keep running unseen.
+            let _ = killer.kill();
+            return Err(LocalError::Io(e.to_string()));
+        }
+    };
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let writer = Arc::new(Mutex::new(Some(writer)));
+    let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rx) = mpsc::channel(EVENT_BUFFER);
     let exit: Arc<Mutex<Option<Option<u32>>>> = Arc::new(Mutex::new(None));
 
@@ -224,11 +241,16 @@ pub fn spawn(
     {
         let master = master.clone();
         let writer = writer.clone();
+        let ended = ended.clone();
         let exit = exit.clone();
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|status| status.exit_code());
             *exit.lock().expect("exit lock") = Some(code);
-            writer.lock().expect("writer lock").take();
+            ended.store(true, std::sync::atomic::Ordering::SeqCst);
+            // A write under way holds the writer; it drops it itself when done.
+            if let Ok(mut slot) = writer.try_lock() {
+                slot.take();
+            }
             master.lock().expect("master lock").take();
         });
     }
@@ -267,6 +289,7 @@ pub fn spawn(
         LocalWriter {
             pty: Arc::new(Pty {
                 writer,
+                ended,
                 master,
                 killer: Mutex::new(killer),
             }),

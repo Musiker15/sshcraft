@@ -98,3 +98,35 @@ fn available_shells_ends_with_custom() {
         );
     }
 }
+
+#[tokio::test]
+async fn close_ends_the_shell_even_while_a_clone_lives() {
+    let interactive = if cfg!(windows) {
+        ShellCommand {
+            program: "cmd.exe".into(),
+            args: Vec::new(),
+            label: "cmd".into(),
+        }
+    } else {
+        ShellCommand {
+            program: "sh".into(),
+            args: Vec::new(),
+            label: "sh".into(),
+        }
+    };
+    let (writer, mut events) = spawn(&interactive, 80, 24).unwrap();
+    let _held = writer.clone();
+    writer.close();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Some(ShellEvent::Data(d))) => {
+                if d.windows(4).any(|w| w == b"\x1b[6n") {
+                    let _ = writer.write(b"\x1b[1;1R");
+                }
+            }
+            Ok(Some(ShellEvent::Ended(_))) | Ok(None) => break,
+            Err(_) => panic!("the shell is still running"),
+        }
+    }
+}

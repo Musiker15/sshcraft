@@ -160,14 +160,25 @@ fn check_rights(
     owner: PasswordOwner,
     password: Option<PasswordId>,
 ) -> Result<(), CommandError> {
+    use sshcraft_core::store::ShareRole;
+    let refused = || CommandError::code(ErrorCode::ShareReadOnly);
+    // An item of a share with read only, or a password that came with a share: not this
+    // account's. With write, an own password for a shared item stays on this account's side.
     let (kind, id) = owner_item(owner);
-    let mut items = vec![(kind, id)];
-    items.extend(password.map(|p| (ItemKind::Password, p.0.to_string())));
-    for (kind, id) in items {
-        if let Some(server) = store.location_of(kind, &id)?
-            && store.received_share_of(server, kind, &id)?.is_some()
+    if let Some(server) = store.location_of(kind, &id)?
+        && let Some(share) = store.received_share_of(server, kind, &id)?
+        && share.role != Some(ShareRole::Write)
+    {
+        return Err(refused());
+    }
+    if let Some(p) = password {
+        let id = p.0.to_string();
+        if let Some(server) = store.location_of(ItemKind::Password, &id)?
+            && store
+                .received_share_of(server, ItemKind::Password, &id)?
+                .is_some()
         {
-            return Err(CommandError::code(ErrorCode::ShareReadOnly));
+            return Err(refused());
         }
     }
     Ok(())
@@ -248,7 +259,10 @@ pub(crate) fn keep_passwords(
     incoming.password = stored.and_then(|s| s.password);
     let old_proxy = stored.and_then(|s| proxy_password(s).ok().flatten());
     let has_proxy = matches!(incoming.proxy, Some(Proxy::Http(_) | Proxy::Socks5(_)));
-    if has_proxy {
+    // A proxy that now leads elsewhere does not take the old proxy's password along.
+    let same = stored
+        .is_some_and(|s| sshcraft_sync::creds::same_proxy_endpoint(&s.proxy, &incoming.proxy));
+    if has_proxy && same {
         set_proxy_password(incoming, old_proxy);
         Vec::new()
     } else {

@@ -153,7 +153,7 @@ export type EndReason =
 
 export type SessionStatus =
   | { state: "connecting" }
-  | { state: "connected" }
+  | { state: "connected"; notice?: string }
   | { state: "reconnecting"; attempt: number; delay_secs: number }
   | { state: "ended"; reason: EndReason; code: string | null; detail: string | null };
 
