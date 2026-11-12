@@ -134,3 +134,154 @@ impl RawAccount {
         }
     }
 }
+
+use sshcraft_core::model::Host;
+use sshcraft_core::store::{ServerRow, Store};
+use sshcraft_core::vault::{MemoryMasterKey, Vault};
+use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, open_area_key};
+use sshcraft_proto::record::{RecordHeader, SealedRecord};
+use sshcraft_sync::account::{JoinAccount, NewAccount, create_account, device_keys, join_account};
+use sshcraft_sync::client::ServerClient;
+use sshcraft_sync::items::{ItemBody, SyncItem, encode};
+use std::sync::Mutex;
+
+/// One device: its own local store and vault.
+pub struct Dev {
+    pub store: Mutex<Store>,
+    pub vault: Vault,
+}
+
+impl Dev {
+    pub fn new() -> Self {
+        let store = Store::open_in_memory().unwrap();
+        let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+        Self {
+            store: Mutex::new(store),
+            vault,
+        }
+    }
+
+    pub fn row(&self) -> ServerRow {
+        self.store.lock().unwrap().servers().unwrap().pop().unwrap()
+    }
+
+    pub fn keys(&self) -> DeviceKeys {
+        device_keys(&self.vault, &self.row()).unwrap()
+    }
+
+    pub fn hosts(&self) -> Vec<Host> {
+        self.store.lock().unwrap().list_hosts().unwrap()
+    }
+
+    /// The personal area's verified manifest and key, from what this device stored.
+    pub fn area(&self) -> (AreaManifest, AreaKey) {
+        let row = self.row();
+        let area = self
+            .store
+            .lock()
+            .unwrap()
+            .areas(row.id)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let manifest: AreaManifest = serde_json::from_str(&area.manifest).unwrap();
+        let envelope: KeyEnvelope = serde_json::from_str(&area.envelope).unwrap();
+        let key = open_area_key(&envelope, row.device_id, &self.keys(), &manifest).unwrap();
+        (manifest, key)
+    }
+
+    pub async fn client(&self, server: &TestServer) -> ServerClient {
+        let row = self.row();
+        let mut client = ServerClient::new(&server.origin).unwrap();
+        client.login(row.device_id, &self.keys()).await.unwrap();
+        client
+    }
+}
+
+/// Creates an account on `dev` and returns the account key export.
+pub async fn create(server: &TestServer, dev: &Dev, email: &str) -> String {
+    let input = NewAccount {
+        server_name: "home".into(),
+        origin: server.origin.clone(),
+        api_key: server.api_key.clone(),
+        name: "Alice".into(),
+        email: email.into(),
+        device_name: "first".into(),
+        platform: "windows".into(),
+    };
+    create_account(&dev.store, &dev.vault, input, 1)
+        .await
+        .unwrap()
+        .1
+        .to_string()
+}
+
+pub async fn join(server: &TestServer, dev: &Dev, export: &str) {
+    let input = JoinAccount {
+        server_name: "home".into(),
+        origin: server.origin.clone(),
+        api_key: server.api_key.clone(),
+        account_key: export.into(),
+        device_name: "next".into(),
+        platform: "linux".into(),
+    };
+    join_account(&dev.store, &dev.vault, input, 2)
+        .await
+        .unwrap();
+}
+
+/// Seals a host as a record written by `dev` and uploads it; returns the record.
+pub async fn write_host(
+    server: &TestServer,
+    dev: &Dev,
+    host: &Host,
+    record_id: Uuid,
+    version: u64,
+    modified_at: i64,
+) -> SealedRecord {
+    let row = dev.row();
+    let (manifest, key) = dev.area();
+    let item = SyncItem {
+        modified_at,
+        body: ItemBody::Host { host: host.clone() },
+    };
+    let header = RecordHeader {
+        record_id,
+        area_id: manifest.area_id,
+        version,
+        key_version: manifest.key_version,
+        author_account: sshcraft_proto::identity::AccountPublic(row.account),
+        author_device: row.device_id,
+    };
+    let record = SealedRecord::seal(header, &encode(&item).unwrap(), &key, &dev.keys());
+    dev.client(server).await.put_record(&record).await.unwrap();
+    record
+}
+
+/// `by` revokes `target` in the account's log, without any key rotation.
+pub async fn revoke_raw(server: &TestServer, by: &Dev, target: Uuid) {
+    let row = by.row();
+    let client = by.client(server).await;
+    let account = sshcraft_proto::identity::AccountPublic(row.account);
+    let mut log = DeviceLog {
+        entries: client.log(&account, 0).await.unwrap(),
+    };
+    log.append_revoke_by_device(row.device_id, &by.keys(), target, 3);
+    let entry = log.entries.last().cloned().unwrap();
+    client.append_log(&account, &[entry], false).await.unwrap();
+}
+
+pub fn sample_host(name: &str) -> Host {
+    Host {
+        id: sshcraft_core::model::HostId::new(),
+        name: name.into(),
+        group_id: None,
+        settings: sshcraft_core::model::ConnectionSettings {
+            address: Some("10.0.0.1".into()),
+            port: None,
+            username: Some("root".into()),
+            key: None,
+        },
+        location: None,
+    }
+}

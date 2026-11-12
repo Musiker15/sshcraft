@@ -442,6 +442,23 @@ impl Store {
         Ok(())
     }
 
+    /// When a still unsent local change to an item was queued (Unix milliseconds).
+    pub fn queued_at(
+        &self,
+        server: ServerId,
+        kind: ItemKind,
+        item_id: &str,
+    ) -> Result<Option<i64>, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT queued_at FROM sync_outbox WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3",
+                params![server.0.to_string(), kind.as_str(), item_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// Where an item lives, or `None` for a local item (or one that does not exist).
     pub fn location_of(&self, kind: ItemKind, id: &str) -> Result<Option<ServerId>, StoreError> {
         let raw: Option<Option<String>> = self

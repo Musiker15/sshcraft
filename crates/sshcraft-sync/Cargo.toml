@@ -22,3 +22,4 @@ qrcode = { workspace = true }
 [dev-dependencies]
 sshcraft-server = { workspace = true }
 tempfile = { workspace = true }
+rusqlite = { workspace = true }

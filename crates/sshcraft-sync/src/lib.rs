@@ -5,6 +5,7 @@
 
 pub mod account;
 pub mod client;
+pub mod engine;
 pub mod items;
 
 use sshcraft_proto::ProtoError;
