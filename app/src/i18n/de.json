@@ -1,0 +1,7 @@
+{
+  "errors.unknown": "Etwas ist schiefgegangen.",
+  "errors.agent_unavailable": "Proton Pass ist nicht erreichbar. Läuft die Proton-Pass-App?",
+  "hosts.count.one": "{count} Host",
+  "hosts.count.other": "{count} Hosts",
+  "hosts.deleteConfirm": "Host \"{name}\" löschen?"
+}
