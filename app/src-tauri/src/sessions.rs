@@ -551,7 +551,63 @@ async fn connect_once(
         .open_shell(cols, rows)
         .await
         .map_err(|e| Failure::Lost(e.to_string()))?;
+    if needs_os(&ctx.store, host_id) {
+        tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
+    }
     Ok(shell.split())
+}
+
+/// Whether a host still has no operating system for its symbol.
+fn needs_os(store: &Mutex<Store>, host_id: HostId) -> bool {
+    store
+        .lock()
+        .expect("store lock")
+        .list_hosts()
+        .is_ok_and(|hosts| hosts.iter().any(|h| h.id == host_id && h.os.is_none()))
+}
+
+/// Asks the server once which operating system it runs and stores it on the host (sent like
+/// any change, unless the host came in a share that may only be read). Failures are ignored:
+/// the symbol simply stays neutral.
+async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_ssh::Session) {
+    let Ok(output) = session
+        .exec(sshcraft_core::os_detect::OS_PROBE, 16 * 1024)
+        .await
+    else {
+        return;
+    };
+    let Some(os) = sshcraft_core::os_detect::from_output(&String::from_utf8_lossy(&output)) else {
+        return;
+    };
+    let store = store.lock().expect("store lock");
+    let Ok(hosts) = store.list_hosts() else {
+        return;
+    };
+    let Some(mut host) = hosts
+        .into_iter()
+        .find(|h| h.id == host_id && h.os.is_none())
+    else {
+        return;
+    };
+    host.os = Some(os);
+    let id = host.id.0.to_string();
+    let read_only = host.location.is_some_and(|server| {
+        store
+            .read_only(server, sshcraft_core::store::ItemKind::Host, &id)
+            .unwrap_or(true)
+    });
+    if store.upsert_host(&host).is_err() || read_only {
+        return;
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    let _ = sshcraft_sync::engine::record_local_change(
+        &store,
+        sshcraft_core::store::ItemKind::Host,
+        &id,
+        now_ms,
+    );
 }
 
 fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Option<String>)> {

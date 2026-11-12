@@ -78,6 +78,7 @@ const TERM: &str = "xterm-256color";
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const KEEPALIVE_MAX: usize = 3;
 const EVENT_BUFFER: usize = 1024;
+const EXEC_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct ConnectParams {
     pub address: String,
@@ -108,6 +109,8 @@ pub enum SshError {
     AgentKeyMissing,
     #[error("the ssh agent refused to sign")]
     AgentRefused,
+    #[error("the command did not finish in time")]
+    Timeout,
 }
 
 impl From<&SshError> for Disconnect {
@@ -119,6 +122,7 @@ impl From<&SshError> for Disconnect {
             | SshError::AgentKeyMissing
             | SshError::AgentRefused => Disconnect::AuthFailed,
             SshError::Connect(m) | SshError::Protocol(m) => Disconnect::Lost(m.clone()),
+            SshError::Timeout => Disconnect::Lost("timed out".into()),
         }
     }
 }
@@ -257,6 +261,34 @@ pub async fn connect(
 }
 
 impl Session {
+    /// Runs a command on its own channel and returns at most `limit` bytes of its output;
+    /// gives up after a few seconds.
+    pub async fn exec(&self, command: &str, limit: usize) -> Result<Vec<u8>, SshError> {
+        let run = async {
+            let mut channel = self.handle.channel_open_session().await.map_err(protocol)?;
+            channel.exec(true, command).await.map_err(protocol)?;
+            let mut out = Vec::new();
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    ChannelMsg::Data { data } => {
+                        let room = limit.saturating_sub(out.len());
+                        out.extend_from_slice(&data[..data.len().min(room)]);
+                        if out.len() >= limit {
+                            break;
+                        }
+                    }
+                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    _ => {}
+                }
+            }
+            let _ = channel.close().await;
+            Ok(out)
+        };
+        tokio::time::timeout(EXEC_TIMEOUT, run)
+            .await
+            .map_err(|_| SshError::Timeout)?
+    }
+
     pub async fn open_shell(&self, cols: u32, rows: u32) -> Result<Shell, SshError> {
         let channel = self.handle.channel_open_session().await.map_err(protocol)?;
         channel
