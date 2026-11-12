@@ -3,7 +3,8 @@
 
 use crate::auth::Session;
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
-use crate::routes::areas::{can_read, load};
+use crate::hub::Event;
+use crate::routes::areas::{audience, can_read, load};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
@@ -49,6 +50,15 @@ pub async fn put(
         return Err(ApiError::TooLarge);
     }
     let seq = state.store.put_record(&record).await?;
+    state.hub.publish(
+        &audience(&row),
+        Event::Record {
+            area_id: AreaId(area),
+            record_id,
+            version: record.header.version,
+            seq,
+        },
+    );
     Ok(Json(json!({ "seq": seq })))
 }
 

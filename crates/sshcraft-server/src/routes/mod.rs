@@ -3,6 +3,7 @@
 pub(crate) mod accounts;
 pub(crate) mod areas;
 mod devicelog;
+mod events;
 mod login;
 mod records;
 mod server;
@@ -35,6 +36,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/areas/{area}/envelope", get(areas::my_envelope))
         .route("/v1/areas/{area}/records", get(records::list))
         .route("/v1/areas/{area}/records/{record}", put(records::put))
+        .route("/v1/events", get(events::events))
         .route("/v1/auth/challenge", post(login::challenge))
         .route("/v1/auth/login", post(login::login))
         .fallback(|| async { ApiError::NotFound })

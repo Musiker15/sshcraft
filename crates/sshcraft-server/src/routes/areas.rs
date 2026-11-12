@@ -2,6 +2,7 @@
 
 use crate::auth::Session;
 use crate::error::{ApiError, ApiJson, ApiPath};
+use crate::hub::Event;
 use crate::state::AppState;
 use crate::store::AreaRow;
 use axum::Json;
@@ -36,6 +37,13 @@ pub async fn load(state: &AppState, area: Uuid) -> Result<AreaRow, ApiError> {
         .area(AreaId(area))
         .await?
         .ok_or(ApiError::NotFound)
+}
+
+/// Owner and members of the area, who get its change notices.
+pub fn audience(row: &AreaRow) -> Vec<AccountPublic> {
+    std::iter::once(row.owner)
+        .chain(row.manifest.members.iter().map(|m| m.account))
+        .collect()
 }
 
 /// Whether `account` owns the area or is listed in its manifest.
@@ -93,11 +101,26 @@ pub async fn put_manifest(
             return Err(invalid("a member has no account on this server"));
         }
     }
-    let expected = existing.map(|row| row.manifest.version);
+    let expected = existing.as_ref().map(|row| row.manifest.version);
     state
         .store
         .put_manifest(&session.account, &manifest, expected)
         .await?;
+    // Members who were just removed hear about it too, so they notice.
+    let mut accounts = audience(&AreaRow {
+        owner: session.account,
+        manifest: manifest.clone(),
+    });
+    if let Some(old) = &existing {
+        accounts.extend(audience(old));
+    }
+    state.hub.publish(
+        &accounts,
+        Event::Manifest {
+            area_id: manifest.area_id,
+            version: manifest.version,
+        },
+    );
     Ok(Json(json!({ "version": manifest.version })))
 }
 
@@ -112,6 +135,12 @@ pub async fn delete(
         return Err(ApiError::Forbidden);
     }
     state.store.delete_area(AreaId(area)).await?;
+    state.hub.publish(
+        &audience(&row),
+        Event::AreaDeleted {
+            area_id: AreaId(area),
+        },
+    );
     Ok(Json(json!({})))
 }
 
@@ -150,6 +179,13 @@ pub async fn put_envelopes(
         .store
         .put_envelopes(AreaId(area), &body.envelopes)
         .await?;
+    state.hub.publish(
+        &audience(&row),
+        Event::Envelopes {
+            area_id: AreaId(area),
+            key_version: row.manifest.key_version,
+        },
+    );
     Ok(Json(json!({ "count": body.envelopes.len() })))
 }
 

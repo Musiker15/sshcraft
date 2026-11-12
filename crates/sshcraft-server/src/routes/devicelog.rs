@@ -3,6 +3,7 @@
 
 use crate::auth::{Session, has_api_key};
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
+use crate::hub::Event;
 use crate::routes::accounts::{check_certificate, parse_account};
 use crate::state::AppState;
 use crate::store::DeviceChanges;
@@ -105,5 +106,18 @@ pub async fn append(
         .store
         .append_log(&account, len, &body.entries, &changes)
         .await?;
-    Ok(Json(json!({ "len": extended.entries.len() })))
+    for device_id in &changes.revoked {
+        state.hub.end_device(*device_id);
+    }
+    let new_len = extended.entries.len() as u64;
+    let mut accounts = state.store.area_peers(&account).await?;
+    accounts.push(account);
+    state.hub.publish(
+        &accounts,
+        Event::DeviceLog {
+            account,
+            len: new_len,
+        },
+    );
+    Ok(Json(json!({ "len": new_len })))
 }
