@@ -199,7 +199,7 @@ fn run_with_timeout_kills_slow_process() {
 
 #[test]
 fn run_with_timeout_returns_output_of_fast_process() {
-    let mut command = if cfg!(windows) {
+    let command = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");
         c.args(["/C", "echo hello"]);
         c
