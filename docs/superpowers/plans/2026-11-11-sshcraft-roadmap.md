@@ -16,7 +16,7 @@ mit dem Wissen aus den vorherigen.
 | 5 | Sync-Server | `sshcraft-server`: axum, SQLite und PostgreSQL, API-Key, Challenge-Anmeldung, Konten, Geräteprotokolle, Datensätze, Push per WebSocket, Verwaltungsbefehle, Docker-Image, Beispiele für Apache und nginx | fertig, auf `main` |
 | 6 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | fertig, auf `main` |
 | 7 | Teilen | Freigaben für Host und Gruppe, Auswahl, mit oder ohne Schlüssel, lesen oder schreiben, Sicherheitsnummer, Entziehen mit Schlüsseltausch | fertig, auf `main` |
-| 8 | Hosts und Ordnung | Untergruppen, Tags, Host-Symbole, Import aus `known_hosts`, Schlüsseldateien, CSV, PuTTY, MobaXterm, SecureCRT, Export als CSV und JSON | offen |
+| 8 | Hosts und Ordnung | Untergruppen, Tags, Host-Symbole, Import aus `known_hosts`, Schlüsseldateien, CSV, PuTTY, MobaXterm, SecureCRT, Export als CSV und JSON | fertig, auf `main` |
 | 9 | Verbindungen | Passwort und keyboard-interactive, Identitäten, Sprung-Hosts, HTTP- und SOCKS5-Proxy, Agent-Weiterleitung, Umgebungsvariablen, serielle Verbindung, lokales Terminal | offen |
 | 10 | Schlüssel erweitert | ECDSA und RSA erzeugen, Passphrase speichern, öffentlichen Schlüssel in `authorized_keys` eintragen, SSH-Zertifikate, FIDO2-Hardwareschlüssel, gerätegebundene Schlüssel (Windows Hello mit TPM) | offen |
 | 11 | Workspaces | Split und Fokus mit 2 bis 16 Sitzungen, Broadcast, Workspace-Vorlagen, Statuspunkte, Tastenkürzel, Terminaltyp, OSC 52, Links | offen |

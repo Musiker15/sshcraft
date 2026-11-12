@@ -5,7 +5,7 @@ programs and go out again. Sync and sharing of all this are described in [sync.m
 
 ## Groups and subgroups
 
-Groups can be nested to any depth (at most 64 levels). A host takes every value it does not set
+Groups can be nested up to 64 levels deep. A host takes every value it does not set
 itself from the nearest group above it that sets it: address and port from the top group,
 the user from a middle one, the port on the host itself, for example. The hosts page shows one
 level at a time; double-click a group to open it, the path above the list leads back.
@@ -25,13 +25,16 @@ The search covers names, addresses, users, the groups on the way up and the tags
 
 The symbol of a host shows its operating system or distribution. After the first successful
 connection to a host without a symbol, SSHCraft reads `/etc/os-release` (or `uname -s`) once over
-a separate channel and stores the result; it can also be set by hand in the host form.
+a separate channel and stores the result; it can also be set by hand in the host form. Each
+device asks a host only once, also when the answer is not recognized.
 
 ## Import
 
 *Hosts → New → Import* reads one source, shows a preview and creates exactly the entries left
-checked. Entries with a warning start unchecked. A host that already exists in the same group with
-the same name, address, port and user is not created again. Groups on a source's path are created
+checked. Entries with a warning start unchecked. A host that already exists at the same place with
+the same address and port is not created again when it also has the same name and user, or when
+the new entry knows no user (a `known_hosts` entry for a host imported before). All names on one
+`known_hosts` line are one host. Groups on a source's path are created
 as subgroups, existing ones with the same name on the same level are reused. The import can go
 straight to a sync server.
 

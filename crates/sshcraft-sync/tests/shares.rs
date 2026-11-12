@@ -1453,5 +1453,8 @@ async fn a_writer_cannot_move_the_share_root() {
         .find(|g| g.id == team.id)
         .unwrap();
     assert_eq!(root.parent_id, None, "{report:?}");
-    assert!(report.rejected.is_empty(), "the change is taken, the parent kept: {report:?}");
+    assert!(
+        report.rejected.is_empty(),
+        "the change is taken, the parent kept: {report:?}"
+    );
 }
