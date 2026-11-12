@@ -270,6 +270,16 @@ impl Store {
                 return Err(StoreError::Malformed("host follows its group".into()));
             }
         }
+        if kind == ItemKind::Group {
+            let parent: Option<Option<String>> = tx
+                .query_row("SELECT parent_id FROM groups WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            if matches!(parent, Some(Some(_))) {
+                return Err(StoreError::Malformed("group follows its parent".into()));
+            }
+        }
         let changed = tx.execute(
             &format!("UPDATE {} SET location = ?2 WHERE id = ?1", kind.table()),
             params![id, target],
@@ -278,10 +288,18 @@ impl Store {
             return Err(StoreError::Malformed("no such item".into()));
         }
         if kind == ItemKind::Group {
-            tx.execute(
-                "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
-                params![id, target],
-            )?;
+            let mut groups = super::subgroups_of(&tx, id)?;
+            groups.push(id.to_owned());
+            for group in groups {
+                tx.execute(
+                    "UPDATE groups SET location = ?2 WHERE id = ?1",
+                    params![group, target],
+                )?;
+                tx.execute(
+                    "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
+                    params![group, target],
+                )?;
+            }
         }
         tx.commit()?;
         Ok(())

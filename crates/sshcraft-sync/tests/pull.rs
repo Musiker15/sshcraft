@@ -116,6 +116,8 @@ async fn a_record_that_cannot_apply_yet_is_tried_again() {
         name: "srv".into(),
         defaults: ConnectionSettings::default(),
         location: None,
+        parent_id: None,
+        tags: Vec::new(),
     };
     let mut host = sample_host("web");
     host.group_id = Some(group.id);

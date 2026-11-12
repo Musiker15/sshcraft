@@ -52,9 +52,79 @@ pub struct Group {
     pub id: GroupId,
     pub name: String,
     pub defaults: ConnectionSettings,
-    /// The sync server this group belongs to; `None` means "only on this device".
+    /// The sync server this group belongs to; `None` means "only on this device". A subgroup
+    /// always has its parent's location.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<ServerId>,
+    /// The group this one is nested in.
+    #[serde(default)]
+    pub parent_id: Option<GroupId>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// The operating system or distribution a host runs, for its symbol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostOs {
+    Linux,
+    Debian,
+    Ubuntu,
+    Fedora,
+    RedHat,
+    CentOs,
+    Rocky,
+    Alma,
+    Arch,
+    Alpine,
+    OpenSuse,
+    Raspbian,
+    FreeBsd,
+    OpenBsd,
+    MacOs,
+    Windows,
+    Other,
+}
+
+/// How deep groups may nest; deeper chains (or a cycle) are cut off here.
+pub const MAX_GROUP_DEPTH: usize = 64;
+/// At most this many tags per item, each at most this many characters.
+pub const MAX_TAGS: usize = 32;
+pub const MAX_TAG_LEN: usize = 64;
+
+/// Tags as they are stored: trimmed, empty ones dropped, duplicates (ignoring case) merged,
+/// each cut to [`MAX_TAG_LEN`] characters, at most [`MAX_TAGS`].
+pub fn normalize_tags(tags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag: String = tag.trim().chars().take(MAX_TAG_LEN).collect();
+        if tag.is_empty() || out.iter().any(|t| t.to_lowercase() == tag.to_lowercase()) {
+            continue;
+        }
+        out.push(tag);
+        if out.len() == MAX_TAGS {
+            break;
+        }
+    }
+    out
+}
+
+/// A group and the groups above it, nearest first. Stops at a missing group, at a cycle and
+/// after [`MAX_GROUP_DEPTH`] levels.
+pub fn group_chain(groups: &[Group], start: GroupId) -> Vec<Group> {
+    let mut chain: Vec<Group> = Vec::new();
+    let mut next = Some(start);
+    while let Some(id) = next {
+        if chain.len() >= MAX_GROUP_DEPTH || chain.iter().any(|g| g.id == id) {
+            break;
+        }
+        let Some(group) = groups.iter().find(|g| g.id == id) else {
+            break;
+        };
+        next = group.parent_id;
+        chain.push(group.clone());
+    }
+    chain
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +137,10 @@ pub struct Host {
     /// group always has its group's location.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<ServerId>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub os: Option<HostOs>,
 }
 
 /// A host with every setting filled in, ready to connect.
@@ -94,29 +168,36 @@ pub enum ResolveError {
 
 pub const DEFAULT_PORT: u16 = 22;
 
-/// Combines a host with its group: host values win, empty strings count as unset.
-pub fn resolve(host: &Host, group: Option<&Group>) -> Result<ResolvedHost, ResolveError> {
-    if let Some(g) = group
-        && host.group_id != Some(g.id)
-    {
-        return Err(ResolveError::WrongGroup);
+/// Checks that `chain` is the host's group and the groups above it, nearest first.
+fn check_chain(host: &Host, chain: &[&Group]) -> Result<(), ResolveError> {
+    match (host.group_id, chain.first()) {
+        (None, None) => {}
+        (Some(id), Some(first)) if first.id == id => {}
+        _ => return Err(ResolveError::WrongGroup),
     }
-    let inherited = group.map(|g| &g.defaults);
+    for pair in chain.windows(2) {
+        if pair[0].parent_id != Some(pair[1].id) {
+            return Err(ResolveError::WrongGroup);
+        }
+    }
+    Ok(())
+}
 
-    let text = |own: &Option<String>, from_group: Option<&Option<String>>| {
-        non_empty(own).or_else(|| from_group.and_then(non_empty))
-    };
-
-    let (address, port) = endpoint(host, inherited)?;
-    let username = text(&host.settings.username, inherited.map(|d| &d.username))
+/// Combines a host with its groups (`chain`: its group, then that group's parent and so on):
+/// a value set on the host wins, then the nearest group that sets it; empty strings count as
+/// unset.
+pub fn resolve(host: &Host, chain: &[&Group]) -> Result<ResolvedHost, ResolveError> {
+    check_chain(host, chain)?;
+    let (address, port) = endpoint(host, chain)?;
+    let username = non_empty(&host.settings.username)
+        .or_else(|| chain.iter().find_map(|g| non_empty(&g.defaults.username)))
         .ok_or(ResolveError::MissingUsername)?;
     let key = host
         .settings
         .key
         .clone()
-        .or_else(|| inherited.and_then(|d| d.key.clone()))
+        .or_else(|| chain.iter().find_map(|g| g.defaults.key.clone()))
         .ok_or(ResolveError::MissingKey)?;
-
     Ok(ResolvedHost {
         host_id: host.id,
         name: host.name.clone(),
@@ -127,31 +208,21 @@ pub fn resolve(host: &Host, group: Option<&Group>) -> Result<ResolvedHost, Resol
     })
 }
 
-/// Address and port of a host after inheriting from its group. Needs neither a username nor a
-/// key, so it also works for half-filled hosts (for example to forget a stored host key).
-pub fn effective_endpoint(
-    host: &Host,
-    group: Option<&Group>,
-) -> Result<(String, u16), ResolveError> {
-    if let Some(g) = group
-        && host.group_id != Some(g.id)
-    {
-        return Err(ResolveError::WrongGroup);
-    }
-    endpoint(host, group.map(|g| &g.defaults))
+/// Address and port of a host after inheriting from its groups. Needs neither a username nor
+/// a key, so it also works for half-filled hosts (for example to forget a stored host key).
+pub fn effective_endpoint(host: &Host, chain: &[&Group]) -> Result<(String, u16), ResolveError> {
+    check_chain(host, chain)?;
+    endpoint(host, chain)
 }
 
-fn endpoint(
-    host: &Host,
-    inherited: Option<&ConnectionSettings>,
-) -> Result<(String, u16), ResolveError> {
+fn endpoint(host: &Host, chain: &[&Group]) -> Result<(String, u16), ResolveError> {
     let address = non_empty(&host.settings.address)
-        .or_else(|| inherited.and_then(|d| non_empty(&d.address)))
+        .or_else(|| chain.iter().find_map(|g| non_empty(&g.defaults.address)))
         .ok_or(ResolveError::MissingAddress)?;
     let port = host
         .settings
         .port
-        .or_else(|| inherited.and_then(|d| d.port))
+        .or_else(|| chain.iter().find_map(|g| g.defaults.port))
         .unwrap_or(DEFAULT_PORT);
     Ok((address, port))
 }
@@ -178,6 +249,8 @@ mod tests {
             id: GroupId::new(),
             name: "srv".into(),
             defaults: settings,
+            parent_id: None,
+            tags: Vec::new(),
         }
     }
 
@@ -188,6 +261,8 @@ mod tests {
             name: "h".into(),
             group_id: Some(group.id),
             settings,
+            tags: Vec::new(),
+            os: None,
         }
     }
 
@@ -205,7 +280,7 @@ mod tests {
         let k = key();
         let g = full_group(&k);
         let h = host_in(&g, ConnectionSettings::default());
-        let r = resolve(&h, Some(&g)).unwrap();
+        let r = resolve(&h, &[&g]).unwrap();
         assert_eq!(r.address, "example.org");
         assert_eq!(r.port, 2222);
         assert_eq!(r.username, "root");
@@ -223,7 +298,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(resolve(&h, Some(&g)).unwrap().username, "deploy");
+        assert_eq!(resolve(&h, &[&g]).unwrap().username, "deploy");
     }
 
     #[test]
@@ -236,7 +311,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(resolve(&h, Some(&g)).unwrap().username, "root");
+        assert_eq!(resolve(&h, &[&g]).unwrap().username, "root");
     }
 
     #[test]
@@ -248,7 +323,7 @@ mod tests {
             port: None,
         });
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(resolve(&h, Some(&g)).unwrap().port, 22);
+        assert_eq!(resolve(&h, &[&g]).unwrap().port, 22);
     }
 
     #[test]
@@ -263,8 +338,10 @@ mod tests {
                 key: Some(key()),
                 ..Default::default()
             },
+            tags: Vec::new(),
+            os: None,
         };
-        assert_eq!(resolve(&h, None), Err(ResolveError::MissingAddress));
+        assert_eq!(resolve(&h, &[]), Err(ResolveError::MissingAddress));
     }
 
     #[test]
@@ -279,8 +356,10 @@ mod tests {
                 username: Some("u".into()),
                 ..Default::default()
             },
+            tags: Vec::new(),
+            os: None,
         };
-        assert_eq!(resolve(&h, None), Err(ResolveError::MissingKey));
+        assert_eq!(resolve(&h, &[]), Err(ResolveError::MissingKey));
     }
 
     #[test]
@@ -288,7 +367,7 @@ mod tests {
         let g = full_group(&key());
         let other = full_group(&key());
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(resolve(&h, Some(&other)), Err(ResolveError::WrongGroup));
+        assert_eq!(resolve(&h, &[&other]), Err(ResolveError::WrongGroup));
     }
 
     #[test]
@@ -316,7 +395,7 @@ mod tests {
         };
         let g = full_group(&agent);
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(resolve(&h, Some(&g)).unwrap().key, agent);
+        assert_eq!(resolve(&h, &[&g]).unwrap().key, agent);
     }
 
     #[test]
@@ -328,7 +407,7 @@ mod tests {
         });
         let h = host_in(&g, ConnectionSettings::default());
         assert_eq!(
-            effective_endpoint(&h, Some(&g)).unwrap(),
+            effective_endpoint(&h, &[&g]).unwrap(),
             ("10.0.0.5".to_owned(), 2222)
         );
     }
@@ -344,12 +423,12 @@ mod tests {
         );
         h.group_id = None;
         assert_eq!(
-            effective_endpoint(&h, None).unwrap(),
+            effective_endpoint(&h, &[]).unwrap(),
             ("example.org".to_owned(), 22)
         );
         h.settings.address = Some("  ".into());
         assert_eq!(
-            effective_endpoint(&h, None),
+            effective_endpoint(&h, &[]),
             Err(ResolveError::MissingAddress)
         );
     }

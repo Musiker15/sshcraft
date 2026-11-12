@@ -356,6 +356,8 @@ pub fn apply_import(store: &Store, candidates: &[ImportCandidate]) -> Result<usi
                             address: Some(name.clone()),
                             ..Default::default()
                         },
+                        parent_id: None,
+                        tags: Vec::new(),
                     };
                     store.upsert_group(&group)?;
                     let id = group.id;
@@ -389,6 +391,8 @@ pub fn apply_import(store: &Store, candidates: &[ImportCandidate]) -> Result<usi
             name: candidate.alias.clone(),
             group_id,
             settings: candidate.settings.clone(),
+            tags: Vec::new(),
+            os: None,
         })?;
         created += 1;
     }

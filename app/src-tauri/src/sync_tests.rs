@@ -33,6 +33,8 @@ fn host(group: Option<GroupId>) -> Host {
         group_id: group,
         settings: ConnectionSettings::default(),
         location: None,
+        tags: Vec::new(),
+        os: None,
     }
 }
 
@@ -66,6 +68,8 @@ fn a_host_moved_into_a_synced_group_queues_for_its_server() {
         name: "srv".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     store.upsert_group(&g).unwrap();
     let mut h = host(None);
@@ -280,6 +284,8 @@ fn moving_an_own_host_into_a_received_group_is_refused() {
         name: "theirs".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     store.upsert_group(&group).unwrap();
     let area = Uuid::new_v4();
@@ -328,6 +334,8 @@ fn a_shared_group_is_ended_before_it_is_deleted() {
         name: "mine".into(),
         defaults: ConnectionSettings::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     store.upsert_group(&group).unwrap();
     let area = Uuid::new_v4();

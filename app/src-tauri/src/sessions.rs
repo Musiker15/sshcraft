@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use sshcraft_core::model::{HostId, KeyRef, ResolvedHost, resolve};
+use sshcraft_core::model::{HostId, KeyRef, ResolvedHost, group_chain, resolve};
 use sshcraft_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
@@ -562,15 +562,12 @@ fn lookup(store: &Store, host_id: HostId) -> Result<ResolvedHost, (ErrorCode, Op
         .into_iter()
         .find(|h| h.id == host_id)
         .ok_or((ErrorCode::NotFound, None))?;
-    let group = match host.group_id {
-        Some(gid) => store
-            .list_groups()
-            .map_err(store_error)?
-            .into_iter()
-            .find(|g| g.id == gid),
-        None => None,
+    let chain = match host.group_id {
+        Some(gid) => group_chain(&store.list_groups().map_err(store_error)?, gid),
+        None => Vec::new(),
     };
-    resolve(&host, group.as_ref()).map_err(|e| (ErrorCode::from(&e), None))
+    let chain: Vec<&sshcraft_core::model::Group> = chain.iter().collect();
+    resolve(&host, &chain).map_err(|e| (ErrorCode::from(&e), None))
 }
 
 struct StoreVerifier {

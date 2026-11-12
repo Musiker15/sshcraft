@@ -39,6 +39,8 @@ async fn group_with_host(a: &Dev) -> (Group, Host) {
         name: "team".into(),
         defaults: Default::default(),
         location: Some(server),
+        parent_id: None,
+        tags: Vec::new(),
     };
     let mut one = common::sample_host("one");
     one.group_id = Some(group.id);

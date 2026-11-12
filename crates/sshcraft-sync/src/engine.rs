@@ -910,7 +910,7 @@ impl Engine {
                             guard.remove_copy(self.server, kind, &id)?;
                             break;
                         }
-                        Step::Write(item, known, area, queued)
+                        Step::Write(Box::new(item), known, area, queued)
                     } else {
                         let mut item = local_item(&guard, vault, kind, &id, queued)?;
                         // Moved to another place (this device only, or another server): for this
@@ -959,7 +959,7 @@ impl Engine {
                         } else if let Some(entry) = known.clone().filter(|e| e.area_id != target) {
                             Step::Leave(entry, item.modified_at)
                         } else {
-                            Step::Write(item, known, target, queued)
+                            Step::Write(Box::new(item), known, target, queued)
                         }
                     }
                 };
@@ -1326,7 +1326,7 @@ enum Step {
     Refuse(&'static str, Option<RecordEntry>),
     /// The item moved to another area: its old record says it is gone first.
     Leave(RecordEntry, i64),
-    Write(crate::items::SyncItem, Option<RecordEntry>, Uuid, i64),
+    Write(Box<crate::items::SyncItem>, Option<RecordEntry>, Uuid, i64),
 }
 
 /// Why this account may not send a change into `area`, if it may not: a received share it may

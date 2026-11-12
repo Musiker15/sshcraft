@@ -289,6 +289,8 @@ pub fn sample_host(name: &str) -> Host {
             key: None,
         },
         location: None,
+        tags: Vec::new(),
+        os: None,
     }
 }
 

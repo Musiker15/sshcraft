@@ -143,6 +143,8 @@ fn sample_group(name: &str) -> sshcraft_core::model::Group {
         name: name.into(),
         defaults: Default::default(),
         location: None,
+        parent_id: None,
+        tags: Vec::new(),
     }
 }
 

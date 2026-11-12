@@ -134,6 +134,8 @@ impl Fixture {
                         .to_string(),
                 }),
             },
+            tags: Vec::new(),
+            os: None,
         };
         self.store.lock().unwrap().upsert_host(&host).unwrap();
         host.id
@@ -196,6 +198,8 @@ async fn fixture(answer: bool) -> Fixture {
             username: Some("tester".into()),
             key: Some(KeyRef::Stored { id: info.id }),
         },
+        tags: Vec::new(),
+        os: None,
     };
     store.upsert_host(&host).unwrap();
     let store = Arc::new(Mutex::new(store));

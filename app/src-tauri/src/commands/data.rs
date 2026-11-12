@@ -1,6 +1,6 @@
 //! Groups, hosts and stored host keys.
 
-use sshcraft_core::model::{Group, GroupId, Host, HostId, effective_endpoint};
+use sshcraft_core::model::{Group, GroupId, Host, HostId, effective_endpoint, group_chain};
 use tauri::State;
 
 use super::{CommandError, CommandResult, ErrorCode};
@@ -134,10 +134,11 @@ pub fn forget_host_key(state: State<'_, AppState>, host_id: HostId) -> CommandRe
         .into_iter()
         .find(|h| h.id == host_id)
         .ok_or_else(|| CommandError::code(ErrorCode::NotFound))?;
-    let group = match host.group_id {
-        Some(gid) => store.list_groups()?.into_iter().find(|g| g.id == gid),
-        None => None,
+    let chain = match host.group_id {
+        Some(gid) => group_chain(&store.list_groups()?, gid),
+        None => Vec::new(),
     };
-    let (address, port) = effective_endpoint(&host, group.as_ref())?;
+    let chain: Vec<&Group> = chain.iter().collect();
+    let (address, port) = effective_endpoint(&host, &chain)?;
     Ok(store.forget_known_host(&address, port)?)
 }
