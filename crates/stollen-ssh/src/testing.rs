@@ -218,3 +218,34 @@ impl server::Handler for Handler {
         Ok(())
     }
 }
+
+/// An in-memory SSH agent holding `keys`. With `confirm == false` it refuses every signature.
+pub async fn spawn_agent(keys: &[PrivateKey], confirm: bool) -> crate::DynAgent {
+    use russh::keys::agent::client::AgentClient;
+
+    let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+    let listener = futures::stream::iter(vec![Ok::<_, std::io::Error>(server_side)]);
+    tokio::spawn(async move {
+        let _ = russh::keys::agent::server::serve(listener, TestAgent { confirm }).await;
+    });
+    let mut client = AgentClient::connect(client_side).dynamic();
+    for key in keys {
+        client.add_identity(key, &[]).await.expect("add identity");
+    }
+    client
+}
+
+#[derive(Clone)]
+struct TestAgent {
+    confirm: bool,
+}
+
+impl russh::keys::agent::server::Agent for TestAgent {
+    fn confirm_request(
+        &self,
+        msg: russh::keys::agent::server::MessageType,
+    ) -> impl std::future::Future<Output = bool> + Send {
+        let allowed = self.confirm || !matches!(msg, russh::keys::agent::server::MessageType::Sign);
+        async move { allowed }
+    }
+}

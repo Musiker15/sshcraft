@@ -7,7 +7,7 @@ license.workspace = true
 
 [features]
 # In-process SSH test server, used by this crate's tests and by the app's tests.
-testing = ["dep:rand"]
+testing = ["dep:rand", "dep:futures"]
 
 [dependencies]
 stollen-core = { workspace = true }
@@ -15,7 +15,9 @@ russh = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
 rand = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 stollen-ssh = { path = ".", features = ["testing"] }

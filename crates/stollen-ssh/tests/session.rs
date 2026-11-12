@@ -3,8 +3,11 @@ use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey};
 use stollen_core::policy::Disconnect;
-use stollen_ssh::testing::{TestServer, flood_pattern};
-use stollen_ssh::{ConnectParams, HostKeyVerifier, Shell, ShellEvent, SshError, connect};
+use stollen_ssh::testing::{TestServer, flood_pattern, spawn_agent};
+use stollen_ssh::{
+    ConnectParams, Credential, HostKeyVerifier, Shell, ShellEvent, SshError, connect,
+    list_agent_keys,
+};
 
 struct Verifier {
     answer: bool,
@@ -37,7 +40,28 @@ fn params(port: u16, key: PrivateKey) -> ConnectParams {
         address: "127.0.0.1".into(),
         port,
         username: "tester".into(),
-        key,
+        credential: Credential::Key(key),
+    }
+}
+
+fn fingerprint(key: &PrivateKey) -> String {
+    key.fingerprint(russh::keys::HashAlg::Sha256).to_string()
+}
+
+async fn agent_params(
+    port: u16,
+    agent_keys: &[PrivateKey],
+    confirm: bool,
+    wanted: &PrivateKey,
+) -> ConnectParams {
+    ConnectParams {
+        address: "127.0.0.1".into(),
+        port,
+        username: "tester".into(),
+        credential: Credential::Agent {
+            fingerprint: fingerprint(wanted),
+            agent: spawn_agent(agent_keys, confirm).await,
+        },
     }
 }
 
@@ -145,4 +169,45 @@ async fn large_output_arrives_complete_and_in_order() {
     let (data, _) = collect_until(&mut shell, |b| b.len() >= expected.len()).await;
     assert_eq!(data.len(), expected.len());
     assert!(data == expected, "flood output differs from the pattern");
+}
+
+#[tokio::test]
+async fn connects_with_agent_key() {
+    let (server, k) = setup().await;
+    let p = agent_params(server.port, std::slice::from_ref(&k), true, &k).await;
+    assert!(connect(p, Verifier::new(true)).await.is_ok());
+}
+
+#[tokio::test]
+async fn agent_without_that_key_fails() {
+    let (server, k) = setup().await;
+    let other = key();
+    let p = agent_params(server.port, std::slice::from_ref(&other), true, &k).await;
+    assert_eq!(
+        connect(p, Verifier::new(true)).await.err(),
+        Some(SshError::AgentKeyMissing)
+    );
+}
+
+#[tokio::test]
+async fn agent_refusing_to_sign_fails() {
+    let (server, k) = setup().await;
+    let p = agent_params(server.port, std::slice::from_ref(&k), false, &k).await;
+    let result = tokio::time::timeout(Duration::from_secs(5), connect(p, Verifier::new(true)))
+        .await
+        .expect("must not hang");
+    assert_eq!(result.err(), Some(SshError::AgentRefused));
+}
+
+#[tokio::test]
+async fn list_agent_keys_returns_fingerprints() {
+    let (a, b) = (key(), key());
+    let mut agent = spawn_agent(&[a.clone(), b.clone()], true).await;
+    let keys = list_agent_keys(&mut agent).await.unwrap();
+    let mut got: Vec<_> = keys.iter().map(|k| k.fingerprint.clone()).collect();
+    let mut want = vec![fingerprint(&a), fingerprint(&b)];
+    got.sort();
+    want.sort();
+    assert_eq!(got, want);
+    assert!(keys.iter().all(|k| k.algorithm == "ssh-ed25519"));
 }

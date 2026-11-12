@@ -323,9 +323,12 @@ async fn connect_once(
     let (resolved, key) = {
         let store = ctx.store.lock().expect("store lock");
         let resolved = lookup(&store, host_id).map_err(error)?;
-        let KeyRef::Stored { id } = resolved.key;
+        let KeyRef::Stored { id } = &resolved.key else {
+            // Agent keys are wired up in the next task.
+            return Err(error("agent keys are not supported yet".into()));
+        };
         let key = vault
-            .private_key(&store, id)
+            .private_key(&store, *id)
             .map_err(|e| error(e.to_string()))?;
         (resolved, key)
     };
@@ -340,7 +343,7 @@ async fn connect_once(
         address: resolved.address.clone(),
         port: resolved.port,
         username: resolved.username.clone(),
-        key,
+        credential: stollen_ssh::Credential::Key(key),
     };
     let session = match stollen_ssh::connect(params, verifier.clone()).await {
         Ok(s) => s,

@@ -33,6 +33,8 @@ id_type!(KeyId);
 pub enum KeyRef {
     /// A key held in Stollen's own encrypted vault.
     Stored { id: KeyId },
+    /// A key held by an SSH agent (Proton Pass); only its fingerprint is known.
+    Agent { fingerprint: String },
 }
 
 /// Connection settings on a group or host. `None` means "not set here".
@@ -252,5 +254,25 @@ mod tests {
         let other = full_group(&key());
         let h = host_in(&g, ConnectionSettings::default());
         assert_eq!(resolve(&h, Some(&other)), Err(ResolveError::WrongGroup));
+    }
+
+    #[test]
+    fn agent_key_ref_roundtrips_json() {
+        let r = KeyRef::Agent {
+            fingerprint: "SHA256:x".into(),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(json, r#"{"kind":"agent","fingerprint":"SHA256:x"}"#);
+        assert_eq!(serde_json::from_str::<KeyRef>(&json).unwrap(), r);
+    }
+
+    #[test]
+    fn host_inherits_agent_key_from_group() {
+        let agent = KeyRef::Agent {
+            fingerprint: "SHA256:y".into(),
+        };
+        let g = full_group(&agent);
+        let h = host_in(&g, ConnectionSettings::default());
+        assert_eq!(resolve(&h, Some(&g)).unwrap().key, agent);
     }
 }

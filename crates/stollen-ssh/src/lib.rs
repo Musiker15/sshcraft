@@ -11,8 +11,57 @@ use russh::{ChannelMsg, ChannelWriteHalf};
 use stollen_core::policy::Disconnect;
 use tokio::sync::mpsc;
 
+#[cfg(windows)]
+pub mod agent;
 #[cfg(feature = "testing")]
 pub mod testing;
+
+/// An SSH agent connection, independent of its transport (named pipe, socket, test stream).
+pub type DynAgent = russh::keys::agent::client::AgentClient<
+    Box<dyn russh::keys::agent::client::AgentStream + Send + Unpin + 'static>,
+>;
+
+/// How to authenticate: with a private key, or with a key held by an agent.
+// Lives only while connecting, so the size difference between the variants does not matter.
+#[allow(clippy::large_enum_variant)]
+pub enum Credential {
+    Key(PrivateKey),
+    Agent {
+        fingerprint: String,
+        agent: DynAgent,
+    },
+}
+
+/// Public facts about a key held by an agent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AgentKey {
+    pub fingerprint: String,
+    pub algorithm: String,
+    pub comment: String,
+    pub public_key: String,
+}
+
+pub async fn list_agent_keys(agent: &mut DynAgent) -> Result<Vec<AgentKey>, SshError> {
+    let identities = agent
+        .request_identities()
+        .await
+        .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
+    Ok(identities
+        .iter()
+        .map(|identity| {
+            let key = identity.public_key();
+            AgentKey {
+                fingerprint: key.fingerprint(HashAlg::Sha256).to_string(),
+                algorithm: key.algorithm().as_str().to_owned(),
+                comment: match identity {
+                    russh::keys::agent::AgentIdentity::PublicKey { comment, .. } => comment.clone(),
+                    _ => String::new(),
+                },
+                public_key: key.to_openssh().unwrap_or_default(),
+            }
+        })
+        .collect())
+}
 
 const TERM: &str = "xterm-256color";
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -23,7 +72,7 @@ pub struct ConnectParams {
     pub address: String,
     pub port: u16,
     pub username: String,
-    pub key: PrivateKey,
+    pub credential: Credential,
 }
 
 /// Decides whether to trust the server's host key. Fingerprints look like `SHA256:…`.
@@ -42,13 +91,22 @@ pub enum SshError {
     Connect(String),
     #[error("ssh protocol error: {0}")]
     Protocol(String),
+    #[error("the ssh agent is not reachable: {0}")]
+    AgentUnavailable(String),
+    #[error("the ssh agent does not hold this key")]
+    AgentKeyMissing,
+    #[error("the ssh agent refused to sign")]
+    AgentRefused,
 }
 
 impl From<&SshError> for Disconnect {
     fn from(e: &SshError) -> Self {
         match e {
             SshError::HostKeyRejected => Disconnect::HostKeyRejected,
-            SshError::AuthFailed => Disconnect::AuthFailed,
+            SshError::AuthFailed
+            | SshError::AgentUnavailable(_)
+            | SshError::AgentKeyMissing
+            | SshError::AgentRefused => Disconnect::AuthFailed,
             SshError::Connect(m) | SshError::Protocol(m) => Disconnect::Lost(m.clone()),
         }
     }
@@ -142,13 +200,40 @@ pub async fn connect(
         .await
         .map_err(protocol)?
         .flatten();
-    let auth = handle
-        .authenticate_publickey(
-            params.username,
-            PrivateKeyWithHashAlg::new(Arc::new(params.key), hash),
-        )
-        .await
-        .map_err(protocol)?;
+    let auth = match params.credential {
+        Credential::Key(key) => handle
+            .authenticate_publickey(
+                params.username,
+                PrivateKeyWithHashAlg::new(Arc::new(key), hash),
+            )
+            .await
+            .map_err(protocol)?,
+        Credential::Agent {
+            fingerprint,
+            mut agent,
+        } => {
+            let identities = agent
+                .request_identities()
+                .await
+                .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
+            let identity = identities
+                .into_iter()
+                .find(|i| i.public_key().fingerprint(HashAlg::Sha256).to_string() == fingerprint)
+                .ok_or(SshError::AgentKeyMissing)?;
+            handle
+                .authenticate_publickey_with(
+                    params.username,
+                    identity.public_key().into_owned(),
+                    hash,
+                    &mut agent,
+                )
+                .await
+                .map_err(|e| match e {
+                    russh::AgentAuthError::Key(_) => SshError::AgentRefused,
+                    other => protocol(other),
+                })?
+        }
+    };
     if !auth.success() {
         return Err(SshError::AuthFailed);
     }

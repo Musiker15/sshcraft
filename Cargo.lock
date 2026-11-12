@@ -4660,8 +4660,10 @@ name = "stollen-ssh"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
  "rand",
  "russh",
+ "serde",
  "stollen-core",
  "stollen-ssh",
  "thiserror 2.0.21",
