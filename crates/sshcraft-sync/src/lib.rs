@@ -3,6 +3,7 @@
 //! Everything that leaves the device is sealed with `sshcraft-proto`; everything that comes back
 //! is verified before it touches the local store.
 
+pub mod account;
 pub mod client;
 pub mod items;
 
@@ -33,6 +34,9 @@ pub enum SyncError {
     /// This device was revoked on the server.
     #[error("this device was revoked")]
     Revoked,
+    /// No account with this account key exists on the server.
+    #[error("no such account on this server")]
+    AccountNotFound,
     /// The server is not set up on this device.
     #[error("not set up")]
     NotSetUp,
