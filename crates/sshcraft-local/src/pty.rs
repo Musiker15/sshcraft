@@ -41,12 +41,14 @@ fn shell(program: &str, args: &[&str], label: &str) -> ShellCommand {
 /// The distributions `wsl.exe --list --quiet` names. It writes UTF-16LE, maybe with a byte order
 /// mark; anything that is not that gives no names.
 pub fn parse_wsl_list(bytes: &[u8]) -> Vec<String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Vec::new();
     }
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     let Ok(text) = String::from_utf16(&units) else {
         return Vec::new();
