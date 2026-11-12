@@ -47,14 +47,13 @@ fn fingerprint_of(identity_file: &str) -> Option<String> {
     Some(key.fingerprint(russh::keys::HashAlg::Sha256).to_string())
 }
 
-async fn agent_fingerprints() -> Vec<String> {
-    let Ok(mut agent) = WindowsAgent.connect().await else {
-        return Vec::new();
-    };
+/// Fingerprints the agent holds, `None` if it cannot be reached or asked.
+async fn agent_fingerprints() -> Option<Vec<String>> {
+    let mut agent = WindowsAgent.connect().await.ok()?;
     sshcraft_ssh::list_agent_keys(&mut agent)
         .await
+        .ok()
         .map(|keys| keys.into_iter().map(|k| k.fingerprint).collect())
-        .unwrap_or_default()
 }
 
 async fn preview() -> CommandResult<SshConfigPreview> {
@@ -69,7 +68,7 @@ async fn preview() -> CommandResult<SshConfigPreview> {
     let parsed = sshconfig::parse(&text);
     let agent = agent_fingerprints().await;
     Ok(SshConfigPreview {
-        candidates: sshconfig::plan_import(&parsed.hosts, &fingerprint_of, &agent),
+        candidates: sshconfig::plan_import(&parsed.hosts, &fingerprint_of, agent.as_deref()),
         skipped: parsed.skipped,
     })
 }

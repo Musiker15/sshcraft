@@ -72,18 +72,23 @@ export const generateKey = (name: string) => invoke<KeyInfo>("generate_key", { n
 export const deleteKey = (id: string) => invoke<void>("delete_key", { id });
 export const listAgentKeys = () => invoke<AgentKey[]>("list_agent_keys");
 
+export type KeyNote = "no_identity_file" | "not_in_agent" | "agent_unavailable";
+export type ImportWarning =
+  | { kind: "proxy_ignored"; directive: string }
+  | { kind: "unsupported_token"; token: string };
 export type ImportCandidate = {
   alias: string;
   group: string | null;
   settings: ConnectionSettings;
-  key_note: string | null;
+  key_note: KeyNote | null;
+  warnings: ImportWarning[];
 };
 export type SshConfigPreview = { candidates: ImportCandidate[]; skipped: string[] };
 export const sshConfigPreview = () => invoke<SshConfigPreview>("ssh_config_preview");
 export const sshConfigImport = (candidates: ImportCandidate[]) =>
   invoke<{ created: number }>("ssh_config_import", { candidates });
 
-export type PassCliStatus = "not_installed" | "logged_out" | "ready";
+export type PassCliStatus = "not_installed" | "logged_out" | "ready" | "failed";
 export type PassKey = { share_id: string; item_id: string; title: string };
 export const passCliStatus = () => invoke<PassCliStatus>("pass_cli_status");
 export const passCliListKeys = () => invoke<PassKey[]>("pass_cli_list_keys");

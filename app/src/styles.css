@@ -285,3 +285,22 @@ label {
   justify-content: space-between;
   align-items: center;
 }
+
+.candidate-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.candidate-row input[type="checkbox"] {
+  width: auto;
+}
+.candidate-text {
+  display: grid;
+  gap: 2px;
+}
+.candidate-text strong {
+  color: var(--text);
+}
+.warning-text {
+  color: var(--warning);
+}

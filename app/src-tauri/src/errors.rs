@@ -101,6 +101,7 @@ impl From<crate::passcli::PassCliError> for CommandError {
             P::LoggedOut => ErrorCode::PassCliLoggedOut,
             P::NoPrivateKey => ErrorCode::NoPrivateKey,
             P::Encrypted => ErrorCode::Encrypted,
+            P::Timeout => ErrorCode::PassCliTimeout,
             _ => ErrorCode::PassCliFailed,
         };
         Self::new(code, e)

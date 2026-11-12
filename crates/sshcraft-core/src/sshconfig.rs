@@ -17,6 +17,8 @@ pub struct ConfigHost {
     pub port: Option<u16>,
     pub user: Option<String>,
     pub identity_files: Vec<String>,
+    /// `ProxyJump` and `ProxyCommand` lines as written; SSHCraft does not follow them yet.
+    pub proxies: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -31,7 +33,31 @@ pub struct ImportCandidate {
     pub alias: String,
     pub group: Option<String>,
     pub settings: ConnectionSettings,
-    pub key_note: Option<String>,
+    pub key_note: Option<KeyNote>,
+    /// Things the preview should point out; candidates with warnings start unchecked.
+    #[serde(default)]
+    pub warnings: Vec<ImportWarning>,
+}
+
+/// Why a candidate has no key yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyNote {
+    /// The block names no `IdentityFile`.
+    NoIdentityFile,
+    /// The agent is reachable but holds none of the named keys.
+    NotInAgent,
+    /// The agent could not be asked, so it is unknown whether it holds the key.
+    AgentUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImportWarning {
+    /// `ProxyJump` or `ProxyCommand` is not followed; the host would connect directly.
+    ProxyIgnored { directive: String },
+    /// A `%` token in `HostName` other than `%h` and `%%`, left as written.
+    UnsupportedToken { token: String },
 }
 
 struct Block {
@@ -108,6 +134,7 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
         port: None,
         user: None,
         identity_files: Vec::new(),
+        proxies: Vec::new(),
     };
     let mut port_seen = false;
     for block in blocks.iter().filter(|b| !b.skip && applies(b, &host.alias)) {
@@ -123,6 +150,14 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
                     host.port = value.parse().ok().filter(|p| *p != 0);
                 }
                 "identityfile" => host.identity_files.push(value.clone()),
+                "proxyjump" | "proxycommand" if host.proxies.is_empty() => {
+                    let name = if keyword == "proxyjump" {
+                        "ProxyJump"
+                    } else {
+                        "ProxyCommand"
+                    };
+                    host.proxies.push(format!("{name} {value}"));
+                }
                 _ => {}
             }
         }
@@ -208,32 +243,75 @@ fn unquote(value: &str) -> String {
     value.strip_suffix('"').unwrap_or(value).to_owned()
 }
 
+/// Expands `%h` (the alias) and `%%` in a `HostName`. Any other token is left as written and
+/// reported, because SSHCraft cannot know its value at import time.
+fn expand_tokens(hostname: &str, alias: &str) -> (String, Vec<ImportWarning>) {
+    let mut out = String::with_capacity(hostname.len());
+    let mut warnings = Vec::new();
+    let mut chars = hostname.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('h') => out.push_str(alias),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+                let token = format!("%{other}");
+                if !warnings.contains(&ImportWarning::UnsupportedToken {
+                    token: token.clone(),
+                }) {
+                    warnings.push(ImportWarning::UnsupportedToken { token });
+                }
+            }
+            None => out.push('%'),
+        }
+    }
+    (out, warnings)
+}
+
+/// `agent_fingerprints` is `None` when the agent could not be reached.
 pub fn plan_import(
     hosts: &[ConfigHost],
     fingerprint_of: &dyn Fn(&str) -> Option<String>,
-    agent_fingerprints: &[String],
+    agent_fingerprints: Option<&[String]>,
 ) -> Vec<ImportCandidate> {
-    let address = |h: &ConfigHost| h.hostname.clone().unwrap_or_else(|| h.alias.clone());
+    let address = |h: &ConfigHost| match &h.hostname {
+        Some(name) => expand_tokens(name, &h.alias),
+        None => (h.alias.clone(), Vec::new()),
+    };
     let mut per_address: HashMap<String, usize> = HashMap::new();
     for h in hosts {
-        *per_address.entry(address(h)).or_default() += 1;
+        *per_address.entry(address(h).0).or_default() += 1;
     }
 
     hosts
         .iter()
         .map(|h| {
-            let address = address(h);
+            let (address, mut warnings) = address(h);
+            warnings.splice(
+                0..0,
+                h.proxies
+                    .iter()
+                    .map(|directive| ImportWarning::ProxyIgnored {
+                        directive: directive.clone(),
+                    }),
+            );
             let grouped = per_address[&address] >= 2;
             let key = h
                 .identity_files
                 .iter()
                 .filter_map(|file| fingerprint_of(file))
-                .find(|fp| agent_fingerprints.contains(fp))
+                .find(|fp| agent_fingerprints.is_some_and(|known| known.contains(fp)))
                 .map(|fingerprint| KeyRef::Agent { fingerprint });
-            let key_note = match (&key, h.identity_files.is_empty()) {
-                (Some(_), _) => None,
-                (None, true) => Some("Kein Schlüssel in der ssh-config, bitte zuordnen".to_owned()),
-                (None, false) => Some("Schlüssel nicht in Proton Pass, bitte zuordnen".to_owned()),
+            let key_note = match (&key, h.identity_files.is_empty(), agent_fingerprints) {
+                (Some(_), _, _) => None,
+                (None, true, _) => Some(KeyNote::NoIdentityFile),
+                (None, false, None) => Some(KeyNote::AgentUnavailable),
+                (None, false, Some(_)) => Some(KeyNote::NotInAgent),
             };
             ImportCandidate {
                 alias: h.alias.clone(),
@@ -245,6 +323,7 @@ pub fn plan_import(
                     key,
                 },
                 key_note,
+                warnings,
             }
         })
         .collect()

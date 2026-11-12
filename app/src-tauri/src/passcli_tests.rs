@@ -139,17 +139,108 @@ fn errors_never_contain_the_private_key() {
 }
 
 #[test]
-fn process_failure_never_includes_stdout() {
-    let stdout = format!("{{\"item\":{{\"private_key\":\"{MARKER}\"}}}}");
-    let err = failure(
+fn process_failure_keeps_only_the_first_stderr_line() {
+    let err = classify_failure(
         Some(1),
-        stdout.as_bytes(),
-        b"Error: something went wrong\nmore detail\n",
+        b"Error: something went wrong
+more detail
+",
     );
     let text = err.to_string();
-    assert!(!text.contains(MARKER), "{text}");
-    assert!(text.contains("something went wrong"));
+    assert!(text.contains("something went wrong"), "{text}");
     assert!(!text.contains("more detail"));
+}
+
+#[test]
+fn classify_failure_only_reports_logged_out_for_login_messages() {
+    assert!(matches!(
+        classify_failure(
+            Some(1),
+            b"Error: not logged in
+"
+        ),
+        PassCliError::LoggedOut
+    ));
+    assert!(matches!(
+        classify_failure(Some(1), b"Please run `pass-cli login` first"),
+        PassCliError::LoggedOut
+    ));
+    assert!(matches!(
+        classify_failure(
+            Some(1),
+            b"error: network unreachable
+"
+        ),
+        PassCliError::Failed(_)
+    ));
+    assert!(matches!(
+        classify_failure(None, b""),
+        PassCliError::Failed(_)
+    ));
+}
+
+#[test]
+fn run_with_timeout_kills_slow_process() {
+    let mut command = if cfg!(windows) {
+        let mut c = std::process::Command::new("powershell");
+        c.args(["-NoProfile", "-Command", "Start-Sleep 10"]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sleep");
+        c.arg("10");
+        c
+    };
+    command.stdin(std::process::Stdio::null());
+    let started = std::time::Instant::now();
+    let result = run_with_timeout(command, std::time::Duration::from_millis(300));
+    assert!(matches!(result, Err(PassCliError::Timeout)), "{result:?}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
+}
+
+#[test]
+fn run_with_timeout_returns_output_of_fast_process() {
+    let mut command = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "echo hello"]);
+        c
+    } else {
+        let mut c = std::process::Command::new("echo");
+        c.arg("hello");
+        c
+    };
+    let output = run_with_timeout(command, std::time::Duration::from_secs(10)).unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("hello"));
+}
+
+#[test]
+fn find_on_path_skips_relative_entries() {
+    let exe = if cfg!(windows) {
+        "pass-cli.exe"
+    } else {
+        "pass-cli"
+    };
+    let dir = std::env::temp_dir().join(format!("sshcraft-path-{}", std::process::id()));
+    let relative = dir.join("rel");
+    let empty = dir.join("abs");
+    std::fs::create_dir_all(&relative).unwrap();
+    std::fs::create_dir_all(&empty).unwrap();
+    std::fs::write(relative.join(exe), b"").unwrap();
+    // "rel" only resolves relative to `dir`; a search must never look there.
+    let path_var = std::env::join_paths([std::path::PathBuf::from("rel"), empty.clone()]).unwrap();
+    let found = with_current_dir(&dir, || find_on_path(&path_var, exe));
+    assert_eq!(found, None);
+    let path_var = std::env::join_paths([relative.clone()]).unwrap();
+    assert_eq!(find_on_path(&path_var, exe), Some(relative.join(exe)));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn with_current_dir<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
+    let before = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir).unwrap();
+    let result = f();
+    std::env::set_current_dir(before).unwrap();
+    result
 }
 
 #[test]

@@ -104,7 +104,11 @@ fn identity_file_with_pub_maps_to_agent_key() {
     let parsed = parse(
         "Host srv\n  HostName example.org\n  IdentityFile ~/.ssh/proton.pub\n  IdentitiesOnly yes\n",
     );
-    let plan = plan_import(&parsed.hosts, &fingerprints, &["SHA256:proton".to_owned()]);
+    let plan = plan_import(
+        &parsed.hosts,
+        &fingerprints,
+        Some(&["SHA256:proton".to_owned()]),
+    );
     assert_eq!(
         plan[0].settings.key,
         Some(KeyRef::Agent {
@@ -117,15 +121,19 @@ fn identity_file_with_pub_maps_to_agent_key() {
 #[test]
 fn unknown_key_gets_a_note() {
     let parsed = parse("Host srv\n  HostName example.org\n  IdentityFile ~/.ssh/local\n");
-    let plan = plan_import(&parsed.hosts, &fingerprints, &["SHA256:proton".to_owned()]);
+    let plan = plan_import(
+        &parsed.hosts,
+        &fingerprints,
+        Some(&["SHA256:proton".to_owned()]),
+    );
     assert_eq!(plan[0].settings.key, None);
-    assert!(plan[0].key_note.is_some());
+    assert_eq!(plan[0].key_note, Some(KeyNote::NotInAgent));
 }
 
 #[test]
 fn same_hostname_becomes_one_group() {
     let text = "Host srv-root\n  HostName example.org\n  User root\nHost srv-deploy\n  HostName example.org\n  User deploy\nHost single\n  HostName other.org\n";
-    let plan = plan_import(&parse(text).hosts, &fingerprints, &[]);
+    let plan = plan_import(&parse(text).hosts, &fingerprints, Some(&[]));
     let root = plan.iter().find(|c| c.alias == "srv-root").unwrap();
     assert_eq!(root.group.as_deref(), Some("example.org"));
     assert_eq!(root.settings.address, None, "address comes from the group");
@@ -140,7 +148,7 @@ fn alias_without_hostname_uses_alias_as_address() {
     let plan = plan_import(
         &parse("Host example.net\n  User u\n").hosts,
         &fingerprints,
-        &[],
+        Some(&[]),
     );
     assert_eq!(plan[0].settings.address.as_deref(), Some("example.net"));
 }
@@ -155,6 +163,7 @@ fn candidate(alias: &str, group: Option<&str>, address: Option<&str>) -> ImportC
             ..Default::default()
         },
         key_note: None,
+        warnings: Vec::new(),
     }
 }
 
@@ -196,4 +205,85 @@ fn apply_import_skips_existing_hosts_and_reuses_groups() {
     assert_eq!(created, 1);
     assert_eq!(store.list_groups().unwrap().len(), 1);
     assert_eq!(store.list_hosts().unwrap().len(), 2);
+}
+
+#[test]
+fn preview_without_agent_says_agent_unavailable() {
+    let parsed = parse(
+        "Host a
+  HostName a.org
+  IdentityFile ~/.ssh/proton.pub
+Host b
+  HostName b.org
+",
+    );
+    let plan = plan_import(&parsed.hosts, &fingerprints, None);
+    assert_eq!(plan[0].key_note, Some(KeyNote::AgentUnavailable));
+    assert_eq!(plan[1].key_note, Some(KeyNote::NoIdentityFile));
+}
+
+#[test]
+fn proxy_jump_and_proxy_command_are_warned() {
+    let parsed = parse(
+        "Host a
+  HostName a.org
+  ProxyJump bastion
+Host b
+  HostName b.org
+  ProxyCommand ssh -W %h:%p gw
+Host c
+  HostName c.org
+",
+    );
+    let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
+    assert_eq!(
+        plan[0].warnings,
+        vec![ImportWarning::ProxyIgnored {
+            directive: "ProxyJump bastion".into()
+        }]
+    );
+    assert_eq!(
+        plan[1].warnings,
+        vec![ImportWarning::ProxyIgnored {
+            directive: "ProxyCommand ssh -W %h:%p gw".into()
+        }]
+    );
+    assert!(plan[2].warnings.is_empty());
+}
+
+#[test]
+fn percent_h_in_hostname_is_the_alias() {
+    let parsed = parse(
+        "Host web
+  HostName %h.example.org
+Host pct
+  HostName a%%b.org
+",
+    );
+    let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
+    assert_eq!(plan[0].settings.address.as_deref(), Some("web.example.org"));
+    assert!(plan[0].warnings.is_empty());
+    assert_eq!(plan[1].settings.address.as_deref(), Some("a%b.org"));
+}
+
+#[test]
+fn other_tokens_are_warned() {
+    let parsed = parse(
+        "Host x
+  HostName %r.x
+",
+    );
+    let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
+    assert_eq!(plan[0].settings.address.as_deref(), Some("%r.x"));
+    assert_eq!(
+        plan[0].warnings,
+        vec![ImportWarning::UnsupportedToken { token: "%r".into() }]
+    );
+}
+
+#[test]
+fn candidate_without_warnings_field_still_deserializes() {
+    let json = r#"{"alias":"a","group":null,"settings":{"address":"a.org","port":null,"username":null,"key":null},"key_note":null}"#;
+    let c: ImportCandidate = serde_json::from_str(json).unwrap();
+    assert!(c.warnings.is_empty());
 }

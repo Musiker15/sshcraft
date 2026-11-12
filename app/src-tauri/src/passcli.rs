@@ -3,9 +3,12 @@
 //! The output of `pass-cli item view` contains the private key in clear text. It is never
 //! logged, never written to a file and never copied into an error message.
 
+use std::ffi::OsStr;
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -14,6 +17,10 @@ use sshcraft_core::vault::{self, KeyInfo, Vault, VaultError};
 use zeroize::Zeroizing;
 
 const VIEW_REASON: &str = "SSHCraft: import an SSH key into the encrypted local key vault";
+
+/// `info` and `item list` answer quickly; `item view` may wait for a confirmation in Proton Pass.
+const QUICK_LIMIT: Duration = Duration::from_secs(15);
+const VIEW_LIMIT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PassKey {
@@ -28,20 +35,24 @@ pub enum PassCliStatus {
     NotInstalled,
     LoggedOut,
     Ready,
+    /// Installed, but the status check failed for another reason (network, crash, timeout).
+    Failed,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum PassCliError {
-    #[error("pass-cli ist nicht installiert.")]
+    #[error("pass-cli is not installed")]
     NotInstalled,
-    #[error("pass-cli ist nicht angemeldet. Melde dich mit `pass-cli login` an.")]
+    #[error("pass-cli is not logged in")]
     LoggedOut,
-    #[error("Dieser Eintrag enthält keinen privaten Schlüssel.")]
+    #[error("the item has no private key")]
     NoPrivateKey,
-    #[error("Der Schlüssel in Proton Pass ist mit einer Passphrase geschützt.")]
+    #[error("the key in Proton Pass is protected by a passphrase")]
     Encrypted,
-    #[error("pass-cli ist fehlgeschlagen: {0}")]
+    #[error("pass-cli failed: {0}")]
     Failed(String),
+    #[error("pass-cli did not answer in time")]
+    Timeout,
     #[error(transparent)]
     Vault(VaultError),
 }
@@ -58,6 +69,7 @@ pub fn ensure_ready(status: PassCliStatus) -> Result<(), PassCliError> {
         PassCliStatus::Ready => Ok(()),
         PassCliStatus::LoggedOut => Err(PassCliError::LoggedOut),
         PassCliStatus::NotInstalled => Err(PassCliError::NotInstalled),
+        PassCliStatus::Failed => Err(PassCliError::Failed("status check failed".into())),
     }
 }
 
@@ -125,16 +137,74 @@ pub fn parse_private_key(json: &[u8]) -> Result<Zeroizing<String>, PassCliError>
 }
 
 /// Builds the error for a failed `pass-cli` run from its exit code and the first line of
-/// stderr. stdout may hold secrets and is deliberately ignored.
-pub fn failure(code: Option<i32>, _stdout: &[u8], stderr: &[u8]) -> PassCliError {
+/// stderr. stdout may hold secrets and is never looked at. Only messages that clearly talk
+/// about logging in count as "logged out"; everything else is a plain failure.
+pub fn classify_failure(code: Option<i32>, stderr: &[u8]) -> PassCliError {
     let first_line = String::from_utf8_lossy(stderr)
         .lines()
         .map(str::trim)
         .find(|l| !l.is_empty())
         .unwrap_or_default()
         .to_owned();
+    let lower = first_line.to_lowercase();
+    let login = [
+        "not logged in",
+        "logged out",
+        "login required",
+        "pass-cli login",
+    ];
+    if login.iter().any(|m| lower.contains(m)) {
+        return PassCliError::LoggedOut;
+    }
     let code = code.map_or_else(|| "?".to_owned(), |c| c.to_string());
-    PassCliError::Failed(format!("Exit-Code {code}: {first_line}"))
+    PassCliError::Failed(format!("exit code {code}: {first_line}"))
+}
+
+/// Runs a command and kills it once `limit` has passed. stdout and stderr are drained on
+/// their own threads, so a full pipe cannot stall the wait.
+pub fn run_with_timeout(mut command: Command, limit: Duration) -> Result<Output, PassCliError> {
+    use wait_timeout::ChildExt;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|e| PassCliError::Failed(e.kind().to_string()))?;
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buffer);
+            }
+            buffer
+        })
+    }
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let status = match child.wait_timeout(limit) {
+        Ok(Some(status)) => status,
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(PassCliError::Timeout);
+        }
+        Err(e) => {
+            let _ = child.kill();
+            return Err(PassCliError::Failed(e.kind().to_string()));
+        }
+    };
+    Ok(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
+/// Looks for `exe_name` in the given `PATH` value. Relative entries are skipped: they would
+/// resolve against whatever the current directory happens to be.
+pub fn find_on_path(path_var: &OsStr, exe_name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path_var)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(exe_name))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Fetches the key from Proton Pass and seals it into the vault. The store is only locked for
@@ -167,24 +237,24 @@ impl PassCliProcess {
     pub fn locate() -> Option<Self> {
         let installed = std::env::var_os("LOCALAPPDATA")
             .map(|d| PathBuf::from(d).join(r"Programs\ProtonPass\pass-cli.exe"));
-        let on_path = std::env::var_os("PATH").and_then(|paths| {
-            std::env::split_paths(&paths)
-                .map(|p| {
-                    p.join(if cfg!(windows) {
-                        "pass-cli.exe"
-                    } else {
-                        "pass-cli"
-                    })
-                })
-                .find(|p| p.is_file())
-        });
+        let exe_name = if cfg!(windows) {
+            "pass-cli.exe"
+        } else {
+            "pass-cli"
+        };
+        let on_path = std::env::var_os("PATH").and_then(|paths| find_on_path(&paths, exe_name));
         installed
             .filter(|p| p.is_file())
             .or(on_path)
             .map(|exe| Self { exe })
     }
 
-    fn run(&self, args: &[&str], reason: Option<&str>) -> Result<Zeroizing<Vec<u8>>, PassCliError> {
+    fn run(
+        &self,
+        args: &[&str],
+        reason: Option<&str>,
+        limit: Duration,
+    ) -> Result<Zeroizing<Vec<u8>>, PassCliError> {
         let mut command = Command::new(&self.exe);
         command.args(args);
         if let Some(reason) = reason {
@@ -196,29 +266,29 @@ impl PassCliProcess {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
-        let output = command
-            .output()
-            .map_err(|e| PassCliError::Failed(e.kind().to_string()))?;
+        command.stdin(Stdio::null());
+        let output = run_with_timeout(command, limit)?;
         let stdout = Zeroizing::new(output.stdout);
         if output.status.success() {
             Ok(stdout)
         } else {
-            Err(failure(output.status.code(), &stdout, &output.stderr))
+            Err(classify_failure(output.status.code(), &output.stderr))
         }
     }
 }
 
 impl PassCli for PassCliProcess {
     fn status(&self) -> PassCliStatus {
-        match self.run(&["info"], None) {
+        match self.run(&["info"], None, QUICK_LIMIT) {
             Ok(_) => PassCliStatus::Ready,
-            Err(_) => PassCliStatus::LoggedOut,
+            Err(PassCliError::LoggedOut) => PassCliStatus::LoggedOut,
+            Err(_) => PassCliStatus::Failed,
         }
     }
 
     fn list_ssh_keys(&self) -> Result<Vec<PassKey>, PassCliError> {
         ensure_ready(self.status())?;
-        let out = self.run(&["item", "list", "--output", "json"], None)?;
+        let out = self.run(&["item", "list", "--output", "json"], None, QUICK_LIMIT)?;
         parse_key_list(&String::from_utf8_lossy(&out))
     }
 
@@ -231,6 +301,7 @@ impl PassCli for PassCliProcess {
         let out = self.run(
             &["item", "view", &uri, "--output", "json"],
             Some(VIEW_REASON),
+            VIEW_LIMIT,
         )?;
         parse_private_key(&out)
     }

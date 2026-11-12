@@ -18,18 +18,18 @@ export function ProtonPassImport({ onImported }: { onImported: () => void }) {
         if (s === "ready") passCliListKeys().then(setKeys, (e) => setMessage(errorText(t, e)));
       },
       (e) => {
-        setStatus("not_installed");
+        setStatus("failed");
         setMessage(errorText(t, e));
       },
     );
-  }, []);
+  }, [t]);
 
   async function importOne(key: PassKey) {
     setBusy(key.item_id);
     setMessage(null);
     try {
       await importFromPassCli(key.share_id, key.item_id, key.title);
-      setMessage(`„${key.title}“ wurde in den Tresor übernommen.`);
+      setMessage(t("passCli.imported", { name: key.title }));
       onImported();
     } catch (e) {
       setMessage(errorText(t, e));
@@ -40,26 +40,20 @@ export function ProtonPassImport({ onImported }: { onImported: () => void }) {
 
   return (
     <>
-      <h2>Aus Proton Pass</h2>
-      <p className="empty" style={{ margin: 0 }}>
-        Zum Verbinden musst du nichts importieren: SSHCraft nutzt den Proton-Pass-Agenten direkt. Importieren brauchst du
-        nur, wenn der Schlüssel später auch synchronisiert werden soll.
-      </p>
-      {status === "loading" && <div>Prüfe pass-cli …</div>}
-      {status === "not_installed" && (
-        <div>
-          pass-cli ist nicht installiert. Anleitung: protonpass.github.io/pass-cli unter „Get started“.
-        </div>
-      )}
-      {status === "logged_out" && <div>pass-cli ist nicht angemeldet. Melde dich im Terminal mit `pass-cli login` an.</div>}
-      {status === "ready" && keys.length === 0 && <div>Keine SSH-Schlüssel in Proton Pass gefunden.</div>}
+      <h2>{t("passCli.title")}</h2>
+      <p className="empty">{t("passCli.intro")}</p>
+      {status === "loading" && <div>{t("passCli.checking")}</div>}
+      {status === "not_installed" && <div>{t("passCli.notInstalled")}</div>}
+      {status === "logged_out" && <div>{t("errors.pass_cli_logged_out")}</div>}
+      {status === "failed" && <div>{t("passCli.failed")}</div>}
+      {status === "ready" && keys.length === 0 && <div>{t("passCli.none")}</div>}
       {status === "ready" &&
         keys.map((k) => (
           <div key={k.item_id} className="key-row">
             <div className="head">
               <strong>{k.title}</strong>
               <button disabled={busy !== null} onClick={() => void importOne(k)}>
-                {busy === k.item_id ? "Importiere …" : "Importieren"}
+                {busy === k.item_id ? t("passCli.importing") : t("passCli.import")}
               </button>
             </div>
           </div>

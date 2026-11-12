@@ -14,10 +14,8 @@ const PENDING = new Set<string>([
   "../components/HostForm.tsx",
   "../components/HostKeyDialog.tsx",
   "../components/KeyManager.tsx",
-  "../components/ProtonPassImport.tsx",
   "../components/SettingsFields.tsx",
   "../components/Sidebar.tsx",
-  "../components/SshConfigImport.tsx",
   "../components/TerminalTabs.tsx",
 ]);
 
