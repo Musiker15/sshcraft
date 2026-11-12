@@ -30,6 +30,7 @@ encrypted vault.
 | Design (German) | [docs/superpowers/specs/2026-11-11-sshcraft-design.md](docs/superpowers/specs/2026-11-11-sshcraft-design.md) |
 | Roadmap (German) | [docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md](docs/superpowers/plans/2026-11-11-sshcraft-roadmap.md) |
 | Protocol and cryptography | [docs/protocol.md](docs/protocol.md) |
+| Sync on the device | [docs/sync.md](docs/sync.md) |
 | Running the sync server | [docs/server.md](docs/server.md) |
 | Sync server API | [docs/server-api.md](docs/server-api.md) |
 | Keyboard shortcuts | [docs/shortcuts.md](docs/shortcuts.md) |

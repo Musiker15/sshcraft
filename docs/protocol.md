@@ -144,7 +144,8 @@ author device. They have to be re-sealed by an active device under the new key.
 
 ## Records
 
-A record holds one item (a host, a group, a key, ...). Its header is readable for the server:
+A record holds one item (a host, a group, a key, ...; how the app uses records is in
+[sync.md](sync.md)). Its header is readable for the server:
 record id, area id, version, key version, author account, author device. The body is encrypted
 with the area key; the associated data is the header (`sshcraft/record-aad/v1`). The author
 device signs `signing_bytes(sshcraft/record/v1, [header bytes, nonce, ciphertext])`.
