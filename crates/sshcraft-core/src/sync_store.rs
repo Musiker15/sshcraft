@@ -460,6 +460,24 @@ impl Store {
             .optional()?)
     }
 
+    /// `None` if the item does not exist; otherwise where it lives (`Some(None)`: this device only).
+    pub fn item_location(
+        &self,
+        kind: ItemKind,
+        id: &str,
+    ) -> Result<Option<Option<ServerId>>, StoreError> {
+        let raw: Option<Option<String>> = self
+            .conn
+            .query_row(
+                &format!("SELECT location FROM {} WHERE id = ?1", kind.table()),
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        raw.map(|loc| loc.map(|t| parse_uuid(&t).map(ServerId)).transpose())
+            .transpose()
+    }
+
     /// Where an item lives, or `None` for a local item (or one that does not exist).
     pub fn location_of(&self, kind: ItemKind, id: &str) -> Result<Option<ServerId>, StoreError> {
         let raw: Option<Option<String>> = self

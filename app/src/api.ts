@@ -12,13 +12,15 @@ export type ConnectionSettings = {
   key: KeyRef | null;
 };
 
-export type Group = { id: string; name: string; defaults: ConnectionSettings };
+/** `location`: the sync server an item belongs to; missing or null means "only on this device". */
+export type Group = { id: string; name: string; defaults: ConnectionSettings; location?: string | null };
 
 export type Host = {
   id: string;
   name: string;
   group_id: string | null;
   settings: ConnectionSettings;
+  location?: string | null;
 };
 
 export type KeyInfo = {
@@ -134,3 +136,67 @@ export const getSettings = () => invoke<AppSettings>("get_settings");
 export const saveSettings = (settings: AppSettings) => invoke<AppSettings>("save_settings", { settings });
 export const systemLocale = () => invoke<string | null>("system_locale");
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
+
+export type SyncStatusView =
+  | { state: "idle" }
+  | { state: "syncing" }
+  | { state: "offline"; retry_in_secs: number }
+  | { state: "revoked" }
+  | { state: "error"; detail: string }
+  | { state: "off" };
+
+export type ServerView = {
+  id: string;
+  name: string;
+  origin: string;
+  sync_enabled: boolean;
+  sync_keys: boolean;
+  revoked: boolean;
+  status: SyncStatusView;
+};
+
+export type CreateAccountInput = {
+  server_name: string;
+  origin: string;
+  api_key: string;
+  name: string;
+  email: string;
+  device_name: string;
+};
+
+export type JoinAccountInput = {
+  server_name: string;
+  origin: string;
+  api_key: string;
+  account_key: string;
+  device_name: string;
+};
+
+export type AccountCreated = { server_id: string; account_key: string; qr_svg: string };
+
+export type SyncDevice = {
+  device_id: string;
+  name: string;
+  platform: string;
+  active: boolean;
+  admin_blocked: boolean;
+  last_seen: number | null;
+  this_device: boolean;
+  recovery: boolean;
+};
+
+export type ItemKind = "group" | "host" | "key";
+
+export const listServers = () => invoke<ServerView[]>("list_servers");
+export const createSyncAccount = (input: CreateAccountInput) =>
+  invoke<AccountCreated>("create_sync_account", { input });
+export const joinSyncAccount = (input: JoinAccountInput) => invoke<string>("join_sync_account", { input });
+export const setServerSync = (id: string, syncEnabled: boolean, syncKeys: boolean) =>
+  invoke<void>("set_server_sync", { id, syncEnabled, syncKeys });
+export const removeServer = (id: string) => invoke<void>("remove_server", { id });
+export const listSyncDevices = (id: string) => invoke<SyncDevice[]>("list_sync_devices", { id });
+export const revokeSyncDevice = (id: string, deviceId: string) =>
+  invoke<void>("revoke_sync_device", { id, deviceId });
+export const moveItem = (kind: ItemKind, itemId: string, location: string | null) =>
+  invoke<void>("move_item", { kind, itemId, location });
+export const accountKeyQr = (text: string) => invoke<string>("account_key_qr", { text });

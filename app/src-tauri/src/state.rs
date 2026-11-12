@@ -10,12 +10,16 @@ use tauri::{AppHandle, Emitter};
 use crate::hello::WindowsHello;
 use crate::prompts::{HostKeyPrompt, PromptEmitter, PromptRegistry};
 use crate::sessions::{SessionManager, WindowsAgent};
+use crate::sync::{StatusView, SyncManager};
+use sshcraft_core::model::ServerId;
+use sshcraft_sync::runtime::{SyncObserver, SyncStatus};
 
 pub struct AppState {
     pub store: Arc<Mutex<Store>>,
     pub vault: Result<Arc<Vault>, crate::errors::CommandError>,
     pub sessions: SessionManager,
     pub prompter: Arc<PromptRegistry<TauriEmitter>>,
+    pub sync: SyncManager,
 }
 
 impl AppState {
@@ -42,11 +46,17 @@ impl AppState {
         sessions.on_hello_unavailable(Box::new(move || {
             let _ = events.emit("hello-unavailable", ());
         }));
+        let sync = SyncManager::new(
+            store.clone(),
+            vault.clone().ok(),
+            Arc::new(TauriSyncObserver(app.clone())),
+        );
         Ok(Self {
             store,
             vault,
             sessions,
             prompter,
+            sync,
         })
     }
 }
@@ -83,5 +93,53 @@ impl PromptEmitter for TauriEmitter {
         let _ = self
             .0
             .emit("host-key-prompt-withdrawn", Withdrawn { prompt_id });
+    }
+}
+
+/// Sends sync news to the window: `sync-status`, `data-changed` and `sync-warning`.
+pub struct TauriSyncObserver(AppHandle);
+
+#[derive(Clone, Serialize)]
+struct StatusEvent {
+    server_id: ServerId,
+    status: StatusView,
+}
+
+#[derive(Clone, Serialize)]
+struct ServerEvent {
+    server_id: ServerId,
+}
+
+#[derive(Clone, Serialize)]
+struct WarningEvent {
+    server_id: ServerId,
+    detail: String,
+}
+
+impl SyncObserver for TauriSyncObserver {
+    fn status(&self, server: ServerId, status: SyncStatus) {
+        let _ = self.0.emit(
+            "sync-status",
+            StatusEvent {
+                server_id: server,
+                status: StatusView::from(&status),
+            },
+        );
+    }
+
+    fn data_changed(&self, server: ServerId) {
+        let _ = self
+            .0
+            .emit("data-changed", ServerEvent { server_id: server });
+    }
+
+    fn warning(&self, server: ServerId, message: String) {
+        let _ = self.0.emit(
+            "sync-warning",
+            WarningEvent {
+                server_id: server,
+                detail: message,
+            },
+        );
     }
 }

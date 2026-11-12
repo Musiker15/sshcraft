@@ -4,5 +4,6 @@ pub mod data;
 pub mod keys;
 pub mod sessions;
 pub mod sshconfig;
+pub mod sync;
 
 pub use crate::errors::{CommandError, CommandResult, ErrorCode};

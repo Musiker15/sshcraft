@@ -34,6 +34,18 @@ pub enum ErrorCode {
     HostMissingKey,
     Network,
     Session,
+    SyncBadOrigin,
+    SyncOriginMismatch,
+    SyncNetwork,
+    SyncBadApiKey,
+    SyncEmailTaken,
+    SyncAccountNotFound,
+    SyncRevoked,
+    SyncBadAccountKey,
+    SyncChecksum,
+    SyncProtocol,
+    SyncServer,
+    SyncNotAllowed,
 }
 
 impl From<&ResolveError> for ErrorCode {

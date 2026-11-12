@@ -261,3 +261,24 @@ fn key_location_follows_set_location() {
         .unwrap();
     assert_eq!(store.key_record(id).unwrap().unwrap().location, Some(s));
 }
+
+#[test]
+fn host_takes_its_groups_location() {
+    let store = Store::open_in_memory().unwrap();
+    let s = server(&store);
+    let g = group("srv");
+    store.upsert_group(&g).unwrap();
+    store
+        .set_location(ItemKind::Group, &g.id.0.to_string(), Some(s))
+        .unwrap();
+    // New host in a synced group, sent without a location by the form.
+    let h = host("new", Some(g.id));
+    store.upsert_host(&h).unwrap();
+    assert_eq!(location_of_host(&store, h.id), Some(s));
+    // A local host moved into the group follows it too.
+    let mut loose = host("loose", None);
+    store.upsert_host(&loose).unwrap();
+    loose.group_id = Some(g.id);
+    store.upsert_host(&loose).unwrap();
+    assert_eq!(location_of_host(&store, loose.id), Some(s));
+}

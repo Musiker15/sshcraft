@@ -6,6 +6,7 @@ pub mod prompts;
 pub mod sessions;
 pub mod settings;
 pub mod state;
+pub mod sync;
 
 use tauri::Manager;
 
@@ -26,6 +27,11 @@ pub fn run() {
         .setup(|app| {
             let state = state::AppState::init(app.handle())?;
             app.manage(state);
+            // Runtimes need the async runtime; start them on it.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                handle.state::<state::AppState>().sync.start_all();
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -58,6 +64,15 @@ pub fn run() {
             commands::sessions::session_ack,
             commands::sessions::session_close,
             commands::sessions::answer_host_key,
+            commands::sync::list_servers,
+            commands::sync::create_sync_account,
+            commands::sync::join_sync_account,
+            commands::sync::set_server_sync,
+            commands::sync::remove_server,
+            commands::sync::list_sync_devices,
+            commands::sync::revoke_sync_device,
+            commands::sync::move_item,
+            commands::sync::account_key_qr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

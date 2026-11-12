@@ -171,3 +171,25 @@ fn outbox_len(dev: &Dev) -> usize {
     let id = dev.row().id;
     dev.store.lock().unwrap().outbox(id).unwrap().len()
 }
+
+#[tokio::test]
+async fn moving_an_item_off_the_server_deletes_it_there() {
+    let server = TestServer::start().await;
+    let (a, b, host) = pair(&server).await;
+    {
+        let store = a.store.lock().unwrap();
+        record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 500).unwrap();
+        store
+            .set_location(ItemKind::Host, &host.id.0.to_string(), None)
+            .unwrap();
+    }
+    sync(&a, 600).await;
+    sync(&b, 600).await;
+    sync(&a, 700).await;
+    assert!(b.hosts().is_empty(), "gone from the server");
+    assert_eq!(
+        name_on(&a),
+        vec!["web"],
+        "still on the device that moved it"
+    );
+}

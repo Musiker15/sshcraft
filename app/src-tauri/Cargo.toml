@@ -19,6 +19,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sshcraft-core = { workspace = true }
 sshcraft-ssh = { workspace = true }
+sshcraft-proto = { workspace = true }
+sshcraft-sync = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 directories = { workspace = true }

@@ -309,7 +309,15 @@ impl Engine {
                     let Some(queued) = guard.queued_at(self.server, kind, &id)? else {
                         break;
                     };
-                    let item = local_item(&guard, vault, kind, &id, queued)?;
+                    let mut item = local_item(&guard, vault, kind, &id, queued)?;
+                    // Moved to another place (this device only, or another server): for this
+                    // server it is gone.
+                    if guard.location_of(kind, &id)? != Some(self.server) {
+                        item.body = ItemBody::Deleted {
+                            item_kind: kind,
+                            item_id: id.clone(),
+                        };
+                    }
                     let known = guard.record_entry(self.server, kind, &id)?;
                     if matches!(item.body, ItemBody::Deleted { .. }) && known.is_none() {
                         // Never reached the server: nothing to delete there.
@@ -379,7 +387,12 @@ impl Engine {
             .is_some_and(|queued| newer(queued, item.modified_at));
         store.put_record_entry(self.server, &entry, kind, &item_id)?;
         let sync_keys = store.server(self.server)?.is_some_and(|row| row.sync_keys);
-        if local_wins || (kind == ItemKind::Key && !sync_keys) {
+        // An item this device moved elsewhere is no longer this server's business.
+        let elsewhere = matches!(
+            store.item_location(kind, &item_id)?,
+            Some(location) if location != Some(self.server)
+        );
+        if local_wins || elsewhere || (kind == ItemKind::Key && !sync_keys) {
             return Ok(false);
         }
         apply(&store, vault, self.server, &item)?;

@@ -132,10 +132,17 @@ pub async fn import_from_pass_cli(
 
 #[tauri::command]
 pub fn delete_key(state: State<'_, AppState>, id: KeyId) -> CommandResult<()> {
-    Ok(vault::delete_key(
-        &state.store.lock().expect("store lock"),
-        id,
-    )?)
+    let servers = {
+        let store = state.store.lock().expect("store lock");
+        let kind = sshcraft_core::store::ItemKind::Key;
+        let key = id.0.to_string();
+        let before = store.location_of(kind, &key)?;
+        let servers = crate::sync::note_change(&store, kind, &key, before, crate::sync::now_ms())?;
+        vault::delete_key(&store, id)?;
+        servers
+    };
+    state.sync.nudge(&servers);
+    Ok(())
 }
 
 /// Keys the Proton Pass agent offers. Only public facts, never key material.

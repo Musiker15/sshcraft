@@ -188,3 +188,22 @@ fn qr_svg_contains_an_svg() {
     let svg = account_key_qr_svg("sshcraft-account-1:ABCDEF");
     assert!(svg.contains("<svg"), "{svg}");
 }
+
+#[tokio::test]
+async fn a_different_address_for_the_server_is_refused_early() {
+    let server = TestServer::start().await;
+    let d = device();
+    let mut input = new_account(&server, "a@example.org");
+    // Same server, but not the address it was set up for: logins would fail later.
+    input.origin = server.origin.replace("127.0.0.1", "localhost");
+    let err = create_account(&d.store, &d.vault, input, 1)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err,
+        SyncError::OriginMismatch {
+            server: server.origin.clone()
+        }
+    );
+    assert!(d.store.lock().unwrap().servers().unwrap().is_empty());
+}

@@ -55,6 +55,17 @@ pub fn device_keys(vault: &Vault, row: &ServerRow) -> Result<DeviceKeys, SyncErr
     Ok(DeviceKeys::from_bytes(array)?)
 }
 
+/// Logins are signed for the server's own address, so the entered one must be the same.
+async fn check_origin(client: &ServerClient) -> Result<(), SyncError> {
+    let info = client.server_info().await?;
+    if info.origin != client.origin() {
+        return Err(SyncError::OriginMismatch {
+            server: info.origin,
+        });
+    }
+    Ok(())
+}
+
 fn to_json(value: &impl serde::Serialize) -> Result<String, SyncError> {
     serde_json::to_string(value).map_err(|e| SyncError::Store(e.to_string()))
 }
@@ -108,6 +119,7 @@ pub async fn create_account(
     now: i64,
 ) -> Result<(ServerId, Zeroizing<String>), SyncError> {
     let client = ServerClient::new(&input.origin)?.with_api_key(input.api_key.clone());
+    check_origin(&client).await?;
     let account = AccountKey::generate();
     let keys = DeviceKeys::generate();
     let device_id = Uuid::new_v4();
@@ -193,6 +205,7 @@ pub async fn join_account(
 ) -> Result<ServerId, SyncError> {
     let account = AccountKey::import(&input.account_key)?;
     let (recovery_id, recovery_keys) = account.recovery_device();
+    check_origin(&ServerClient::new(&input.origin)?).await?;
     let mut recovery_client = ServerClient::new(&input.origin)?.with_api_key(input.api_key.clone());
     match recovery_client.login(recovery_id, &recovery_keys).await {
         Ok(_) => {}

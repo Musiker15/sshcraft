@@ -213,9 +213,14 @@ impl Store {
 
     pub fn upsert_host(&self, host: &Host) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO hosts (id, name, group_id, settings, location) VALUES (?1, ?2, ?3, ?4, ?5)
+            // A host in a group always lives where its group lives.
+            "INSERT INTO hosts (id, name, group_id, settings, location) VALUES (?1, ?2, ?3, ?4,
+                 CASE WHEN ?3 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?3) ELSE ?5 END)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, group_id = excluded.group_id,
-             settings = excluded.settings",
+             settings = excluded.settings,
+             location = CASE WHEN excluded.group_id IS NOT NULL
+                 THEN (SELECT location FROM groups WHERE id = excluded.group_id)
+                 ELSE hosts.location END",
             rusqlite::params![
                 host.id.0.to_string(),
                 host.name,

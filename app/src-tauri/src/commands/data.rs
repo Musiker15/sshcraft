@@ -6,6 +6,8 @@ use tauri::State;
 use super::{CommandError, CommandResult, ErrorCode};
 use crate::settings::{self, AppSettings};
 use crate::state::AppState;
+use crate::sync::{note_change, now_ms};
+use sshcraft_core::store::ItemKind;
 
 fn store(state: &AppState) -> std::sync::MutexGuard<'_, sshcraft_core::store::Store> {
     state.store.lock().expect("store lock")
@@ -16,14 +18,39 @@ pub fn list_groups(state: State<'_, AppState>) -> CommandResult<Vec<Group>> {
     Ok(store(&state).list_groups()?)
 }
 
+/// Writes to the store, then queues the item for the server it lives at (or left).
+fn changed(
+    state: &AppState,
+    kind: ItemKind,
+    id: String,
+    write: impl FnOnce(&sshcraft_core::store::Store) -> Result<(), CommandError>,
+) -> CommandResult<()> {
+    let servers = {
+        let store = store(state);
+        let before = store.location_of(kind, &id)?;
+        // A delete is queued before it happens: afterwards the item's location is gone.
+        let early = note_change(&store, kind, &id, before, now_ms())?;
+        write(&store)?;
+        let mut servers = note_change(&store, kind, &id, before, now_ms())?;
+        servers.extend(early);
+        servers
+    };
+    state.sync.nudge(&servers);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn save_group(state: State<'_, AppState>, group: Group) -> CommandResult<()> {
-    Ok(store(&state).upsert_group(&group)?)
+    changed(&state, ItemKind::Group, group.id.0.to_string(), |s| {
+        Ok(s.upsert_group(&group)?)
+    })
 }
 
 #[tauri::command]
 pub fn delete_group(state: State<'_, AppState>, id: GroupId) -> CommandResult<()> {
-    Ok(store(&state).delete_group(id)?)
+    changed(&state, ItemKind::Group, id.0.to_string(), |s| {
+        Ok(s.delete_group(id)?)
+    })
 }
 
 #[tauri::command]
@@ -33,12 +60,16 @@ pub fn list_hosts(state: State<'_, AppState>) -> CommandResult<Vec<Host>> {
 
 #[tauri::command]
 pub fn save_host(state: State<'_, AppState>, host: Host) -> CommandResult<()> {
-    Ok(store(&state).upsert_host(&host)?)
+    changed(&state, ItemKind::Host, host.id.0.to_string(), |s| {
+        Ok(s.upsert_host(&host)?)
+    })
 }
 
 #[tauri::command]
 pub fn delete_host(state: State<'_, AppState>, id: HostId) -> CommandResult<()> {
-    Ok(store(&state).delete_host(id)?)
+    changed(&state, ItemKind::Host, id.0.to_string(), |s| {
+        Ok(s.delete_host(id)?)
+    })
 }
 
 #[tauri::command]

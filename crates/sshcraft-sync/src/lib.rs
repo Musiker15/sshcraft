@@ -17,6 +17,9 @@ pub enum SyncError {
     /// The server address is not an `http://` or `https://` address with a host.
     #[error("not a server address")]
     BadOrigin,
+    /// The server was set up for another address than the one entered; logins would fail.
+    #[error("the server expects the address {server}")]
+    OriginMismatch { server: String },
     /// The server could not be reached or did not answer in time.
     #[error("network: {0}")]
     Network(String),
