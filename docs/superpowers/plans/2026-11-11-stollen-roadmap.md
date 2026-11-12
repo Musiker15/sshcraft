@@ -9,7 +9,7 @@ mit dem Wissen aus den vorherigen.
 | Nr. | Teilplan | Ergebnis | Design-Abschnitte | Stand |
 |---|---|---|---|---|
 | 1 | Desktop-Grundlage | Windows-App: Gruppen und Hosts anlegen, eigene Schlüssel importieren oder erzeugen (verschlüsselt gespeichert), Terminal in Tabs, Host-Fingerprint-Prüfung, Keep-Alive, Wiederverbinden | 3, 4, 5 (eigener Schlüssel), 9, 11 | fertig, auf `main` |
-| 2 | Schlüsselquellen und Windows-Anbindung | Proton-Pass-Agent über die Named Pipe, Import über `pass-cli`, Import aus `~/.ssh/config`, Entsperren mit Windows Hello | 5, 9, 10 (Windows Hello) | offen |
+| 2 | Schlüsselquellen und Windows-Anbindung | Proton-Pass-Agent über die Named Pipe, Import über `pass-cli`, Import aus `~/.ssh/config`, Entsperren mit Windows Hello | 5, 9, 10 (Windows Hello) | fertig, auf `main` |
 | 3 | Protokoll- und Krypto-Crate | `stollen-proto`: Konto- und Geräteschlüssel, Signaturen, Bereichsschlüssel, verschlüsselte und signierte Datensätze mit Versionen, Prüfung gegen Rückfall | 6, 7 | offen |
 | 4 | Sync-Server | `stollen-server`: axum, SQLite und PostgreSQL, API-Key, Challenge-Anmeldung, Konten, Geräte, Datensätze, Push per WebSocket, Verwaltungsbefehle, Docker-Image, Apache-Beispiel | 6, 7, 12 | offen |
 | 5 | Client-Sync | Mehrere Server, Konto anlegen, Gerät einrichten (Einfügen, QR), Sync-Einstellungen, Live-Abgleich, Offline-Betrieb, Geräteliste und Geräte-Sperre mit Schlüsseltausch | 4 (Orte), 6, 7 | offen |
