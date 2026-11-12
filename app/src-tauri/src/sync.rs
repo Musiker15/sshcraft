@@ -435,6 +435,7 @@ pub fn sync_error(err: SyncError) -> CommandError {
         SyncError::ContactUnconfirmed => ErrorCode::ShareContactUnconfirmed,
         SyncError::AlreadyShared => ErrorCode::ShareAlreadyShared,
         SyncError::GroupCycle => ErrorCode::GroupCycle,
+        SyncError::NestedGroupAll => ErrorCode::ShareNestedGroup,
         SyncError::AccountNotFound => ErrorCode::SyncAccountNotFound,
     };
     let detail = match err {

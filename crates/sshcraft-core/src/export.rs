@@ -10,12 +10,23 @@ use crate::store::{Store, StoreError};
 
 pub use crate::import::csv::CSV_HEADER;
 
+/// A place to export from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExportPlace {
+    /// Only on this device.
+    Local,
+    Server {
+        id: ServerId,
+    },
+}
+
 /// What to export.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
 pub struct ExportFilter {
-    /// Only items at this place (`Some(None)`: this device only).
+    /// Only items at this place.
     #[serde(default)]
-    pub location: Option<Option<ServerId>>,
+    pub location: Option<ExportPlace>,
     /// Only this group and everything below it.
     #[serde(default)]
     pub group: Option<GroupId>,
@@ -81,7 +92,11 @@ fn select(store: &Store, filter: &ExportFilter) -> Result<Selection, StoreError>
         }
         None => None,
     };
-    let at = |location: &Option<ServerId>| filter.location.is_none_or(|want| want == *location);
+    let at = |location: &Option<ServerId>| match filter.location {
+        None => true,
+        Some(ExportPlace::Local) => location.is_none(),
+        Some(ExportPlace::Server { id }) => *location == Some(id),
+    };
     let groups = all_groups
         .iter()
         .filter(|g| at(&g.location) && tree.as_ref().is_none_or(|t| t.contains(&g.id)))

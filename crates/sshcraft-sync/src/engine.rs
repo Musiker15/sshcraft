@@ -49,6 +49,32 @@ pub fn record_local_change(
     for (_, copy) in store.copies_of(server, kind, id)? {
         store.queue(server, kind, &copy, now_ms)?;
     }
+    // Copies below a group carry values from it: they follow too.
+    if kind == ItemKind::Group
+        && let Ok(uuid) = Uuid::parse_str(id)
+    {
+        let mut tree: Vec<String> = store
+            .subgroups(sshcraft_core::model::GroupId(uuid))?
+            .iter()
+            .map(|g| g.0.to_string())
+            .collect();
+        for group in &tree {
+            for (_, copy) in store.copies_of(server, ItemKind::Group, group)? {
+                store.queue(server, ItemKind::Group, &copy, now_ms)?;
+            }
+        }
+        tree.push(id.to_owned());
+        for host in store.list_hosts()? {
+            if host
+                .group_id
+                .is_some_and(|g| tree.contains(&g.0.to_string()))
+            {
+                for (_, copy) in store.copies_of(server, ItemKind::Host, &host.id.0.to_string())? {
+                    store.queue(server, ItemKind::Host, &copy, now_ms)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 

@@ -56,6 +56,7 @@ pub enum ErrorCode {
     GroupCycle,
     ImportUnreadable,
     ImportTooLarge,
+    ShareNestedGroup,
 }
 
 impl From<&ResolveError> for ErrorCode {

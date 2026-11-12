@@ -39,6 +39,7 @@
   "errors.share_already_shared": "This group is already shared with all its hosts. Add people to that share instead.",
   "errors.share_contact_unconfirmed": "Compare the safety number with the recipient first.",
   "errors.share_end_first": "End the share of this group first.",
+  "errors.share_nested_group": "Only a top-level group can be shared with all its hosts. Share a selection of its hosts instead.",
   "errors.share_not_owner": "Only the owner can do that with a shared item.",
   "errors.share_read_only": "This was shared with you and cannot be changed here.",
   "errors.store": "The local database could not be read or written.",

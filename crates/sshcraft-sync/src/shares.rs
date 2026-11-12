@@ -123,6 +123,10 @@ fn plan(
             let Some(group) = group_of(*id) else {
                 return not_allowed();
             };
+            // Members would not know the groups above it, nor what they pass down.
+            if group.parent_id.is_some() {
+                return Err(SyncError::NestedGroupAll);
+            }
             // The group's hosts at every level.
             let mut tree = store.subgroups(*id)?;
             tree.push(*id);
@@ -180,17 +184,46 @@ fn plan(
     Ok((kind, group, picked))
 }
 
-/// The stored keys the shared items use (at this server), and how many use an agent key.
+/// The stored keys the shared items use (at this server), and how many use an agent key: the
+/// hosts' own, those of every group a shared host takes values from (all groups of a tree
+/// shared with all hosts; for copies every group above the host, as those values are written
+/// into the copies).
 fn used_keys(
     server: ServerId,
     store: &Store,
+    kind: ShareKind,
     group: &Option<Group>,
     hosts: &[Host],
 ) -> Result<(Vec<KeyId>, usize), SyncError> {
-    let mut refs: Vec<&Option<KeyRef>> = hosts.iter().map(|h| &h.settings.key).collect();
-    if let Some(group) = group {
-        refs.push(&group.defaults.key);
+    let all_groups = store.list_groups()?;
+    let mut groups: Vec<Group> = Vec::new();
+    match (kind, group) {
+        (ShareKind::GroupAll, Some(root)) => {
+            let mut tree = store.subgroups(root.id)?;
+            tree.push(root.id);
+            groups.extend(all_groups.iter().filter(|g| tree.contains(&g.id)).cloned());
+        }
+        _ => {
+            for host in hosts {
+                if let Some(start) = host.group_id {
+                    for g in sshcraft_core::model::group_chain(&all_groups, start) {
+                        if !groups.iter().any(|known| known.id == g.id) {
+                            groups.push(g);
+                        }
+                    }
+                }
+            }
+            if let Some(root) = group {
+                for g in sshcraft_core::model::group_chain(&all_groups, root.id) {
+                    if !groups.iter().any(|known| known.id == g.id) {
+                        groups.push(g);
+                    }
+                }
+            }
+        }
     }
+    let mut refs: Vec<&Option<KeyRef>> = hosts.iter().map(|h| &h.settings.key).collect();
+    refs.extend(groups.iter().map(|g| &g.defaults.key));
     let mut keys = Vec::new();
     let mut agent = 0;
     for key in refs.into_iter().flatten() {
@@ -273,6 +306,30 @@ pub(crate) fn copy_item(
     let mut item = local_item(store, vault, kind, original, modified_at)?;
     match &mut item.body {
         ItemBody::Group { group } => {
+            // The copy is a top-level group for members: it carries what the original takes
+            // from the groups above it.
+            let groups = store.list_groups()?;
+            let above = sshcraft_core::model::group_chain(&groups, group.id);
+            for ancestor in above.iter().skip(1) {
+                let d = &mut group.defaults;
+                let set = |v: &Option<String>| {
+                    v.as_deref()
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_owned)
+                };
+                if set(&d.address).is_none() {
+                    d.address = set(&ancestor.defaults.address);
+                }
+                d.port = d.port.or(ancestor.defaults.port);
+                if set(&d.username).is_none() {
+                    d.username = set(&ancestor.defaults.username);
+                }
+                if d.key.is_none() {
+                    d.key = ancestor.defaults.key.clone();
+                }
+            }
+            group.parent_id = None;
             group.id = GroupId(copy_uuid);
             group.defaults.key = copy_key(store, server, area, group.defaults.key.take())?;
         }
@@ -313,12 +370,13 @@ pub(crate) fn intermediate_defaults(
     shared: Option<&str>,
 ) -> Result<sshcraft_core::model::ConnectionSettings, SyncError> {
     let mut out = sshcraft_core::model::ConnectionSettings::default();
-    let (Some(start), Some(shared)) = (host_group, shared) else {
+    let Some(start) = host_group else {
         return Ok(out);
     };
     let groups = store.list_groups()?;
+    // A single host (nothing shared as a group) takes everything from its whole chain.
     for group in sshcraft_core::model::group_chain(&groups, start) {
-        if group.id.0.to_string() == shared {
+        if shared.is_some_and(|shared| group.id.0.to_string() == shared) {
             break;
         }
         let set = |v: &Option<String>| {
@@ -363,7 +421,8 @@ pub async fn share(
         require_confirmed(store, engine.server, &grant.account)?;
     }
     let (kind, group, hosts) = plan(&*lock(store)?, engine.server, &what)?;
-    let (keys, agent_keys_skipped) = used_keys(engine.server, &*lock(store)?, &group, &hosts)?;
+    let (keys, agent_keys_skipped) =
+        used_keys(engine.server, &*lock(store)?, kind, &group, &hosts)?;
     let members = grants
         .iter()
         .map(|g| Member {
