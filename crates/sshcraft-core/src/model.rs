@@ -26,6 +26,7 @@ macro_rules! id_type {
 id_type!(GroupId);
 id_type!(HostId);
 id_type!(KeyId);
+id_type!(ServerId);
 
 /// Where the private key for a connection comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +52,9 @@ pub struct Group {
     pub id: GroupId,
     pub name: String,
     pub defaults: ConnectionSettings,
+    /// The sync server this group belongs to; `None` means "only on this device".
+    #[serde(default)]
+    pub location: Option<ServerId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,6 +63,10 @@ pub struct Host {
     pub name: String,
     pub group_id: Option<GroupId>,
     pub settings: ConnectionSettings,
+    /// The sync server this host belongs to; `None` means "only on this device". A host in a
+    /// group always has its group's location.
+    #[serde(default)]
+    pub location: Option<ServerId>,
 }
 
 /// A host with every setting filled in, ready to connect.
@@ -166,6 +174,7 @@ mod tests {
 
     fn group(settings: ConnectionSettings) -> Group {
         Group {
+            location: None,
             id: GroupId::new(),
             name: "srv".into(),
             defaults: settings,
@@ -174,6 +183,7 @@ mod tests {
 
     fn host_in(group: &Group, settings: ConnectionSettings) -> Host {
         Host {
+            location: None,
             id: HostId::new(),
             name: "h".into(),
             group_id: Some(group.id),
@@ -244,6 +254,7 @@ mod tests {
     #[test]
     fn missing_address_is_error() {
         let h = Host {
+            location: None,
             id: HostId::new(),
             name: "h".into(),
             group_id: None,
@@ -259,6 +270,7 @@ mod tests {
     #[test]
     fn missing_key_is_error() {
         let h = Host {
+            location: None,
             id: HostId::new(),
             name: "h".into(),
             group_id: None,
@@ -277,6 +289,14 @@ mod tests {
         let other = full_group(&key());
         let h = host_in(&g, ConnectionSettings::default());
         assert_eq!(resolve(&h, Some(&other)), Err(ResolveError::WrongGroup));
+    }
+
+    #[test]
+    fn host_json_without_location_still_parses() {
+        let json = r#"{"id":"6f1c2c4e-8d3a-4b7e-9a51-2f0e7c1d9b00","name":"web","group_id":null,
+            "settings":{"address":null,"port":null,"username":null,"key":null}}"#;
+        let host: Host = serde_json::from_str(json).unwrap();
+        assert_eq!(host.location, None);
     }
 
     #[test]

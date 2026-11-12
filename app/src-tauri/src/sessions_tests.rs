@@ -119,6 +119,7 @@ impl Fixture {
     /// Adds a host that uses the fixture's key through the agent instead of the vault.
     fn agent_host(&self) -> HostId {
         let host = Host {
+            location: None,
             id: HostId::new(),
             name: "agent host".into(),
             group_id: None,
@@ -185,6 +186,7 @@ async fn fixture(answer: bool) -> Fixture {
         )
         .unwrap();
     let host = Host {
+        location: None,
         id: HostId::new(),
         name: "test host".into(),
         group_id: None,

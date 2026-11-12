@@ -349,6 +349,7 @@ pub fn apply_import(store: &Store, candidates: &[ImportCandidate]) -> Result<usi
                 Some(g) => g.id,
                 None => {
                     let group = Group {
+                        location: None,
                         id: GroupId::new(),
                         name: name.clone(),
                         defaults: ConnectionSettings {
@@ -383,6 +384,7 @@ pub fn apply_import(store: &Store, candidates: &[ImportCandidate]) -> Result<usi
             continue;
         }
         store.upsert_host(&Host {
+            location: None,
             id: HostId::new(),
             name: candidate.alias.clone(),
             group_id,

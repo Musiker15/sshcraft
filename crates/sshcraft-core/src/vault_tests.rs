@@ -184,3 +184,33 @@ fn list_and_delete_keys() {
     delete_key(&store, info.id).unwrap();
     assert!(list_keys(&store).unwrap().is_empty());
 }
+
+#[test]
+fn sealed_secret_needs_the_same_label() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let sealed = v.seal_secret("device:a", b"secret bytes").unwrap();
+    assert_eq!(
+        &v.open_secret("device:a", &sealed).unwrap()[..],
+        b"secret bytes"
+    );
+    assert!(v.open_secret("device:b", &sealed).is_err());
+}
+
+#[test]
+fn received_key_keeps_its_id_and_location() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let id = crate::model::KeyId::new();
+    let server = crate::model::ServerId::new();
+    let info = v
+        .store_key_with_id(&store, id, "synced", &key, Some(server))
+        .unwrap();
+    assert_eq!(info.id, id);
+    assert_eq!(
+        store.key_record(id).unwrap().unwrap().location,
+        Some(server)
+    );
+    assert_eq!(openssh(&v.private_key(&store, id).unwrap()), openssh(&key));
+}

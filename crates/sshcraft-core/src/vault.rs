@@ -12,7 +12,7 @@ use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use serde::Serialize;
 use zeroize::Zeroizing;
 
-use crate::model::KeyId;
+use crate::model::{KeyId, ServerId};
 use crate::store::{KeyRecord, Store, StoreError};
 
 const FORMAT_VERSION: u8 = 1;
@@ -166,6 +166,32 @@ impl Vault {
         self.seal_and_store(store, name, key)
     }
 
+    /// Stores a key received from a sync server under its own id and location.
+    pub fn store_key_with_id(
+        &self,
+        store: &Store,
+        id: KeyId,
+        name: &str,
+        key: &PrivateKey,
+        location: Option<ServerId>,
+    ) -> Result<KeyInfo, VaultError> {
+        self.seal_and_store_as(store, id, name, key, location)
+    }
+
+    /// Seals any secret (a device's sync keys, for example). `label` names what it is and must
+    /// be the same to open it again, so a secret cannot be passed off as another.
+    pub fn seal_secret(&self, label: &str, secret: &[u8]) -> Result<Vec<u8>, VaultError> {
+        self.seal_with(&secret_aad(label), secret)
+    }
+
+    pub fn open_secret(
+        &self,
+        label: &str,
+        sealed: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+        self.open_with(&secret_aad(label), sealed)
+    }
+
     pub fn generate_ed25519(&self, store: &Store, name: &str) -> Result<KeyInfo, VaultError> {
         let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
             .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
@@ -185,7 +211,17 @@ impl Vault {
         name: &str,
         key: &PrivateKey,
     ) -> Result<KeyInfo, VaultError> {
-        let id = KeyId::new();
+        self.seal_and_store_as(store, KeyId::new(), name, key, None)
+    }
+
+    fn seal_and_store_as(
+        &self,
+        store: &Store,
+        id: KeyId,
+        name: &str,
+        key: &PrivateKey,
+        location: Option<ServerId>,
+    ) -> Result<KeyInfo, VaultError> {
         let openssh = key
             .to_openssh(LineEnding::LF)
             .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
@@ -200,6 +236,7 @@ impl Vault {
             fingerprint: key.fingerprint(HashAlg::Sha256).to_string(),
             public_key,
             sealed_secret: self.seal(id, openssh.as_bytes())?,
+            location,
         };
         store.put_key_record(&record)?;
         Ok(record.into())
@@ -211,6 +248,14 @@ impl Vault {
     }
 
     fn seal(&self, id: KeyId, plaintext: &[u8]) -> Result<Vec<u8>, VaultError> {
+        self.seal_with(id.0.as_bytes(), plaintext)
+    }
+
+    fn open(&self, id: KeyId, sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+        self.open_with(id.0.as_bytes(), sealed)
+    }
+
+    fn seal_with(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, VaultError> {
         let mut nonce = [0u8; NONCE_LEN];
         rand::rng().fill(&mut nonce[..]);
         let ciphertext = self
@@ -219,7 +264,7 @@ impl Vault {
                 &XNonce::from(nonce),
                 Payload {
                     msg: plaintext,
-                    aad: id.0.as_bytes(),
+                    aad,
                 },
             )
             .map_err(|_| VaultError::Corrupt)?;
@@ -230,7 +275,7 @@ impl Vault {
         Ok(out)
     }
 
-    fn open(&self, id: KeyId, sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    fn open_with(&self, aad: &[u8], sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
         let (&version, rest) = sealed.split_first().ok_or(VaultError::Corrupt)?;
         if version != FORMAT_VERSION || rest.len() < NONCE_LEN {
             return Err(VaultError::Corrupt);
@@ -242,7 +287,7 @@ impl Vault {
                 &XNonce::from(nonce),
                 Payload {
                     msg: ciphertext,
-                    aad: id.0.as_bytes(),
+                    aad,
                 },
             )
             .map(Zeroizing::new)
@@ -284,3 +329,10 @@ pub fn delete_key(store: &Store, id: KeyId) -> Result<(), VaultError> {
 #[cfg(test)]
 #[path = "vault_tests.rs"]
 mod tests;
+
+/// Associated data for [`Vault::seal_secret`]; the prefix keeps it apart from key ids (16 bytes).
+fn secret_aad(label: &str) -> Vec<u8> {
+    let mut aad = b"sshcraft/secret/".to_vec();
+    aad.extend_from_slice(label.as_bytes());
+    aad
+}

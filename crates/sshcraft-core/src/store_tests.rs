@@ -3,6 +3,7 @@ use crate::model::{ConnectionSettings, Group, GroupId, Host, HostId};
 
 fn group(name: &str) -> Group {
     Group {
+        location: None,
         id: GroupId::new(),
         name: name.into(),
         defaults: ConnectionSettings {
@@ -14,6 +15,7 @@ fn group(name: &str) -> Group {
 
 fn host(name: &str, group_id: Option<GroupId>) -> Host {
     Host {
+        location: None,
         id: HostId::new(),
         name: name.into(),
         group_id,
@@ -76,6 +78,7 @@ fn key_records_roundtrip() {
     let store = Store::open_in_memory().unwrap();
     assert!(!store.has_key_records().unwrap());
     let rec = KeyRecord {
+        location: None,
         id: KeyId::new(),
         name: "k".into(),
         algorithm: "ssh-ed25519".into(),
@@ -150,7 +153,7 @@ fn upgrade_from_v1_keeps_data() {
         .conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, SCHEMA_VERSION);
     store.put_setting("app", "{}").unwrap();
     store.touch_recent(h.id, 1).unwrap();
     drop(store);

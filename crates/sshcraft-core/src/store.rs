@@ -4,7 +4,7 @@ use std::path::Path;
 
 use rusqlite::OptionalExtension;
 
-use crate::model::{Group, GroupId, Host, HostId, KeyId};
+use crate::model::{Group, GroupId, Host, HostId, KeyId, ServerId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -23,13 +23,15 @@ pub struct KeyRecord {
     pub fingerprint: String,
     pub public_key: String,
     pub sealed_secret: Vec<u8>,
+    /// The sync server this key belongs to; `None` means "only on this device".
+    pub location: Option<ServerId>,
 }
 
 pub struct Store {
     conn: rusqlite::Connection,
 }
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -60,7 +62,7 @@ CREATE TABLE keys (
 ";
 
 /// Version 2: app settings and the hosts connected to most recently.
-const SCHEMA_V2: &str = "
+pub(crate) const SCHEMA_V2: &str = "
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -71,7 +73,62 @@ CREATE TABLE IF NOT EXISTS recent_hosts (
 );
 ";
 
-type KeyRow = (String, String, String, String, String, Vec<u8>);
+/// Version 3: where each item lives (a sync server or only this device) and the sync state.
+pub(crate) const SCHEMA_V3: &str = "
+ALTER TABLE groups ADD COLUMN location TEXT;
+ALTER TABLE hosts ADD COLUMN location TEXT;
+ALTER TABLE keys ADD COLUMN location TEXT;
+CREATE TABLE sync_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    account BLOB NOT NULL,
+    device_id TEXT NOT NULL,
+    sealed_device BLOB NOT NULL,
+    sync_enabled INTEGER NOT NULL,
+    sync_keys INTEGER NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0,
+    log_head TEXT,
+    tracker TEXT,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE sync_areas (
+    server_id TEXT NOT NULL REFERENCES sync_servers(id) ON DELETE CASCADE,
+    area_id TEXT NOT NULL,
+    manifest TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, area_id)
+);
+CREATE TABLE sync_records (
+    server_id TEXT NOT NULL REFERENCES sync_servers(id) ON DELETE CASCADE,
+    record_id TEXT NOT NULL,
+    area_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    modified_at INTEGER NOT NULL,
+    PRIMARY KEY (server_id, record_id)
+);
+CREATE UNIQUE INDEX sync_records_item ON sync_records(server_id, kind, item_id);
+CREATE TABLE sync_outbox (
+    server_id TEXT NOT NULL REFERENCES sync_servers(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    queued_at INTEGER NOT NULL,
+    PRIMARY KEY (server_id, kind, item_id)
+);
+";
+
+type KeyRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Vec<u8>,
+    Option<String>,
+);
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
@@ -96,6 +153,12 @@ impl Store {
         if version < 2 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V2)?;
+            tx.pragma_update(None, "user_version", 2)?;
+            tx.commit()?;
+        }
+        if version < 3 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V3)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -104,12 +167,15 @@ impl Store {
 
     pub fn upsert_group(&self, group: &Group) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO groups (id, name, defaults) VALUES (?1, ?2, ?3)
+            // The location is set on insert only; moving an item goes through `set_location`,
+            // so a form that sends an item back without its location cannot move it.
+            "INSERT INTO groups (id, name, defaults, location) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, defaults = excluded.defaults",
             rusqlite::params![
                 group.id.0.to_string(),
                 group.name,
-                to_json(&group.defaults)?
+                to_json(&group.defaults)?,
+                group.location.map(|s| s.0.to_string())
             ],
         )?;
         Ok(())
@@ -122,22 +188,24 @@ impl Store {
     }
 
     pub fn list_groups(&self) -> Result<Vec<Group>, StoreError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, defaults FROM groups ORDER BY name COLLATE NOCASE, id")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, defaults, location FROM groups ORDER BY name COLLATE NOCASE, id",
+        )?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, defaults) = row?;
+            let (id, name, defaults, location) = row?;
             Ok(Group {
                 id: GroupId(parse_uuid(&id)?),
                 name,
                 defaults: from_json(&defaults)?,
+                location: parse_location(location)?,
             })
         })
         .collect()
@@ -145,14 +213,15 @@ impl Store {
 
     pub fn upsert_host(&self, host: &Host) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO hosts (id, name, group_id, settings) VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO hosts (id, name, group_id, settings, location) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, group_id = excluded.group_id,
              settings = excluded.settings",
             rusqlite::params![
                 host.id.0.to_string(),
                 host.name,
                 host.group_id.map(|g| g.0.to_string()),
-                to_json(&host.settings)?
+                to_json(&host.settings)?,
+                host.location.map(|s| s.0.to_string())
             ],
         )?;
         Ok(())
@@ -166,7 +235,8 @@ impl Store {
 
     pub fn list_hosts(&self) -> Result<Vec<Host>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, group_id, settings FROM hosts ORDER BY name COLLATE NOCASE, id",
+            "SELECT id, name, group_id, settings, location FROM hosts
+             ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -174,15 +244,17 @@ impl Store {
                 r.get::<_, String>(1)?,
                 r.get::<_, Option<String>>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, group_id, settings) = row?;
+            let (id, name, group_id, settings, location) = row?;
             Ok(Host {
                 id: HostId(parse_uuid(&id)?),
                 name,
                 group_id: group_id.map(|g| parse_uuid(&g).map(GroupId)).transpose()?,
                 settings: from_json(&settings)?,
+                location: parse_location(location)?,
             })
         })
         .collect()
@@ -223,8 +295,8 @@ impl Store {
 
     pub fn put_key_record(&self, record: &KeyRecord) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO keys (id, name, algorithm, fingerprint, public_key, sealed_secret)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO keys (id, name, algorithm, fingerprint, public_key, sealed_secret, location)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, algorithm = excluded.algorithm,
              fingerprint = excluded.fingerprint, public_key = excluded.public_key,
              sealed_secret = excluded.sealed_secret",
@@ -234,7 +306,8 @@ impl Store {
                 record.algorithm,
                 record.fingerprint,
                 record.public_key,
-                record.sealed_secret
+                record.sealed_secret,
+                record.location.map(|s| s.0.to_string())
             ],
         )?;
         Ok(())
@@ -306,7 +379,8 @@ impl Store {
         params: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<KeyRecord>, StoreError> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, name, algorithm, fingerprint, public_key, sealed_secret FROM keys {tail}"
+            "SELECT id, name, algorithm, fingerprint, public_key, sealed_secret, location
+             FROM keys {tail}"
         ))?;
         let rows = stmt.query_map(params, |r| -> rusqlite::Result<KeyRow> {
             Ok((
@@ -316,10 +390,11 @@ impl Store {
                 r.get(3)?,
                 r.get(4)?,
                 r.get(5)?,
+                r.get(6)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, algorithm, fingerprint, public_key, sealed_secret) = row?;
+            let (id, name, algorithm, fingerprint, public_key, sealed_secret, location) = row?;
             Ok(KeyRecord {
                 id: KeyId(parse_uuid(&id)?),
                 name,
@@ -327,6 +402,7 @@ impl Store {
                 fingerprint,
                 public_key,
                 sealed_secret,
+                location: parse_location(location)?,
             })
         })
         .collect()
@@ -341,9 +417,17 @@ fn from_json<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, StoreError
     serde_json::from_str(text).map_err(|e| StoreError::Malformed(e.to_string()))
 }
 
-fn parse_uuid(text: &str) -> Result<uuid::Uuid, StoreError> {
+fn parse_location(text: Option<String>) -> Result<Option<ServerId>, StoreError> {
+    text.map(|t| parse_uuid(&t).map(ServerId)).transpose()
+}
+
+pub(crate) fn parse_uuid(text: &str) -> Result<uuid::Uuid, StoreError> {
     uuid::Uuid::parse_str(text).map_err(|e| StoreError::Malformed(e.to_string()))
 }
+
+#[path = "sync_store.rs"]
+mod sync_store;
+pub use sync_store::{AreaState, ItemKind, RecordEntry, ServerRow};
 
 #[cfg(test)]
 #[path = "store_tests.rs"]
