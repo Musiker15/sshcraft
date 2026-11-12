@@ -222,7 +222,11 @@ pub fn apply_import(
 pub mod csv;
 pub mod keyfiles;
 pub mod knownhosts;
+pub mod mobaxterm;
 pub mod putty;
+pub mod securecrt;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_sessions;
