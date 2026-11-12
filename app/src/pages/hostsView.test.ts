@@ -42,13 +42,13 @@ test("empty search keeps every host", () => {
 });
 
 test("subtitle shows user and address, inherits from the group and hides port 22", () => {
-  expect(hostSubtitle(host("a", { address: "example.org", username: "root" }), undefined)).toBe("root@example.org");
-  expect(hostSubtitle(host("a", { address: "example.org", port: 22 }), undefined)).toBe("example.org");
-  expect(hostSubtitle(host("b", {}, "g1"), group)).toBe("deploy@10.0.0.5:2222");
-  expect(hostSubtitle(host("c", { address: "10.0.0.1", username: "root", port: 2222 }), undefined)).toBe(
+  expect(hostSubtitle(host("a", { address: "example.org", username: "root" }), [])).toBe("root@example.org");
+  expect(hostSubtitle(host("a", { address: "example.org", port: 22 }), [])).toBe("example.org");
+  expect(hostSubtitle(host("b", {}, "g1"), [group])).toBe("deploy@10.0.0.5:2222");
+  expect(hostSubtitle(host("c", { address: "10.0.0.1", username: "root", port: 2222 }), [])).toBe(
     "root@10.0.0.1:2222",
   );
-  expect(hostSubtitle(host("d", { username: "root" }), undefined)).toBeNull();
+  expect(hostSubtitle(host("d", { username: "root" }), [])).toBeNull();
 });
 
 test("sorting follows the language", () => {

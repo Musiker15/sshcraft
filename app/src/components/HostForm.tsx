@@ -1,31 +1,49 @@
 import { useState } from "react";
-import { forgetHostKey, saveHost, type Group, type Host, type KeyInfo } from "../api";
+import { forgetHostKey, HOST_OS, saveHost, type Group, type Host, type HostOs, type KeyInfo } from "../api";
 import { errorText, FormError } from "../i18n/errors";
-import { useT } from "../i18n/i18n";
+import { useLanguage, useT } from "../i18n/i18n";
 import { fromConnectionSettings, toConnectionSettings } from "../forms/hostForm";
+import { groupLabel, inheritedDefaults } from "../pages/hostsTree";
 import { SettingsFields } from "./SettingsFields";
+import { TagInput } from "./TagInput";
 
-type Props = { host?: Host; groups: Group[]; keys: KeyInfo[]; onDone: () => void; onCancel: () => void };
+type Props = {
+  host?: Host;
+  groups: Group[];
+  /** Group of a new host. */
+  group?: string | null;
+  keys: KeyInfo[];
+  onDone: () => void;
+  onCancel: () => void;
+};
 
-export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
+export function HostForm({ host, groups, group: initialGroup, keys, onDone, onCancel }: Props) {
   const t = useT();
+  const lang = useLanguage();
   const [name, setName] = useState(host?.name ?? "");
-  const [groupId, setGroupId] = useState(host?.group_id ?? "");
+  const [groupId, setGroupId] = useState(host?.group_id ?? initialGroup ?? "");
+  const [tags, setTags] = useState(host?.tags ?? []);
+  const [os, setOs] = useState<HostOs | "">(host?.os ?? "");
   const [values, setValues] = useState(
     fromConnectionSettings(host?.settings ?? { address: null, port: null, username: null, key: null }),
   );
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const group = groups.find((g) => g.id === groupId);
+  const options = groups
+    .map((g) => ({ id: g.id, label: groupLabel(groups, g.id) }))
+    .sort((a, b) => a.label.localeCompare(b.label, lang));
 
   async function submit() {
     try {
       if (!name.trim()) throw new FormError("name_required");
       await saveHost({
+        ...host,
         id: host?.id ?? crypto.randomUUID(),
         name: name.trim(),
         group_id: groupId || null,
         settings: toConnectionSettings(values),
+        tags,
+        os: os || null,
       });
       onDone();
     } catch (e) {
@@ -54,14 +72,31 @@ export function HostForm({ host, groups, keys, onDone, onCancel }: Props) {
         {t("hostForm.group")}
         <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
           <option value="">{t("hostForm.noGroup")}</option>
-          {groups.map((g) => (
+          {options.map((g) => (
             <option key={g.id} value={g.id}>
-              {g.name}
+              {g.label}
             </option>
           ))}
         </select>
       </label>
-      <SettingsFields values={values} onChange={setValues} keys={keys} inherited={group?.defaults} />
+      <TagInput value={tags} onChange={setTags} />
+      <label>
+        {t("hostForm.os")}
+        <select value={os} onChange={(e) => setOs(e.target.value as HostOs | "")}>
+          <option value="">{t("hostForm.osAuto")}</option>
+          {HOST_OS.map((o) => (
+            <option key={o} value={o}>
+              {t(`os.${o}`)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <SettingsFields
+        values={values}
+        onChange={setValues}
+        keys={keys}
+        inherited={groupId ? inheritedDefaults(groups, groupId) : undefined}
+      />
       {host && (
         <div>
           <button onClick={forget}>{t("hostForm.forget")}</button>

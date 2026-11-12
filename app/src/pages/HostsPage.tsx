@@ -1,9 +1,11 @@
-import { ChevronDown, Folder, LayoutGrid, List, Search, Server } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, LayoutGrid, List, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { Group, Host, ItemKind, ItemShare, KeyInfo, ServerView } from "../api";
 import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { HostIcon } from "../components/HostIcon";
+import { allTags, chain, childGroups, hasTags } from "./hostsTree";
 import { filterHosts, hostSubtitle, sortByName } from "./hostsView";
 import type { ShareTarget } from "./sync/ShareDialog";
 import { missingKey } from "./sync/syncView";
@@ -16,9 +18,11 @@ export type HostsPageProps = {
   onDeleteHost: (host: Host) => void;
   onEditGroup: (group: Group) => void;
   onDeleteGroup: (group: Group) => void;
-  onNewHost: () => void;
-  onNewGroup: () => void;
+  /** `group`: the group shown at the moment, for the new item to go into. */
+  onNewHost: (group?: string | null) => void;
+  onNewGroup: (parent?: string | null) => void;
   onImportSshConfig: () => void;
+  onExport?: () => void;
   /** Sync servers, for the location badge and "Move to". */
   servers?: ServerView[];
   /** Keys on this device, to point out hosts whose key is missing here. */
@@ -38,13 +42,21 @@ export function HostsPage(props: HostsPageProps) {
   const { settings, update } = useSettings();
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [level, setLevel] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
   const view = settings.host_view;
 
-  const groupsById = useMemo(() => new Map(props.groups.map((g) => [g.id, g])), [props.groups]);
-  const groups = useMemo(() => sortByName(props.groups, lang), [props.groups, lang]);
+  // A level whose group is gone (deleted, moved away) falls back to the top.
+  const here = level && props.groups.some((g) => g.id === level) ? level : null;
+  const groups = useMemo(() => sortByName(childGroups(props.groups, here), lang), [props.groups, here, lang]);
   const hosts = useMemo(() => sortByName(props.hosts, lang), [props.hosts, lang]);
-  const found = useMemo(() => filterHosts(hosts, props.groups, query), [hosts, props.groups, query]);
-  const searching = query.trim() !== "";
+  const tagChoices = useMemo(() => allTags([...props.hosts, ...props.groups]), [props.hosts, props.groups]);
+  const found = useMemo(
+    () => filterHosts(hosts, props.groups, query).filter((h) => hasTags(h, tags)),
+    [hosts, props.groups, query, tags],
+  );
+  const searching = query.trim() !== "" || tags.length > 0;
+  const trail = chain(props.groups, here).reverse();
 
   const servers = props.servers ?? [];
   const serverName = (id: string | null | undefined) => servers.find((s) => s.id === id)?.name;
@@ -91,7 +103,7 @@ export function HostsPage(props: HostsPageProps) {
   const hostItem = (host: Host) => {
     const subtitle = missingKey(host, props.keys ?? [])
       ? t("hosts.keyMissing")
-      : hostSubtitle(host, host.group_id ? groupsById.get(host.group_id) : undefined);
+      : hostSubtitle(host, props.groups);
     const place = serverName(host.location);
     const share = shareOf("host", host.id);
     const received = share !== undefined && !share.owned;
@@ -118,7 +130,7 @@ export function HostsPage(props: HostsPageProps) {
         }
       >
         <span className="card-icon">
-          <Server size={18} aria-hidden="true" />
+          <HostIcon os={host.os} />
         </span>
         <span className="card-text">
           <span className="card-title">
@@ -127,6 +139,15 @@ export function HostsPage(props: HostsPageProps) {
             {shareBadge(share)}
           </span>
           <span className="card-sub">{subtitle ?? t("hosts.noAddress")}</span>
+          {(host.tags ?? []).length > 0 && (
+            <span className="card-tags">
+              {(host.tags ?? []).map((tag) => (
+                <span key={tag} className="chip small">
+                  {tag}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
       </div>
     );
@@ -140,13 +161,16 @@ export function HostsPage(props: HostsPageProps) {
       key={group.id}
       className={view === "grid" ? "card" : "card row"}
       tabIndex={0}
-      onDoubleClick={() => props.onEditGroup(group)}
+      onDoubleClick={() => setLevel(group.id)}
+      onKeyDown={(e) => e.key === "Enter" && setLevel(group.id)}
       onContextMenu={(e) =>
         openMenu(
           [
+            { label: t("hosts.openGroup"), onSelect: () => setLevel(group.id) },
             { label: t("hosts.edit"), onSelect: () => props.onEditGroup(group) },
+            ...(received ? [] : [{ label: t("hosts.newSubgroup"), onSelect: () => props.onNewGroup(group.id) }]),
             ...shareItems({ kind: "group", group }, group.location, share),
-            ...(received ? [] : moveItems("group", group.id, group.location, false)),
+            ...(received ? [] : moveItems("group", group.id, group.location, (group.parent_id ?? null) !== null)),
             ...(received ? [] : [{ label: t("common.delete"), onSelect: () => props.onDeleteGroup(group), danger: true }]),
           ],
           e,
@@ -163,7 +187,12 @@ export function HostsPage(props: HostsPageProps) {
           {shareBadge(share)}
         </span>
         <span className="card-sub">
-          {t("hosts.count", { count: props.hosts.filter((h) => h.group_id === group.id).length })}
+          {[
+            t("hosts.count", { count: props.hosts.filter((h) => h.group_id === group.id).length }),
+            ...(childGroups(props.groups, group.id).length > 0
+              ? [t("hosts.subgroups", { count: childGroups(props.groups, group.id).length })]
+              : []),
+          ].join(" · ")}
         </span>
       </span>
     </div>
@@ -204,11 +233,17 @@ export function HostsPage(props: HostsPageProps) {
             </button>
           </div>
           <NewMenu
-            labels={{ host: t("hosts.newHost"), group: t("hosts.newGroup"), sshconfig: t("hosts.importSshConfig") }}
+            labels={{
+              host: t("hosts.newHost"),
+              group: t("hosts.newGroup"),
+              sshconfig: t("hosts.import"),
+              export: t("hosts.export"),
+            }}
             button={t("hosts.new")}
-            onHost={props.onNewHost}
-            onGroup={props.onNewGroup}
+            onHost={() => props.onNewHost(here)}
+            onGroup={() => props.onNewGroup(here)}
             onSshConfig={props.onImportSshConfig}
+            onExport={props.onExport}
           />
         </div>
       </header>
@@ -222,6 +257,40 @@ export function HostsPage(props: HostsPageProps) {
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
+
+      {tagChoices.length > 0 && (
+        <div className="tag-filter" role="group" aria-label={t("hosts.tagFilter")}>
+          {tagChoices.map((tag) => {
+            const on = tags.some((x) => x.toLocaleLowerCase() === tag.toLocaleLowerCase());
+            return (
+              <button
+                key={tag}
+                className={on ? "chip active" : "chip"}
+                aria-pressed={on}
+                onClick={() => setTags(on ? tags.filter((x) => x !== tag) : [...tags, tag])}
+              >
+                {tag}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {here && !searching && (
+        <nav className="breadcrumbs" aria-label={t("hosts.path")}>
+          <button className="link" onClick={() => setLevel(null)}>
+            {t("hosts.allGroups")}
+          </button>
+          {trail.map((g) => (
+            <span key={g.id}>
+              <ChevronRight size={14} aria-hidden="true" />
+              <button className="link" onClick={() => setLevel(g.id)} aria-current={g.id === here ? "page" : undefined}>
+                {g.name}
+              </button>
+            </span>
+          ))}
+        </nav>
+      )}
 
       {props.hosts.length === 0 && props.groups.length === 0 && <p className="empty">{t("hosts.empty")}</p>}
 
@@ -240,9 +309,9 @@ export function HostsPage(props: HostsPageProps) {
             </div>
           )}
           {section(
-            "ungrouped",
-            t("hosts.ungrouped"),
-            hosts.filter((h) => !h.group_id),
+            "here",
+            here ? t("hosts.inThisGroup") : t("hosts.ungrouped"),
+            hosts.filter((h) => (h.group_id ?? null) === here),
           )}
           {groups.map((g) =>
             section(
@@ -260,14 +329,15 @@ export function HostsPage(props: HostsPageProps) {
 
 type NewMenuProps = {
   button: string;
-  labels: { host: string; group: string; sshconfig: string };
+  labels: { host: string; group: string; sshconfig: string; export: string };
   onHost: () => void;
   onGroup: () => void;
   onSshConfig: () => void;
+  onExport?: () => void;
 };
 
-/** "New" button with a small menu: host, group, import from ssh config. */
-function NewMenu({ button, labels, onHost, onGroup, onSshConfig }: NewMenuProps) {
+/** "New" button with a small menu: host, group, import, export. */
+function NewMenu({ button, labels, onHost, onGroup, onSshConfig, onExport }: NewMenuProps) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   return (
     <>
@@ -289,6 +359,7 @@ function NewMenu({ button, labels, onHost, onGroup, onSshConfig }: NewMenuProps)
             { label: labels.host, onSelect: onHost },
             { label: labels.group, onSelect: onGroup },
             { label: labels.sshconfig, onSelect: onSshConfig },
+            ...(onExport ? [{ label: labels.export, onSelect: onExport }] : []),
           ]}
         />
       )}

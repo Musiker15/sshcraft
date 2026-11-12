@@ -14,7 +14,6 @@ export function NewTabPage({ hosts, groups, recent, onPick }: Props) {
   const t = useT();
   const lang = useLanguage();
   const [query, setQuery] = useState("");
-  const groupsById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   const matches = useMemo(
     () => rankPalette(query, hosts, groups, recent, []).flatMap((item) => (item.kind === "host" ? [item.host] : [])),
     [query, hosts, groups, recent],
@@ -39,7 +38,7 @@ export function NewTabPage({ hosts, groups, recent, onPick }: Props) {
     <button key={`${icon}:${host.id}`} className="list-row" onClick={() => onPick(host)}>
       {icon === "recent" ? <Clock size={16} aria-hidden="true" /> : <Server size={16} aria-hidden="true" />}
       <span className="palette-name">{host.name}</span>
-      <span className="card-sub">{hostSubtitle(host, host.group_id ? groupsById.get(host.group_id) : undefined)}</span>
+      <span className="card-sub">{hostSubtitle(host, groups)}</span>
     </button>
   );
 

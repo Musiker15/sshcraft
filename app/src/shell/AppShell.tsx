@@ -27,7 +27,8 @@ import { GroupForm } from "../components/GroupForm";
 import { HostForm } from "../components/HostForm";
 import { HostKeyDialog } from "../components/HostKeyDialog";
 import { SessionStatusLine } from "../components/SessionStatusLine";
-import { SshConfigImport } from "../components/SshConfigImport";
+import { ExportDialog } from "../components/ExportDialog";
+import { ImportDialog } from "../components/ImportDialog";
 import { TerminalView } from "../components/TerminalView";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
@@ -47,7 +48,12 @@ import { NavSidebar, type Page } from "./NavSidebar";
 import { matchShortcut, type ShortcutAction } from "./shortcuts";
 import { TabStrip } from "./TabStrip";
 
-type Editor = { kind: "host"; host?: Host } | { kind: "group"; group?: Group } | { kind: "sshconfig" } | null;
+type Editor =
+  | { kind: "host"; host?: Host; group?: string | null }
+  | { kind: "group"; group?: Group; parent?: string | null }
+  | { kind: "import" }
+  | { kind: "export" }
+  | null;
 type Confirm = { message: string; confirmLabel: string; action: () => Promise<void> } | null;
 
 export function AppShell() {
@@ -170,8 +176,11 @@ export function AppShell() {
       case "newGroup":
         setEditor({ kind: "group" });
         break;
-      case "importSshConfig":
-        setEditor({ kind: "sshconfig" });
+      case "importHosts":
+        setEditor({ kind: "import" });
+        break;
+      case "exportHosts":
+        setEditor({ kind: "export" });
         break;
       case "openHosts":
       case "openKeys":
@@ -243,9 +252,10 @@ export function AppShell() {
                   onDeleteGroup={(group) =>
                     askDelete(t("groups.deleteConfirm", { name: group.name }), () => deleteGroup(group.id))
                   }
-                  onNewHost={() => setEditor({ kind: "host" })}
-                  onNewGroup={() => setEditor({ kind: "group" })}
-                  onImportSshConfig={() => setEditor({ kind: "sshconfig" })}
+                  onNewHost={(group) => setEditor({ kind: "host", group })}
+                  onNewGroup={(parent) => setEditor({ kind: "group", parent })}
+                  onImportSshConfig={() => setEditor({ kind: "import" })}
+                  onExport={() => setEditor({ kind: "export" })}
                   servers={servers}
                   keys={keys}
                   onMove={(kind: ItemKind, id: string, location: string | null) =>
@@ -301,12 +311,27 @@ export function AppShell() {
       {editor && (
         <Drawer onClose={() => setEditor(null)}>
           {editor.kind === "host" && (
-            <HostForm host={editor.host} groups={groups} keys={keys} onDone={done} onCancel={() => setEditor(null)} />
+            <HostForm
+              host={editor.host}
+              group={editor.group}
+              groups={groups}
+              keys={keys}
+              onDone={done}
+              onCancel={() => setEditor(null)}
+            />
           )}
           {editor.kind === "group" && (
-            <GroupForm group={editor.group} keys={keys} onDone={done} onCancel={() => setEditor(null)} />
+            <GroupForm
+              group={editor.group}
+              parent={editor.parent}
+              groups={groups}
+              keys={keys}
+              onDone={done}
+              onCancel={() => setEditor(null)}
+            />
           )}
-          {editor.kind === "sshconfig" && <SshConfigImport onDone={done} onCancel={() => setEditor(null)} />}
+          {editor.kind === "import" && <ImportDialog servers={servers} onDone={done} onCancel={done} />}
+          {editor.kind === "export" && <ExportDialog groups={groups} servers={servers} onDone={() => setEditor(null)} />}
         </Drawer>
       )}
 
