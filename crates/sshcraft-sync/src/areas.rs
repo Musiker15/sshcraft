@@ -581,7 +581,7 @@ async fn finish_area(
                         )?,
                         None => local_item(&guard, vault, *kind, item, entry.modified_at)?,
                     };
-                    crate::engine::strip_unsynced_keys(
+                    crate::engine::strip_unsynced_credentials(
                         &guard,
                         engine.server,
                         &mut local,

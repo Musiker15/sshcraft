@@ -50,7 +50,24 @@ pub struct KeyAssignment {
     pub kind: ItemKind,
     pub item: String,
     pub key: Option<KeyRef>,
+    #[serde(default)]
+    pub password: Option<sshcraft_core::model::PasswordId>,
+    #[serde(default)]
+    pub identity: Option<sshcraft_core::model::IdentityId>,
+    #[serde(default)]
+    pub proxy_password: Option<sshcraft_core::model::PasswordId>,
     pub modified_at: i64,
+}
+
+impl KeyAssignment {
+    pub fn refs(&self) -> crate::creds::CredentialRefs {
+        crate::creds::CredentialRefs {
+            key: self.key.clone(),
+            password: self.password,
+            identity: self.identity,
+            proxy_password: self.proxy_password,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -356,6 +373,10 @@ pub(crate) fn copy_item(
             };
         }
         ItemBody::Key { id, .. } => *id = KeyId(copy_uuid),
+        ItemBody::Identity { identity } => {
+            identity.id = sshcraft_core::model::IdentityId(copy_uuid)
+        }
+        ItemBody::Password { id, .. } => *id = sshcraft_core::model::PasswordId(copy_uuid),
         ItemBody::Deleted { item_id, .. } => *item_id = copy,
     }
     Ok(item)

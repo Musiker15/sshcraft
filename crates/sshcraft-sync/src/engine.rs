@@ -12,7 +12,6 @@ use crate::shares::{
     KeyAssignment, ShareInfo, copy_item, decode_key_assignment, decode_share_info,
     encode_key_assignment, share_info_record_id,
 };
-use sshcraft_core::model::KeyRef;
 use sshcraft_core::model::ServerId;
 use sshcraft_core::store::{
     ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
@@ -831,7 +830,7 @@ impl Engine {
         personal: Uuid,
         kind: ItemKind,
         id: &str,
-        key: Option<KeyRef>,
+        refs: crate::creds::CredentialRefs,
         modified_at: i64,
     ) -> Result<(), SyncError> {
         let item = Uuid::parse_str(id).map_err(|e| SyncError::Store(e.to_string()))?;
@@ -846,7 +845,10 @@ impl Engine {
         let body = encode_key_assignment(&KeyAssignment {
             kind,
             item: id.to_owned(),
-            key,
+            key: refs.key,
+            password: refs.password,
+            identity: refs.identity,
+            proxy_password: refs.proxy_password,
             modified_at,
         });
         for _ in 0..CONFLICT_ROUNDS {
@@ -894,17 +896,17 @@ impl Engine {
         match assignment.kind {
             ItemKind::Host => {
                 if let Some(mut host) = guard.list_hosts()?.into_iter().find(|h| h.id.0 == uuid) {
-                    host.settings.key = assignment.key.clone();
+                    assignment.refs().apply_to_settings(&mut host.settings);
                     guard.upsert_host(&host)?;
                 }
             }
             ItemKind::Group => {
                 if let Some(mut group) = guard.list_groups()?.into_iter().find(|g| g.id.0 == uuid) {
-                    group.defaults.key = assignment.key.clone();
+                    assignment.refs().apply_to_settings(&mut group.defaults);
                     guard.upsert_group(&group)?;
                 }
             }
-            ItemKind::Key => {}
+            ItemKind::Key | ItemKind::Identity | ItemKind::Password => {}
         }
         Ok(())
     }
@@ -931,26 +933,28 @@ impl Engine {
             .ok_or(SyncError::NotSetUp)?
             .sync_keys;
         let mut outbox = lock(store)?.outbox(self.server)?;
-        // Keys before what uses them, a group before its subgroups, groups before hosts, so a
-        // device fetching in order can apply each record as it comes.
+        // Keys and passwords before what uses them, then identities, a group before its
+        // subgroups, groups before hosts, so a device fetching in order can apply each record as
+        // it comes.
         {
             let groups = lock(store)?.list_groups()?;
             let rank = |(kind, id): &(ItemKind, String)| match kind {
-                ItemKind::Key => (0, 0),
+                ItemKind::Key | ItemKind::Password => (0, 0),
+                ItemKind::Identity => (1, 0),
                 ItemKind::Group => (
-                    1,
+                    2,
                     Uuid::parse_str(id).map_or(0, |u| {
                         sshcraft_core::model::group_chain(&groups, sshcraft_core::model::GroupId(u))
                             .len()
                     }),
                 ),
-                ItemKind::Host => (2, 0),
+                ItemKind::Host => (3, 0),
             };
             outbox.sort_by_key(rank);
         }
         let mut sent = 0;
         for (kind, id) in outbox {
-            if kind == ItemKind::Key && !sync_keys {
+            if is_secret(kind) && !sync_keys {
                 lock(store)?.dequeue(self.server, kind, &id)?;
                 continue;
             }
@@ -1001,7 +1005,13 @@ impl Engine {
                             (Some(entry), true) => entry.area_id,
                             _ => guard.area_for(self.server, kind, &id, personal)?,
                         };
-                        strip_unsynced_keys(&guard, self.server, &mut item, target, personal)?;
+                        strip_unsynced_credentials(
+                            &guard,
+                            self.server,
+                            &mut item,
+                            target,
+                            personal,
+                        )?;
                         // Moving between areas is a deletion in the old one and an addition in the
                         // new one; both are checked before anything is sent.
                         let moving = known.as_ref().is_some_and(|e| e.area_id != target);
@@ -1116,13 +1126,13 @@ impl Engine {
                                         personal,
                                     )?
                                 };
-                                if let Some(key) = assignment {
+                                if let Some(refs) = assignment {
                                     self.write_assignment(
                                         store,
                                         personal,
                                         kind,
                                         &id,
-                                        key,
+                                        refs,
                                         item.modified_at,
                                     )
                                     .await?;
@@ -1245,7 +1255,9 @@ impl Engine {
                 }
                 ItemBody::Group { group } => outside(group.parent_id)?,
                 ItemBody::Host { host } => outside(host.group_id)?,
-                ItemBody::Key { .. } => false,
+                ItemBody::Key { .. } | ItemBody::Identity { .. } | ItemBody::Password { .. } => {
+                    false
+                }
             };
             if refuse {
                 store.put_record_entry(self.server, &entry, kind, &item_id)?;
@@ -1299,7 +1311,7 @@ impl Engine {
             Some(Some(server)) if server != self.server => deleted,
             _ => false,
         };
-        if local_wins || elsewhere || (kind == ItemKind::Key && !sync_keys) {
+        if local_wins || elsewhere || (is_secret(kind) && !sync_keys) {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Ok(false);
         }
@@ -1340,6 +1352,16 @@ fn find_original(
             .list_key_records()?
             .into_iter()
             .map(|k| k.id.0)
+            .collect(),
+        ItemKind::Identity => store
+            .list_identities()?
+            .into_iter()
+            .map(|i| i.id.0)
+            .collect(),
+        ItemKind::Password => store
+            .list_password_ids()?
+            .into_iter()
+            .map(|p| p.0)
             .collect(),
     };
     let Some(original) = ids
@@ -1422,8 +1444,8 @@ fn take_into_original(
     Ok(true)
 }
 
-/// The key to remember privately after sending an item into an own share: its local key when
-/// the item is a host or group in a share this account owns.
+/// The credentials to remember privately after sending an item into an own share: its local
+/// references when the item is a host or group in a share this account owns.
 fn own_assignment(
     store: &Store,
     server: ServerId,
@@ -1431,24 +1453,30 @@ fn own_assignment(
     id: &str,
     target: Uuid,
     personal: Uuid,
-) -> Result<Option<Option<KeyRef>>, SyncError> {
+) -> Result<Option<crate::creds::CredentialRefs>, SyncError> {
+    use crate::creds::CredentialRefs;
     if target == personal || !store.share(server, target)?.is_some_and(|s| s.owned) {
         return Ok(None);
     }
-    let key = match kind {
+    let refs = match kind {
         ItemKind::Host => store
             .list_hosts()?
             .into_iter()
             .find(|h| h.id.0.to_string() == id)
-            .map(|h| h.settings.key),
+            .map(|h| CredentialRefs::of_settings(&h.settings)),
         ItemKind::Group => store
             .list_groups()?
             .into_iter()
             .find(|g| g.id.0.to_string() == id)
-            .map(|g| g.defaults.key),
-        ItemKind::Key => None,
+            .map(|g| CredentialRefs::of_settings(&g.defaults)),
+        ItemKind::Key | ItemKind::Identity | ItemKind::Password => None,
     };
-    Ok(key)
+    Ok(refs)
+}
+
+/// Keys and passwords: sent only with key sync on, read-only in a received share.
+pub(crate) fn is_secret(kind: ItemKind) -> bool {
+    matches!(kind, ItemKind::Key | ItemKind::Password)
 }
 
 /// What `push` does with one queued item.
@@ -1546,11 +1574,13 @@ fn remove_item(store: &Store, kind: ItemKind, id: &str) -> Result<(), SyncError>
         ItemKind::Group => store.delete_group(sshcraft_core::model::GroupId(uuid))?,
         ItemKind::Host => store.delete_host(sshcraft_core::model::HostId(uuid))?,
         ItemKind::Key => store.delete_key_record(sshcraft_core::model::KeyId(uuid))?,
+        ItemKind::Identity => store.delete_identity(sshcraft_core::model::IdentityId(uuid))?,
+        ItemKind::Password => store.delete_password(sshcraft_core::model::PasswordId(uuid))?,
     }
     Ok(())
 }
 
-/// Whether a record holds a key, read without counting it in the tracker.
+/// Whether a record holds a key or a password, read without counting it in the tracker.
 fn is_key_record(
     record: &SealedRecord,
     key: &AreaKey,
@@ -1561,36 +1591,24 @@ fn is_key_record(
         .open(key, manifest, devices)
         .ok()
         .and_then(|body| decode(&body).ok())
-        .is_some_and(|item| item.item().0 == ItemKind::Key)
+        .is_some_and(|item| is_secret(item.item().0))
 }
 
-/// A host or group that points to a stored key which does not live at this server, or not in
-/// the area the record goes to, sends no key: each device (each member) assigns its own
-/// (design, sections 7 and 8). Agent keys never go into a share. `apply_in` keeps the local
-/// assignment.
-pub(crate) fn strip_unsynced_keys(
+/// A host, group or identity that points to a key, password or identity which does not live at
+/// this server, or not in the area the record goes to, sends no reference to it: each device
+/// (each member) assigns its own (design, sections 7 and 8). Agent keys never go into a share.
+/// `apply_in` keeps the local assignment.
+pub(crate) fn strip_unsynced_credentials(
     store: &Store,
     server: ServerId,
     item: &mut crate::items::SyncItem,
     target: Uuid,
     personal: Uuid,
 ) -> Result<(), SyncError> {
-    let key = match &mut item.body {
-        ItemBody::Host { host } => &mut host.settings.key,
-        ItemBody::Group { group } => &mut group.defaults.key,
-        _ => return Ok(()),
+    let Some(mut refs) = crate::creds::refs_of(&item.body) else {
+        return Ok(());
     };
-    let keep = match key {
-        Some(sshcraft_core::model::KeyRef::Stored { id }) => {
-            let id = id.0.to_string();
-            store.location_of(ItemKind::Key, &id)? == Some(server)
-                && store.area_for(server, ItemKind::Key, &id, personal)? == target
-        }
-        Some(sshcraft_core::model::KeyRef::Agent { .. }) => target == personal,
-        None => true,
-    };
-    if !keep {
-        *key = None;
-    }
+    crate::creds::strip_unsynced(store, server, &mut refs, target, personal)?;
+    crate::creds::set_refs(&mut item.body, &refs);
     Ok(())
 }
