@@ -5616,6 +5616,7 @@ dependencies = [
  "data-encoding",
  "futures",
  "qrcode",
+ "rand 0.10.3",
  "reqwest",
  "rusqlite",
  "russh",

@@ -132,11 +132,31 @@ pub fn import(
         .into_iter()
         .find(|r| r.fingerprint == fingerprint)
     {
+        let id = known.id;
+        if known.certificate.is_none() {
+            return Ok(attach_sibling_certificate(vault, store, path, id)
+                .unwrap_or_else(|| KeyInfo::from(known)));
+        }
         return Ok(KeyInfo::from(known));
     }
     let name = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "key".into());
-    vault.store_key(store, &name, &key)
+    let info = vault.store_key(store, &name, &key)?;
+    Ok(attach_sibling_certificate(vault, store, path, info.id).unwrap_or(info))
+}
+
+/// Attaches `<key file>-cert.pub` if it lies next to the key and fits it, as OpenSSH would use
+/// it. A certificate that does not fit is left out; the key itself is imported anyway.
+fn attach_sibling_certificate(
+    vault: &Vault,
+    store: &Store,
+    path: &Path,
+    id: crate::model::KeyId,
+) -> Option<KeyInfo> {
+    let mut sibling = path.as_os_str().to_owned();
+    sibling.push("-cert.pub");
+    let text = read_small(Path::new(&sibling))?;
+    vault.attach_certificate(store, id, &text).ok()
 }

@@ -556,3 +556,62 @@ fn importing_a_key_file_twice_keeps_one_key() {
     assert_eq!(first.id, second.id);
     assert_eq!(store.list_key_records().unwrap().len(), 1);
 }
+
+fn user_cert_line(key: &PrivateKey) -> String {
+    use russh::keys::ssh_key::certificate::{Builder, CertType};
+    let ca = ed25519();
+    let mut builder = Builder::new_with_random_nonce(
+        &mut rand::rng(),
+        key.public_key().key_data().clone(),
+        0,
+        u64::MAX,
+    )
+    .unwrap();
+    builder.cert_type(CertType::User).unwrap();
+    builder.valid_principal("deploy").unwrap();
+    builder.sign(&ca).unwrap().to_openssh().unwrap()
+}
+
+fn keyfile_with_cert(
+    cert_of: &PrivateKey,
+    key: &PrivateKey,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("id_ed25519");
+    std::fs::write(&path, key.to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
+    std::fs::write(
+        dir.path().join("id_ed25519-cert.pub"),
+        user_cert_line(cert_of),
+    )
+    .unwrap();
+    (dir, path)
+}
+
+#[test]
+fn keyfile_import_picks_up_cert_sibling() {
+    let key = ed25519();
+    let (_dir, path) = keyfile_with_cert(&key, &key);
+    let store = Store::open_in_memory().unwrap();
+    let vault =
+        crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default()))
+            .unwrap();
+    let info = keyfiles::import(&vault, &store, &path, None).unwrap();
+    assert!(info.certificate.is_some());
+    // Importing again keeps the one key with its certificate.
+    let again = keyfiles::import(&vault, &store, &path, None).unwrap();
+    assert_eq!(again.id, info.id);
+    assert!(again.certificate.is_some());
+}
+
+#[test]
+fn mismatching_cert_sibling_is_not_fatal() {
+    let key = ed25519();
+    let (_dir, path) = keyfile_with_cert(&ed25519(), &key);
+    let store = Store::open_in_memory().unwrap();
+    let vault =
+        crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default()))
+            .unwrap();
+    let info = keyfiles::import(&vault, &store, &path, None).unwrap();
+    assert!(info.certificate.is_none());
+    assert_eq!(store.list_key_records().unwrap().len(), 1);
+}

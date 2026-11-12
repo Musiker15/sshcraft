@@ -323,3 +323,41 @@ async fn device_key_never_syncs() {
     assert!(store.key_record(key.id).unwrap().is_none());
     assert!(store.list_key_records().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn certificate_travels_with_key() {
+    use russh::keys::ssh_key::certificate::{Builder, CertType};
+    let server = TestServer::start().await;
+    let (a, b) = pair(&server).await;
+    let server_a = server_id(&a);
+    let id = {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
+        let key = a.vault.private_key(&store, info.id).unwrap();
+        let ca = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+            .unwrap();
+        let mut builder = Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            key.public_key().key_data().clone(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.cert_type(CertType::User).unwrap();
+        builder.valid_principal("deploy").unwrap();
+        let text = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        a.vault.attach_certificate(&store, info.id, &text).unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
+            .unwrap();
+        record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 100).unwrap();
+        info.id
+    };
+    sync(&a).await;
+    sync(&b).await;
+    let store = b.store.lock().unwrap();
+    let cert = sshcraft_core::vault::certificate(&store, id)
+        .unwrap()
+        .expect("certificate reached b");
+    assert_eq!(cert.valid_principals(), ["deploy".to_owned()]);
+}

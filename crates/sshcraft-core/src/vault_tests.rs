@@ -448,3 +448,137 @@ fn device_key_is_device_kind_and_local() {
         KeyKind::Device
     );
 }
+
+use russh::keys::ssh_key::certificate::{Builder, CertType};
+
+/// A certificate for `key`, signed by a fresh CA, valid for user `deploy` from 0 to `until`.
+fn certificate_for(key: &PrivateKey, cert_type: CertType, until: u64) -> (String, PrivateKey) {
+    let ca = test_key();
+    let mut builder = Builder::new_with_random_nonce(
+        &mut rand::rng(),
+        key.public_key().key_data().clone(),
+        0,
+        until,
+    )
+    .unwrap();
+    builder.cert_type(cert_type).unwrap();
+    builder.key_id("deploy-cert").unwrap();
+    builder.valid_principal("deploy").unwrap();
+    let cert = builder.sign(&ca).unwrap();
+    (cert.to_openssh().unwrap(), ca)
+}
+
+#[test]
+fn attaches_matching_user_certificate() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let info = v.import_key(&store, "k", &openssh(&key), None).unwrap();
+    let (text, ca) = certificate_for(&key, CertType::User, u64::MAX);
+    let info = v
+        .attach_certificate(&store, info.id, &format!("  {text}\n"))
+        .unwrap();
+    let cert = info.certificate.expect("certificate info");
+    assert_eq!(cert.key_id, "deploy-cert");
+    assert_eq!(cert.principals, vec!["deploy".to_owned()]);
+    assert_eq!(cert.valid_after, 0);
+    assert_eq!(cert.valid_before, u64::MAX);
+    assert_eq!(
+        cert.ca_fingerprint,
+        ca.public_key().fingerprint(HashAlg::Sha256).to_string()
+    );
+    // It is kept and listed.
+    let parsed = certificate(&store, info.id).unwrap().expect("stored");
+    assert_eq!(parsed.key_id(), "deploy-cert");
+    let listed = list_keys(&store).unwrap();
+    assert!(listed[0].certificate.is_some());
+}
+
+#[test]
+fn rejects_certificate_for_other_key() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let info = v
+        .import_key(&store, "k", &openssh(&test_key()), None)
+        .unwrap();
+    let (text, _) = certificate_for(&test_key(), CertType::User, u64::MAX);
+    assert!(matches!(
+        v.attach_certificate(&store, info.id, &text),
+        Err(VaultError::CertificateMismatch)
+    ));
+    assert_eq!(
+        store.key_record(info.id).unwrap().unwrap().certificate,
+        None
+    );
+}
+
+#[test]
+fn rejects_host_certificate() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let info = v.import_key(&store, "k", &openssh(&key), None).unwrap();
+    let (text, _) = certificate_for(&key, CertType::Host, u64::MAX);
+    assert!(matches!(
+        v.attach_certificate(&store, info.id, &text),
+        Err(VaultError::InvalidCertificate(_))
+    ));
+}
+
+#[test]
+fn rejects_garbage_certificate() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let info = v
+        .import_key(&store, "k", &openssh(&test_key()), None)
+        .unwrap();
+    for text in [
+        "",
+        "not a certificate",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB",
+    ] {
+        assert!(matches!(
+            v.attach_certificate(&store, info.id, text),
+            Err(VaultError::InvalidCertificate(_))
+        ));
+    }
+}
+
+#[test]
+fn certificate_survives_protection_change_and_detach_removes_it() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let info = v.import_key(&store, "k", &openssh(&key), None).unwrap();
+    let (text, _) = certificate_for(&key, CertType::User, u64::MAX);
+    v.attach_certificate(&store, info.id, &text).unwrap();
+    let info = v.protect_key(&store, info.id, "pw").unwrap();
+    assert!(info.certificate.is_some());
+    let info = v.detach_certificate(&store, info.id).unwrap();
+    assert!(info.certificate.is_none());
+    assert!(certificate(&store, info.id).unwrap().is_none());
+}
+
+#[test]
+fn received_certificate_for_other_key_is_dropped() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let (theirs, _) = certificate_for(&test_key(), CertType::User, u64::MAX);
+    let info = v
+        .store_openssh_with_id(
+            &store,
+            crate::model::KeyId::new(),
+            "k",
+            &openssh(&key),
+            Some(&theirs),
+            None,
+        )
+        .unwrap();
+    assert!(info.certificate.is_none());
+    let (mine, _) = certificate_for(&key, CertType::User, u64::MAX);
+    let info = v
+        .store_openssh_with_id(&store, info.id, "k", &openssh(&key), Some(&mine), None)
+        .unwrap();
+    assert!(info.certificate.is_some());
+}

@@ -8,8 +8,9 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rand::RngExt;
 use russh::keys::ssh_key::LineEnding;
+use russh::keys::ssh_key::certificate::CertType;
 use russh::keys::ssh_key::private::{KeypairData, RsaKeypair};
-use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
+use russh::keys::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 use serde::Serialize;
 use zeroize::Zeroizing;
 
@@ -138,7 +139,7 @@ impl From<KeyRecord> for KeyInfo {
             location: r.location,
             kind: r.kind,
             protected: r.protected,
-            certificate: None,
+            certificate: r.certificate.as_deref().and_then(certificate_info),
         }
     }
 }
@@ -311,15 +312,32 @@ impl Vault {
         let normalized = Zeroizing::new(openssh.replace("\r\n", "\n"));
         let key = PrivateKey::from_openssh(normalized.trim())
             .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
-        self.write_record(
-            store,
-            id,
-            name,
-            &key,
-            KeyKind::Vault,
-            location,
-            certificate.map(|c| c.trim().to_owned()),
-        )
+        // A certificate that does not fit the key is dropped, not stored.
+        let certificate =
+            certificate.and_then(|text| check_certificate(key.public_key(), text).ok());
+        self.write_record(store, id, name, &key, KeyKind::Vault, location, certificate)
+    }
+
+    /// Attaches an OpenSSH user certificate; it must be for this key.
+    pub fn attach_certificate(
+        &self,
+        store: &Store,
+        id: KeyId,
+        text: &str,
+    ) -> Result<KeyInfo, VaultError> {
+        let mut record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+        let public =
+            PublicKey::from_openssh(&record.public_key).map_err(|_| VaultError::Corrupt)?;
+        record.certificate = Some(check_certificate(&public, text)?);
+        store.put_key_record(&record)?;
+        Ok(record.into())
+    }
+
+    pub fn detach_certificate(&self, store: &Store, id: KeyId) -> Result<KeyInfo, VaultError> {
+        let mut record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+        record.certificate = None;
+        store.put_key_record(&record)?;
+        Ok(record.into())
     }
 
     /// The key, ready to sign. A key whose passphrase is not saved gives `PassphraseRequired`.
@@ -547,6 +565,46 @@ pub fn parse_private_key(
     } else {
         Ok(parsed)
     }
+}
+
+/// The certificate attached to a key, if any.
+pub fn certificate(store: &Store, id: KeyId) -> Result<Option<Certificate>, VaultError> {
+    let record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+    record
+        .certificate
+        .as_deref()
+        .map(|text| Certificate::from_openssh(text).map_err(|_| VaultError::Corrupt))
+        .transpose()
+}
+
+/// Checks that `text` is an OpenSSH user certificate for `public`; returns the trimmed line.
+fn check_certificate(public: &PublicKey, text: &str) -> Result<String, VaultError> {
+    let line = text.trim();
+    let cert = Certificate::from_openssh(line)
+        .map_err(|e| VaultError::InvalidCertificate(e.to_string()))?;
+    if cert.cert_type() != CertType::User {
+        return Err(VaultError::InvalidCertificate(
+            "not a user certificate".into(),
+        ));
+    }
+    if cert.public_key() != public.key_data() {
+        return Err(VaultError::CertificateMismatch);
+    }
+    Ok(line.to_owned())
+}
+
+fn certificate_info(text: &str) -> Option<CertificateInfo> {
+    let cert = Certificate::from_openssh(text).ok()?;
+    Some(CertificateInfo {
+        key_id: cert.key_id().to_owned(),
+        principals: cert.valid_principals().to_vec(),
+        valid_after: cert.valid_after(),
+        valid_before: cert.valid_before(),
+        ca_fingerprint: cert
+            .signature_key()
+            .fingerprint(HashAlg::Sha256)
+            .to_string(),
+    })
 }
 
 /// `None` for a missing or empty passphrase.
