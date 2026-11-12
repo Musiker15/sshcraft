@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/stollen-core", "crates/stollen-ssh", "app/src-tauri"]
+members = ["crates/stollen-core", "crates/stollen-ssh", "crates/stollen-proto", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -25,6 +25,10 @@ rand = "0.10.3"
 directories = "6.0.0"
 async-trait = "0.1.92"
 futures = "0.3.34"
+ed25519-dalek = "3.0.0"
+hpke = { version = "0.15.1", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
+sha2 = "0.11.1"
+data-encoding = "2.11.1"
 tempfile = "3.27.0"
 
 [profile.release]
