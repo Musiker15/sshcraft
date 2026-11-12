@@ -24,7 +24,9 @@ pub const PAGE: u32 = 500;
 pub const CONFLICT_ROUNDS: usize = 3;
 
 /// Queues a local change for the server the item lives at (nothing for a local item). Call it
-/// before deleting an item: afterwards its location is gone. A group also queues its hosts.
+/// before deleting an item: afterwards its location is gone. A group's hosts are not queued with
+/// it: their own last change must stay what "last change wins" compares (see
+/// `record_group_hosts` for moving or deleting a group).
 pub fn record_local_change(
     store: &Store,
     kind: ItemKind,
@@ -35,11 +37,14 @@ pub fn record_local_change(
         return Ok(());
     };
     store.queue(server, kind, id, now_ms)?;
-    if kind == ItemKind::Group {
-        for host in store.list_hosts()? {
-            if host.group_id.is_some_and(|g| g.0.to_string() == id) {
-                store.queue(server, ItemKind::Host, &host.id.0.to_string(), now_ms)?;
-            }
+    Ok(())
+}
+
+/// Queues every host of a group, for when the group moves or is deleted (its hosts go with it).
+pub fn record_group_hosts(store: &Store, group_id: &str, now_ms: i64) -> Result<(), SyncError> {
+    for host in store.list_hosts()? {
+        if host.group_id.is_some_and(|g| g.0.to_string() == group_id) {
+            record_local_change(store, ItemKind::Host, &host.id.0.to_string(), now_ms)?;
         }
     }
     Ok(())
@@ -238,6 +243,12 @@ impl Engine {
                 .into_iter()
                 .find(|a| a.area_id == area_id.0)
                 .map_or(0, |a| a.cursor);
+            let sync_keys = lock(store)?
+                .server(self.server)?
+                .is_some_and(|row| row.sync_keys);
+            // A record that verified but could not be applied yet (its group not here yet, for
+            // example) is fetched again next time: the stored cursor stays before it.
+            let mut retry_from: Option<u64> = None;
             loop {
                 let page = self.client.records(area_id, cursor, PAGE).await;
                 let (records, more) = self.revoked_check(store, page)?;
@@ -245,18 +256,28 @@ impl Engine {
                     cursor = cursor.max(seq);
                     let record_id = record.header.record_id;
                     // Records of other accounts (members) come with Teilplan 7.
-                    let opened = if record.header.author_account == self.account {
-                        tracker.accept_record(&record, &key, &manifest, &devices)
-                    } else {
-                        Err(sshcraft_proto::ProtoError::NotAllowed)
-                    };
-                    match opened {
+                    if record.header.author_account != self.account {
+                        report
+                            .rejected
+                            .push(format!("record {record_id}: not allowed"));
+                        continue;
+                    }
+                    // Keys are skipped uncounted while key sync is off, so turning it on (which
+                    // fetches from the start) still brings them.
+                    if !sync_keys && is_key_record(&record, &key, &manifest, &devices) {
+                        continue;
+                    }
+                    let before = tracker.clone();
+                    match tracker.accept_record(&record, &key, &manifest, &devices) {
                         Ok((Freshness::Unchanged, _)) => {}
                         Ok((Freshness::New, body)) => {
                             match self.take(store, vault, &record.header, &body) {
                                 Ok(true) => report.applied += 1,
                                 Ok(false) => {}
                                 Err(err) => {
+                                    tracker = before;
+                                    retry_from =
+                                        Some(retry_from.map_or(seq - 1, |r| r.min(seq - 1)));
                                     report.rejected.push(format!("record {record_id}: {err}"))
                                 }
                             }
@@ -264,7 +285,8 @@ impl Engine {
                         Err(err) => report.rejected.push(format!("record {record_id}: {err}")),
                     }
                 }
-                lock(store)?.set_cursor(self.server, area_id.0, cursor)?;
+                let keep = retry_from.map_or(cursor, |r| r.min(cursor));
+                lock(store)?.set_cursor(self.server, area_id.0, keep)?;
                 self.save_state(store, &devices, &tracker)?;
                 if !more {
                     break;
@@ -313,7 +335,7 @@ impl Engine {
             }
             for _ in 0..CONFLICT_ROUNDS {
                 let (manifest, key) = self.personal_area(store)?;
-                let (record, entry) = {
+                let (record, entry, sent_at) = {
                     let guard = lock(store)?;
                     let Some(queued) = guard.queued_at(self.server, kind, &id)? else {
                         break;
@@ -351,17 +373,21 @@ impl Engine {
                         version,
                         modified_at: item.modified_at,
                     };
-                    (record, entry)
+                    (record, entry, queued)
                 };
                 match self.client.put_record(&record).await {
                     Ok(_) => {
                         let guard = lock(store)?;
                         guard.put_record_entry(self.server, &entry, kind, &id)?;
-                        guard.dequeue(self.server, kind, &id)?;
+                        guard.dequeue_if(self.server, kind, &id, sent_at)?;
                         sent += 1;
                         break;
                     }
-                    Err(SyncError::Server { status: 409, .. }) => {
+                    // 409: someone wrote first. 400: the area moved on to a new key (a rotation)
+                    // or the stored manifest is stale. Either way fetch first, then try again.
+                    Err(SyncError::Server {
+                        status: 409 | 400, ..
+                    }) => {
                         // Someone wrote first: fetch, then decide again (the item may be gone
                         // from the outbox if the server's state won).
                         self.pull(store, vault).await?;
@@ -394,18 +420,38 @@ impl Engine {
         let local_wins = store
             .queued_at(self.server, kind, &item_id)?
             .is_some_and(|queued| newer(queued, item.modified_at));
-        store.put_record_entry(self.server, &entry, kind, &item_id)?;
         let sync_keys = store.server(self.server)?.is_some_and(|row| row.sync_keys);
-        // An item this device moved elsewhere is no longer this server's business.
-        let elsewhere = matches!(
-            store.item_location(kind, &item_id)?,
-            Some(location) if location != Some(self.server)
-        );
+        let deleted = matches!(item.body, ItemBody::Deleted { .. });
+        // Where the item is here decides whether this server may touch it: an item this device
+        // keeps only locally is not this server's business; one at another server is taken
+        // over by a live record (it was moved here) but not removed by a deletion (it was moved
+        // away from here).
+        let elsewhere = match store.item_location(kind, &item_id)? {
+            Some(None) => true,
+            Some(Some(server)) if server != self.server => deleted,
+            _ => false,
+        };
         if local_wins || elsewhere || (kind == ItemKind::Key && !sync_keys) {
+            store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Ok(false);
         }
         apply(&store, vault, self.server, &item)?;
+        store.put_record_entry(self.server, &entry, kind, &item_id)?;
         store.dequeue(self.server, kind, &item_id)?;
         Ok(true)
     }
+}
+
+/// Whether a record holds a key, read without counting it in the tracker.
+fn is_key_record(
+    record: &SealedRecord,
+    key: &AreaKey,
+    manifest: &AreaManifest,
+    devices: &DeviceSet,
+) -> bool {
+    record
+        .open(key, manifest, devices)
+        .ok()
+        .and_then(|body| decode(&body).ok())
+        .is_some_and(|item| item.item().0 == ItemKind::Key)
 }

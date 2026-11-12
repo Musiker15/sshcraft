@@ -282,3 +282,29 @@ fn host_takes_its_groups_location() {
     store.upsert_host(&loose).unwrap();
     assert_eq!(location_of_host(&store, loose.id), Some(s));
 }
+
+#[test]
+fn dequeue_keeps_a_change_made_while_sending() {
+    let store = Store::open_in_memory().unwrap();
+    let s = server(&store);
+    store.queue(s, ItemKind::Host, "a", 1).unwrap();
+    // The record for the change at 1 is on its way; the user changes the host again.
+    store.queue(s, ItemKind::Host, "a", 2).unwrap();
+    store.dequeue_if(s, ItemKind::Host, "a", 1).unwrap();
+    assert_eq!(store.queued_at(s, ItemKind::Host, "a").unwrap(), Some(2));
+    store.dequeue_if(s, ItemKind::Host, "a", 2).unwrap();
+    assert_eq!(store.queued_at(s, ItemKind::Host, "a").unwrap(), None);
+}
+
+#[test]
+fn turning_key_sync_on_refetches_from_the_start() {
+    let store = Store::open_in_memory().unwrap();
+    let s = server(&store);
+    let area = Uuid::new_v4();
+    store.put_area(s, area, "{}", "{}").unwrap();
+    store.set_cursor(s, area, 40).unwrap();
+    store.update_server_flags(s, true, false).unwrap();
+    assert_eq!(store.areas(s).unwrap()[0].cursor, 40);
+    store.update_server_flags(s, true, true).unwrap();
+    assert_eq!(store.areas(s).unwrap()[0].cursor, 0);
+}

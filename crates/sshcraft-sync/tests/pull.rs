@@ -101,3 +101,48 @@ async fn revoked_device_stops_and_keeps_its_data() {
     assert!(b.row().revoked);
     assert_eq!(b.hosts().len(), 1, "local data stays");
 }
+
+#[tokio::test]
+async fn a_record_that_cannot_apply_yet_is_tried_again() {
+    use sshcraft_core::model::{ConnectionSettings, Group, GroupId};
+    use sshcraft_proto::record::{RecordHeader, SealedRecord};
+    use sshcraft_sync::items::{ItemBody, SyncItem, encode};
+    let server = TestServer::start().await;
+    let (a, b) = (Dev::new(), Dev::new());
+    let export = create(&server, &a, "a@example.org").await;
+    join(&server, &b, &export).await;
+    let group = Group {
+        id: GroupId::new(),
+        name: "srv".into(),
+        defaults: ConnectionSettings::default(),
+        location: None,
+    };
+    let mut host = sample_host("web");
+    host.group_id = Some(group.id);
+    // The host's record comes before its group's (as after a key rotation re-sealed them).
+    write_host(&server, &a, &host, Uuid::new_v4(), 1, 100).await;
+    let (manifest, key) = a.area();
+    let row = a.row();
+    let item = SyncItem {
+        modified_at: 100,
+        body: ItemBody::Group {
+            group: group.clone(),
+        },
+    };
+    let header = RecordHeader {
+        record_id: Uuid::new_v4(),
+        area_id: manifest.area_id,
+        version: 1,
+        key_version: manifest.key_version,
+        author_account: sshcraft_proto::identity::AccountPublic(row.account),
+        author_device: row.device_id,
+    };
+    let record = SealedRecord::seal(header, &encode(&item).unwrap(), &key, &a.keys());
+    a.client(&server).await.put_record(&record).await.unwrap();
+
+    pull(&b).await.unwrap();
+    pull(&b).await.unwrap();
+    let hosts = b.hosts();
+    assert_eq!(hosts.len(), 1, "the host arrives once its group is there");
+    assert_eq!(hosts[0].group_id, Some(group.id));
+}

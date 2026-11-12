@@ -10,7 +10,7 @@ use sshcraft_core::store::{ItemKind, Store};
 use sshcraft_core::vault::Vault;
 use sshcraft_proto::ProtoError;
 use sshcraft_sync::SyncError;
-use sshcraft_sync::engine::record_local_change;
+use sshcraft_sync::engine::{record_group_hosts, record_local_change};
 use sshcraft_sync::runtime::{SyncObserver, SyncRuntime, SyncStatus};
 
 use crate::errors::{CommandError, ErrorCode};
@@ -201,6 +201,10 @@ pub fn note_change(
         servers.push(old);
     }
     record_local_change(store, kind, id, now).map_err(sync_error)?;
+    // A moved group takes its hosts along to the new place.
+    if kind == ItemKind::Group && before != after {
+        record_group_hosts(store, id, now).map_err(sync_error)?;
+    }
     if let Some(new) = after {
         servers.push(new);
     }

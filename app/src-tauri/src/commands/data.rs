@@ -8,6 +8,7 @@ use crate::settings::{self, AppSettings};
 use crate::state::AppState;
 use crate::sync::{note_change, now_ms};
 use sshcraft_core::store::ItemKind;
+use sshcraft_sync::engine::record_group_hosts;
 
 fn store(state: &AppState) -> std::sync::MutexGuard<'_, sshcraft_core::store::Store> {
     state.store.lock().expect("store lock")
@@ -49,6 +50,8 @@ pub fn save_group(state: State<'_, AppState>, group: Group) -> CommandResult<()>
 #[tauri::command]
 pub fn delete_group(state: State<'_, AppState>, id: GroupId) -> CommandResult<()> {
     changed(&state, ItemKind::Group, id.0.to_string(), |s| {
+        // Its hosts go with it; queue them while they still exist.
+        record_group_hosts(s, &id.0.to_string(), now_ms()).map_err(crate::sync::sync_error)?;
         Ok(s.delete_group(id)?)
     })
 }

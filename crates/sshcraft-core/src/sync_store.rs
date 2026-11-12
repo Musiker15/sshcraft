@@ -184,16 +184,33 @@ impl Store {
             .transpose()
     }
 
+    /// Turning key sync on fetches every area from the start again: key records skipped while
+    /// it was off were never counted, so they arrive now.
     pub fn update_server_flags(
         &self,
         id: ServerId,
         sync_enabled: bool,
         sync_keys: bool,
     ) -> Result<(), StoreError> {
-        self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        let was: Option<bool> = tx
+            .query_row(
+                "SELECT sync_keys FROM sync_servers WHERE id = ?1",
+                [id.0.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        tx.execute(
             "UPDATE sync_servers SET sync_enabled = ?2, sync_keys = ?3 WHERE id = ?1",
             params![id.0.to_string(), sync_enabled, sync_keys],
         )?;
+        if sync_keys && was == Some(false) {
+            tx.execute(
+                "UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1",
+                [id.0.to_string()],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -428,6 +445,23 @@ impl Store {
         rows.into_iter()
             .map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item)))
             .collect()
+    }
+
+    /// Takes an item out of the outbox only if it was not changed again since `queued_at`, so a
+    /// change made while the previous one was being sent is not lost.
+    pub fn dequeue_if(
+        &self,
+        server: ServerId,
+        kind: ItemKind,
+        item_id: &str,
+        queued_at: i64,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "DELETE FROM sync_outbox WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3
+             AND queued_at = ?4",
+            params![server.0.to_string(), kind.as_str(), item_id, queued_at],
+        )?;
+        Ok(())
     }
 
     pub fn dequeue(
