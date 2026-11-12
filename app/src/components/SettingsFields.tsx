@@ -9,10 +9,12 @@ type Props = {
   keys: KeyInfo[];
   /** Values a host inherits from its group, shown as placeholders. */
   inherited?: ConnectionSettings;
+  /** Only user and key (an identity has no address). */
+  credentialsOnly?: boolean;
 };
 
 /** Address, port, user and key fields, shared by the host and group forms. */
-export function SettingsFields({ values, onChange, keys, inherited }: Props) {
+export function SettingsFields({ values, onChange, keys, inherited, credentialsOnly }: Props) {
   const t = useT();
   const [agentKeys, setAgentKeys] = useState<AgentKey[] | null>(null);
   useEffect(() => {
@@ -33,6 +35,7 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
 
   return (
     <>
+      {!credentialsOnly && (
       <div className="grid-2">
         <label>
           {t("settingsFields.address")}
@@ -52,6 +55,7 @@ export function SettingsFields({ values, onChange, keys, inherited }: Props) {
           />
         </label>
       </div>
+      )}
       <label>
         {t("settingsFields.user")}
         <input

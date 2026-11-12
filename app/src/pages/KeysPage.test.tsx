@@ -52,3 +52,25 @@ test("a synced key shows its server and can go back to this device", () => {
   fireEvent.click(screen.getByText(en["sync.moveTo"].replace("{place}", en["sync.localOnly"])));
   expect(onMove).toHaveBeenCalledWith("k1", null);
 });
+
+test("identities are listed and can be deleted", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  render(
+    <I18nProvider language="en">
+      <KeysPage
+        keys={[key]}
+        onChanged={() => {}}
+        identities={[
+          { id: "i1", name: "ops", username: "deploy", key: null, location: null, has_password: true },
+        ]}
+      />
+    </I18nProvider>,
+  );
+  expect(screen.getByText("ops")).toBeTruthy();
+  expect(screen.getByText(`deploy · ${en["identity.hasPassword"]}`)).toBeTruthy();
+  const card = screen.getByText("ops").closest(".card") as HTMLElement;
+  fireEvent.click(card.querySelector("button.danger") as HTMLElement);
+  const confirm = screen.getAllByRole("button", { name: en["common.delete"] }).pop() as HTMLElement;
+  fireEvent.click(confirm);
+  expect(invoke).toHaveBeenCalledWith("identity_delete", { id: "i1" });
+});

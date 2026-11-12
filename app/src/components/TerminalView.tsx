@@ -56,7 +56,7 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
     };
 
     sessionOpen(
-      tab.hostId,
+      { kind: "host", host_id: tab.hostId },
       terminal.cols,
       terminal.rows,
       // Acknowledge only after xterm has rendered, so Rust pauses reading while the UI is behind.

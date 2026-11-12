@@ -941,3 +941,75 @@ button.link[aria-current="page"] {
 .import-dialog .row-form label {
   flex: 1;
 }
+
+/* Connection options in the host and group forms */
+.connection-more {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.connection-more[open] summary {
+  margin-bottom: 4px;
+}
+
+.connection-more summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.jump-list,
+.env-list {
+  display: grid;
+  gap: 6px;
+}
+
+.jump-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jump-row span {
+  flex: 1;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.env-row .error {
+  grid-column: 1 / -1;
+}
+
+.env-row input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.password-field {
+  display: grid;
+  gap: 4px;
+}
+
+.field-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.group-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}

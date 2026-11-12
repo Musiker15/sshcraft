@@ -1,6 +1,7 @@
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { deleteKey, listAgentKeys, type AgentKey, type KeyInfo, type ServerView } from "../api";
+import { deleteKey, listAgentKeys, type AgentKey, type Identity, type KeyInfo, type ServerView } from "../api";
+import { IdentitiesSection } from "../components/IdentitiesSection";
 import { KeyGenerateForm, KeyImportForm } from "../components/KeyForms";
 import { ProtonPassImport } from "../components/ProtonPassImport";
 import { useLanguage, useT } from "../i18n/i18n";
@@ -20,9 +21,10 @@ type Props = {
   /** Sync servers; a key can move only to one that syncs keys. */
   servers?: ServerView[];
   onMove?: (id: string, location: string | null) => void;
+  identities?: Identity[];
 };
 
-export function KeysPage({ keys, onChanged, servers = [], onMove }: Props) {
+export function KeysPage({ keys, onChanged, servers = [], onMove, identities = [] }: Props) {
   const t = useT();
   const lang = useLanguage();
   const [panel, setPanel] = useState<Panel>(null);
@@ -116,6 +118,8 @@ export function KeysPage({ keys, onChanged, servers = [], onMove }: Props) {
           ))}
         </div>
       </div>
+
+      <IdentitiesSection identities={identities} keys={keys} servers={servers} onChanged={onChanged} />
 
       <div className="group-block">
         <h2 className="group-title">{t("keys.agent")}</h2>

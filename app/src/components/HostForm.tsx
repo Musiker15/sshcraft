@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { forgetHostKey, HOST_OS, saveHost, type Group, type Host, type HostOs, type KeyInfo } from "../api";
+import { forgetHostKey, HOST_OS, saveHost, type Group, type Host, type HostOs, type KeyInfo, applyPassword, type Identity, type PasswordChange } from "../api";
 import { errorText, FormError } from "../i18n/errors";
 import { useLanguage, useT } from "../i18n/i18n";
 import { fromConnectionSettings, toConnectionSettings } from "../forms/hostForm";
+import { emptyConnection, fromConnectionOptions, toConnectionOptions } from "../forms/connectionForm";
+import { ConnectionFields } from "./ConnectionFields";
 import { groupLabel, inheritedDefaults } from "../pages/hostsTree";
 import { SettingsFields } from "./SettingsFields";
 import { TagInput } from "./TagInput";
@@ -13,11 +15,13 @@ type Props = {
   /** Group of a new host. */
   group?: string | null;
   keys: KeyInfo[];
+  identities?: Identity[];
+  hosts?: Host[];
   onDone: () => void;
   onCancel: () => void;
 };
 
-export function HostForm({ host, groups, group: initialGroup, keys, onDone, onCancel }: Props) {
+export function HostForm({ host, groups, group: initialGroup, keys, identities = [], hosts = [], onDone, onCancel }: Props) {
   const t = useT();
   const lang = useLanguage();
   const [name, setName] = useState(host?.name ?? "");
@@ -27,6 +31,9 @@ export function HostForm({ host, groups, group: initialGroup, keys, onDone, onCa
   const [values, setValues] = useState(
     fromConnectionSettings(host?.settings ?? { address: null, port: null, username: null, key: null }),
   );
+  const [connection, setConnection] = useState(host ? fromConnectionOptions(host.settings) : emptyConnection);
+  const [password, setPassword] = useState<PasswordChange>({ kind: "keep" });
+  const [proxyPassword, setProxyPassword] = useState<PasswordChange>({ kind: "keep" });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const options = groups
@@ -36,15 +43,22 @@ export function HostForm({ host, groups, group: initialGroup, keys, onDone, onCa
   async function submit() {
     try {
       if (!name.trim()) throw new FormError("name_required");
+      const id = host?.id ?? crypto.randomUUID();
+      const settings = { ...toConnectionSettings(values), ...toConnectionOptions(connection) };
       await saveHost({
         ...host,
-        id: host?.id ?? crypto.randomUUID(),
+        id,
         name: name.trim(),
         group_id: groupId || null,
-        settings: toConnectionSettings(values),
+        settings,
         tags,
         os: os || null,
       });
+      // Passwords go after the host exists (and has its proxy).
+      await applyPassword({ kind: "host", id }, password);
+      if (settings.proxy && settings.proxy.kind !== "direct") {
+        await applyPassword({ kind: "host_proxy", id }, proxyPassword);
+      }
       onDone();
     } catch (e) {
       setError(errorText(t, e));
@@ -96,6 +110,18 @@ export function HostForm({ host, groups, group: initialGroup, keys, onDone, onCa
         onChange={setValues}
         keys={keys}
         inherited={groupId ? inheritedDefaults(groups, groupId) : undefined}
+      />
+      <ConnectionFields
+        values={connection}
+        onChange={setConnection}
+        identities={identities}
+        hosts={hosts.filter((h) => h.id !== host?.id)}
+        password={password}
+        onPassword={setPassword}
+        passwordStored={host?.has_password ?? false}
+        proxyPassword={proxyPassword}
+        onProxyPassword={setProxyPassword}
+        proxyPasswordStored={host?.proxy_has_password ?? false}
       />
       {host && (
         <div>

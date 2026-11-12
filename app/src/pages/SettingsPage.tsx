@@ -1,3 +1,4 @@
+import { LocalShellSetting } from "../components/LocalShellSetting";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 import type { AppSettings, AppTheme } from "../api";
@@ -124,6 +125,8 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
           />
         </label>
       </div>
+
+      <LocalShellSetting />
 
       <div className="settings-block">
         <h2 className="group-title">{t("settings.about")}</h2>

@@ -10,6 +10,10 @@ import {
   listHosts,
   itemShares,
   listKeys,
+  identitiesList,
+  answerAuth,
+  type AuthPrompt,
+  type Identity,
   listRecent,
   listServers,
   moveItem,
@@ -25,6 +29,7 @@ import {
 } from "../api";
 import { GroupForm } from "../components/GroupForm";
 import { HostForm } from "../components/HostForm";
+import { AuthPromptDialog } from "../components/AuthPromptDialog";
 import { HostKeyDialog } from "../components/HostKeyDialog";
 import { SessionStatusLine } from "../components/SessionStatusLine";
 import { ExportDialog } from "../components/ExportDialog";
@@ -61,6 +66,8 @@ export function AppShell() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
+  const [identities, setIdentities] = useState<Identity[]>([]);
+  const [authPrompts, setAuthPrompts] = useState<AuthPrompt[]>([]);
   const [servers, setServers] = useState<ServerView[]>([]);
   const [shares, setShares] = useState<ItemShare[]>([]);
   const [sharing, setSharing] = useState<{ target: ShareTarget; server: ServerView } | null>(null);
@@ -82,13 +89,15 @@ export function AppShell() {
 
   const reload = useCallback(async () => {
     try {
-      const [g, h, k, s, sh] = await Promise.all([
+      const [g, h, k, s, sh, ids] = await Promise.all([
         listGroups(),
         listHosts(),
         listKeys(),
         listServers(),
         itemShares(),
+        identitiesList(),
       ]);
+      setIdentities(ids ?? []);
       setShares(sh ?? []);
       setGroups(g);
       setHosts(h);
@@ -108,10 +117,13 @@ export function AppShell() {
     void helloStatus().then((s) => setHelloMissing(s.missing));
     const listeners = [
       listen<HostKeyPrompt>("host-key-prompt", (event) => setPrompts((queue) => [...queue, event.payload])),
-      // The tab that asked was closed: its question must not stay on screen.
-      listen<{ prompt_id: number }>("host-key-prompt-withdrawn", (event) =>
-        setPrompts((queue) => queue.filter((p) => p.prompt_id !== event.payload.prompt_id)),
-      ),
+      listen<AuthPrompt>("auth-prompt", (event) => setAuthPrompts((queue) => [...queue, event.payload])),
+      // The tab that asked was closed: its question must not stay on screen (both kinds come
+      // under this name).
+      listen<{ prompt_id: number }>("host-key-prompt-withdrawn", (event) => {
+        setAuthPrompts((queue) => queue.filter((p) => p.prompt_id !== event.payload.prompt_id));
+        setPrompts((queue) => queue.filter((p) => p.prompt_id !== event.payload.prompt_id));
+      }),
       listen("hello-unavailable", () => setHelloMissing(true)),
       // Another device changed something: show it.
       listen("data-changed", () => void reload()),
@@ -268,6 +280,7 @@ export function AppShell() {
               {page === "keys" && (
                 <KeysPage
                   keys={keys}
+                  identities={identities}
                   onChanged={() => void reload()}
                   servers={servers}
                   onMove={(id: string, location: string | null) =>
@@ -316,6 +329,8 @@ export function AppShell() {
               group={editor.group}
               groups={groups}
               keys={keys}
+              identities={identities}
+              hosts={hosts}
               onDone={done}
               onCancel={() => setEditor(null)}
             />
@@ -326,6 +341,8 @@ export function AppShell() {
               parent={editor.parent}
               groups={groups}
               keys={keys}
+              identities={identities}
+              hosts={hosts}
               onDone={done}
               onCancel={() => setEditor(null)}
             />
@@ -367,6 +384,18 @@ export function AppShell() {
           confirmLabel={confirming.confirmLabel}
           onConfirm={() => void confirmed()}
           onCancel={() => setConfirming(null)}
+        />
+      )}
+
+      {authPrompts[0] && !prompts[0] && (
+        <AuthPromptDialog
+          key={authPrompts[0].prompt_id}
+          prompt={authPrompts[0]}
+          onAnswer={(answers) => {
+            const answered = authPrompts[0].prompt_id;
+            void answerAuth(answered, answers);
+            setAuthPrompts((queue) => queue.filter((p) => p.prompt_id !== answered));
+          }}
         />
       )}
 

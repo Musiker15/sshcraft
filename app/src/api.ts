@@ -6,11 +6,22 @@ export type KeyRef = { kind: "stored"; id: string } | { kind: "agent"; fingerpri
 
 export type AgentKey = { fingerprint: string; algorithm: string; comment: string; public_key: string };
 
+export type ProxyEndpoint = { address: string; port: number; username: string | null; password?: null };
+export type Proxy = { kind: "direct" } | ({ kind: "http" } & ProxyEndpoint) | ({ kind: "socks5" } & ProxyEndpoint);
+export type EnvVar = { name: string; value: string };
+
+/** Password ids never reach the UI: a view only says whether one is set. */
 export type ConnectionSettings = {
   address: string | null;
   port: number | null;
   username: string | null;
   key: KeyRef | null;
+  identity?: string | null;
+  /** null: inherit; []: none. */
+  jump_hosts?: string[] | null;
+  proxy?: Proxy | null;
+  agent_forwarding?: boolean | null;
+  env?: EnvVar[];
 };
 
 export const HOST_OS = [
@@ -42,6 +53,8 @@ export type Group = {
   location?: string | null;
   parent_id?: string | null;
   tags?: string[];
+  has_password?: boolean;
+  proxy_has_password?: boolean;
 };
 
 export type Host = {
@@ -52,7 +65,72 @@ export type Host = {
   location?: string | null;
   tags?: string[];
   os?: HostOs | null;
+  has_password?: boolean;
+  proxy_has_password?: boolean;
 };
+
+export type Identity = {
+  id: string;
+  name: string;
+  username: string | null;
+  key: KeyRef | null;
+  location: string | null;
+  has_password: boolean;
+};
+
+export type PasswordChange = { kind: "keep" } | { kind: "set"; secret: string } | { kind: "clear" };
+export type PasswordOwner =
+  | { kind: "host"; id: string }
+  | { kind: "group"; id: string }
+  | { kind: "host_proxy"; id: string }
+  | { kind: "group_proxy"; id: string }
+  | { kind: "identity"; id: string };
+
+export type IdentityInput = {
+  id: string | null;
+  name: string;
+  username: string | null;
+  key: KeyRef | null;
+  location: string | null;
+  password: PasswordChange;
+};
+
+export const identitiesList = () => invoke<Identity[]>("identities_list");
+export const identitySave = (identity: IdentityInput) => invoke<Identity>("identity_save", { identity });
+export const identityDelete = (id: string) => invoke<void>("identity_delete", { id });
+export const passwordSet = (owner: PasswordOwner, secret: string) => invoke<void>("password_set", { owner, secret });
+export const passwordClear = (owner: PasswordOwner) => invoke<void>("password_clear", { owner });
+
+/** Carries out a password change from a form; "keep" and an empty new password do nothing. */
+export async function applyPassword(owner: PasswordOwner, change: PasswordChange): Promise<void> {
+  if (change.kind === "set" && change.secret !== "") await passwordSet(owner, change.secret);
+  if (change.kind === "clear") await passwordClear(owner);
+}
+
+export type ShellCommand = { program: string; args: string[]; label: string };
+export type Parity = "none" | "odd" | "even";
+export type FlowControl = "none" | "software" | "hardware";
+export type SerialSettings = {
+  port: string;
+  baud: number;
+  data_bits: number;
+  stop_bits: number;
+  parity: Parity;
+  flow: FlowControl;
+};
+export type SerialPortInfo = { name: string; description: string };
+
+export type SessionTarget =
+  | { kind: "host"; host_id: string }
+  | { kind: "local"; shell: ShellCommand }
+  | { kind: "serial"; settings: SerialSettings };
+
+export const localShells = () => invoke<ShellCommand[]>("local_shells");
+export const localShellGet = () => invoke<ShellCommand | null>("local_shell_get");
+export const localShellSet = (shell: ShellCommand | null) => invoke<void>("local_shell_set", { shell });
+export const serialPorts = () => invoke<SerialPortInfo[]>("serial_ports");
+export const serialLast = () => invoke<SerialSettings | null>("serial_last");
+export const serialRemember = (settings: SerialSettings) => invoke<void>("serial_remember", { settings });
 
 export type KeyInfo = {
   id: string;
@@ -69,6 +147,7 @@ export type EndReason =
   | "host_key_rejected"
   | "host_key_mismatch"
   | "auth_failed"
+  | "auth_cancelled"
   | "connect_failed"
   | "error";
 
@@ -84,6 +163,15 @@ export type HostKeyPrompt = {
   address: string;
   port: number;
   fingerprint: string;
+};
+
+export type AuthPrompt = {
+  prompt_id: number;
+  host_name: string;
+  username: string;
+  name: string;
+  instructions: string;
+  prompts: { text: string; echo: boolean }[];
 };
 
 export type { CommandError } from "./i18n/errors";
@@ -114,7 +202,7 @@ export const importFromPassCli = (shareId: string, itemId: string, name: string)
   invoke<KeyInfo>("import_from_pass_cli", { shareId, itemId, name });
 
 export async function sessionOpen(
-  hostId: string,
+  target: SessionTarget,
   cols: number,
   rows: number,
   onData: (bytes: Uint8Array) => void,
@@ -124,7 +212,7 @@ export async function sessionOpen(
   data.onmessage = (msg) => onData(msg instanceof ArrayBuffer ? new Uint8Array(msg) : Uint8Array.from(msg));
   const status = new Channel<SessionStatus>();
   status.onmessage = onStatus;
-  return invoke<string>("session_open", { hostId, cols, rows, onData: data, onStatus: status });
+  return invoke<string>("session_open", { target, cols, rows, onData: data, onStatus: status });
 }
 
 const encoder = new TextEncoder();
@@ -136,6 +224,9 @@ export const sessionAck = (id: string, bytes: number) => invoke<void>("session_a
 export const sessionClose = (id: string) => invoke<void>("session_close", { id });
 export const answerHostKey = (promptId: number, accept: boolean) =>
   invoke<void>("answer_host_key", { promptId, accept });
+/** `null` cancels the sign-in. */
+export const answerAuth = (promptId: number, answers: string[] | null) =>
+  invoke<void>("answer_auth", { promptId, answers });
 
 export type AppTheme = "system" | "dark" | "light";
 export type HostView = "grid" | "list";
