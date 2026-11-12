@@ -1,0 +1,22 @@
+[package]
+name = "sshcraft-sync"
+description = "Client side of SSHCraft sync: talks to a sync server and keeps this device in step"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sshcraft-proto = { workspace = true }
+sshcraft-core = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+data-encoding = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+sshcraft-server = { workspace = true }
+tempfile = { workspace = true }
