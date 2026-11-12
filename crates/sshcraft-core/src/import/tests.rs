@@ -384,3 +384,56 @@ fn not_a_csv_is_harmless() {
     assert!(plan.candidates.is_empty());
     assert!(!plan.skipped.is_empty());
 }
+
+// ---------- PuTTY
+
+const REG: &str = include_str!("fixtures/putty.reg");
+
+fn utf16(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xff, 0xfe];
+    for unit in text.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
+}
+
+#[test]
+fn reg_file_utf16_is_read() {
+    let sessions = putty::parse_reg(&utf16(REG));
+    assert_eq!(sessions.len(), 3);
+    assert_eq!(
+        putty::parse_reg(REG.as_bytes()),
+        sessions,
+        "UTF-8 reads the same"
+    );
+}
+
+#[test]
+fn url_encoded_session_names() {
+    let sessions = putty::parse_reg(REG.as_bytes());
+    assert!(sessions.iter().any(|s| s.name == "web server"));
+    assert!(sessions.iter().any(|s| s.name == "Default Settings"));
+}
+
+#[test]
+fn non_ssh_sessions_are_skipped() {
+    let plan = putty::candidates(&putty::parse_reg(REG.as_bytes()));
+    assert_eq!(plan.candidates.len(), 1, "no Default Settings, no serial");
+    assert_eq!(plan.skipped.len(), 1);
+}
+
+#[test]
+fn user_at_host_is_split() {
+    let plan = putty::candidates(&putty::parse_reg(REG.as_bytes()));
+    let c = &plan.candidates[0];
+    assert_eq!(c.name, "web server");
+    assert_eq!(c.settings.address.as_deref(), Some("web.example.org"));
+    assert_eq!(c.settings.username.as_deref(), Some("deploy"));
+    assert_eq!(c.settings.port, Some(2222));
+    assert_eq!(
+        c.key_note,
+        Some(KeyNote::File {
+            path: r"C:\Users\me\web.ppk".into()
+        })
+    );
+}

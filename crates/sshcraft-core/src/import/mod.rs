@@ -222,6 +222,7 @@ pub fn apply_import(
 pub mod csv;
 pub mod keyfiles;
 pub mod knownhosts;
+pub mod putty;
 
 #[cfg(test)]
 mod tests;
