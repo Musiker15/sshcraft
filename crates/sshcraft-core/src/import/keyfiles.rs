@@ -132,14 +132,7 @@ pub fn import(
         .into_iter()
         .find(|r| r.fingerprint == fingerprint)
     {
-        return Ok(KeyInfo {
-            id: known.id,
-            name: known.name,
-            algorithm: known.algorithm,
-            fingerprint: known.fingerprint,
-            public_key: known.public_key,
-            location: known.location,
-        });
+        return Ok(KeyInfo::from(known));
     }
     let name = path
         .file_stem()

@@ -84,7 +84,7 @@ fn migration_from_v2_keeps_data() {
         .conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, crate::store::SCHEMA_VERSION);
 }
 
 #[test]
@@ -258,6 +258,9 @@ fn key_location_follows_set_location() {
             public_key: "ssh-ed25519 AAAA".into(),
             sealed_secret: vec![1],
             location: None,
+            kind: Default::default(),
+            protected: false,
+            certificate: None,
         })
         .unwrap();
     store

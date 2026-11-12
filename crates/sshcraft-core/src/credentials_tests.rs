@@ -158,6 +158,9 @@ fn password_cannot_be_opened_as_key() {
             public_key: "ssh-ed25519 AAAA".into(),
             sealed_secret: sealed,
             location: None,
+            kind: Default::default(),
+            protected: false,
+            certificate: None,
         })
         .unwrap();
     assert!(v.private_key(&store, crate::model::KeyId(id.0)).is_err());

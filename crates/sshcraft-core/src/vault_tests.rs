@@ -214,3 +214,237 @@ fn received_key_keeps_its_id_and_location() {
     );
     assert_eq!(openssh(&v.private_key(&store, id).unwrap()), openssh(&key));
 }
+
+use crate::keytypes::{EcdsaCurveName, KeyKind, KeySpec};
+
+fn encrypted_openssh(key: &PrivateKey, passphrase: &str) -> String {
+    openssh(&key.encrypt(&mut rand::rng(), passphrase).unwrap())
+}
+
+fn rsa_bits(key: &PrivateKey) -> usize {
+    let public = key.public_key();
+    let n = public.key_data().rsa().unwrap().n();
+    let bytes = n.as_positive_bytes().unwrap();
+    bytes.len() * 8 - bytes[0].leading_zeros() as usize
+}
+
+#[test]
+fn generates_every_supported_type() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let cases = [
+        (KeySpec::Ed25519, "ssh-ed25519"),
+        (
+            KeySpec::Ecdsa {
+                curve: EcdsaCurveName::Nistp256,
+            },
+            "ecdsa-sha2-nistp256",
+        ),
+        (
+            KeySpec::Ecdsa {
+                curve: EcdsaCurveName::Nistp384,
+            },
+            "ecdsa-sha2-nistp384",
+        ),
+        (
+            KeySpec::Ecdsa {
+                curve: EcdsaCurveName::Nistp521,
+            },
+            "ecdsa-sha2-nistp521",
+        ),
+    ];
+    for (spec, algorithm) in cases {
+        let info = v.generate(&store, "k", &spec, None).unwrap();
+        assert_eq!(info.algorithm, algorithm);
+        assert!(info.public_key.starts_with(algorithm));
+        assert_eq!(info.kind, KeyKind::Vault);
+        assert!(!info.protected);
+        assert!(v.private_key(&store, info.id).is_ok());
+    }
+    for bits in [3072u32, 4096] {
+        let info = v
+            .generate(&store, "rsa", &KeySpec::Rsa { bits }, None)
+            .unwrap();
+        assert_eq!(info.algorithm, "ssh-rsa");
+        let key = v.private_key(&store, info.id).unwrap();
+        assert_eq!(rsa_bits(&key), bits as usize);
+    }
+}
+
+#[test]
+fn rejects_rsa_sizes_outside_3072_and_4096() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    for bits in [1024u32, 2048, 8192] {
+        let result = v.generate(&store, "rsa", &KeySpec::Rsa { bits }, None);
+        assert!(
+            matches!(result, Err(VaultError::UnsupportedKeyType)),
+            "{bits}"
+        );
+    }
+    assert!(!store.has_key_records().unwrap());
+}
+
+#[test]
+fn key_without_saved_passphrase_needs_it() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let info = v
+        .import_key_protected(&store, "k", &encrypted_openssh(&key, "secret"), "secret")
+        .unwrap();
+    assert!(info.protected);
+    assert!(matches!(
+        v.private_key(&store, info.id),
+        Err(VaultError::PassphraseRequired)
+    ));
+    assert!(matches!(
+        v.unlock_key(&store, info.id, "wrong"),
+        Err(VaultError::WrongPassphrase)
+    ));
+    let unlocked = v.unlock_key(&store, info.id, "secret").unwrap();
+    assert_eq!(seed(&unlocked), seed(&key));
+}
+
+#[test]
+fn protected_import_checks_the_passphrase() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let text = encrypted_openssh(&test_key(), "secret");
+    assert!(matches!(
+        v.import_key_protected(&store, "k", &text, "wrong"),
+        Err(VaultError::WrongPassphrase)
+    ));
+    assert!(!store.has_key_records().unwrap());
+}
+
+#[test]
+fn protected_key_never_lands_decrypted_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite");
+    let key = test_key();
+    let passphrase = "correct horse battery";
+    {
+        let store = Store::open(&path).unwrap();
+        let v = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+        let info = v
+            .import_key_protected(
+                &store,
+                "k",
+                &encrypted_openssh(&key, passphrase),
+                passphrase,
+            )
+            .unwrap();
+        let stored = v.stored_openssh(&store, info.id).unwrap();
+        let parsed = PrivateKey::from_openssh(stored.as_str()).unwrap();
+        assert!(parsed.is_encrypted());
+        assert!(!stored.contains(openssh(&key).as_str()));
+    }
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(!contains(&bytes, passphrase.as_bytes()));
+    assert!(!contains(&bytes, &seed(&key)));
+}
+
+#[test]
+fn saved_passphrase_stores_plain_key() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let info = v
+        .import_key(
+            &store,
+            "k",
+            &encrypted_openssh(&key, "secret"),
+            Some("secret"),
+        )
+        .unwrap();
+    assert!(!info.protected);
+    assert_eq!(seed(&v.private_key(&store, info.id).unwrap()), seed(&key));
+}
+
+#[test]
+fn remember_and_protect_switch_protection_and_keep_id_location_kind() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let id = crate::model::KeyId::new();
+    let server = crate::model::ServerId::new();
+    v.store_key_with_id(&store, id, "synced", &key, Some(server))
+        .unwrap();
+
+    let info = v.protect_key(&store, id, "pw").unwrap();
+    assert!(info.protected);
+    assert_eq!(info.id, id);
+    assert_eq!(info.location, Some(server));
+    assert_eq!(info.kind, KeyKind::Vault);
+    assert!(matches!(
+        v.private_key(&store, id),
+        Err(VaultError::PassphraseRequired)
+    ));
+
+    assert!(matches!(
+        v.remember_passphrase(&store, id, "nope"),
+        Err(VaultError::WrongPassphrase)
+    ));
+    let info = v.remember_passphrase(&store, id, "pw").unwrap();
+    assert!(!info.protected);
+    assert_eq!(info.location, Some(server));
+    assert_eq!(seed(&v.private_key(&store, id).unwrap()), seed(&key));
+}
+
+#[test]
+fn generate_with_passphrase_is_protected() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let info = v
+        .generate(&store, "k", &KeySpec::Ed25519, Some("pw"))
+        .unwrap();
+    assert!(info.protected);
+    assert!(v.unlock_key(&store, info.id, "pw").is_ok());
+}
+
+#[test]
+fn empty_passphrase_counts_as_none() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let info = v
+        .generate(&store, "k", &KeySpec::Ed25519, Some(""))
+        .unwrap();
+    assert!(!info.protected);
+    assert!(v.private_key(&store, info.id).is_ok());
+    assert!(matches!(
+        v.protect_key(&store, info.id, ""),
+        Err(VaultError::WrongPassphrase)
+    ));
+}
+
+#[test]
+fn received_protected_text_stays_protected() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let id = crate::model::KeyId::new();
+    let info = v
+        .store_openssh_with_id(&store, id, "k", &encrypted_openssh(&key, "pw"), None, None)
+        .unwrap();
+    assert!(info.protected);
+    assert_eq!(info.id, id);
+    assert!(v.unlock_key(&store, id, "pw").is_ok());
+    assert!(matches!(
+        v.store_openssh_with_id(&store, id, "k", "garbage", None, None),
+        Err(VaultError::InvalidKey(_))
+    ));
+}
+
+#[test]
+fn device_key_is_device_kind_and_local() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let info = v.store_device_key(&store, "hello", &test_key()).unwrap();
+    assert_eq!(info.kind, KeyKind::Device);
+    assert_eq!(info.location, None);
+    assert_eq!(
+        store.key_record(info.id).unwrap().unwrap().kind,
+        KeyKind::Device
+    );
+}
