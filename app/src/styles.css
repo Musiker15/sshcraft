@@ -1,20 +1,47 @@
-:root {
-  --bg: #0d0f12;
-  --bg-panel: #15181d;
+/* Colours exist only as tokens; the settings provider sets data-theme on <html>. */
+:root,
+:root[data-theme="dark"] {
+  --bg: #111318;
+  --bg-panel: #171a21;
+  --bg-raised: #1f232c;
   --bg-input: rgba(255, 255, 255, 0.05);
   --bg-hover: rgba(255, 255, 255, 0.06);
-  --border: rgba(255, 255, 255, 0.09);
-  --accent: #4fb3a9;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #e7e8ec;
+  --text-muted: #8b90a0;
+  --accent: #f5a524;
+  --accent-text: #1b1306;
   --danger: #e5534b;
+  --danger-bg: rgba(229, 83, 75, 0.15);
   --warning: #d4a72c;
-  --text: #e8e6e3;
-  --text-muted: #8b8d93;
+  --overlay: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f6f8;
+  --bg-panel: #ffffff;
+  --bg-raised: #eceef2;
+  --bg-input: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(0, 0, 0, 0.05);
+  --border: rgba(0, 0, 0, 0.1);
+  --text: #1b1d23;
+  --text-muted: #5f6472;
+  --accent: #c47f00;
+  --accent-text: #ffffff;
+  --danger: #c4312b;
+  --danger-bg: rgba(196, 49, 43, 0.1);
+  --warning: #9a6a00;
+  --overlay: rgba(0, 0, 0, 0.35);
+  color-scheme: light;
+}
+
+:root {
   --radius: 8px;
   font-family: "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   color: var(--text);
   background: var(--bg);
-  color-scheme: dark;
 }
 
 * {
@@ -45,7 +72,7 @@ button:hover {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0b1413;
+  color: var(--accent-text);
 }
 
 button.danger {
@@ -221,14 +248,14 @@ label {
 
 .banner {
   padding: 10px 14px;
-  background: rgba(229, 83, 75, 0.15);
+  background: var(--danger-bg);
   border-bottom: 1px solid var(--danger);
 }
 
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay);
   display: grid;
   place-items: center;
   z-index: 10;

@@ -4,6 +4,8 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { sessionAck, sessionClose, sessionOpen, sessionResize, sessionWrite, type SessionStatus } from "../api";
 import { errorDetail } from "../i18n/errors";
+import { useSettings } from "../settings/SettingsProvider";
+import { terminalTheme } from "../settings/themes";
 import type { Tab } from "../state/tabs";
 
 type Props = {
@@ -17,6 +19,10 @@ type Props = {
 export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const fit = useRef<FitAddon | null>(null);
+  const term = useRef<Terminal | null>(null);
+  const { settings } = useSettings();
+  const look = useRef(settings);
+  look.current = settings;
   const sessionId = useRef<string | null>(null);
   const callbacks = useRef({ onAttach, onStatus });
   callbacks.current = { onAttach, onStatus };
@@ -26,11 +32,12 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
     if (!element) return;
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: "Cascadia Mono, Consolas, monospace",
-      fontSize: 14,
-      theme: { background: "#0d0f12" },
+      fontFamily: look.current.font_family,
+      fontSize: look.current.font_size,
+      theme: terminalTheme(look.current.terminal_theme).colors,
       scrollback: 10000,
     });
+    term.current = terminal;
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(element);
@@ -98,6 +105,16 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
   useEffect(() => {
     if (active && host.current && host.current.offsetWidth > 0) fit.current?.fit();
   }, [active]);
+
+  // Font and colours follow the settings while the session keeps running.
+  useEffect(() => {
+    const terminal = term.current;
+    if (!terminal) return;
+    terminal.options.fontFamily = settings.font_family;
+    terminal.options.fontSize = settings.font_size;
+    terminal.options.theme = terminalTheme(settings.terminal_theme).colors;
+    if (host.current && host.current.offsetWidth > 0) fit.current?.fit();
+  }, [settings.font_family, settings.font_size, settings.terminal_theme]);
 
   return <div className="terminal-host" ref={host} />;
 }

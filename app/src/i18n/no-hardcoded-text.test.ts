@@ -25,7 +25,8 @@ const LETTERS = /[A-Za-zÄÖÜäöüß]{2,}/;
 export function findHardcodedText(source: string): string[] {
   const findings: string[] = [];
   // JSX text between a closing ">" and the next "<", skipping code fragments.
-  for (const match of source.matchAll(/>([^<>{}]*)</g)) {
+  // An arrow ("=>") is code, not the end of a tag.
+  for (const match of source.matchAll(/(?<!=)>([^<>{}]*)</g)) {
     const text = match[1].trim();
     if (!text || /[=;]|&&|\|\|/.test(text)) continue;
     if (LETTERS.test(text) && !ALLOWED.has(text)) findings.push(text);
@@ -53,4 +54,5 @@ test("the scanner finds JSX text, attributes and dialogs", () => {
   expect(findHardcodedText(`<button title="Löschen">Neuer Host</button>`)).toEqual(["Neuer Host", 'title="Löschen"']);
   expect(findHardcodedText(`if (!confirm(message)) return;`)).toEqual(["confirm("]);
   expect(findHardcodedText(`<span>{t("a")}</span><b>SSHCraft</b>`)).toEqual([]);
+  expect(findHardcodedText(`update: (patch: Partial<AppSettings>) => Promise<void>;`)).toEqual([]);
 });
