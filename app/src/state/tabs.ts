@@ -1,5 +1,5 @@
 // Tabs of the window: the start page (always first), new-tab pages and terminal sessions.
-import type { SessionStatus } from "../api";
+import type { SessionStatus, SessionTarget } from "../api";
 
 export const HOME_ID = "home";
 
@@ -8,7 +8,7 @@ export type NewTab = { kind: "new"; id: string };
 export type SessionTab = {
   kind: "session";
   id: string;
-  hostId: string;
+  target: SessionTarget;
   title: string;
   sessionId?: string;
   status: SessionStatus;
@@ -18,9 +18,9 @@ export type Tab = HomeTab | NewTab | SessionTab;
 export type TabsState = { tabs: Tab[]; activeId: string };
 
 export type TabsAction =
-  | { type: "open"; tab: { id: string; hostId: string; title: string } }
+  | { type: "open"; tab: { id: string; target: SessionTarget; title: string } }
   | { type: "openNew"; id: string }
-  | { type: "pick"; id: string; hostId: string; title: string }
+  | { type: "pick"; id: string; target: SessionTarget; title: string }
   | { type: "attach"; id: string; sessionId: string }
   | { type: "status"; id: string; status: SessionStatus }
   | { type: "close"; id: string }
@@ -53,7 +53,7 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       return {
         tabs: state.tabs.map((t) =>
           t.id === action.id && t.kind === "new"
-            ? { kind: "session", id: t.id, hostId: action.hostId, title: action.title, status: { state: "connecting" } }
+            ? { kind: "session", id: t.id, target: action.target, title: action.title, status: { state: "connecting" } }
             : t,
         ),
         activeId: action.id,
@@ -77,5 +77,17 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       const neighbour = tabs[index] ?? tabs[index - 1];
       return { tabs, activeId: neighbour.id };
     }
+  }
+}
+
+/** How a tab is titled: the host's name, the shell's label or "port (baud)". */
+export function targetTitle(target: SessionTarget, hostName = ""): string {
+  switch (target.kind) {
+    case "host":
+      return hostName;
+    case "local":
+      return target.shell.label;
+    case "serial":
+      return `${target.settings.port} (${target.settings.baud})`;
   }
 }

@@ -11,6 +11,11 @@ import {
   itemShares,
   listKeys,
   identitiesList,
+  localShells,
+  serialRemember,
+  type SerialSettings,
+  type SessionTarget,
+  type ShellCommand,
   answerAuth,
   type AuthPrompt,
   type Identity,
@@ -45,7 +50,7 @@ import type { PaletteActionId } from "../palette/rank";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ShareDialog, type ShareTarget } from "../pages/sync/ShareDialog";
-import { HOME_ID, initialTabs, tabsReducer } from "../state/tabs";
+import { HOME_ID, initialTabs, tabsReducer, targetTitle } from "../state/tabs";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Drawer } from "./Drawer";
 import { ErrorMessage } from "./ErrorMessage";
@@ -67,6 +72,7 @@ export function AppShell() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
   const [identities, setIdentities] = useState<Identity[]>([]);
+  const [shells, setShells] = useState<ShellCommand[]>([]);
   const [authPrompts, setAuthPrompts] = useState<AuthPrompt[]>([]);
   const [servers, setServers] = useState<ServerView[]>([]);
   const [shares, setShares] = useState<ItemShare[]>([]);
@@ -112,6 +118,7 @@ export function AppShell() {
   useEffect(() => {
     void reload();
     reloadRecent();
+    localShells().then(setShells, () => setShells([]));
     void vaultStatus().then((s) => setVault(s.ok ? null : s));
     // Hello is only checked when a stored key is first used; the core reports the outcome.
     void helloStatus().then((s) => setHelloMissing(s.missing));
@@ -134,7 +141,7 @@ export function AppShell() {
   }, [reload, reloadRecent]);
 
   const connect = useCallback((host: Host) => {
-    dispatch({ type: "open", tab: { id: crypto.randomUUID(), hostId: host.id, title: host.name } });
+    dispatch({ type: "open", tab: { id: crypto.randomUUID(), target: { kind: "host", host_id: host.id }, title: host.name } });
   }, []);
 
   const runAction = useCallback(
@@ -298,7 +305,19 @@ export function AppShell() {
             hosts={hosts}
             groups={groups}
             recent={recent}
-            onPick={(host) => dispatch({ type: "pick", id: activeTab.id, hostId: host.id, title: host.name })}
+            onPick={(host) =>
+              dispatch({ type: "pick", id: activeTab.id, target: { kind: "host", host_id: host.id }, title: host.name })
+            }
+            shells={shells}
+            onShell={(shell) => {
+              const target: SessionTarget = { kind: "local", shell };
+              dispatch({ type: "pick", id: activeTab.id, target, title: targetTitle(target) });
+            }}
+            onSerial={(settings: SerialSettings) => {
+              void serialRemember(settings).catch(() => {});
+              const target: SessionTarget = { kind: "serial", settings };
+              dispatch({ type: "pick", id: activeTab.id, target, title: targetTitle(target) });
+            }}
           />
         )}
         {/* Sessions stay mounted while hidden, so switching tabs never drops a connection. */}
@@ -375,6 +394,11 @@ export function AppShell() {
           onClose={() => setPaletteOpen(false)}
           onHost={connect}
           onAction={paletteAction}
+          shells={shells}
+          onShell={(shell) => {
+            const target: SessionTarget = { kind: "local", shell };
+            dispatch({ type: "open", tab: { id: crypto.randomUUID(), target, title: targetTitle(target) } });
+          }}
         />
       )}
 

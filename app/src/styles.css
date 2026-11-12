@@ -1013,3 +1013,16 @@ button.link[aria-current="page"] {
   gap: 6px;
   margin-left: auto;
 }
+
+/* Serial settings on the new tab page */
+.serial-form {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.serial-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}

@@ -1,16 +1,26 @@
-import { Clock, Search, Server } from "lucide-react";
+import { Cable, Clock, Search, Server, SquareTerminal } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Group, Host } from "../api";
+import type { Group, Host, SerialSettings, ShellCommand } from "../api";
+import { SerialForm } from "../components/SerialForm";
 import { useLanguage, useT } from "../i18n/i18n";
 import { rankPalette } from "../palette/rank";
 import { hostSubtitle, sortByName } from "./hostsView";
 
-type Props = { hosts: Host[]; groups: Group[]; recent: string[]; onPick: (host: Host) => void };
+type Props = {
+  hosts: Host[];
+  groups: Group[];
+  recent: string[];
+  onPick: (host: Host) => void;
+  /** Local shells (empty on a phone, where both local sections are left out). */
+  shells?: ShellCommand[];
+  onShell?: (shell: ShellCommand) => void;
+  onSerial?: (settings: SerialSettings) => void;
+};
 
 const RECENT = 10;
 
 /** A fresh tab: search, recent connections and all hosts; picking one connects this tab. */
-export function NewTabPage({ hosts, groups, recent, onPick }: Props) {
+export function NewTabPage({ hosts, groups, recent, onPick, shells = [], onShell, onSerial }: Props) {
   const t = useT();
   const lang = useLanguage();
   const [query, setQuery] = useState("");
@@ -79,6 +89,27 @@ export function NewTabPage({ hosts, groups, recent, onPick }: Props) {
               <div className="list">{s.hosts.map((host) => row(host))}</div>
             </div>
           ))}
+          {shells.length > 0 && onShell && (
+            <div className="group-block">
+              <h2 className="group-title">{t("newTab.local")}</h2>
+              <div className="list">
+                {shells.map((shell) => (
+                  <button key={`${shell.program} ${shell.args.join(" ")}`} className="list-row" onClick={() => onShell(shell)}>
+                    <SquareTerminal size={16} aria-hidden="true" />
+                    <span className="palette-name">{shell.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {shells.length > 0 && onSerial && (
+            <div className="group-block">
+              <h2 className="group-title">
+                <Cable size={14} aria-hidden="true" /> {t("newTab.serial")}
+              </h2>
+              <SerialForm onOpen={onSerial} />
+            </div>
+          )}
         </>
       )}
     </section>
