@@ -5553,6 +5553,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcraft-agent"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+ "windows",
+]
+
+[[package]]
 name = "sshcraft-app"
 version = "0.1.0"
 dependencies = [
@@ -5562,6 +5575,7 @@ dependencies = [
  "russh",
  "serde",
  "serde_json",
+ "sshcraft-agent",
  "sshcraft-core",
  "sshcraft-fido",
  "sshcraft-local",
@@ -5585,6 +5599,18 @@ dependencies = [
  "windows-future",
  "winreg 0.56.0",
  "zeroize",
+]
+
+[[package]]
+name = "sshcraft-cli"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "serde",
+ "serde_json",
+ "sshcraft-agent",
+ "tokio",
 ]
 
 [[package]]

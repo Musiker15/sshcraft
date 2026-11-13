@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Folder, LayoutGrid, List, Search } from "lucide-react";
-import { useMemo, useState } from "react";
-import type { Group, Host, ItemKind, ItemShare, KeyInfo, ServerView } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { agentPolicyGet, agentSetHidden, type AgentPolicy, type Group, type Host, type ItemKind, type ItemShare, type KeyInfo, type ServerView } from "../api";
+import { emptyPolicy } from "../agents/policy";
 import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
@@ -49,6 +50,26 @@ export function HostsPage(props: HostsPageProps) {
   const view = settings.host_view;
 
   // A level whose group is gone (deleted, moved away) falls back to the top.
+  // Hosts and groups hidden from AI agents (a setting of this device).
+  const [agentPolicy, setAgentPolicy] = useState<AgentPolicy>(emptyPolicy);
+  useEffect(() => {
+    agentPolicyGet().then(
+      (p) => setAgentPolicy(p ?? emptyPolicy),
+      () => {},
+    );
+  }, []);
+  const agentItem = (id: string) => {
+    const hidden = agentPolicy.hidden.includes(id);
+    return {
+      label: hidden ? t("hosts.agentShow") : t("hosts.agentHide"),
+      onSelect: () => {
+        void agentSetHidden(id, !hidden).then(
+          (saved) => saved && setAgentPolicy(saved),
+          () => {},
+        );
+      },
+    };
+  };
   const here = level && props.groups.some((g) => g.id === level) ? level : null;
   const groups = useMemo(() => sortByName(childGroups(props.groups, here), lang), [props.groups, here, lang]);
   const hosts = useMemo(() => sortByName(props.hosts, lang), [props.hosts, lang]);
@@ -127,6 +148,7 @@ export function HostsPage(props: HostsPageProps) {
                 ? [{ label: t("hosts.installKey"), onSelect: () => props.onInstallKey?.(host) }]
                 : []),
               ...shareItems({ kind: "host", host }, host.location, share),
+              agentItem(host.id),
               ...(received ? [] : moveItems("host", host.id, host.location, host.group_id !== null)),
               ...(readOnly ? [] : [{ label: t("common.delete"), onSelect: () => props.onDeleteHost(host), danger: true }]),
             ],
@@ -175,6 +197,7 @@ export function HostsPage(props: HostsPageProps) {
             { label: t("hosts.edit"), onSelect: () => props.onEditGroup(group) },
             ...(received ? [] : [{ label: t("hosts.newSubgroup"), onSelect: () => props.onNewGroup(group.id) }]),
             ...shareItems({ kind: "group", group }, group.location, share),
+            agentItem(group.id),
             ...(received ? [] : moveItems("group", group.id, group.location, (group.parent_id ?? null) !== null)),
             ...(received ? [] : [{ label: t("common.delete"), onSelect: () => props.onDeleteGroup(group), danger: true }]),
           ],

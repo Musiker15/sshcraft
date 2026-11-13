@@ -86,3 +86,13 @@ switched on is refused. See [connections.md](connections.md).
 - Log sync is a switch of its own per server and goes into the personal area only. The server
   learns how many log records there are and their sizes. Details in
   [session-logs.md](session-logs.md).
+
+## AI agents
+
+- Agents reach SSHCraft only through the local pipe of the current user (access list for that
+  user, no remote clients, first instance; the `sshcraft` tool checks the server's user).
+- No action returns key material, passwords or account keys; answers that look like key
+  material are blocked. Rights per kind of action (allow, ask, block), questions only in
+  SSHCraft's window, hidden hosts answered as unknown, a sealed log of every action.
+- An agent with its own shell runs as the same user and can bypass SSHCraft (`pass-cli`, files).
+  Details in [agents.md](agents.md).

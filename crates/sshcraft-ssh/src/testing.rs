@@ -83,6 +83,10 @@ struct Records {
     commands: Mutex<Vec<String>>,
     /// What `exec` answers; `None`: [`TEST_EXEC_OUTPUT`].
     exec_output: Mutex<Option<String>>,
+    /// Extra for `exec`: text on standard error, exit status, and a delay before answering.
+    exec_stderr: Mutex<String>,
+    exec_status: Mutex<u32>,
+    exec_delay: Mutex<std::time::Duration>,
     /// Terminal types clients asked for with `pty-req`.
     terms: Mutex<Vec<String>>,
     /// What clients sent on the standard input of `exec` channels.
@@ -129,6 +133,13 @@ impl TestServer {
     /// Answers every later `exec` with `output`.
     pub fn set_exec_output(&self, output: &str) {
         *self.records.exec_output.lock().unwrap() = Some(output.to_owned());
+    }
+
+    /// What `exec` writes to standard error, its exit status and how long it takes.
+    pub fn set_exec_result(&self, stderr: &str, status: u32, delay: std::time::Duration) {
+        *self.records.exec_stderr.lock().unwrap() = stderr.to_owned();
+        *self.records.exec_status.lock().unwrap() = status;
+        *self.records.exec_delay.lock().unwrap() = delay;
     }
 
     /// Commands clients ran over `exec`, in order.
@@ -615,10 +626,19 @@ impl server::Handler for Handler {
             .unwrap()
             .clone()
             .unwrap_or_else(|| TEST_EXEC_OUTPUT.to_owned());
+        let stderr = self.records.exec_stderr.lock().unwrap().clone();
+        let status = *self.records.exec_status.lock().unwrap();
+        let delay = *self.records.exec_delay.lock().unwrap();
         let handle = session.handle();
         tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
             let _ = handle.data(channel, Bytes::from(output.into_bytes())).await;
-            let _ = handle.exit_status_request(channel, 0).await;
+            if !stderr.is_empty() {
+                let _ = handle
+                    .extended_data(channel, 1, Bytes::from(stderr.into_bytes()))
+                    .await;
+            }
+            let _ = handle.exit_status_request(channel, status).await;
             let _ = handle.eof(channel).await;
             let _ = handle.close(channel).await;
         });

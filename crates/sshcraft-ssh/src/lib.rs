@@ -376,6 +376,49 @@ async fn exec_on(
         .map_err(|_| SshError::Timeout)?
 }
 
+/// What a command run with [`Session::run`] gave back.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RunOutput {
+    /// Standard output and standard error as they came, at most the limit.
+    pub output: Vec<u8>,
+    /// More came than the limit allowed.
+    pub truncated: bool,
+    /// The exit status the server reported, if it did.
+    pub exit_status: Option<u32>,
+}
+
+/// Runs a command to its end: output and errors together (up to `limit` bytes, the rest is
+/// read and dropped) and the exit status. No time limit of its own; the caller sets one.
+async fn run_on(
+    handle: &client::Handle<ClientHandler>,
+    command: &str,
+    limit: usize,
+) -> Result<RunOutput, SshError> {
+    let mut channel = handle.channel_open_session().await.map_err(protocol)?;
+    channel.exec(true, command).await.map_err(protocol)?;
+    let mut result = RunOutput::default();
+    let take = |data: &[u8], result: &mut RunOutput| {
+        let room = limit.saturating_sub(result.output.len());
+        if data.len() > room {
+            result.truncated = true;
+        }
+        result
+            .output
+            .extend_from_slice(&data[..data.len().min(room)]);
+    };
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::Data { data } => take(&data, &mut result),
+            ChannelMsg::ExtendedData { data, .. } => take(&data, &mut result),
+            ChannelMsg::ExitStatus { exit_status } => result.exit_status = Some(exit_status),
+            ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+    let _ = channel.close().await;
+    Ok(result)
+}
+
 /// An authenticated SSH connection. Shells opened from it keep it alive.
 pub struct Session {
     handle: Arc<client::Handle<ClientHandler>>,
@@ -624,6 +667,12 @@ impl Session {
     /// gives up after a few seconds.
     pub async fn exec(&self, command: &str, limit: usize) -> Result<Vec<u8>, SshError> {
         exec_on(&self.handle, command, None, limit).await
+    }
+
+    /// Runs a command to its end and returns output, errors and exit status; see [`RunOutput`].
+    /// Without a time limit: the caller decides how long to wait.
+    pub async fn run(&self, command: &str, limit: usize) -> Result<RunOutput, SshError> {
+        run_on(&self.handle, command, limit).await
     }
 
     /// Opens a shell with a terminal of type `term` (`TERM` on the server).

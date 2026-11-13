@@ -1,5 +1,6 @@
 //! Data model, local store and key vault for SSHCraft.
 
+pub mod agent;
 pub mod authorized_keys;
 pub mod export;
 pub mod forward;

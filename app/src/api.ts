@@ -564,3 +564,46 @@ export const logExport = (id: string, format: LogExportFormat) => invoke<boolean
 export const sessionBookmark = (id: string, text: string) => invoke<LogMark>("session_bookmark", { id, text });
 export const sessionRecording = (id: string) => invoke<boolean>("session_recording", { id });
 export const setServerLogs = (id: string, on: boolean) => invoke<void>("set_server_logs", { id, on });
+
+// AI agents.
+export const AGENT_CATEGORIES = ["list", "connect", "edit", "delete", "keys", "share", "sync"] as const;
+export type AgentCategory = (typeof AGENT_CATEGORIES)[number];
+export type AgentLevel = "allow" | "ask" | "deny";
+/** Levels that differ from the defaults; ids of hosts and groups agents never see. */
+export type AgentPolicy = { levels: Partial<Record<AgentCategory, AgentLevel>>; hidden: string[] };
+export const AGENT_DEFAULTS: Record<AgentCategory, AgentLevel> = {
+  list: "allow",
+  connect: "ask",
+  edit: "ask",
+  delete: "deny",
+  keys: "ask",
+  share: "deny",
+  sync: "deny",
+};
+export type AgentOutcome =
+  | "allowed"
+  | "asked_allowed"
+  | "asked_denied"
+  | "denied"
+  | "hidden"
+  | "failed"
+  | "cancelled";
+export type AgentLogEntry = {
+  id: string;
+  at: number;
+  agent: string;
+  action: string;
+  target: string;
+  detail: string;
+  outcome: AgentOutcome;
+};
+/** A question about an agent's action, answered in this window only. */
+export type AgentQuestion = { prompt_id: number; agent: string; action: string; target: string; detail: string };
+export const agentPolicyGet = () => invoke<AgentPolicy>("agent_policy_get");
+/** One change at a time on the stored policy (a window that has not loaded it cannot overwrite it). */
+export const agentSetHidden = (id: string, hidden: boolean) => invoke<AgentPolicy>("agent_set_hidden", { id, hidden });
+export const agentSetLevel = (category: AgentCategory, level: AgentLevel) =>
+  invoke<AgentPolicy>("agent_set_level", { category, level });
+export const agentLogList = () => invoke<AgentLogEntry[]>("agent_log_list");
+export const agentLogClear = () => invoke<void>("agent_log_clear");
+export const answerAgent = (promptId: number, allow: boolean) => invoke<void>("answer_agent", { promptId, allow });

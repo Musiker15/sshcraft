@@ -25,6 +25,11 @@ pub struct AppState {
     pub sync: SyncManager,
     /// FIDO2 tokens and Windows Hello; `None` where there is no WebAuthn.
     pub security: Option<Arc<dyn sshcraft_fido::Authenticator>>,
+    /// Sessions AI agents opened (only those are theirs).
+    pub agent_sessions: crate::agent_sessions::AgentSessions,
+    /// Questions to the user before an agent's action runs.
+    #[cfg(desktop)]
+    pub agent_confirms: Arc<crate::agents::tauri::TauriConfirmer>,
 }
 
 impl AppState {
@@ -86,6 +91,9 @@ impl AppState {
             prompter,
             sync,
             security,
+            agent_sessions: crate::agent_sessions::AgentSessions::default(),
+            #[cfg(desktop)]
+            agent_confirms: Arc::new(crate::agents::tauri::TauriConfirmer::new(app.clone())),
         })
     }
 }

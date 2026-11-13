@@ -22,6 +22,7 @@ sshcraft-ssh = { workspace = true }
 sshcraft-proto = { workspace = true }
 sshcraft-sync = { workspace = true }
 sshcraft-fido = { workspace = true }
+sshcraft-agent = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 directories = { workspace = true }
