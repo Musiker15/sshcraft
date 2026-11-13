@@ -64,6 +64,9 @@ pub struct AgentKey {
 const AGENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a signature may take; generous, because the user may have to confirm it.
 pub(crate) const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long a security key may take: longer than the 120 s WebAuthn waits itself, so its own
+/// "cancelled" arrives first.
+pub(crate) const SIGNER_TIMEOUT: Duration = Duration::from_secs(130);
 
 pub(crate) async fn agent_identities(
     agent: &mut DynAgent,

@@ -185,7 +185,7 @@ pub async fn create_security_key(
 }
 
 /// A key changed: queue it for its server, if it has one.
-fn key_changed(
+pub(crate) fn key_changed(
     store: &sshcraft_core::store::Store,
     id: KeyId,
 ) -> CommandResult<Vec<sshcraft_core::model::ServerId>> {
@@ -195,41 +195,48 @@ fn key_changed(
 }
 
 /// Runs `change` on a key the user owns, then queues it for sync.
-fn change_key(
+/// Runs off the async threads: a passphrase change runs bcrypt, which can take a second.
+async fn change_key(
     state: &AppState,
     id: KeyId,
-    change: impl FnOnce(&Vault, &sshcraft_core::store::Store) -> Result<KeyInfo, vault::VaultError>,
+    change: impl FnOnce(&Vault, &sshcraft_core::store::Store) -> Result<KeyInfo, vault::VaultError>
+    + Send
+    + 'static,
 ) -> CommandResult<KeyInfo> {
     let vault = unlocked(state)?;
-    let (info, servers) = {
-        let store = state.store.lock().expect("store lock");
+    let store = state.store.clone();
+    let (info, servers) = blocking(move || {
+        let store = store.lock().expect("store lock");
         if let Some(server) = store.location_of(ItemKind::Key, &id.0.to_string())? {
             crate::sync::share_rights_for_key(&store, server, id)?;
         }
         let info = change(&vault, &store)?;
         let servers = key_changed(&store, id)?;
-        (info, servers)
-    };
+        Ok((info, servers))
+    })
+    .await?;
     state.sync.nudge(&servers);
     Ok(info)
 }
 
 #[tauri::command]
-pub fn attach_certificate(
+pub async fn attach_certificate(
     state: State<'_, AppState>,
     id: KeyId,
     text: String,
 ) -> CommandResult<KeyInfo> {
-    change_key(&state, id, |vault, store| {
+    change_key(&state, id, move |vault, store| {
         vault.attach_certificate(store, id, &text)
     })
+    .await
 }
 
 #[tauri::command]
-pub fn detach_certificate(state: State<'_, AppState>, id: KeyId) -> CommandResult<KeyInfo> {
-    change_key(&state, id, |vault, store| {
+pub async fn detach_certificate(state: State<'_, AppState>, id: KeyId) -> CommandResult<KeyInfo> {
+    change_key(&state, id, move |vault, store| {
         vault.detach_certificate(store, id)
     })
+    .await
 }
 
 /// Saves the passphrase from now on (the key is kept decrypted inside the vault).
@@ -240,9 +247,10 @@ pub async fn remember_passphrase(
     passphrase: String,
 ) -> CommandResult<KeyInfo> {
     let passphrase = Zeroizing::new(passphrase);
-    change_key(&state, id, |vault, store| {
+    change_key(&state, id, move |vault, store| {
         vault.remember_passphrase(store, id, &passphrase)
     })
+    .await
 }
 
 /// Stops saving the passphrase: the key is kept encrypted with `passphrase`.
@@ -253,9 +261,10 @@ pub async fn protect_key(
     passphrase: String,
 ) -> CommandResult<KeyInfo> {
     let passphrase = Zeroizing::new(passphrase);
-    change_key(&state, id, |vault, store| {
+    change_key(&state, id, move |vault, store| {
         vault.protect_key(store, id, &passphrase)
     })
+    .await
 }
 
 /// Puts the public half of `key` into `authorized_keys` on the host.

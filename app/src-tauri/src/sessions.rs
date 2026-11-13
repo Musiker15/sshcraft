@@ -772,7 +772,12 @@ async fn ask_passphrase(
         let Some(passphrase) = answers.into_iter().next() else {
             return Err(Failure::End(EndReason::AuthCancelled, None, None));
         };
-        if let Ok(key) = key.decrypt(passphrase.as_str()) {
+        // bcrypt takes up to a second per try: not on an async worker.
+        let encrypted = key.clone();
+        let opened = tokio::task::spawn_blocking(move || encrypted.decrypt(passphrase.as_str()))
+            .await
+            .map_err(|e| end_error(ErrorCode::Internal, Some(e.to_string())))?;
+        if let Ok(key) = opened {
             return Ok(key);
         }
     }

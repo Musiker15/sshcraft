@@ -9,7 +9,7 @@ use russh::keys::{Certificate, HashAlg, PrivateKeyWithHashAlg};
 use russh::{MethodKind, MethodSet};
 use zeroize::Zeroizing;
 
-use crate::{AGENT_SIGN_TIMEOUT, Credential, SshError, agent_identities, protocol};
+use crate::{AGENT_SIGN_TIMEOUT, Credential, SIGNER_TIMEOUT, SshError, agent_identities, protocol};
 
 /// How to sign in on one host: a key, a stored password, both or neither (then the user is asked
 /// where the server allows it).
@@ -393,7 +393,7 @@ async fn publickey<H: client::Handler>(
             if let Some(cert) = certificate {
                 let signed =
                     handle.authenticate_certificate_with(username, cert, None, &mut adapter);
-                let result = tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
+                let result = tokio::time::timeout(SIGNER_TIMEOUT, signed)
                     .await
                     .map_err(|_| SshError::SignerFailed("no answer while signing".into()))??;
                 if !may_retry_key(&result) {
@@ -402,7 +402,7 @@ async fn publickey<H: client::Handler>(
             }
             let signed =
                 handle.authenticate_publickey_with(username, public_key, None, &mut adapter);
-            Ok(tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
+            Ok(tokio::time::timeout(SIGNER_TIMEOUT, signed)
                 .await
                 .map_err(|_| SshError::SignerFailed("no answer while signing".into()))??)
         }
