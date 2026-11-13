@@ -2,7 +2,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
+  answerAgent,
   answerHostKey,
+  type AgentQuestion,
   deleteGroup,
   deleteHost,
   helloStatus,
@@ -45,6 +47,7 @@ import {
 import { GroupForm } from "../components/GroupForm";
 import { HostForm } from "../components/HostForm";
 import { AuthPromptDialog } from "../components/AuthPromptDialog";
+import { AgentConfirmDialog } from "../components/AgentConfirmDialog";
 import { HostKeyDialog } from "../components/HostKeyDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ImportDialog } from "../components/ImportDialog";
@@ -112,6 +115,7 @@ export function AppShell() {
   const [editor, setEditor] = useState<Editor>(null);
   const [confirming, setConfirming] = useState<Confirm>(null);
   const [prompts, setPrompts] = useState<HostKeyPrompt[]>([]);
+  const [agentQuestions, setAgentQuestions] = useState<AgentQuestion[]>([]);
   const [tabs, dispatch] = useReducer(tabsReducer, initialTabs);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -183,6 +187,11 @@ export function AppShell() {
         setPrompts((queue) => queue.filter((p) => p.prompt_id !== event.payload.prompt_id));
       }),
       listen("hello-unavailable", () => setHelloMissing(true)),
+      listen<AgentQuestion>("agent-confirm", (event) => setAgentQuestions((queue) => [...queue, event.payload])),
+      // The agent went away or the question timed out: it leaves the screen.
+      listen<number>("agent-confirm-withdrawn", (event) =>
+        setAgentQuestions((queue) => queue.filter((q) => q.prompt_id !== event.payload)),
+      ),
       // Another device changed something: show it.
       listen("data-changed", () => void reload()),
     ];
@@ -524,7 +533,7 @@ export function AppShell() {
                   onInstall={(key) => openInstall({ key })}
                 />
               )}
-              {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
+              {page === "settings" && <SettingsPage onDataChanged={() => void reload()} hosts={hosts} groups={groups} />}
               {page === "forwarding" && <ForwardingPage hosts={hosts} onChanged={() => void reload()} />}
               {page === "snippets" && <SnippetsPage hosts={hosts} onRun={setRunning} />}
               {page === "logs" && <LogsPage hosts={hosts} />}
@@ -728,6 +737,18 @@ export function AppShell() {
             const answered = authPrompts[0].prompt_id;
             void answerAuth(answered, answers);
             setAuthPrompts((queue) => queue.filter((p) => p.prompt_id !== answered));
+          }}
+        />
+      )}
+
+      {agentQuestions[0] && (
+        <AgentConfirmDialog
+          key={agentQuestions[0].prompt_id}
+          question={agentQuestions[0]}
+          onAnswer={(allow) => {
+            const answered = agentQuestions[0].prompt_id;
+            void answerAgent(answered, allow);
+            setAgentQuestions((queue) => queue.filter((q) => q.prompt_id !== answered));
           }}
         />
       )}

@@ -1,9 +1,10 @@
+import { AgentSettings } from "./AgentSettings";
 import { LocalShellSetting } from "../components/LocalShellSetting";
 import { ShortcutSettings } from "../components/ShortcutSettings";
 import { TERMINAL_TYPES } from "../settings/terminal";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
-import { LOG_RETENTION_DAYS, historyClear, type AppSettings, type AppTheme } from "../api";
+import { LOG_RETENTION_DAYS, historyClear, type AppSettings, type AppTheme, type Group, type Host } from "../api";
 import { HISTORY_CLEARED } from "../terminal/panes";
 import { useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
@@ -21,7 +22,9 @@ const APP_THEMES: AppTheme[] = ["system", "dark", "light"];
 const SAMPLE_PROMPT = "user@host:~$";
 
 /** Language, look and terminal font of this device; every change is saved at once. */
-export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } = {}) {
+type SettingsPageProps = { onDataChanged?: () => void; hosts?: Host[]; groups?: Group[] };
+
+export function SettingsPage({ onDataChanged, hosts = [], groups = [] }: SettingsPageProps = {}) {
   const t = useT();
   const { settings, update } = useSettings();
   const [version, setVersion] = useState<string | null>(null);
@@ -214,6 +217,8 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
       </div>
 
       <LocalShellSetting />
+
+      <AgentSettings hosts={hosts} groups={groups} />
 
       <ShortcutSettings />
 

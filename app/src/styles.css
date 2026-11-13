@@ -1567,3 +1567,35 @@ textarea.mono {
   opacity: 0.85;
   pointer-events: none;
 }
+
+/* AI agents */
+.agent-levels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 16px;
+}
+
+.agent-hidden {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-log {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.agent-log td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.agent-detail {
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
