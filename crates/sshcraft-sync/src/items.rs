@@ -283,7 +283,15 @@ pub fn apply_in(
             match item_kind {
                 ItemKind::Group => store.delete_group(GroupId(uuid))?,
                 ItemKind::Host => store.delete_host(HostId(uuid))?,
-                ItemKind::Key => store.delete_key_record(KeyId(uuid))?,
+                // A key bound to this device was never sent; no record may remove it.
+                ItemKind::Key => {
+                    if !store
+                        .key_record(KeyId(uuid))?
+                        .is_some_and(|r| r.kind == KeyKind::Device)
+                    {
+                        store.delete_key_record(KeyId(uuid))?;
+                    }
+                }
                 ItemKind::Identity => store.delete_identity(IdentityId(uuid))?,
                 ItemKind::Password => store.delete_password(PasswordId(uuid))?,
             }

@@ -611,3 +611,23 @@ fn security_key_is_never_stored_protected() {
         Err(VaultError::UnsupportedKeyType)
     ));
 }
+
+#[test]
+fn certificate_with_broken_signature_is_refused() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    let key = test_key();
+    let info = v.import_key(&store, "k", &openssh(&key), None).unwrap();
+    let (text, _) = certificate_for(&key, CertType::User, u64::MAX);
+    // Change one byte of the CA signature at the end of the blob.
+    let mut parts: Vec<String> = text.split(' ').map(str::to_owned).collect();
+    let mut blob = data_encoding::BASE64.decode(parts[1].as_bytes()).unwrap();
+    let last = blob.len() - 1;
+    blob[last] ^= 0x01;
+    parts[1] = data_encoding::BASE64.encode(&blob);
+    let tampered = parts.join(" ");
+    assert!(matches!(
+        v.attach_certificate(&store, info.id, &tampered),
+        Err(VaultError::InvalidCertificate(_))
+    ));
+}

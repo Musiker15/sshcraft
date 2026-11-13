@@ -598,6 +598,9 @@ fn check_certificate(public: &PublicKey, text: &str) -> Result<String, VaultErro
     if cert.public_key() != public.key_data() {
         return Err(VaultError::CertificateMismatch);
     }
+    // A damaged or altered certificate would only be refused by the server later.
+    cert.verify_signature()
+        .map_err(|e| VaultError::InvalidCertificate(e.to_string()))?;
     Ok(line.to_owned())
 }
 
