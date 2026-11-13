@@ -545,5 +545,9 @@
   "workspaces.open": "Workspace: {name}",
   "workspaces.panes": "{count} Bereiche",
   "workspaces.skipped": "{count} Bereich(e) der Vorlage fehlen, weil es ihren Host nicht mehr gibt.",
-  "workspaces.title": "Workspaces"
+  "workspaces.title": "Workspaces",
+  "errors.invalid_forward": "Die Weiterleitungsregel ist ungültig (Ports 1 bis 65535, Adresse ohne Leerzeichen, höchstens 50 Regeln je Host).",
+  "errors.port_in_use": "Der Port ist auf diesem Gerät schon belegt.",
+  "errors.bind_failed": "Auf dieser Adresse lässt sich nicht lauschen.",
+  "errors.forward_refused": "Der Server erlaubt diese entfernte Weiterleitung nicht."
 }

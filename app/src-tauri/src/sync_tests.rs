@@ -28,6 +28,7 @@ fn store_with_server() -> (Store, ServerId) {
 
 fn host(group: Option<GroupId>) -> Host {
     Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "web".into(),
         group_id: group,

@@ -13,6 +13,7 @@ fn group(settings: ConnectionSettings) -> Group {
 
 fn host(name: &str, group: Option<&Group>, settings: ConnectionSettings) -> Host {
     Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: name.into(),
         group_id: group.map(|g| g.id),

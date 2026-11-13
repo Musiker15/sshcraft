@@ -15,6 +15,7 @@ fn setup() -> (Store, Vault) {
 
 fn new_host(store: &Store, settings: ConnectionSettings) -> Host {
     let host = Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "web".into(),
         group_id: None,

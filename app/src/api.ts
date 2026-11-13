@@ -57,6 +57,18 @@ export type Group = {
   proxy_has_password?: boolean;
 };
 
+export type ForwardKind = "local" | "remote" | "dynamic";
+export type ForwardRule = {
+  id: string;
+  name: string;
+  kind: ForwardKind;
+  bind_address: string;
+  bind_port: number;
+  /** Empty for a dynamic rule. */
+  target_host: string;
+  /** 0 for a dynamic rule. */
+  target_port: number;
+};
 export type Host = {
   id: string;
   name: string;
@@ -67,6 +79,8 @@ export type Host = {
   os?: HostOs | null;
   has_password?: boolean;
   proxy_has_password?: boolean;
+  /** Port forwarding rules of this host. */
+  forwards?: ForwardRule[];
 };
 
 export type Identity = {

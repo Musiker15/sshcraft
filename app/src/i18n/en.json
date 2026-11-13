@@ -545,5 +545,9 @@
   "workspaces.open": "Workspace: {name}",
   "workspaces.panes": "{count} panes",
   "workspaces.skipped": "{count} pane(s) of the template were left out because their host no longer exists.",
-  "workspaces.title": "Workspaces"
+  "workspaces.title": "Workspaces",
+  "errors.invalid_forward": "The forwarding rule is not valid (ports 1 to 65535, an address without spaces, at most 50 rules per host).",
+  "errors.port_in_use": "The port is already in use on this device.",
+  "errors.bind_failed": "The address could not be used for listening.",
+  "errors.forward_refused": "The server does not allow this remote forwarding."
 }

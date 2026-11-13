@@ -2,6 +2,7 @@
 
 pub mod authorized_keys;
 pub mod export;
+pub mod forward;
 pub mod import;
 pub mod keytypes;
 pub mod model;

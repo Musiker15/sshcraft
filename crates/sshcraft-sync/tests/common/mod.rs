@@ -279,6 +279,7 @@ pub async fn revoke_raw(server: &TestServer, by: &Dev, target: Uuid) {
 
 pub fn sample_host(name: &str) -> Host {
     Host {
+        forwards: Vec::new(),
         id: sshcraft_core::model::HostId::new(),
         name: name.into(),
         group_id: None,
