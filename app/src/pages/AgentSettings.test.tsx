@@ -70,14 +70,14 @@ test("levels show the stored ones and the defaults, and are saved", async () => 
   const remove = screen.getByLabelText(en["agents.category.delete"]) as HTMLSelectElement;
   expect(remove.value).toBe("deny");
   fireEvent.change(remove, { target: { value: "ask" } });
-  await vi.waitFor(() => expect(state.saved.at(-1)?.levels.delete).toBe("ask"));
-  expect(state.saved.at(-1)?.levels.connect).toBe("allow");
+  await vi.waitFor(() => expect(state.saved[state.saved.length - 1]?.levels.delete).toBe("ask"));
+  expect(state.saved[state.saved.length - 1]?.levels.connect).toBe("allow");
 });
 
 test("a hidden host can be shown again", async () => {
   await show();
   fireEvent.click(screen.getByRole("button", { name: en["agents.show"] }));
-  await vi.waitFor(() => expect(state.saved.at(-1)?.hidden).toEqual([]));
+  await vi.waitFor(() => expect(state.saved[state.saved.length - 1]?.hidden).toEqual([]));
 });
 
 test("the log lists actions and can be cleared", async () => {
