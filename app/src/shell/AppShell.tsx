@@ -14,6 +14,9 @@ import {
   localShells,
   serialRemember,
   sessionWrite,
+  workspaceTemplates,
+  deleteWorkspaceTemplate,
+  type WorkspaceTemplate,
   type SerialSettings,
   type SessionStatus,
   type SessionTarget,
@@ -45,6 +48,7 @@ import { ExportDialog } from "../components/ExportDialog";
 import { ImportDialog } from "../components/ImportDialog";
 import { InstallKeyDialog } from "../components/KeyDialogs";
 import { WorkspaceView } from "../components/WorkspaceView";
+import { TemplateDialog } from "../components/TemplateDialog";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
@@ -62,6 +66,7 @@ import {
   isPicker,
   tabsReducer,
   targetTitle,
+  type Pane,
   type SessionTab,
 } from "../state/tabs";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -106,6 +111,14 @@ export function AppShell() {
   const [helloDismissed, setHelloDismissed] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
+  const [templateFor, setTemplateFor] = useState<SessionTab | null>(null);
+  /** Panes of the last opened template left out because their host is gone. */
+  const [skipped, setSkipped] = useState(0);
+
+  const reloadTemplates = useCallback(() => {
+    workspaceTemplates().then((list) => setTemplates(list ?? []), () => setTemplates([]));
+  }, []);
 
   /** "Add to authorized_keys": the agent's keys are offered too, fetched when it opens. */
   const openInstall = useCallback((start: { host?: string; key?: KeyRef }) => {
@@ -142,6 +155,7 @@ export function AppShell() {
   useEffect(() => {
     void reload();
     reloadRecent();
+    reloadTemplates();
     localShells().then(setShells, () => setShells([]));
     void vaultStatus().then((s) => setVault(s.ok ? null : s));
     // Hello is only checked when a stored key is first used; the core reports the outcome.
@@ -162,7 +176,41 @@ export function AppShell() {
     return () => {
       for (const unlisten of listeners) void unlisten.then((stop) => stop());
     };
-  }, [reload, reloadRecent]);
+  }, [reload, reloadRecent, reloadTemplates]);
+
+  /** Opens a template as a new tab; panes whose host was deleted are left out. */
+  const openTemplate = useCallback(
+    (template: WorkspaceTemplate) => {
+      const known = new Set(hosts.map((h) => h.id));
+      const panes: Pane[] = template.panes.flatMap((p): Pane[] => {
+        const target = p.target;
+        if (target.kind === "host" && !known.has(target.host_id)) return [];
+        return [
+          {
+            id: crypto.randomUUID(),
+            target: target.kind === "local" ? { kind: "local", shell: target.shell, cwd: p.cwd ?? null } : target,
+            title: p.title,
+            status: { state: "connecting" },
+            activity: "none",
+            startup: { cwd: p.cwd ?? null, command: p.command ?? null },
+          },
+        ];
+      });
+      setSkipped(template.panes.length - panes.length);
+      // All panes kept: the stored grid fits; otherwise it starts equal.
+      const complete = panes.length === template.panes.length;
+      dispatch({
+        type: "openTemplate",
+        tabId: crypto.randomUUID(),
+        name: template.name,
+        layout: template.layout,
+        colSizes: complete ? template.col_sizes : [],
+        rowSizes: complete ? template.row_sizes : [],
+        panes,
+      });
+    },
+    [hosts],
+  );
 
   const connect = useCallback((host: Host) => {
     dispatch({ type: "open", tab: { id: crypto.randomUUID(), target: { kind: "host", host_id: host.id }, title: host.name } });
@@ -312,7 +360,7 @@ export function AppShell() {
         dispatch={dispatch}
         onNewTab={() => runAction("newTab")}
         onSplit={() => runAction("splitPane")}
-        onSaveTemplate={() => {}}
+        onSaveTemplate={setTemplateFor}
       />
       {vault && (
         <div className="banner">
@@ -324,6 +372,14 @@ export function AppShell() {
       {problem !== null && (
         <div className="banner">
           <ErrorMessage error={problem} />
+        </div>
+      )}
+      {skipped > 0 && (
+        <div className="banner">
+          {t("workspaces.skipped", { count: skipped })}{" "}
+          <button className="link" onClick={() => setSkipped(0)}>
+            {t("common.dismiss")}
+          </button>
         </div>
       )}
       {helloMissing && !helloDismissed && (
@@ -388,6 +444,17 @@ export function AppShell() {
             recent={recent}
             onPick={(host) =>
               dispatch({ type: "pick", id: activeTab.id, target: { kind: "host", host_id: host.id }, title: host.name })
+            }
+            templates={templates}
+            onTemplate={(template) => {
+              dispatch({ type: "close", id: activeTab.id });
+              openTemplate(template);
+            }}
+            onDeleteTemplate={(template) =>
+              askDelete(t("workspaces.deleteConfirm", { name: template.name }), async () => {
+                await deleteWorkspaceTemplate(template.id);
+                reloadTemplates();
+              })
             }
             shells={shells}
             onShell={(shell) => {
@@ -474,6 +541,20 @@ export function AppShell() {
         </Drawer>
       )}
 
+      {templateFor && (
+        <Drawer onClose={() => setTemplateFor(null)}>
+          <TemplateDialog
+            tab={templateFor}
+            existing={templates}
+            onDone={() => {
+              setTemplateFor(null);
+              reloadTemplates();
+            }}
+            onCancel={() => setTemplateFor(null)}
+          />
+        </Drawer>
+      )}
+
       {sharing && (
         <Drawer onClose={() => setSharing(null)}>
           <ShareDialog
@@ -502,6 +583,8 @@ export function AppShell() {
             const target: SessionTarget = { kind: "local", shell };
             dispatch({ type: "open", tab: { id: crypto.randomUUID(), target, title: targetTitle(target) } });
           }}
+          templates={templates}
+          onTemplate={openTemplate}
         />
       )}
 

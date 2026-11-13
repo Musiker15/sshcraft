@@ -1,6 +1,6 @@
-import { Cable, Clock, Search, Server, SquareTerminal } from "lucide-react";
+import { Cable, Clock, LayoutGrid, Search, Server, SquareTerminal, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Group, Host, SerialSettings, ShellCommand } from "../api";
+import type { Group, Host, SerialSettings, ShellCommand, WorkspaceTemplate } from "../api";
 import { SerialForm } from "../components/SerialForm";
 import { useLanguage, useT } from "../i18n/i18n";
 import { rankPalette } from "../palette/rank";
@@ -15,12 +15,27 @@ type Props = {
   shells?: ShellCommand[];
   onShell?: (shell: ShellCommand) => void;
   onSerial?: (settings: SerialSettings) => void;
+  /** Workspace templates; left out where a workspace cannot open (inside a pane). */
+  templates?: WorkspaceTemplate[];
+  onTemplate?: (template: WorkspaceTemplate) => void;
+  onDeleteTemplate?: (template: WorkspaceTemplate) => void;
 };
 
 const RECENT = 10;
 
 /** A fresh tab: search, recent connections and all hosts; picking one connects this tab. */
-export function NewTabPage({ hosts, groups, recent, onPick, shells = [], onShell, onSerial }: Props) {
+export function NewTabPage({
+  hosts,
+  groups,
+  recent,
+  onPick,
+  shells = [],
+  onShell,
+  onSerial,
+  templates = [],
+  onTemplate,
+  onDeleteTemplate,
+}: Props) {
   const t = useT();
   const lang = useLanguage();
   const [query, setQuery] = useState("");
@@ -77,6 +92,32 @@ export function NewTabPage({ hosts, groups, recent, onPick, shells = [], onShell
         </div>
       ) : (
         <>
+          {templates.length > 0 && onTemplate && (
+            <div className="group-block">
+              <h2 className="group-title">{t("workspaces.title")}</h2>
+              <div className="list">
+                {templates.map((template) => (
+                  <div key={template.id} className="list-row-wrap">
+                    <button className="list-row" onClick={() => onTemplate(template)}>
+                      <LayoutGrid size={16} aria-hidden="true" />
+                      <span className="palette-name">{template.name}</span>
+                      <span className="card-sub">{t("workspaces.panes", { count: template.panes.length })}</span>
+                    </button>
+                    {onDeleteTemplate && (
+                      <button
+                        className="icon"
+                        aria-label={t("workspaces.delete", { name: template.name })}
+                        title={t("workspaces.delete", { name: template.name })}
+                        onClick={() => onDeleteTemplate(template)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {recentHosts.length > 0 && (
             <div className="group-block">
               <h2 className="group-title">{t("newTab.recent")}</h2>

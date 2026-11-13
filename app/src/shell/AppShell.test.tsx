@@ -6,7 +6,7 @@ import { AppShell } from "./AppShell";
 import { invoke } from "@tauri-apps/api/core";
 
 type ViewProps = {
-  pane: { id: string };
+  pane: { id: string; title: string; startup?: { cwd?: string | null; command?: string | null } };
   onAttach: (id: string) => void;
   onInput: (data: string, report: boolean) => void;
 };
@@ -27,6 +27,19 @@ vi.mock("@tauri-apps/api/core", () => {
     list_keys: [],
     list_recent: [],
     local_shells: [],
+    workspace_templates: [
+      {
+        id: "tpl",
+        name: "Ops",
+        layout: "split",
+        col_sizes: [],
+        row_sizes: [],
+        panes: [
+          { target: { kind: "host", host_id: "h1" }, title: "web", cwd: "/srv", command: "htop" },
+          { target: { kind: "host", host_id: "gone" }, title: "old", cwd: null, command: null },
+        ],
+      },
+    ],
     vault_status: { ok: true, code: null, detail: null },
     hello_status: { missing: false },
     system_locale: "en-US",
@@ -228,4 +241,15 @@ test("the focus layout lists every pane and shows the one picked", async () => {
   fireEvent.click(entries[0]);
   expect(document.querySelector(`[data-pane="${a}"]`)?.classList.contains("offscreen")).toBe(false);
   expect(document.querySelector(`[data-pane="${b}"]`)?.classList.contains("offscreen")).toBe(true);
+});
+
+test("a template opens its panes with their start, leaving out deleted hosts", async () => {
+  await renderShell();
+  press("T");
+  fireEvent.click(await screen.findByRole("button", { name: /^Ops/ }));
+  expect(await screen.findByRole("tab", { name: /Ops/ })).toBeTruthy();
+  const views = Object.values(state.views);
+  expect(views).toHaveLength(1);
+  expect(views[0].pane).toMatchObject({ title: "web", startup: { cwd: "/srv", command: "htop" } });
+  expect(screen.getByText(en["workspaces.skipped"].replace("{count}", "1"))).toBeTruthy();
 });
