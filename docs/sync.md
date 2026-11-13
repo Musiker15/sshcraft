@@ -57,6 +57,10 @@ read such a key record and stop syncing until they are updated: update every dev
 using that option on a synced key.
 Identities always sync; their key and password go along only under the same rule. A password
 lives where its host, group or identity lives and moves with it.
+Port forwarding rules are part of their host and sync and are shared with it (see
+[forwarding.md](forwarding.md)). Versions of SSHCraft before port forwarding (Teilplan 12) keep
+a synced host but drop its rules when the host is edited there: update every device before
+relying on synced rules.
 
 Everything is sealed on the device before it leaves it: the server sees ciphertext, version
 numbers and who wrote what, never names, addresses, users or keys.

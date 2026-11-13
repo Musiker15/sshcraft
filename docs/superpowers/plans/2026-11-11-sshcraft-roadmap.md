@@ -20,7 +20,7 @@ mit dem Wissen aus den vorherigen.
 | 9 | Verbindungen | Passwort und keyboard-interactive, Identitäten, Sprung-Hosts, HTTP- und SOCKS5-Proxy, Agent-Weiterleitung, Umgebungsvariablen, serielle Verbindung, lokales Terminal | fertig, auf `main` |
 | 10 | Schlüssel erweitert | ECDSA und RSA erzeugen, Passphrase speichern, öffentlichen Schlüssel in `authorized_keys` eintragen, SSH-Zertifikate, FIDO2-Hardwareschlüssel, gerätegebundene Schlüssel (Windows Hello mit TPM) | fertig, auf `main` |
 | 11 | Workspaces | Split und Fokus mit 2 bis 16 Sitzungen, Broadcast, Workspace-Vorlagen, Statuspunkte, Tastenkürzel, Terminaltyp, OSC 52, Links | fertig, auf `main` |
-| 12 | Portweiterleitung | lokal, entfernt, dynamisch (SOCKS), Regelseite, Assistent | offen |
+| 12 | Portweiterleitung | lokal, entfernt, dynamisch (SOCKS), Regelseite, Assistent | fertig, auf `main` |
 | 13 | Snippets und Autovervollständigung | Snippets in Paketen, auf mehreren Hosts ausführen, Seitenleiste mit Verlauf, Autovervollständigung aus Verlauf, Pfaden, Snippets und Befehlen (ohne KI) | offen |
 | 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | offen |
 | 15 | Agent-Anbindung | `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | offen |
