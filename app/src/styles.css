@@ -1279,3 +1279,55 @@ button.link[aria-current="page"] {
   font-family: var(--mono, monospace);
   user-select: all;
 }
+
+/* Snippets */
+.snippets-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  min-height: 0;
+}
+
+.package-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.snippets-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.snippet-first-line {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+}
+
+.snippet-preview {
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+textarea.mono {
+  font-family: var(--mono, monospace);
+}

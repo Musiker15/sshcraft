@@ -114,6 +114,7 @@ function quoteDir(dir: string): string {
  * (POSIX shell); a local shell already starts there, a serial line has none.
  */
 export function startupInput(target: SessionTarget, startup: Startup | undefined): string | null {
+  if (startup?.raw) return startup.raw;
   const cwd = startup?.cwd?.trim() ?? "";
   const command = startup?.command?.trim() ?? "";
   const parts = [target.kind === "host" && cwd !== "" ? `cd -- ${quoteDir(cwd)}` : "", command].filter(

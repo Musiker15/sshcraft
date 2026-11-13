@@ -6,7 +6,7 @@ import { AppShell } from "./AppShell";
 import { invoke } from "@tauri-apps/api/core";
 
 type ViewProps = {
-  pane: { id: string; title: string; startup?: { cwd?: string | null; command?: string | null } };
+  pane: { id: string; title: string; startup?: { cwd?: string | null; command?: string | null; raw?: string } };
   onAttach: (id: string) => void;
   onInput: (data: string, report: boolean) => void;
 };
@@ -27,6 +27,7 @@ vi.mock("@tauri-apps/api/core", () => {
     list_keys: [],
     list_recent: [],
     local_shells: [],
+    snippets_list: [{ id: "sn", name: "Uptime", package: "", content: "uptime", default_targets: ["h1"] }],
     workspace_templates: [
       {
         id: "tpl",
@@ -265,4 +266,44 @@ test("clicking a pane's title bar gives that pane's terminal the keyboard", asyn
   fireEvent.mouseDown(title);
   fireEvent.click(title);
   expect(document.activeElement).toBe(pane.querySelector("textarea"));
+});
+
+const written = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "session_write")
+    .map(([, args]) => {
+      const { id, data } = args as { id: string; data: number[] };
+      return { id, text: new TextDecoder().decode(new Uint8Array(data)) };
+    });
+
+async function runDialog() {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  const [pane] = Object.keys(state.views);
+  act(() => state.views[pane].onAttach("s-1"));
+  fireEvent.click(screen.getByRole("tab", { name: en["tabs.home"] }));
+  fireEvent.click(screen.getByRole("button", { name: en["nav.snippets"] }));
+  const row = (await screen.findByText("Uptime")).closest(".snippet-row") as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: en["snippets.run"] }));
+  return within(screen.getByText(en["snippets.runTitle"].replace("{name}", "Uptime")).closest(".dialog") as HTMLElement);
+}
+
+test("a snippet runs in the open pane of its default host", async () => {
+  const dialog = await runDialog();
+  vi.mocked(invoke).mockClear();
+  // Only the open pane, no new connection.
+  fireEvent.click(dialog.getAllByRole("checkbox", { name: "web" })[0]);
+  fireEvent.click(dialog.getByRole("button", { name: en["snippets.run"] }));
+  expect(written()).toEqual([{ id: "s-1", text: "uptime\r" }]);
+  expect(Object.keys(state.views)).toHaveLength(1);
+});
+
+test("a snippet on new connections opens a tab that types it after connecting", async () => {
+  const dialog = await runDialog();
+  fireEvent.click(dialog.getAllByRole("checkbox", { name: "web" })[1]);
+  fireEvent.click(dialog.getByRole("button", { name: en["snippets.run"] }));
+  expect(await screen.findByRole("tab", { name: /Snippet: Uptime/ })).toBeTruthy();
+  const opened = Object.values(state.views).find((v) => v.pane.startup?.raw);
+  expect(opened?.pane.startup?.raw).toBe("uptime\r");
 });

@@ -14,6 +14,8 @@ import {
   localShells,
   serialRemember,
   sessionWrite,
+  snippetsList,
+  type Snippet,
   workspaceTemplates,
   deleteWorkspaceTemplate,
   type WorkspaceTemplate,
@@ -49,6 +51,9 @@ import { ImportDialog } from "../components/ImportDialog";
 import { InstallKeyDialog } from "../components/KeyDialogs";
 import { WorkspaceView } from "../components/WorkspaceView";
 import { TemplateDialog } from "../components/TemplateDialog";
+import { RunSnippetDialog, type OpenPane, type RunPlan } from "../components/RunSnippetDialog";
+import { planNewTabs, snippetInput } from "../forms/snippetRun";
+import { SnippetsPage } from "../pages/SnippetsPage";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
@@ -112,6 +117,9 @@ export function AppShell() {
   const [helloDismissed, setHelloDismissed] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** The snippet whose run dialog is open. */
+  const [running, setRunning] = useState<Snippet | null>(null);
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
   const [templateFor, setTemplateFor] = useState<SessionTab | null>(null);
   /** Panes of the last opened template left out because their host is gone. */
@@ -212,6 +220,59 @@ export function AppShell() {
     },
     [hosts],
   );
+
+  // The palette offers snippets too; they are read when it opens.
+  useEffect(() => {
+    if (paletteOpen) snippetsList().then((list) => setSnippets(list ?? []), () => setSnippets([]));
+  }, [paletteOpen]);
+
+  /** Panes with a session, for "run in open tabs". */
+  const openPanes: OpenPane[] = tabs.tabs.flatMap((tab) =>
+    tab.kind === "session"
+      ? tab.panes.flatMap((pane) =>
+          !isPicker(pane) && pane.sessionId
+            ? [
+                {
+                  paneId: pane.id,
+                  title: pane.title,
+                  sessionId: pane.sessionId,
+                  hostId: pane.target.kind === "host" ? pane.target.host_id : null,
+                },
+              ]
+            : [],
+        )
+      : [],
+  );
+
+  /** Types the snippet into the chosen panes, and opens new connections that type it. */
+  const runSnippet = (snippet: Snippet, plan: RunPlan) => {
+    const input = snippetInput(snippet.content, plan.run);
+    for (const paneId of plan.paneIds) {
+      const pane = openPanes.find((p) => p.paneId === paneId);
+      if (pane) void sessionWrite(pane.sessionId, input).catch(() => {});
+    }
+    const byId = new Map(hosts.map((h) => [h.id, h]));
+    const { tabs: groups, missing } = planNewTabs(hosts, plan.hostIds);
+    setSkipped(missing);
+    for (const group of groups) {
+      dispatch({
+        type: "openTemplate",
+        tabId: crypto.randomUUID(),
+        name: t("snippets.tabTitle", { name: snippet.name }),
+        layout: "split",
+        colSizes: [],
+        rowSizes: [],
+        panes: group.map((hostId) => ({
+          id: crypto.randomUUID(),
+          target: { kind: "host", host_id: hostId },
+          title: byId.get(hostId)?.name ?? "",
+          status: { state: "connecting" },
+          activity: "none",
+          startup: { raw: input },
+        })),
+      });
+    }
+  };
 
   const connect = useCallback((host: Host) => {
     dispatch({ type: "open", tab: { id: crypto.randomUUID(), target: { kind: "host", host_id: host.id }, title: host.name } });
@@ -435,7 +496,8 @@ export function AppShell() {
               )}
               {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
               {page === "forwarding" && <ForwardingPage hosts={hosts} onChanged={() => void reload()} />}
-              {(page === "snippets" || page === "logs") && <PlaceholderPage page={page} />}
+              {page === "snippets" && <SnippetsPage hosts={hosts} onRun={setRunning} />}
+              {page === "logs" && <PlaceholderPage page={page} />}
             </main>
           </div>
         )}
@@ -543,6 +605,22 @@ export function AppShell() {
         </Drawer>
       )}
 
+      {running && (
+        <Drawer onClose={() => setRunning(null)}>
+          <RunSnippetDialog
+            snippet={running}
+            hosts={hosts}
+            panes={openPanes}
+            onRun={(plan) => {
+              const snippet = running;
+              setRunning(null);
+              runSnippet(snippet, plan);
+            }}
+            onCancel={() => setRunning(null)}
+          />
+        </Drawer>
+      )}
+
       {templateFor && (
         <Drawer onClose={() => setTemplateFor(null)}>
           <TemplateDialog
@@ -587,6 +665,8 @@ export function AppShell() {
           }}
           templates={templates}
           onTemplate={openTemplate}
+          snippets={snippets}
+          onSnippet={setRunning}
         />
       )}
 

@@ -1,7 +1,7 @@
 import { useT } from "../i18n/i18n";
 import type { Page } from "../shell/NavSidebar";
 
-/** Pages that get their content in a later version (snippets, logs). */
+/** Pages that get their content in a later version (logs). */
 export function PlaceholderPage({ page }: { page: Page }) {
   const t = useT();
   return (

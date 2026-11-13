@@ -10,7 +10,12 @@ export const MAX_PANES = 16;
 export type Activity = "none" | "output" | "input" | "error";
 const URGENCY: Record<Activity, number> = { none: 0, output: 1, input: 2, error: 3 };
 
-export type Startup = { cwd?: string | null; command?: string | null };
+export type Startup = {
+  cwd?: string | null;
+  command?: string | null;
+  /** Typed as it is instead of `cd` and command (a snippet run in new connections). */
+  raw?: string;
+};
 
 export type Pane = {
   id: string;

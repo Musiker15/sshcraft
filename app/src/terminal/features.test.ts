@@ -125,3 +125,8 @@ test.each([["ls\r"], ["a"], ["\x1b[A"], ["\x1b[1;5C"], ["\x1b"], ["\x1bOP"], ["\
   },
 );
 
+
+test("a snippet start is typed exactly as given", () => {
+  expect(startupInput(host, { raw: "uptime\rdf -h\r" })).toBe("uptime\rdf -h\r");
+  expect(startupInput(serial, { raw: "AT\r" })).toBe("AT\r");
+});
