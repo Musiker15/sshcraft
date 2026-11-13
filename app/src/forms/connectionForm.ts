@@ -19,11 +19,13 @@ export type ConnectionFormValues = {
   proxyUser: string;
   agent: AgentMode;
   env: EnvVar[];
+  /** Record sessions to session logs. */
+  record: AgentMode;
 };
 
 export type ConnectionOptions = Pick<
   ConnectionSettings,
-  "identity" | "jump_hosts" | "proxy" | "agent_forwarding" | "env"
+  "identity" | "jump_hosts" | "proxy" | "agent_forwarding" | "env" | "session_log"
 >;
 
 /** Names the core accepts: a letter or underscore, then letters, digits, underscores; at most 64. */
@@ -44,6 +46,7 @@ export const emptyConnection: ConnectionFormValues = {
   proxyUser: "",
   agent: "inherit",
   env: [],
+  record: "inherit",
 };
 
 function proxy(form: ConnectionFormValues): Proxy | null {
@@ -71,6 +74,7 @@ export function toConnectionOptions(form: ConnectionFormValues): ConnectionOptio
     agent_forwarding: form.agent === "inherit" ? null : form.agent === "on",
     // Rows with an invalid name are not saved (the form marks them).
     env: form.env.filter(validEnvVar).map((v) => ({ name: v.name.trim(), value: v.value })),
+    session_log: form.record === "inherit" ? null : form.record === "on",
   };
 }
 
@@ -87,5 +91,6 @@ export function fromConnectionOptions(settings: ConnectionSettings): ConnectionF
     proxyUser: p && p.kind !== "direct" ? (p.username ?? "") : "",
     agent: settings.agent_forwarding == null ? "inherit" : settings.agent_forwarding ? "on" : "off",
     env: settings.env ?? [],
+    record: settings.session_log == null ? "inherit" : settings.session_log ? "on" : "off",
   };
 }

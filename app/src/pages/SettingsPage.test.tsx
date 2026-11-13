@@ -23,6 +23,8 @@ vi.mock("@tauri-apps/api/core", () => ({
           shortcuts: {},
           history: true,
           autocomplete: true,
+          session_logs: false,
+          log_retention_days: 0,
         };
       case "history_clear":
         calls.cleared.push(args);
@@ -92,4 +94,14 @@ test("history and suggestions can be switched off, and the history cleared", asy
   fireEvent.click(screen.getByRole("button", { name: de["settings.historyClear"] }));
   await vi.waitFor(() => expect(calls.cleared).toEqual([{ scope: null }]));
   expect(await screen.findByText(de["settings.historyCleared"])).toBeTruthy();
+});
+
+test("recording and how long logs are kept are saved", async () => {
+  await renderPage();
+  fireEvent.click(screen.getByRole("checkbox", { name: de["settings.sessionLogs"] }));
+  await vi.waitFor(() => expect(calls.saved[calls.saved.length - 1]?.session_logs).toBe(true));
+  fireEvent.change(screen.getByRole("combobox", { name: de["settings.logRetention"] }), { target: { value: "30" } });
+  await vi.waitFor(() => expect(calls.saved[calls.saved.length - 1]?.log_retention_days).toBe(30));
+  expect(screen.getByRole("option", { name: de["settings.logRetentionForever"] })).toBeTruthy();
+  expect(screen.getByRole("option", { name: "365 Tage" })).toBeTruthy();
 });

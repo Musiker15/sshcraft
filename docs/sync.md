@@ -62,6 +62,9 @@ Port forwarding rules are part of their host and sync and are shared with it (se
 a synced host but drop its rules when the host is edited there: update every device before
 relying on synced rules.
 
+Session logs sync only with *Sync session logs* on, into the personal area, never into a share
+(see [session-logs.md](session-logs.md)).
+
 Everything is sealed on the device before it leaves it: the server sees ciphertext, version
 numbers and who wrote what, never names, addresses, users or keys.
 

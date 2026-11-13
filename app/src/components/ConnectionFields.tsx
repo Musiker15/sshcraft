@@ -157,6 +157,15 @@ export function ConnectionFields(props: Props) {
         </label>
         {values.agent === "on" && <p className="warning-text">{t("connection.agentWarning")}</p>}
 
+        <label>
+          {t("connection.record")}
+          <select value={values.record} onChange={(e) => set({ record: e.target.value as AgentMode })}>
+            <option value="inherit">{t("connection.recordInherit")}</option>
+            <option value="on">{t("connection.recordOn")}</option>
+            <option value="off">{t("connection.recordOff")}</option>
+          </select>
+        </label>
+
         <div className="env-list">
           <span className="field-label">{t("connection.env")}</span>
           {values.env.map((v, index) => (

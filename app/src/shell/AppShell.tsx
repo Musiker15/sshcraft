@@ -367,6 +367,9 @@ export function AppShell() {
         case "toggleSidebar":
           setSidebarOpen((open) => !open);
           break;
+        case "bookmark":
+          if (activeSession) paneInput(activeSession.focusedId)?.bookmark?.();
+          break;
       }
     },
     [tabs.activeId, activeSession],

@@ -22,7 +22,7 @@ mit dem Wissen aus den vorherigen.
 | 11 | Workspaces | Split und Fokus mit 2 bis 16 Sitzungen, Broadcast, Workspace-Vorlagen, Statuspunkte, Tastenkürzel, Terminaltyp, OSC 52, Links | fertig, auf `main` |
 | 12 | Portweiterleitung | lokal, entfernt, dynamisch (SOCKS), Regelseite, Assistent | fertig, auf `main` |
 | 13 | Snippets und Autovervollständigung | Snippets in Paketen, auf mehreren Hosts ausführen, Seitenleiste mit Verlauf, Autovervollständigung aus Verlauf, Pfaden, Snippets und Befehlen (ohne KI) | fertig, auf `main` |
-| 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | offen |
+| 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | fertig, auf `main` |
 | 15 | Agent-Anbindung | `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | offen |
 | 16 | Desktop-Plattformen | macOS, Linux und FreeBSD: Agent über `SSH_AUTH_SOCK`, Keychain und Secret Service, Touch ID, Login-Shell als lokales Terminal, `pass-cli`-Pfade; CI-Matrix für alle Desktop-Ziele | offen |
 | 17 | Releases für Desktop und Server | GitHub-Actions-Releases: Windows x64, x86, arm64; macOS universal; Linux x86_64 und aarch64; FreeBSD x86_64; Server-Programm für Linux; Docker-Image; Windows-Pakete bei winget eingetragen und bei jedem neuen Release per Workflow automatisch auf winget aktualisiert | offen |

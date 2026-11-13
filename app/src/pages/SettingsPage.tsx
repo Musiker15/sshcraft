@@ -3,7 +3,7 @@ import { ShortcutSettings } from "../components/ShortcutSettings";
 import { TERMINAL_TYPES } from "../settings/terminal";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
-import { historyClear, type AppSettings, type AppTheme } from "../api";
+import { LOG_RETENTION_DAYS, historyClear, type AppSettings, type AppTheme } from "../api";
 import { HISTORY_CLEARED } from "../terminal/panes";
 import { useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
@@ -184,6 +184,33 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
           {t("settings.autocomplete")}
         </label>
         <p className="hint">{t("settings.autocompleteHint")}</p>
+      </div>
+
+      <div className="settings-block">
+        <h2 className="group-title">{t("settings.logs")}</h2>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.session_logs}
+            onChange={(e) => void update({ session_logs: e.target.checked })}
+          />
+          {t("settings.sessionLogs")}
+        </label>
+        <p className="hint">{t("settings.sessionLogsHint")}</p>
+        <label>
+          {t("settings.logRetention")}
+          <select
+            value={settings.log_retention_days}
+            onChange={(e) => void update({ log_retention_days: Number(e.target.value) })}
+          >
+            {LOG_RETENTION_DAYS.map((days) => (
+              <option key={days} value={days}>
+                {days === 0 ? t("settings.logRetentionForever") : t("settings.logRetentionDays", { count: days })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">{t("settings.logRetentionHint")}</p>
       </div>
 
       <LocalShellSetting />

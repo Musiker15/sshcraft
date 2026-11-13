@@ -1548,3 +1548,22 @@ textarea.mono {
   border-radius: 50%;
   background: #e5484d;
 }
+
+.recording-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  text-transform: uppercase;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  opacity: 0.85;
+  pointer-events: none;
+}

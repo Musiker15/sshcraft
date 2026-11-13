@@ -6,6 +6,8 @@ export type PaneInput = {
   track(data: string): void;
   /** Pastes `content` into the shell (bracketed where the shell allows), with Enter if `run`. */
   paste(content: string, run: boolean): void;
+  /** Sets a bookmark in the session log the pane records into, if it records. */
+  bookmark?(): void;
 };
 
 const panes = new Map<string, PaneInput>();
