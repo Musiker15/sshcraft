@@ -1694,7 +1694,9 @@ async fn encrypted_security_key_asks_passphrase_then_signs() {
         verify_user: false,
         user_name: "tester".into(),
     };
-    let sk = create_key(token.as_ref(), &options, "yubikey").await.unwrap();
+    let sk = create_key(token.as_ref(), &options, "yubikey")
+        .await
+        .unwrap();
     let server = TestServer::start(sk.public_key().clone()).await;
     let encrypted = sk
         .encrypt(&mut rand::rng(), "pw")
@@ -1712,10 +1714,59 @@ async fn encrypted_security_key_asks_passphrase_then_signs() {
     let host = f.host_on(server.port, KeyRef::Stored { id }, None);
     let auth = ScriptedAuth::new(&[Some("pw")]);
     let manager = f
-        .manager_with_auth(auth.clone(), Arc::new(FakePresence::new(&[Presence::Verified])))
+        .manager_with_auth(
+            auth.clone(),
+            Arc::new(FakePresence::new(&[Presence::Verified])),
+        )
         .with_security_keys(token.clone());
     let statuses = open_and_wait(&manager, host).await;
     assert!(connected(&statuses), "{statuses:?}");
     assert_eq!(auth.seen().len(), 1);
     assert_eq!(token.assertions(), 1);
+}
+
+#[tokio::test]
+async fn reconnect_does_not_ask_the_passphrase_again() {
+    let mut f = fixture(true).await;
+    {
+        let id = f.key_id();
+        let store = f.store.lock().unwrap();
+        f.vault.protect_key(&store, id, "pw").unwrap();
+    }
+    let auth = ScriptedAuth::new(&[Some("pw"), Some("pw"), Some("pw")]);
+    let manager = f.manager_with_auth(
+        auth.clone(),
+        Arc::new(FakePresence::new(&[Presence::Verified])),
+    );
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.server.restart(false).await;
+    sink.wait_for(|s| connected_count(s) == 2).await;
+    assert_eq!(auth.seen().len(), 1, "asked once per tab, not per attempt");
+}
+
+#[tokio::test]
+async fn one_key_on_jump_host_and_target_is_asked_once() {
+    let f = fixture(true).await;
+    let id = f.key_id();
+    {
+        let store = f.store.lock().unwrap();
+        f.vault.protect_key(&store, id, "pw").unwrap();
+    }
+    let jump = f.host_on(f.server.port, KeyRef::Stored { id }, Some(Vec::new()));
+    let target = f.host_on(f.server.port, KeyRef::Stored { id }, Some(vec![jump]));
+    let auth = ScriptedAuth::new(&[Some("pw"), Some("pw")]);
+    let manager = f.manager_with_auth(
+        auth.clone(),
+        Arc::new(FakePresence::new(&[Presence::Verified])),
+    );
+    let statuses = open_and_wait(&manager, target).await;
+    assert!(connected(&statuses), "{statuses:?}");
+    assert_eq!(auth.seen().len(), 1);
 }

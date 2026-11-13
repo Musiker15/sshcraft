@@ -421,7 +421,7 @@ impl SessionManager {
         key: KeyRef,
     ) -> Result<InstallOutcome, (ErrorCode, Option<String>)> {
         let (public, verify_required) = public_half(&self.ctx, &key).await?;
-        let (session, _) = connect_session(&self.ctx, host_id)
+        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default())
             .await
             .map_err(failure_code)?;
         let output = session
@@ -542,9 +542,10 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let sink = shared.sink.clone();
     let mut attempt = 0u32;
     let mut ever_connected = false;
+    let opened = OpenedKeys::default();
     loop {
         sink.status(SessionStatus::Connecting);
-        let reason = match connect_target(&ctx, &target, &shared.size).await {
+        let reason = match connect_target(&ctx, &target, &shared.size, &opened).await {
             Ok((writer, mut events, notice)) => {
                 *shared.writer.lock().expect("writer lock") = Some(writer.clone());
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
@@ -655,10 +656,29 @@ fn vault_failure(e: sshcraft_core::vault::VaultError) -> Failure {
 /// A stored key ready to sign in, with its certificate. Windows Hello guards only keys whose
 /// secret lies open in the vault: a key with a passphrase asks for it instead, and a security
 /// key's authenticator checks the user itself.
+/// Keys opened with their passphrase during one tab: a reconnect or a second hop with the same
+/// key does not ask again. Lives as long as the tab's task, then drops (and wipes) the keys.
+#[derive(Default)]
+struct OpenedKeys(Mutex<HashMap<KeyId, PrivateKey>>);
+
+impl OpenedKeys {
+    fn get(&self, id: KeyId) -> Option<PrivateKey> {
+        self.0.lock().expect("opened keys lock").get(&id).cloned()
+    }
+
+    fn keep(&self, id: KeyId, key: &PrivateKey) {
+        self.0
+            .lock()
+            .expect("opened keys lock")
+            .insert(id, key.clone());
+    }
+}
+
 async fn stored_credential(
     ctx: &Context,
     id: KeyId,
     resolved: &ResolvedHost,
+    opened: &OpenedKeys,
 ) -> Result<(Credential, Option<Certificate>), Failure> {
     // A synced host can point to a key that lives on another device: say so before asking for
     // Windows Hello for nothing.
@@ -686,10 +706,14 @@ async fn stored_credential(
     // A key with a passphrase is opened first, whatever kind it is: a security key that came
     // encrypted (from `ssh-keygen`) signs once its handle is readable.
     let asked = key.is_encrypted();
-    let key = if asked {
-        ask_passphrase(ctx, &record.name, &key, resolved).await?
-    } else {
+    let key = if !asked {
         key
+    } else if let Some(open) = opened.get(id) {
+        open
+    } else {
+        let open = ask_passphrase(ctx, &record.name, &key, resolved).await?;
+        opened.keep(id, &open);
+        open
     };
     if sshcraft_fido::is_security_key(&key) {
         let auth = ctx
@@ -846,12 +870,12 @@ async fn stored_password(
 }
 
 /// One hop with its own credentials only.
-async fn hop(ctx: &Context, resolved: &ResolvedHost) -> Result<Hop, Failure> {
+async fn hop(ctx: &Context, resolved: &ResolvedHost, opened: &OpenedKeys) -> Result<Hop, Failure> {
     let mut certificate = None;
     let key = match &resolved.key {
         None => None,
         Some(KeyRef::Stored { id }) => {
-            let (credential, cert) = stored_credential(ctx, *id, resolved).await?;
+            let (credential, cert) = stored_credential(ctx, *id, resolved, opened).await?;
             certificate = cert;
             Some(credential)
         }
@@ -959,9 +983,10 @@ async fn connect_target(
     ctx: &Context,
     target: &SessionTarget,
     size: &Mutex<(u32, u32)>,
+    opened: &OpenedKeys,
 ) -> Result<Connected, Failure> {
     match target {
-        SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size).await,
+        SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size, opened).await,
         #[cfg(desktop)]
         SessionTarget::Local { shell } => {
             let (cols, rows) = *size.lock().expect("size lock");
@@ -987,8 +1012,9 @@ async fn connect_once(
     ctx: &Context,
     host_id: HostId,
     size: &Mutex<(u32, u32)>,
+    opened: &OpenedKeys,
 ) -> Result<Connected, Failure> {
-    let (session, notice) = connect_session(ctx, host_id).await?;
+    let (session, notice) = connect_session(ctx, host_id, opened).await?;
     let (cols, rows) = *size.lock().expect("size lock");
     let shell = session
         .open_shell(cols, rows)
@@ -1006,6 +1032,7 @@ async fn connect_once(
 async fn connect_session(
     ctx: &Context,
     host_id: HostId,
+    opened: &OpenedKeys,
 ) -> Result<(sshcraft_ssh::Session, Option<ErrorCode>), Failure> {
     let route = {
         let store = ctx.store.lock().expect("store lock");
@@ -1014,14 +1041,14 @@ async fn connect_session(
     let mut hops = Vec::new();
     for resolved in &route.jumps {
         // A jump host that cannot be used is named.
-        hops.push(hop(ctx, resolved).await.map_err(|f| match f {
+        hops.push(hop(ctx, resolved, opened).await.map_err(|f| match f {
             Failure::End(reason, code, None) => {
                 Failure::End(reason, code, Some(resolved.name.clone()))
             }
             other => other,
         })?);
     }
-    hops.push(hop(ctx, &route.target).await?);
+    hops.push(hop(ctx, &route.target, opened).await?);
     let proxy = match &route.target.proxy {
         Some(Proxy::Http(endpoint)) => Some(ProxyConfig::Http(proxy_target(ctx, endpoint).await?)),
         Some(Proxy::Socks5(endpoint)) => {
