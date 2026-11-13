@@ -315,6 +315,16 @@ export const saveWorkspaceTemplate = (template: WorkspaceTemplate) =>
 export const deleteWorkspaceTemplate = (id: string) => invoke<void>("delete_workspace_template", { id });
 /** Opens an http(s) link in the default browser; Rust checks it again. */
 export const openLink = (url: string) => invoke<void>("open_link", { url });
+export type ForwardState =
+  | { state: "starting" }
+  | { state: "running"; bound_port: number; connections: number }
+  | { state: "reconnecting"; attempt: number; delay_secs: number }
+  | { state: "stopped" }
+  | { state: "failed"; code: string | null; detail: string | null };
+export type ForwardStatus = { rule_id: string; host_id: string } & ForwardState;
+export const forwardStart = (hostId: string, ruleId: string) => invoke<void>("forward_start", { hostId, ruleId });
+export const forwardStop = (ruleId: string) => invoke<void>("forward_stop", { ruleId });
+export const forwardStatuses = () => invoke<ForwardStatus[]>("forward_statuses");
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
 
 export type SyncStatusView =

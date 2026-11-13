@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod errors;
+pub mod forwards;
 pub mod hello;
 pub mod links;
 pub mod passcli;
@@ -48,6 +49,9 @@ pub fn run() {
             commands::data::delete_host,
             commands::data::forget_host_key,
             commands::data::get_settings,
+            commands::forwards::forward_start,
+            commands::forwards::forward_stop,
+            commands::forwards::forward_statuses,
             commands::workspaces::workspace_templates,
             commands::workspaces::save_workspace_template,
             commands::workspaces::delete_workspace_template,

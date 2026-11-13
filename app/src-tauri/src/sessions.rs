@@ -229,14 +229,14 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<SessionId, Live>>,
 }
 
-struct Context {
-    store: Arc<Mutex<Store>>,
+pub(crate) struct Context {
+    pub(crate) store: Arc<Mutex<Store>>,
     vault: Option<Arc<Vault>>,
     prompter: Arc<dyn HostKeyPrompter>,
     auth: Arc<dyn AuthPrompter>,
     agent: Arc<dyn AgentConnector>,
     gate: KeyGate,
-    delay_scale: f32,
+    pub(crate) delay_scale: f32,
     /// Signs for FIDO2 and Windows Hello keys; `None` where there is none.
     security: Option<Arc<dyn Authenticator>>,
 }
@@ -502,6 +502,12 @@ impl SessionManager {
         }
     }
 
+    /// What connecting needs (store, vault, prompts, agent, Windows Hello), shared with the
+    /// port forwarding.
+    pub(crate) fn context(&self) -> Arc<Context> {
+        self.ctx.clone()
+    }
+
     pub fn close(&self, id: SessionId) {
         if let Some(live) = self.sessions.lock().expect("sessions lock").remove(&id) {
             if let Some(writer) = live.writer.lock().expect("writer lock").clone() {
@@ -627,7 +633,7 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     }
 }
 
-enum Failure {
+pub(crate) enum Failure {
     /// Do not retry.
     End(EndReason, Option<ErrorCode>, Option<String>),
     /// Network trouble, may retry. The code says what failed (the network, a proxy, a jump
@@ -635,7 +641,7 @@ enum Failure {
     Lost(ErrorCode, String),
 }
 
-fn end_error(code: ErrorCode, detail: Option<String>) -> Failure {
+pub(crate) fn end_error(code: ErrorCode, detail: Option<String>) -> Failure {
     Failure::End(EndReason::Error, Some(code), detail)
 }
 
@@ -669,7 +675,7 @@ fn vault_failure(e: sshcraft_core::vault::VaultError) -> Failure {
 /// Keys opened with their passphrase during one tab: a reconnect or a second hop with the same
 /// key does not ask again. Lives as long as the tab's task, then drops (and wipes) the keys.
 #[derive(Default)]
-struct OpenedKeys(Mutex<HashMap<KeyId, PrivateKey>>);
+pub(crate) struct OpenedKeys(Mutex<HashMap<KeyId, PrivateKey>>);
 
 impl OpenedKeys {
     fn get(&self, id: KeyId) -> Option<PrivateKey> {
@@ -850,7 +856,7 @@ async fn public_half(
 }
 
 /// A failure as a command error.
-fn failure_code(f: Failure) -> (ErrorCode, Option<String>) {
+pub(crate) fn failure_code(f: Failure) -> (ErrorCode, Option<String>) {
     match f {
         Failure::End(reason, code, detail) => (
             code.unwrap_or(match reason {
@@ -1053,7 +1059,7 @@ async fn connect_once(
 
 /// Connects to a host along its route and signs in on every hop; no shell yet. The notice is
 /// something to show while connected.
-async fn connect_session(
+pub(crate) async fn connect_session(
     ctx: &Context,
     host_id: HostId,
     opened: &OpenedKeys,

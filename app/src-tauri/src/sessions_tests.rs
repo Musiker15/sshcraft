@@ -1829,3 +1829,6 @@ async fn install_key_reports_write_failure_and_cancelled_sign_in() {
         .unwrap_err();
     assert_eq!(err.0, ErrorCode::SignInCancelled);
 }
+
+#[path = "forwards_tests.rs"]
+mod forwards;

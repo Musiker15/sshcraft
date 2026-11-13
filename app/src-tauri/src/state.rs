@@ -7,6 +7,7 @@ use sshcraft_core::store::Store;
 use sshcraft_core::vault::{KeyringMasterKey, Vault};
 use tauri::{AppHandle, Emitter};
 
+use crate::forwards::{ForwardManager, ForwardSink, ForwardStatus};
 use crate::hello::WindowsHello;
 use crate::prompts::{AuthPrompt, HostKeyPrompt, PromptEmitter, PromptRegistry};
 use crate::sessions::{SessionManager, WindowsAgent};
@@ -18,6 +19,8 @@ pub struct AppState {
     pub store: Arc<Mutex<Store>>,
     pub vault: Result<Arc<Vault>, crate::errors::CommandError>,
     pub sessions: SessionManager,
+    /// Running port forwarding rules.
+    pub forwards: ForwardManager,
     pub prompter: Arc<PromptRegistry<TauriEmitter>>,
     pub sync: SyncManager,
     /// FIDO2 tokens and Windows Hello; `None` where there is no WebAuthn.
@@ -54,6 +57,8 @@ impl AppState {
         sessions.on_hello_unavailable(Box::new(move || {
             let _ = events.emit("hello-unavailable", ());
         }));
+        let forwards =
+            ForwardManager::new(sessions.context(), Arc::new(TauriForwardSink(app.clone())));
         let sync = SyncManager::new(
             store.clone(),
             vault.clone().ok(),
@@ -63,6 +68,7 @@ impl AppState {
             store,
             vault,
             sessions,
+            forwards,
             prompter,
             sync,
             security,
@@ -122,6 +128,15 @@ impl PromptEmitter for TauriEmitter {
         let _ = self
             .0
             .emit("host-key-prompt-withdrawn", Withdrawn { prompt_id });
+    }
+}
+
+/// Sends the state of port forwarding rules to the window as `forward-status`.
+pub struct TauriForwardSink(AppHandle);
+
+impl ForwardSink for TauriForwardSink {
+    fn status(&self, status: ForwardStatus) {
+        let _ = self.0.emit("forward-status", status);
     }
 }
 
