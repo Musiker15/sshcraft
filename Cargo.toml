@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/sshcraft-core", "crates/sshcraft-agent", "crates/sshcraft-ssh", "crates/sshcraft-proto", "crates/sshcraft-server", "crates/sshcraft-sync", "crates/sshcraft-local", "crates/sshcraft-fido", "app/src-tauri"]
+members = ["crates/sshcraft-core", "crates/sshcraft-agent", "crates/sshcraft-cli", "crates/sshcraft-ssh", "crates/sshcraft-proto", "crates/sshcraft-server", "crates/sshcraft-sync", "crates/sshcraft-local", "crates/sshcraft-fido", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
