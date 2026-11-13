@@ -683,6 +683,14 @@ async fn stored_credential(
     };
     let key = PrivateKey::from_openssh(stored.as_str())
         .map_err(|e| end_error(ErrorCode::Vault, Some(e.to_string())))?;
+    // A key with a passphrase is opened first, whatever kind it is: a security key that came
+    // encrypted (from `ssh-keygen`) signs once its handle is readable.
+    let asked = key.is_encrypted();
+    let key = if asked {
+        ask_passphrase(ctx, &record.name, &key, resolved).await?
+    } else {
+        key
+    };
     if sshcraft_fido::is_security_key(&key) {
         let auth = ctx
             .security
@@ -700,8 +708,7 @@ async fn stored_credential(
         };
         return Ok((credential, certificate));
     }
-    if key.is_encrypted() {
-        let key = ask_passphrase(ctx, &record.name, &key, resolved).await?;
+    if asked {
         return Ok((Credential::Key(key), certificate));
     }
     unlock_secrets(ctx).await?;

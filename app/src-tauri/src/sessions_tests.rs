@@ -1681,3 +1681,41 @@ async fn key_from_other_device_reports_key_not_on_device() {
     let statuses = open_and_wait(&f.manager, host).await;
     assert_eq!(ended_code(&statuses), Some(ErrorCode::KeyNotOnDevice));
 }
+
+#[tokio::test]
+async fn encrypted_security_key_asks_passphrase_then_signs() {
+    use sshcraft_fido::soft::SoftAuthenticator;
+    use sshcraft_fido::{Attachment, CreateOptions, SkAlgorithm, create_key};
+    let f = fixture(true).await;
+    let token = Arc::new(SoftAuthenticator::new(Attachment::CrossPlatform));
+    let options = CreateOptions {
+        algorithm: SkAlgorithm::EcdsaP256,
+        attachment: Attachment::CrossPlatform,
+        verify_user: false,
+        user_name: "tester".into(),
+    };
+    let sk = create_key(token.as_ref(), &options, "yubikey").await.unwrap();
+    let server = TestServer::start(sk.public_key().clone()).await;
+    let encrypted = sk
+        .encrypt(&mut rand::rng(), "pw")
+        .unwrap()
+        .to_openssh(LineEnding::LF)
+        .unwrap();
+    let id = KeyId::new();
+    {
+        let store = f.store.lock().unwrap();
+        // As a synced record would bring it.
+        f.vault
+            .store_openssh_with_id(&store, id, "yubikey", &encrypted, None, None)
+            .unwrap();
+    }
+    let host = f.host_on(server.port, KeyRef::Stored { id }, None);
+    let auth = ScriptedAuth::new(&[Some("pw")]);
+    let manager = f
+        .manager_with_auth(auth.clone(), Arc::new(FakePresence::new(&[Presence::Verified])))
+        .with_security_keys(token.clone());
+    let statuses = open_and_wait(&manager, host).await;
+    assert!(connected(&statuses), "{statuses:?}");
+    assert_eq!(auth.seen().len(), 1);
+    assert_eq!(token.assertions(), 1);
+}

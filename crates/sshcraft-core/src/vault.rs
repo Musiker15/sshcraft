@@ -269,7 +269,9 @@ impl Vault {
         self.store_protected(store, name, &key, passphrase)
     }
 
-    /// Stores `key` encrypted with `passphrase`; the decrypted key is never written.
+    /// Stores `key` encrypted with `passphrase`; the decrypted key is never written. A security
+    /// key (`sk-`) holds only a key handle and is stored as it is: its authenticator checks the
+    /// user, a passphrase would only lock it out.
     pub fn store_protected(
         &self,
         store: &Store,
@@ -277,6 +279,9 @@ impl Vault {
         key: &PrivateKey,
         passphrase: &str,
     ) -> Result<KeyInfo, VaultError> {
+        if is_security_key(key) {
+            return self.seal_and_store(store, name, key);
+        }
         let encrypted = encrypt(key, passphrase)?;
         self.write_record(
             store,
@@ -388,6 +393,9 @@ impl Vault {
             return Ok(record.into());
         }
         let key = self.private_key(store, id)?;
+        if record.kind == KeyKind::Device || is_security_key(&key) {
+            return Err(VaultError::UnsupportedKeyType);
+        }
         let encrypted = encrypt(&key, passphrase)?;
         self.rewrite(store, &record, &encrypted)
     }
@@ -605,6 +613,14 @@ fn certificate_info(text: &str) -> Option<CertificateInfo> {
             .fingerprint(HashAlg::Sha256)
             .to_string(),
     })
+}
+
+/// A FIDO2 or Windows Hello key: signs through an authenticator, holds no secret.
+fn is_security_key(key: &PrivateKey) -> bool {
+    matches!(
+        key.algorithm(),
+        Algorithm::SkEcdsaSha2NistP256 | Algorithm::SkEd25519
+    )
 }
 
 /// `None` for a missing or empty passphrase.

@@ -582,3 +582,32 @@ fn received_certificate_for_other_key_is_dropped() {
         .unwrap();
     assert!(info.certificate.is_some());
 }
+
+fn sk_key() -> PrivateKey {
+    use russh::keys::ssh_key::private::{self, KeypairData};
+    use russh::keys::ssh_key::public::{self, Ed25519PublicKey};
+    let public = public::SkEd25519::new(Ed25519PublicKey([7u8; 32]), "ssh:");
+    let pair = private::SkEd25519::new(public, 0x05, vec![1, 2, 3]).unwrap();
+    PrivateKey::new(KeypairData::SkEd25519(pair), "token").unwrap()
+}
+
+#[test]
+fn security_key_is_never_stored_protected() {
+    let store = Store::open_in_memory().unwrap();
+    let v = vault(&store);
+    // ssh-keygen asks for a passphrase on sk keys too; the file holds only a key handle.
+    let info = v
+        .import_key_protected(&store, "token", &encrypted_openssh(&sk_key(), "pw"), "pw")
+        .unwrap();
+    assert!(!info.protected);
+    assert!(v.private_key(&store, info.id).is_ok());
+    assert!(matches!(
+        v.protect_key(&store, info.id, "pw"),
+        Err(VaultError::UnsupportedKeyType)
+    ));
+    let device = v.store_device_key(&store, "hello", &sk_key()).unwrap();
+    assert!(matches!(
+        v.protect_key(&store, device.id, "pw"),
+        Err(VaultError::UnsupportedKeyType)
+    ));
+}
