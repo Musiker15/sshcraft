@@ -119,6 +119,7 @@ impl Fixture {
     /// Adds a host that uses the fixture's key through the agent instead of the vault.
     fn agent_host(&self) -> HostId {
         let host = Host {
+            forwards: Vec::new(),
             location: None,
             id: HostId::new(),
             name: "agent host".into(),
@@ -191,6 +192,7 @@ async fn fixture(answer: bool) -> Fixture {
         )
         .unwrap();
     let host = Host {
+        forwards: Vec::new(),
         location: None,
         id: HostId::new(),
         name: "test host".into(),
@@ -869,6 +871,7 @@ async fn a_key_not_on_this_device_ends_before_hello() {
 fn os_probe_runs_once() {
     let store = std::sync::Mutex::new(sshcraft_core::store::Store::open_in_memory().unwrap());
     let host = sshcraft_core::model::Host {
+        forwards: Vec::new(),
         id: sshcraft_core::model::HostId::new(),
         name: "h".into(),
         group_id: None,
@@ -918,6 +921,7 @@ impl PasswordWorld {
             id
         });
         let host = Host {
+            forwards: Vec::new(),
             location: None,
             id: HostId::new(),
             name: format!("host-{port}"),
@@ -1453,6 +1457,7 @@ impl Fixture {
     /// A host on `port` as user `tester` with `key`.
     fn host_on(&self, port: u16, key: KeyRef, jumps: Option<Vec<HostId>>) -> HostId {
         let host = Host {
+            forwards: Vec::new(),
             location: None,
             id: HostId::new(),
             name: "other".into(),
@@ -1824,3 +1829,6 @@ async fn install_key_reports_write_failure_and_cancelled_sign_in() {
         .unwrap_err();
     assert_eq!(err.0, ErrorCode::SignInCancelled);
 }
+
+#[path = "forwards_tests.rs"]
+mod forwards;

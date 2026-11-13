@@ -26,6 +26,15 @@ What a server prints may not reach beyond the terminal on its own:
 - **Broadcast:** answers xterm.js gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
 
+## Port forwarding
+
+- New rules listen on loopback only (`127.0.0.1`, or `localhost` on the server for a remote
+  rule). Another address makes the forwarding usable by anyone who reaches it; the wizard warns.
+- The dynamic proxy has no authentication, like `ssh -D`. Keep it on loopback.
+- A connection the server opens for a remote rule is only accepted for an address and port this
+  session asked for; anything else is refused.
+- Every rule carries at most 256 connections at a time, and a SOCKS handshake has 10 seconds.
+
 ## One instance
 
 Only one SSHCraft runs at a time. A second start brings the open window to the front and exits,

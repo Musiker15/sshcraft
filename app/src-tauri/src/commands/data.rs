@@ -128,6 +128,8 @@ pub fn delete_group(state: State<'_, AppState>, id: GroupId) -> CommandResult<()
         record_group_hosts(s, &id.0.to_string(), now_ms()).map_err(crate::sync::sync_error)?;
         Ok(s.delete_group(id)?)
     })?;
+    // The group's hosts are gone, and their rules stop.
+    state.forwards.reconcile();
     drop_orphans(&state, &passwords)
 }
 
@@ -151,6 +153,9 @@ pub fn save_host(state: State<'_, AppState>, mut host: Host) -> CommandResult<()
     checked(&state, Change::SaveHost(&host), ItemKind::Host, id, |s| {
         Ok(s.upsert_host(&host)?)
     })?;
+    // A rule taken off the host stops; the others keep running.
+    let keep: Vec<_> = host.forwards.iter().map(|r| r.id).collect();
+    state.forwards.keep_only(host.id, &keep);
     drop_orphans(&state, &orphans)
 }
 
@@ -166,6 +171,7 @@ pub fn delete_host(state: State<'_, AppState>, id: HostId) -> CommandResult<()> 
     changed(&state, ItemKind::Host, id.0.to_string(), |s| {
         Ok(s.delete_host(id)?)
     })?;
+    state.forwards.stop_host(id);
     drop_orphans(&state, &passwords)
 }
 

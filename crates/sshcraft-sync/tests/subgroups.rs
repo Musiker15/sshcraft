@@ -51,6 +51,7 @@ async fn subgroups_reach_other_devices() {
     save_group(&x, &middle, 2);
     save_group(&x, &bottom, 3);
     let host = Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "h".into(),
         group_id: Some(bottom.id),
@@ -171,6 +172,7 @@ async fn moving_a_group_takes_subgroups_along() {
     let mut sub = group("sub", Some(top.id), s);
     sub.location = None;
     let host = Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "h".into(),
         group_id: Some(sub.id),

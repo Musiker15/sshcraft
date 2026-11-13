@@ -28,6 +28,7 @@ fn server(store: &Store) -> ServerId {
 
 fn host(settings: ConnectionSettings, group: Option<GroupId>) -> Host {
     Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "h".into(),
         group_id: group,

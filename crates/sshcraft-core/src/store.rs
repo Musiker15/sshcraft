@@ -22,6 +22,8 @@ pub enum StoreError {
     /// A key bound to this device cannot move to a sync server.
     #[error("this key is bound to this device")]
     DeviceBound,
+    #[error(transparent)]
+    InvalidForward(#[from] crate::forward::ForwardError),
 }
 
 /// A key as stored on disk. `sealed_secret` is the vault's ciphertext, never plaintext.
@@ -46,7 +48,7 @@ pub struct Store {
     conn: rusqlite::Connection,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 7;
+pub(crate) const SCHEMA_VERSION: i64 = 8;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -86,6 +88,11 @@ CREATE TABLE IF NOT EXISTS recent_hosts (
     host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
     connected_at INTEGER NOT NULL
 );
+";
+
+/// Version 8: port forwarding rules of a host.
+pub(crate) const SCHEMA_V8: &str = "
+ALTER TABLE hosts ADD COLUMN forwards TEXT NOT NULL DEFAULT '[]';
 ";
 
 /// Version 7: what kind of key, whether its passphrase is asked, and its certificate.
@@ -216,6 +223,12 @@ impl Store {
         if version < 7 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V7)?;
+            tx.pragma_update(None, "user_version", 7)?;
+            tx.commit()?;
+        }
+        if version < 8 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V8)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -357,15 +370,17 @@ impl Store {
     }
 
     pub fn upsert_host(&self, host: &Host) -> Result<(), StoreError> {
+        crate::forward::validate_all(&host.forwards)?;
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
             // A host in a group always lives where its group lives.
-            "INSERT INTO hosts (id, name, group_id, settings, location, tags, os)
+            "INSERT INTO hosts (id, name, group_id, settings, location, tags, os, forwards)
              VALUES (?1, ?2, ?3, ?4,
                  CASE WHEN ?3 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?3) ELSE ?5 END,
-                 ?6, ?7)
+                 ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, group_id = excluded.group_id,
              settings = excluded.settings, tags = excluded.tags, os = excluded.os,
+             forwards = excluded.forwards,
              location = CASE WHEN excluded.group_id IS NOT NULL
                  THEN (SELECT location FROM groups WHERE id = excluded.group_id)
                  ELSE hosts.location END",
@@ -376,7 +391,8 @@ impl Store {
                 to_json(&normalized(&host.settings))?,
                 host.location.map(|s| s.0.to_string()),
                 to_json(&crate::model::normalize_tags(&host.tags))?,
-                host.os.map(|os| to_json(&os)).transpose()?
+                host.os.map(|os| to_json(&os)).transpose()?,
+                to_json(&host.forwards)?
             ],
         )?;
         carry_passwords(&tx, ItemKind::Host, &host.id.0.to_string())?;
@@ -391,8 +407,14 @@ impl Store {
     }
 
     pub fn list_hosts(&self) -> Result<Vec<Host>, StoreError> {
+        /// Rules one by one: a damaged value or rule never hides the host.
+        fn read_forwards(text: &str) -> Vec<crate::forward::ForwardRule> {
+            serde_json::from_str::<Vec<serde_json::Value>>(text)
+                .map(crate::forward::parse_rules)
+                .unwrap_or_default()
+        }
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, group_id, settings, location, tags, os FROM hosts
+            "SELECT id, name, group_id, settings, location, tags, os, forwards FROM hosts
              ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -404,11 +426,13 @@ impl Store {
                 r.get::<_, Option<String>>(4)?,
                 r.get::<_, String>(5)?,
                 r.get::<_, Option<String>>(6)?,
+                r.get::<_, String>(7)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, group_id, settings, location, tags, os) = row?;
+            let (id, name, group_id, settings, location, tags, os, forwards) = row?;
             Ok(Host {
+                forwards: read_forwards(&forwards),
                 id: HostId(parse_uuid(&id)?),
                 name,
                 group_id: group_id.map(|g| parse_uuid(&g).map(GroupId)).transpose()?,

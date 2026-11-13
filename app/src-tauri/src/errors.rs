@@ -87,6 +87,14 @@ pub enum ErrorCode {
     TooManyTemplates,
     /// Only `http` and `https` links are opened.
     InvalidLink,
+    /// A port forwarding rule is not valid (ports, addresses, more than 50).
+    InvalidForward,
+    /// The local port of a forwarding rule is taken.
+    PortInUse,
+    /// The local address of a forwarding rule could not be bound.
+    BindFailed,
+    /// The server does not allow the remote forwarding.
+    ForwardRefused,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -136,6 +144,9 @@ impl From<sshcraft_core::store::StoreError> for CommandError {
             sshcraft_core::store::StoreError::GroupCycle => Self::code(ErrorCode::GroupCycle),
             sshcraft_core::store::StoreError::TooDeep => Self::code(ErrorCode::GroupTooDeep),
             sshcraft_core::store::StoreError::DeviceBound => Self::code(ErrorCode::DeviceBound),
+            sshcraft_core::store::StoreError::InvalidForward(e) => {
+                Self::new(ErrorCode::InvalidForward, e)
+            }
             e => Self::new(ErrorCode::Store, e),
         }
     }

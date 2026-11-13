@@ -16,6 +16,7 @@ fn group(name: &str, parent: Option<GroupId>, defaults: ConnectionSettings) -> G
 
 fn host(name: &str, group_id: Option<GroupId>, settings: ConnectionSettings) -> Host {
     Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: name.into(),
         group_id,

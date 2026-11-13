@@ -208,6 +208,7 @@ pub fn apply_import(
             &mut outcome.groups,
         )?;
         let host = Host {
+            forwards: Vec::new(),
             id: HostId::new(),
             name: clean(&candidate.name),
             group_id,

@@ -16,6 +16,7 @@ fn group() -> Group {
 
 fn host(group_id: Option<GroupId>) -> Host {
     Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "h".into(),
         group_id,

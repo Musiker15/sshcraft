@@ -13,6 +13,7 @@ fn setup() -> (Store, Vault) {
 
 fn host(key: Option<KeyRef>) -> Host {
     Host {
+        forwards: Vec::new(),
         id: HostId::new(),
         name: "web".into(),
         group_id: None,
@@ -158,4 +159,39 @@ fn remote_deletion_never_removes_a_device_key() {
     sshcraft_sync::items::apply(&store, &vault, sshcraft_core::model::ServerId::new(), &item)
         .unwrap();
     assert!(store.key_record(info.id).unwrap().is_some());
+}
+
+#[test]
+fn host_item_carries_forwards() {
+    use sshcraft_core::forward::{ForwardId, ForwardKind, ForwardRule};
+    let (store, vault) = setup();
+    let mut h = host(None);
+    h.forwards = vec![ForwardRule {
+        id: ForwardId::new(),
+        name: "socks".into(),
+        kind: ForwardKind::Dynamic,
+        bind_address: "127.0.0.1".into(),
+        bind_port: 1080,
+        target_host: String::new(),
+        target_port: 0,
+    }];
+    store.upsert_host(&h).unwrap();
+    let item = local_item(&store, &vault, ItemKind::Host, &h.id.0.to_string(), 1).unwrap();
+    let back = decode(&encode(&item).unwrap()).unwrap();
+    match back.body {
+        ItemBody::Host { host } => assert_eq!(host.forwards, h.forwards),
+        _ => panic!("expected a host"),
+    }
+}
+
+#[test]
+fn a_broken_rule_does_not_take_its_host_with_it() {
+    let mut value = serde_json::to_value(host(None)).unwrap();
+    value["forwards"] = serde_json::json!([{ "id": "not-a-uuid" }, { "bind_port": 70000 }]);
+    let back: Host = serde_json::from_value(value).unwrap();
+    assert!(back.forwards.is_empty());
+    let mut old = serde_json::to_value(host(None)).unwrap();
+    old.as_object_mut().unwrap().remove("forwards");
+    let back: Host = serde_json::from_value(old).unwrap();
+    assert!(back.forwards.is_empty());
 }

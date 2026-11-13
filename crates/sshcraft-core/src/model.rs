@@ -242,6 +242,9 @@ pub struct Host {
     /// A system a newer client knows reads as `Other` here.
     #[serde(default, deserialize_with = "os_or_other")]
     pub os: Option<HostOs>,
+    /// Port forwarding rules; a broken one is left out when reading.
+    #[serde(default, deserialize_with = "crate::forward::lenient_rules")]
+    pub forwards: Vec<crate::forward::ForwardRule>,
 }
 
 fn os_or_other<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<HostOs>, D::Error> {
@@ -545,6 +548,7 @@ mod tests {
 
     fn host_in(group: &Group, settings: ConnectionSettings) -> Host {
         Host {
+            forwards: Vec::new(),
             location: None,
             id: HostId::new(),
             name: "h".into(),
@@ -620,6 +624,7 @@ mod tests {
     #[test]
     fn missing_address_is_error() {
         let h = Host {
+            forwards: Vec::new(),
             location: None,
             id: HostId::new(),
             name: "h".into(),

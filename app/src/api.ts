@@ -57,6 +57,18 @@ export type Group = {
   proxy_has_password?: boolean;
 };
 
+export type ForwardKind = "local" | "remote" | "dynamic";
+export type ForwardRule = {
+  id: string;
+  name: string;
+  kind: ForwardKind;
+  bind_address: string;
+  bind_port: number;
+  /** Empty for a dynamic rule. */
+  target_host: string;
+  /** 0 for a dynamic rule. */
+  target_port: number;
+};
 export type Host = {
   id: string;
   name: string;
@@ -67,6 +79,8 @@ export type Host = {
   os?: HostOs | null;
   has_password?: boolean;
   proxy_has_password?: boolean;
+  /** Port forwarding rules of this host. */
+  forwards?: ForwardRule[];
 };
 
 export type Identity = {
@@ -301,6 +315,16 @@ export const saveWorkspaceTemplate = (template: WorkspaceTemplate) =>
 export const deleteWorkspaceTemplate = (id: string) => invoke<void>("delete_workspace_template", { id });
 /** Opens an http(s) link in the default browser; Rust checks it again. */
 export const openLink = (url: string) => invoke<void>("open_link", { url });
+export type ForwardState =
+  | { state: "starting" }
+  | { state: "running"; bound_port: number; connections: number; refused: number; notice: string | null }
+  | { state: "reconnecting"; attempt: number; delay_secs: number }
+  | { state: "stopped" }
+  | { state: "failed"; code: string | null; detail: string | null };
+export type ForwardStatus = { rule_id: string; host_id: string } & ForwardState;
+export const forwardStart = (hostId: string, ruleId: string) => invoke<void>("forward_start", { hostId, ruleId });
+export const forwardStop = (hostId: string, ruleId: string) => invoke<void>("forward_stop", { hostId, ruleId });
+export const forwardStatuses = () => invoke<ForwardStatus[]>("forward_statuses");
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
 
 export type SyncStatusView =
