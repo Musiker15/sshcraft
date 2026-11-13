@@ -36,6 +36,7 @@ encrypted vault.
 | Sync on the device | [docs/sync.md](docs/sync.md) |
 | Running the sync server | [docs/server.md](docs/server.md) |
 | Sync server API | [docs/server-api.md](docs/server-api.md) |
+| Workspaces, broadcast, templates and terminal settings | [docs/workspaces.md](docs/workspaces.md) |
 | Keyboard shortcuts | [docs/shortcuts.md](docs/shortcuts.md) |
 | Security notes | [docs/security.md](docs/security.md) |
 
