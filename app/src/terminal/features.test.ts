@@ -25,6 +25,18 @@ test("OSC 7 gives the reported directory", () => {
   expect(osc7Path("garbage")).toBeNull();
 });
 
+test("an OSC 7 path with a lone percent sign gives nothing instead of throwing", () => {
+  expect(() => osc7Path("file://h/tmp/50% off")).not.toThrow();
+  expect(osc7Path("file://h/tmp/50% off")).toBeNull();
+  expect(osc7Path("file://h/50%")).toBeNull();
+});
+
+test("a home-relative directory keeps its tilde unquoted", () => {
+  expect(startupInput(host, { cwd: "~/my app" })).toBe("cd -- ~/'my app'\r");
+  expect(startupInput(host, { cwd: "~" })).toBe("cd -- ~\r");
+  expect(startupInput(host, { cwd: "~other/x" })).toBe("cd -- '~other/x'\r");
+});
+
 test("only web links are opened", () => {
   expect(isOpenableLink("https://example.com/a?b=c")).toBe(true);
   expect(isOpenableLink("http://10.0.0.1:8080/")).toBe(true);
@@ -93,6 +105,15 @@ test.each([
   ["\x1b[O"],
   ["\x1b]11;rgb:0000/0000/0000\x1b\\"],
   ["\x1b[?2004;1$y"],
+  // DECRQSS answer, DECXCPR, DSR status, window size report (all sent by xterm 6).
+  ["\x1bP1$r0;1m\x1b\\"],
+  ["\x1b[?12;40R"],
+  ["\x1b[0n"],
+  ["\x1b[8;24;80t"],
+  // Mouse reports (SGR and X10): a click in one pane is not replayed in the others.
+  ["\x1b[<0;12;5M"],
+  ["\x1b[<0;12;5m"],
+  ["\x1b[M !!"],
 ])("%j is the terminal answering, not typing", (data) => {
   expect(isTerminalReport(data)).toBe(true);
 });

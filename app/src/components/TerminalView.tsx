@@ -71,16 +71,26 @@ export function TerminalView({ pane, visible, focused, onAttach, onStatus, onInp
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(new WebLinksAddon(openOnCtrlClick));
     // OSC 52: a program may put text on the clipboard (if allowed), never read it.
+    // xterm does not catch what a parser hook throws: one exception would stop this terminal for
+    // good (and with it the flow control). Every hook swallows its own errors.
     const clipboard = terminal.parser.registerOscHandler(52, (data) => {
-      if (look.current.clipboard_osc52 === "write") {
-        const text = osc52Text(data);
-        if (text !== null) void navigator.clipboard.writeText(text).catch(() => {});
+      try {
+        if (look.current.clipboard_osc52 === "write") {
+          const text = osc52Text(data);
+          if (text !== null) void navigator.clipboard.writeText(text).catch(() => {});
+        }
+      } catch {
+        // Ignored: the sequence just does nothing.
       }
       return true;
     });
     const directory = terminal.parser.registerOscHandler(7, (data) => {
-      const path = osc7Path(data);
-      if (path) callbacks.current.onCwd(path);
+      try {
+        const path = osc7Path(data);
+        if (path) callbacks.current.onCwd(path);
+      } catch {
+        // Ignored: the sequence just does nothing.
+      }
       return true;
     });
     terminal.open(element);

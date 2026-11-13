@@ -38,7 +38,13 @@ export function osc7Path(data: string): string | null {
     return null;
   }
   if (url.protocol !== "file:") return null;
-  const path = decodeURIComponent(url.pathname);
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    // A lone "%" in the path: not a directory we can name.
+    return null;
+  }
   // file:///C:/Users -> C:/Users
   return /^\/[A-Za-z]:/.test(path) ? path.slice(1) : path;
 }
@@ -69,17 +75,24 @@ export function expectsInput(tail: string): boolean {
   return last !== "" && PROMPTS.some((p) => p.test(last));
 }
 
+// Every answer xterm 6 sends on its own (`triggerDataEvent` in its InputHandler), and mouse reports.
 const REPORTS = [
-  /^\x1b\[\d+;\d+R$/, // cursor position
+  /^\x1b\[\??\d+;\d+R$/, // cursor position (DSR 6, DECXCPR)
+  /^\x1b\[\d*n$/, // status report (DSR 5)
   /^\x1b\[[?>]?[\d;]*c$/, // device attributes
   /^\x1b\[[IO]$/, // focus in and out
   /^\x1b\][^\x07\x1b]*(\x07|\x1b\\)$/, // OSC answers (colours and the like)
+  /^\x1bP[\s\S]*\x1b\\$/, // DCS answers (DECRQSS)
   /^\x1b\[\??[\d;]*\$y$/, // mode reports
+  /^\x1b\[\d+(;\d+)*t$/, // window reports
+  /^\x1b\[<\d+;\d+;\d+[Mm]$/, // mouse, SGR encoding
+  /^\x1b\[M[\s\S]{3}$/, // mouse, X10 encoding
 ];
 
 /**
  * Whether `data` from xterm is the terminal answering the server (cursor position, device
- * attributes, focus) rather than the user typing. A broadcast never sends those to other panes.
+ * attributes, focus, DECRQSS) or a mouse report rather than the user typing. A broadcast never
+ * sends those to other panes; they go to their own session only.
  */
 export function isTerminalReport(data: string): boolean {
   return REPORTS.some((r) => r.test(data));
@@ -89,6 +102,13 @@ function shellQuote(text: string): string {
   return `'${text.split("'").join("'\\''")}'`;
 }
 
+/** A directory for `cd`: a leading `~` or `~/` stays outside the quotes so the shell expands it. */
+function quoteDir(dir: string): string {
+  if (dir === "~") return "~";
+  if (dir.startsWith("~/")) return `~/${shellQuote(dir.slice(2))}`;
+  return shellQuote(dir);
+}
+
 /**
  * What a template types once after the first connect. Over SSH it changes directory first
  * (POSIX shell); a local shell already starts there, a serial line has none.
@@ -96,7 +116,7 @@ function shellQuote(text: string): string {
 export function startupInput(target: SessionTarget, startup: Startup | undefined): string | null {
   const cwd = startup?.cwd?.trim() ?? "";
   const command = startup?.command?.trim() ?? "";
-  const parts = [target.kind === "host" && cwd !== "" ? `cd -- ${shellQuote(cwd)}` : "", command].filter(
+  const parts = [target.kind === "host" && cwd !== "" ? `cd -- ${quoteDir(cwd)}` : "", command].filter(
     (p) => p !== "",
   );
   return parts.length === 0 ? null : `${parts.join(" && ")}\r`;
