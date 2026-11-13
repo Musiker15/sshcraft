@@ -799,6 +799,28 @@ async fn connected_session_is_recent() {
     );
 }
 
+#[tokio::test]
+async fn host_session_uses_terminal_type_setting() {
+    let f = fixture(true).await;
+    crate::settings::save(
+        &f.store.lock().unwrap(),
+        crate::settings::AppSettings {
+            terminal_type: "linux".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(connected).await;
+    assert_eq!(f.server.requested_terms(), vec!["linux".to_owned()]);
+}
+
 #[test]
 fn hello_reason_follows_the_app_language() {
     use crate::settings::LanguageSetting;
@@ -1189,7 +1211,12 @@ async fn local_target_runs_and_ends() {
         }
     };
     let sink = Arc::new(RecordingSink::default());
-    let id = manager.open(SessionTarget::Local { shell }, 80, 24, sink.clone());
+    let id = manager.open(
+        SessionTarget::Local { shell, cwd: None },
+        80,
+        24,
+        sink.clone(),
+    );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let mut answered = false;
     while ended(&sink.statuses()).is_none() {

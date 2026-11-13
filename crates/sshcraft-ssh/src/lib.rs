@@ -96,7 +96,6 @@ pub async fn list_agent_keys(agent: &mut DynAgent) -> Result<Vec<AgentKey>, SshE
         .collect())
 }
 
-const TERM: &str = "xterm-256color";
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const KEEPALIVE_MAX: usize = 3;
 const EVENT_BUFFER: usize = 1024;
@@ -493,10 +492,11 @@ impl Session {
             .map_err(|_| SshError::Timeout)?
     }
 
-    pub async fn open_shell(&self, cols: u32, rows: u32) -> Result<Shell, SshError> {
+    /// Opens a shell with a terminal of type `term` (`TERM` on the server).
+    pub async fn open_shell(&self, cols: u32, rows: u32, term: &str) -> Result<Shell, SshError> {
         let channel = self.handle.channel_open_session().await.map_err(protocol)?;
         channel
-            .request_pty(false, TERM, cols, rows, 0, 0, &[])
+            .request_pty(false, term, cols, rows, 0, 0, &[])
             .await
             .map_err(protocol)?;
         for (name, value) in self.env.iter() {

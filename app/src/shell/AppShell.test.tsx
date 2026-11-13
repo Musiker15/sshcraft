@@ -28,6 +28,9 @@ vi.mock("@tauri-apps/api/core", () => {
       font_family: "Consolas",
       font_size: 14,
       host_view: "grid",
+      terminal_type: "xterm-256color",
+      clipboard_osc52: "write",
+      shortcuts: {},
     },
   };
   return {

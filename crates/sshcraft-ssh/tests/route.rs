@@ -67,7 +67,7 @@ fn target(port: u16, credentials: Option<(&str, &str)>) -> ProxyTarget {
 
 /// Opens a shell and checks an echo comes back: the session really reaches the target.
 async fn echoes(session: &sshcraft_ssh::Session) {
-    let mut shell = session.open_shell(80, 24).await.unwrap();
+    let mut shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     shell.write(b"ping\n").await.unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let mut got = Vec::new();

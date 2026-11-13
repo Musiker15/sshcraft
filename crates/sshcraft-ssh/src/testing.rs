@@ -81,6 +81,8 @@ struct Records {
     commands: Mutex<Vec<String>>,
     /// What `exec` answers; `None`: [`TEST_EXEC_OUTPUT`].
     exec_output: Mutex<Option<String>>,
+    /// Terminal types clients asked for with `pty-req`.
+    terms: Mutex<Vec<String>>,
 }
 
 pub struct TestServer {
@@ -133,6 +135,11 @@ impl TestServer {
     /// How many certificates clients offered.
     pub fn received_certificates(&self) -> usize {
         *self.records.certificates.lock().unwrap()
+    }
+
+    /// Terminal types clients asked for, in order.
+    pub fn requested_terms(&self) -> Vec<String> {
+        self.records.terms.lock().unwrap().clone()
     }
 
     pub fn received_env(&self) -> Vec<(String, String)> {
@@ -478,7 +485,7 @@ impl server::Handler for Handler {
     async fn pty_request(
         &mut self,
         channel: ChannelId,
-        _term: &str,
+        term: &str,
         _cols: u32,
         _rows: u32,
         _pix_width: u32,
@@ -486,6 +493,7 @@ impl server::Handler for Handler {
         _modes: &[(russh::Pty, u32)],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.records.terms.lock().unwrap().push(term.to_owned());
         session.channel_success(channel)
     }
 

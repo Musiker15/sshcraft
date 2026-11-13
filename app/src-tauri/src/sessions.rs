@@ -133,6 +133,9 @@ pub enum SessionTarget {
     #[cfg(desktop)]
     Local {
         shell: sshcraft_local::pty::ShellCommand,
+        /// Where the shell starts; the home directory when missing or not a directory.
+        #[serde(default)]
+        cwd: Option<String>,
     },
     #[cfg(desktop)]
     Serial {
@@ -1000,10 +1003,17 @@ async fn connect_target(
     match target {
         SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size, opened).await,
         #[cfg(desktop)]
-        SessionTarget::Local { shell } => {
+        SessionTarget::Local { shell, cwd } => {
             let (cols, rows) = *size.lock().expect("size lock");
-            let (writer, events) = sshcraft_local::pty::spawn(shell, to_u16(cols), to_u16(rows))
-                .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
+            let term = crate::settings::load(&ctx.store.lock().expect("store lock")).terminal_type;
+            let (writer, events) = sshcraft_local::pty::spawn(
+                shell,
+                to_u16(cols),
+                to_u16(rows),
+                &term,
+                cwd.as_deref().map(std::path::Path::new),
+            )
+            .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
             Ok((Arc::new(writer), events, None))
         }
         #[cfg(desktop)]
@@ -1028,8 +1038,10 @@ async fn connect_once(
 ) -> Result<Connected, Failure> {
     let (session, notice) = connect_session(ctx, host_id, opened).await?;
     let (cols, rows) = *size.lock().expect("size lock");
+    // Read on every connect, so a reconnect uses the type set now.
+    let term = crate::settings::load(&ctx.store.lock().expect("store lock")).terminal_type;
     let shell = session
-        .open_shell(cols, rows)
+        .open_shell(cols, rows, &term)
         .await
         .map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
     if needs_os(&ctx.store, host_id) {

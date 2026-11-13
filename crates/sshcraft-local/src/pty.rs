@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use sshcraft_core::policy::{Disconnect, ShellEvent};
 use tokio::sync::mpsc;
 
-const TERM: &str = "xterm-256color";
 const EVENT_BUFFER: usize = 1024;
 const READ_CHUNK: usize = 8 * 1024;
 
@@ -190,12 +189,15 @@ fn home() -> Option<std::path::PathBuf> {
         .filter(|p| p.is_dir())
 }
 
-/// Starts the shell in the user's home directory. Output comes as [`ShellEvent::Data`], then
-/// [`ShellEvent::Ended`] with the exit code once the shell has ended and its output is read.
+/// Starts the shell in `cwd` when that is a directory, else in the user's home directory, with
+/// `TERM` set to `term`. Output comes as [`ShellEvent::Data`], then [`ShellEvent::Ended`] with
+/// the exit code once the shell has ended and its output is read.
 pub fn spawn(
     cmd: &ShellCommand,
     cols: u16,
     rows: u16,
+    term: &str,
+    cwd: Option<&std::path::Path>,
 ) -> Result<(LocalWriter, mpsc::Receiver<ShellEvent>), LocalError> {
     let pair = native_pty_system()
         .openpty(PtySize {
@@ -207,8 +209,12 @@ pub fn spawn(
         .map_err(|e| LocalError::Spawn(e.to_string()))?;
     let mut builder = CommandBuilder::new(&cmd.program);
     builder.args(&cmd.args);
-    builder.env("TERM", TERM);
-    if let Some(dir) = home() {
+    builder.env("TERM", term);
+    let dir = cwd
+        .filter(|dir| dir.is_dir())
+        .map(std::path::Path::to_path_buf)
+        .or_else(home);
+    if let Some(dir) = dir {
         builder.cwd(dir);
     }
     let mut child = pair

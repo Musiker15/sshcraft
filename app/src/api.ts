@@ -122,7 +122,7 @@ export type SerialPortInfo = { name: string; description: string };
 
 export type SessionTarget =
   | { kind: "host"; host_id: string }
-  | { kind: "local"; shell: ShellCommand }
+  | { kind: "local"; shell: ShellCommand; cwd?: string | null }
   | { kind: "serial"; settings: SerialSettings };
 
 export const localShells = () => invoke<ShellCommand[]>("local_shells");
@@ -270,6 +270,11 @@ export type AppSettings = {
   font_family: string;
   font_size: number;
   host_view: HostView;
+  /** One of `TERMINAL_TYPES` (settings/terminal.ts). */
+  terminal_type: string;
+  clipboard_osc52: "write" | "off";
+  /** Shortcuts that differ from the defaults; an empty list unbinds the action. */
+  shortcuts: Record<string, string[]>;
 };
 export const getSettings = () => invoke<AppSettings>("get_settings");
 /** Returns what Rust stored, with values kept in their allowed ranges. */
