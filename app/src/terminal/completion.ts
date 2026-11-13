@@ -39,14 +39,19 @@ export function pathQuery(word: string, cwd: string | null): { dir: string; pref
   return { dir: `${cwd.endsWith("/") ? cwd : `${cwd}/`}${dir}`, prefix };
 }
 
-/** Snippet text as typed: line ends as Enter, without running the last line. */
-function pasted(content: string): string {
-  return content.replace(/\r?\n/g, "\r").replace(/\r+$/, "");
+/** A snippet as completion knows it: line ends as Enter, no Enter after the last line. Done
+ * once when snippets are loaded, not on every key. */
+export function snippetSource(s: { name: string; content: string }): { name: string; content: string } {
+  return { name: s.name, content: s.content.replace(/\r?\n/g, "\r").replace(/\r+$/, "") };
 }
 
-/** What taking `s` sends to the shell. */
-export function insertText(s: Suggestion): string {
-  return s.replace ? `\x15${s.insert}` : s.insert;
+/**
+ * What taking `s` sends when `lineLength` characters are typed: the missing end, or for a
+ * replacing suggestion one Backspace per typed character first (Ctrl+U does not clear a line in
+ * PowerShell or cmd).
+ */
+export function insertText(s: Suggestion, lineLength: number): string {
+  return s.replace ? "\x7f".repeat(lineLength) + s.insert : s.insert;
 }
 
 /** The spec reached by the finished words of the line, past `sudo` and the like. */
@@ -101,7 +106,7 @@ export function suggest(line: string, sources: Sources): Suggestion[] {
   }
   const query = line.trim().toLocaleLowerCase();
   for (const snippet of sources.snippets) {
-    const content = pasted(snippet.content);
+    const content = snippet.content;
     if (content.startsWith(line) && content !== line) {
       add({ label: snippet.name, insert: content.slice(line.length), replace: false, source: "snippet" });
     } else if (snippet.name.toLocaleLowerCase().includes(query)) {
@@ -146,4 +151,30 @@ export function keyAction(state: { open: boolean; selected: number | null }, key
     default:
       return "pass";
   }
+}
+
+type GateEvent = { type: string; key: string; preventDefault(): void; stopPropagation(): void };
+
+/**
+ * Wraps a "does this keydown belong to the suggestions?" decision for xterm's key handler: a
+ * key it takes is cancelled, and so is the keypress the browser sends after it. Without that,
+ * Enter would still reach the shell and Tab would move the focus.
+ */
+export function keyGate(consume: (e: GateEvent) => boolean): (e: GateEvent) => boolean {
+  let swallowPress = false;
+  return (e) => {
+    if (e.type === "keypress") {
+      if (!swallowPress) return true;
+      swallowPress = false;
+      e.preventDefault();
+      return false;
+    }
+    if (e.type !== "keydown") return true;
+    swallowPress = false;
+    if (!consume(e)) return true;
+    e.preventDefault();
+    e.stopPropagation();
+    swallowPress = true;
+    return false;
+  };
 }

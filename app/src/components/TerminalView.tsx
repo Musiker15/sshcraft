@@ -18,8 +18,18 @@ import {
   type Snippet,
 } from "../api";
 import { CompletionPopup } from "./CompletionPopup";
-import { currentWord, insertText, keyAction, pathQuery, suggest, type Suggestion } from "../terminal/completion";
+import {
+  currentWord,
+  insertText,
+  keyAction,
+  keyGate,
+  pathQuery,
+  snippetSource,
+  suggest,
+  type Suggestion,
+} from "../terminal/completion";
 import { emptyLine, shouldRecord, track, type Line } from "../terminal/lineTracker";
+import { HISTORY_CLEARED, SNIPPETS_CHANGED, pasteBytes, registerPane } from "../terminal/panes";
 import { errorDetail } from "../i18n/errors";
 import { useSettings } from "../settings/SettingsProvider";
 import { terminalTheme } from "../settings/themes";
@@ -66,6 +76,32 @@ type Props = {
   broadcast?: boolean;
 };
 
+/** Height of one suggestion row and the list's padding, width of the list (as in the CSS). */
+const POPUP_ROW = 20;
+const POPUP_PAD = 10;
+const POPUP_WIDTH = 320;
+
+/**
+ * Where the list goes: under the cursor in the pane, or above it when it would not fit below;
+ * never past the pane's right edge. Measured on xterm's screen, so padding and scrollbar do not
+ * shift it.
+ */
+function popupPosition(terminal: Terminal, element: HTMLElement, count: number): { left: number; top: number } {
+  const screen = element.querySelector<HTMLElement>(".xterm-screen") ?? element;
+  const pane = (element.offsetParent as HTMLElement | null) ?? element;
+  const paneRect = pane.getBoundingClientRect();
+  const rect = screen.getBoundingClientRect();
+  const cellWidth = rect.width / Math.max(1, terminal.cols);
+  const cellHeight = rect.height / Math.max(1, terminal.rows);
+  const x = rect.left - paneRect.left + terminal.buffer.active.cursorX * cellWidth;
+  const rowTop = rect.top - paneRect.top + terminal.buffer.active.cursorY * cellHeight;
+  const height = count * POPUP_ROW + POPUP_PAD;
+  const below = rowTop + cellHeight;
+  const top = below + height > paneRect.height && rowTop - height >= 0 ? rowTop - height : below;
+  const left = Math.max(0, Math.min(x, paneRect.width - POPUP_WIDTH));
+  return { left, top };
+}
+
 /** Opens a link only on Ctrl+click and only for web addresses (Rust checks again). */
 function openOnCtrlClick(event: MouseEvent, uri: string) {
   if (event.ctrlKey && isOpenableLink(uri)) void openLink(uri).catch(() => {});
@@ -102,7 +138,7 @@ export function TerminalView({
   const line = useRef<Line>(emptyLine);
   const tail = useRef("");
   const scope = historyScope(pane.target);
-  const known = useRef({ history: [] as string[], snippets: [] as Snippet[] });
+  const known = useRef({ history: [] as string[], snippets: [] as { name: string; content: string }[] });
   const listings = useRef(new Map<string, { at: number; names: string[] }>());
   const cwd = useRef<string | null>(pane.cwd ?? null);
   cwd.current = pane.cwd ?? null;
@@ -111,12 +147,28 @@ export function TerminalView({
   const listingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    snippetsList().then((list) => (known.current.snippets = list ?? []), () => {});
+    const loadSnippets = () =>
+      snippetsList().then(
+        (list) => (known.current.snippets = (list ?? []).map((s: Snippet) => snippetSource(s))),
+        () => {},
+      );
+    loadSnippets();
     if (scope)
       historyList(scope).then(
         (list) => (known.current.history = (list ?? []).map((e) => e.command)),
         () => {},
       );
+    // A cleared history is not suggested any more; changed snippets are.
+    const cleared = (e: Event) => {
+      const which = (e as CustomEvent<string | null>).detail;
+      if (which === null || which === scope) known.current.history = [];
+    };
+    window.addEventListener(HISTORY_CLEARED, cleared);
+    window.addEventListener(SNIPPETS_CHANGED, loadSnippets);
+    return () => {
+      window.removeEventListener(HISTORY_CLEARED, cleared);
+      window.removeEventListener(SNIPPETS_CHANGED, loadSnippets);
+    };
   }, [scope]);
 
   /** Works out the suggestions for the line as it is now. */
@@ -126,7 +178,9 @@ export function TerminalView({
     const element = host.current;
     const text = line.current.text;
     const fullScreen = terminal?.buffer.active.type === "alternate";
-    if (!terminal || !element || !look.current.autocomplete || !line.current.certain || fullScreen) {
+    // Only at a shell prompt: never while a password is typed, nor in mysql, python and the like.
+    const atShell = line.current.kind === "shell";
+    if (!terminal || !element || !look.current.autocomplete || !line.current.certain || fullScreen || !atShell) {
       if (shown.current.suggestions.length > 0) setCompletion(noCompletion);
       return;
     }
@@ -141,7 +195,7 @@ export function TerminalView({
         if (listingTimer.current) clearTimeout(listingTimer.current);
         const id = sessionId.current;
         listingTimer.current = setTimeout(() => {
-          sessionListDir(id, query.dir).then(
+          sessionListDir(id, query.dir, "").then(
             (names) => {
               listings.current.set(query.dir, { at: Date.now(), names: names ?? [] });
               refresh.current();
@@ -152,34 +206,53 @@ export function TerminalView({
       }
     }
     const suggestions = suggest(text, { history: known.current.history, snippets: known.current.snippets, paths });
-    // Under the cursor, inside the pane.
-    const cellWidth = element.clientWidth / Math.max(1, terminal.cols);
-    const cellHeight = element.clientHeight / Math.max(1, terminal.rows);
-    const at = {
-      left: element.offsetLeft + terminal.buffer.active.cursorX * cellWidth,
-      top: element.offsetTop + (terminal.buffer.active.cursorY + 1) * cellHeight,
-    };
-    setCompletion({ suggestions, selected: null, at });
+    if (suggestions.length === 0) {
+      if (shown.current.suggestions.length > 0) setCompletion(noCompletion);
+      return;
+    }
+    setCompletion({ suggestions, selected: null, at: popupPosition(terminal, element, suggestions.length) });
+  };
+
+  /** Re-places an open list when the cursor moves (the echo of a key arrives after it). */
+  const reposition = useRef(() => {});
+  reposition.current = () => {
+    const terminal = term.current;
+    const element = host.current;
+    const state = shown.current;
+    if (!terminal || !element || state.suggestions.length === 0) return;
+    setCompletion({ ...state, at: popupPosition(terminal, element, state.suggestions.length) });
+  };
+
+  /** Pastes into this pane's shell (bracketed where it allows) and follows it in the line. */
+  const pasteInto = useRef<(content: string, run: boolean) => void>(() => {});
+  pasteInto.current = (content, run) => {
+    const bytes = pasteBytes(content, run, term.current?.modes.bracketedPasteMode ?? false);
+    typed.current(bytes);
+    callbacks.current.onInput(bytes, false);
   };
 
   /** Follows the keys sent to the shell: the line, and the history once Enter runs it. */
   const typed = useRef<(data: string) => void>(() => {});
   typed.current = (data: string) => {
-    // Asked before the keys change what is on screen: no echo after "Password:".
-    const secretPrompt = expectsInput(tail.current);
-    const next = track(line.current, data);
+    // The kind of the line (shell, secret, other) comes from the output before its first key.
+    const kind = line.current.kind;
+    const next = track(line.current, data, tail.current);
+    const lineKind = line.current.kind ?? next.line.kind ?? kind;
     line.current = next.line;
     const command = next.committed;
     const terminal = term.current;
     if (command !== null && scope && look.current.history) {
       const context = {
-        secretPrompt,
+        kind: lineKind,
         alternate: terminal?.buffer.active.type === "alternate",
         broadcast: broadcasting.current,
       };
       if (shouldRecord(command, context)) {
-        known.current.history = [command, ...known.current.history.filter((c) => c !== command)];
-        void historyRecord(scope, command).catch(() => {});
+        // Suggested only once it is really kept (the vault may be locked).
+        void historyRecord(scope, command).then(
+          () => (known.current.history = [command, ...known.current.history.filter((c) => c !== command)]),
+          () => {},
+        );
       }
     }
     refresh.current();
@@ -199,41 +272,59 @@ export function TerminalView({
     });
     term.current = terminal;
     // Window shortcuts are handled by the shell; xterm must not also send them to the server.
-    terminal.attachCustomKeyEventHandler((e) => {
-      if (matchShortcut(e, "terminal", resolveBindings(look.current.shortcuts)) !== null) return false;
-      if (e.type !== "keydown") return true;
-      // Suggestions take keys only once one is selected; until then every key is the shell's.
+    // Suggestions take keys only once one is selected; until then every key is the shell's. A
+    // key they take is cancelled together with its keypress (else Enter would still run the line
+    // and Tab move the focus).
+    const suggestionKeys = keyGate((e) => {
       const state = shown.current;
       const open = state.suggestions.length > 0;
       const action = keyAction({ open, selected: state.selected }, e.key);
       const count = state.suggestions.length;
       switch (action) {
         case "pass":
-          return true;
+          return false;
         case "close":
           setCompletion(noCompletion);
           // An unselected list closes, but Escape still reaches the shell.
-          return state.selected === null;
+          return state.selected !== null;
         case "select":
           setCompletion({ ...state, selected: 0 });
-          return false;
+          return true;
         case "next":
           setCompletion({ ...state, selected: ((state.selected ?? 0) + 1) % count });
-          return false;
+          return true;
         case "prev":
           setCompletion({ ...state, selected: ((state.selected ?? 0) - 1 + count) % count });
-          return false;
+          return true;
         case "accept": {
           const chosen = state.suggestions[state.selected ?? 0];
           setCompletion(noCompletion);
           if (chosen) {
-            const text = insertText(chosen);
-            callbacks.current.onInput(text, false);
-            line.current = track(line.current, text).line;
+            const length = [...line.current.text].length;
+            if (chosen.replace) {
+              // Erase what is typed, then paste the snippet (several lines stay a paste).
+              const erase = insertText({ ...chosen, insert: "" }, length);
+              typed.current(erase);
+              callbacks.current.onInput(erase, false);
+              pasteInto.current(chosen.insert, false);
+            } else {
+              const text = insertText(chosen, length);
+              typed.current(text);
+              callbacks.current.onInput(text, false);
+            }
           }
-          return false;
+          return true;
         }
       }
+    });
+    terminal.attachCustomKeyEventHandler((e) => {
+      if (matchShortcut(e, "terminal", resolveBindings(look.current.shortcuts)) !== null) return false;
+      return suggestionKeys(e);
+    });
+    const cursor = terminal.onCursorMove(() => reposition.current());
+    const unregister = registerPane(pane.id, {
+      track: (data) => typed.current(data),
+      paste: (content, run) => pasteInto.current(content, run),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -301,7 +392,10 @@ export function TerminalView({
         if (status.state === "connected" && !start.typed && sessionId.current) {
           start.typed = true;
           const input = startupInput(start.target, start.startup);
-          if (input) void sessionWrite(sessionId.current, input).catch(() => {});
+          if (input) {
+            typed.current(input);
+            void sessionWrite(sessionId.current, input).catch(() => {});
+          }
         }
       },
     ).then(
@@ -350,6 +444,8 @@ export function TerminalView({
       input.dispose();
       resized.dispose();
       bell.dispose();
+      cursor.dispose();
+      unregister();
       clipboard.dispose();
       directory.dispose();
       if (sessionId.current) void sessionClose(sessionId.current);
@@ -364,7 +460,10 @@ export function TerminalView({
     if (pane.sessionId && pane.status.state === "connected" && !start.typed) {
       start.typed = true;
       const input = startupInput(start.target, start.startup);
-      if (input) void sessionWrite(pane.sessionId, input).catch(() => {});
+      if (input) {
+        typed.current(input);
+        void sessionWrite(pane.sessionId, input).catch(() => {});
+      }
     }
   }, [pane.sessionId, pane.status.state]);
 

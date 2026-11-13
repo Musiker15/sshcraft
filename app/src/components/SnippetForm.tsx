@@ -64,7 +64,14 @@ export function SnippetForm({ snippet, packages, package: startPackage = "", hos
       </label>
       <label>
         {t("snippets.content")}
-        <textarea className="mono" rows={8} value={content} spellCheck={false} onChange={(e) => setContent(e.target.value)} />
+        <textarea
+          className="mono"
+          rows={8}
+          maxLength={10000}
+          value={content}
+          spellCheck={false}
+          onChange={(e) => setContent(e.target.value)}
+        />
       </label>
       <fieldset className="choice">
         <legend>{t("snippets.defaultTargets")}</legend>

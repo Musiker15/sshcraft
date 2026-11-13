@@ -1,26 +1,29 @@
 // Sidebar beside the terminal: snippets (click pastes, the button runs) and the focused pane's
-// history (click pastes).
+// history (click pastes, can be cleared).
 import { Play, Search } from "lucide-react";
 import { useEffect, useState } from "react";
-import { historyList, snippetsList, type HistoryEntry, type Snippet } from "../api";
-import { snippetInput } from "../forms/snippetRun";
+import { historyClear, historyList, snippetsList, type HistoryEntry, type Snippet } from "../api";
 import { useT } from "../i18n/i18n";
+import { HISTORY_CLEARED, SNIPPETS_CHANGED } from "../terminal/panes";
 
 type Props = {
   /** History scope of the focused pane; `null` where there is none (serial). */
   scope: string | null;
-  onInsert: (text: string) => void;
-  onRun: (text: string) => void;
+  /** Pastes into the focused pane; `run` presses Enter after it. */
+  onPaste: (content: string, run: boolean) => void;
 };
 
-export function TerminalSidebar({ scope, onInsert, onRun }: Props) {
+export function TerminalSidebar({ scope, onPaste }: Props) {
   const t = useT();
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    snippetsList().then((list) => setSnippets(list ?? []), () => setSnippets([]));
+    const load = () => snippetsList().then((list) => setSnippets(list ?? []), () => setSnippets([]));
+    load();
+    window.addEventListener(SNIPPETS_CHANGED, load);
+    return () => window.removeEventListener(SNIPPETS_CHANGED, load);
   }, []);
   useEffect(() => {
     if (!scope) {
@@ -28,7 +31,22 @@ export function TerminalSidebar({ scope, onInsert, onRun }: Props) {
       return;
     }
     historyList(scope).then((list) => setHistory(list ?? []), () => setHistory([]));
+    // Cleared here or in the settings: the list goes at once.
+    const cleared = (e: Event) => {
+      const which = (e as CustomEvent<string | null>).detail;
+      if (which === null || which === scope) setHistory([]);
+    };
+    window.addEventListener(HISTORY_CLEARED, cleared);
+    return () => window.removeEventListener(HISTORY_CLEARED, cleared);
   }, [scope]);
+
+  const clear = () => {
+    if (!scope) return;
+    void historyClear(scope).then(() => {
+      setHistory([]);
+      window.dispatchEvent(new CustomEvent(HISTORY_CLEARED, { detail: scope }));
+    }, () => {});
+  };
 
   const q = query.trim().toLocaleLowerCase();
   const matches = (text: string) => q === "" || text.toLocaleLowerCase().includes(q);
@@ -52,14 +70,14 @@ export function TerminalSidebar({ scope, onInsert, onRun }: Props) {
       <ul className="sidebar-list">
         {shownSnippets.map((s) => (
           <li key={s.id} className="sidebar-row">
-            <button className="sidebar-entry" title={s.content} onClick={() => onInsert(snippetInput(s.content, false))}>
+            <button className="sidebar-entry" title={s.content} onClick={() => onPaste(s.content, false)}>
               {s.name}
             </button>
             <button
               className="icon"
               aria-label={t("snippets.run")}
               title={t("snippets.run")}
-              onClick={() => onRun(snippetInput(s.content, true))}
+              onClick={() => onPaste(s.content, true)}
             >
               <Play size={12} />
             </button>
@@ -71,12 +89,17 @@ export function TerminalSidebar({ scope, onInsert, onRun }: Props) {
       <ul className="sidebar-list">
         {shownHistory.map((h) => (
           <li key={h.command} className="sidebar-row">
-            <button className="sidebar-entry mono" onClick={() => onInsert(h.command)}>
+            <button className="sidebar-entry mono" onClick={() => onPaste(h.command, false)}>
               {h.command}
             </button>
           </li>
         ))}
       </ul>
+      {scope && history.length > 0 && (
+        <button className="link" onClick={clear}>
+          {t("sidebar.clearHistory")}
+        </button>
+      )}
     </aside>
   );
 }

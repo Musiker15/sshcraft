@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { Drawer } from "../shell/Drawer";
 import { ErrorMessage } from "../shell/ErrorMessage";
+import { SNIPPETS_CHANGED } from "../terminal/panes";
 
 type Props = { hosts: Host[]; onRun: (snippet: Snippet) => void };
 /** `null`: all; `""`: without a package; else a package name. */
@@ -24,10 +25,15 @@ export function SnippetsPage({ hosts, onRun }: Props) {
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: MenuItem[] } | null>(null);
   const [problem, setProblem] = useState<unknown>(null);
 
-  const reload = useCallback(() => {
+  const load = useCallback(() => {
     snippetsList().then((list) => setSnippets(list ?? []), setProblem);
   }, []);
-  useEffect(reload, [reload]);
+  useEffect(load, [load]);
+  /** After a change: this page and every terminal (completion, sidebar) read them again. */
+  const reload = useCallback(() => {
+    load();
+    window.dispatchEvent(new Event(SNIPPETS_CHANGED));
+  }, [load]);
 
   const packages = useMemo(
     () => [...new Set(snippets.map((s) => s.package).filter((p) => p !== ""))].sort((a, b) => a.localeCompare(b, lang)),

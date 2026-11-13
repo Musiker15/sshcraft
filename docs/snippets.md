@@ -1,6 +1,7 @@
 # Snippets, history and completion
 
-Snippets, the command history and completion stay on this device. They do not sync.
+Snippets, the command history and completion stay on this device. They do not sync. Snippets
+and the history are encrypted with the vault, so they need it unlocked.
 
 ## Snippets
 
@@ -21,16 +22,21 @@ where and how:
 - **New connections:** one tab named "Snippet: name" with a pane per chosen host (up to 16 per
   tab, more hosts open more tabs). Each pane types the snippet once after it connects.
 - **Open tabs:** the chosen panes that have a connection get the snippet right away.
-- The default hosts are picked first, both as new connections and as open panes connected to
-  them.
-- **Run** presses Enter after every line, **Paste only** leaves the last line for you to check.
-- A default host that was deleted is left out, and a notice says how many.
+- The default hosts are picked first, each once: its open pane where it has one, else a new
+  connection.
+- **Run** pastes the snippet and presses Enter; **Paste only** leaves it at the prompt to check.
+  Where the shell supports bracketed paste (bash 5.1 and later, zsh, fish), several lines are
+  pasted as one block and nothing runs before Enter. Without it each line runs as it arrives,
+  even with "paste only", and tabs are typed as spaces so they do not start the shell's
+  completion.
+- A default host that was deleted is named in the dialog and left out.
 
 ## Terminal sidebar
 
 Ctrl+Shift+S (or the panel button at the right of the tab strip) shows snippets and the history
 of the focused pane beside the terminal. A click pastes into the focused pane (with broadcast on,
-into all panes of the tab); the play button next to a snippet runs it. The search covers both.
+into all panes of the tab); the play button next to a snippet runs it. The search covers both,
+and the history of the focused terminal can be cleared there.
 
 ## History
 
@@ -38,14 +44,23 @@ SSHCraft keeps the commands typed in a terminal, per host and per local shell (n
 lines), up to 1000 per terminal, the most recent first.
 
 - Encrypted with the vault, on this device only.
+- Only lines typed at a shell prompt (ending in `$`, `#`, `%`, `>` or the like) are kept. What
+  kind of line it is is decided from the output when its first key is typed and kept until
+  Enter, so a password stays secret even where the server prints an asterisk per key.
 - Not kept:
   - lines starting with a space (as `HISTCONTROL=ignorespace` does);
-  - input right after a password or passphrase question;
+  - input after a password, passphrase, PIN, token or verification code question (also in
+    German, French, Spanish and Portuguese);
+  - input to programs with their own prompt: mysql, MariaDB, psql, sqlite, python, irb, a
+    shell's continuation prompt `>`;
   - anything typed in a full-screen program (vim, less, top);
   - lines the shell changed in ways SSHCraft cannot follow (Tab completion, arrow keys, Ctrl+R),
     and pasted text with several lines;
   - input while broadcast is on.
-- Settings → Terminal turns the history off and clears it.
+- A nested shell (`ssh` or `su` inside the terminal) looks like a shell prompt: its commands go
+  into the history of the outer host.
+- Settings → Terminal turns the history off and clears all of it; the sidebar clears the focused
+  terminal's. Deleting a host deletes its history.
 
 ## Completion
 
@@ -53,16 +68,20 @@ While you type at a prompt, SSHCraft suggests, in this order: commands from the 
 paths and known commands with their subcommands and options (git, docker, systemctl, apt,
 kubectl and about fifty more). Nothing comes from an AI.
 
-- The list shows up from two characters on and never takes a key by itself: Tab, Enter and the
+- The list shows up from two characters on, only at a shell prompt (never while a password is
+  typed, nor in mysql, python and the like), and never takes a key by itself: Tab, Enter and the
   arrow keys go to the shell as usual.
-- **Down arrow** selects the first suggestion; then Up/Down move, **Tab** or **Enter** takes it,
-  **Escape** closes the list (Escape always closes it, and without a selection still reaches the
-  shell).
-- Taking a suggestion types only the missing rest. A snippet found by its name replaces the line
-  (Ctrl+U first).
+- **Down arrow** selects the first suggestion; then Up/Down move, **Tab** or **Enter** takes it
+  (and only takes it: nothing runs), **Escape** closes the list (without a selection Escape still
+  reaches the shell).
+- Taking a suggestion types only the missing rest. A snippet found by its name replaces the line:
+  SSHCraft erases what you typed with Backspace and pastes the snippet.
 - Paths are suggested for a word that starts with `/`, `~`, `./` or `../` or contains `/`.
-  - Over SSH SSHCraft asks the server with `ls -1Ap` on a separate channel of the same
-    connection: the shell is not touched, and the name is quoted so it cannot run anything.
+  - Over SSH SSHCraft runs one fixed command, `sh -c '… ls -1ApL -- "$d"'`, on a separate
+    channel of the same connection and sends the directory on its standard input. No shell ever
+    parses the typed name, whatever the login shell is (bash, fish, csh, cmd). It needs `sh` on
+    the server and runs as the user that logged in (not as the user of an `su` or `sudo -i`
+    inside the terminal).
   - A local shell reads the folder directly.
   - Relative paths need the shell to report its directory (OSC 7, which many shells do or can
     be set to).

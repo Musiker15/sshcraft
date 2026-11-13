@@ -16,28 +16,27 @@ vi.mock("@tauri-apps/api/core", () => ({
 afterEach(cleanup);
 
 function show() {
-  const onInsert = vi.fn();
-  const onRun = vi.fn();
+  const onPaste = vi.fn();
   render(
     <I18nProvider language="en">
-      <TerminalSidebar scope="host:x" onInsert={onInsert} onRun={onRun} />
+      <TerminalSidebar scope="host:x" onPaste={onPaste} />
     </I18nProvider>,
   );
-  return { onInsert, onRun };
+  return { onPaste };
 }
 
 test("a snippet is pasted, or run with its button", async () => {
-  const { onInsert, onRun } = show();
+  const { onPaste } = show();
   fireEvent.click(await screen.findByText("Deploy"));
-  expect(onInsert).toHaveBeenCalledWith("cd /srv\rgit pull");
+  expect(onPaste).toHaveBeenCalledWith("cd /srv\ngit pull", false);
   fireEvent.click(screen.getByRole("button", { name: en["snippets.run"] }));
-  expect(onRun).toHaveBeenCalledWith("cd /srv\rgit pull\r");
+  expect(onPaste).toHaveBeenCalledWith("cd /srv\ngit pull", true);
 });
 
 test("a command from the history is pasted", async () => {
-  const { onInsert } = show();
+  const { onPaste } = show();
   fireEvent.click(await screen.findByText("systemctl status nginx"));
-  expect(onInsert).toHaveBeenCalledWith("systemctl status nginx");
+  expect(onPaste).toHaveBeenCalledWith("systemctl status nginx", false);
 });
 
 test("search narrows both lists", async () => {
@@ -46,4 +45,11 @@ test("search narrows both lists", async () => {
   fireEvent.change(screen.getByLabelText(en["sidebar.search"]), { target: { value: "nginx" } });
   expect(screen.queryByText("Deploy")).toBeNull();
   expect(screen.getByText("systemctl status nginx")).toBeTruthy();
+});
+
+test("this terminal's history can be cleared", async () => {
+  show();
+  await screen.findByText("systemctl status nginx");
+  fireEvent.click(screen.getByRole("button", { name: en["sidebar.clearHistory"] }));
+  await vi.waitFor(() => expect(screen.queryByText("systemctl status nginx")).toBeNull());
 });

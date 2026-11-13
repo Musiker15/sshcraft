@@ -4,6 +4,7 @@ import { TERMINAL_TYPES } from "../settings/terminal";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 import { historyClear, type AppSettings, type AppTheme } from "../api";
+import { HISTORY_CLEARED } from "../terminal/panes";
 import { useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { FONT_PRESETS, TERMINAL_THEMES, terminalTheme } from "../settings/themes";
@@ -161,7 +162,15 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
         </label>
         <p className="hint">{t("settings.historyHint")}</p>
         <div>
-          <button onClick={() => void historyClear(null).then(() => setHistoryCleared(true), () => {})}>
+          <button
+            onClick={() =>
+              void historyClear(null).then(() => {
+                setHistoryCleared(true);
+                // Open terminals and the sidebar forget it at once.
+                window.dispatchEvent(new CustomEvent(HISTORY_CLEARED, { detail: null }));
+              }, () => {})
+            }
+          >
             {t("settings.historyClear")}
           </button>
           {historyCleared && <span className="hint"> {t("settings.historyCleared")}</span>}

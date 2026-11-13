@@ -56,6 +56,7 @@ import { planNewTabs, snippetInput } from "../forms/snippetRun";
 import { SnippetsPage } from "../pages/SnippetsPage";
 import { TerminalSidebar } from "../components/TerminalSidebar";
 import { historyScope } from "../terminal/features";
+import { paneInput } from "../terminal/panes";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
@@ -69,10 +70,10 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { ShareDialog, type ShareTarget } from "../pages/sync/ShareDialog";
 import {
   HOME_ID,
-  broadcastTargets,
   initialTabs,
   isPicker,
   tabsReducer,
+  tabTitle,
   targetTitle,
   type Pane,
   type SessionTab,
@@ -229,15 +230,16 @@ export function AppShell() {
     if (paletteOpen) snippetsList().then((list) => setSnippets(list ?? []), () => setSnippets([]));
   }, [paletteOpen]);
 
-  /** Panes with a session, for "run in open tabs". */
+  /** Panes with a live session, for "run in open tabs"; a pane of a workspace is named with it. */
   const openPanes: OpenPane[] = tabs.tabs.flatMap((tab) =>
     tab.kind === "session"
       ? tab.panes.flatMap((pane) =>
-          !isPicker(pane) && pane.sessionId
+          !isPicker(pane) && pane.sessionId && pane.status.state !== "ended"
             ? [
                 {
                   paneId: pane.id,
-                  title: pane.title,
+                  title:
+                    tab.panes.length > 1 || tab.name ? `${tab.name ?? tabTitle(tab) ?? ""} · ${pane.title}` : pane.title,
                   sessionId: pane.sessionId,
                   hostId: pane.target.kind === "host" ? pane.target.host_id : null,
                 },
@@ -252,11 +254,15 @@ export function AppShell() {
     const input = snippetInput(snippet.content, plan.run);
     for (const paneId of plan.paneIds) {
       const pane = openPanes.find((p) => p.paneId === paneId);
-      if (pane) void sessionWrite(pane.sessionId, input).catch(() => {});
+      if (!pane) continue;
+      // Through the pane: a paste where its shell allows, and its typed line follows.
+      const target = paneInput(paneId);
+      if (target) target.paste(snippet.content, plan.run);
+      else void sessionWrite(pane.sessionId, input).catch(() => {});
     }
     const byId = new Map(hosts.map((h) => [h.id, h]));
-    const { tabs: groups, missing } = planNewTabs(hosts, plan.hostIds);
-    setSkipped(missing);
+    // Deleted default hosts are named in the dialog already.
+    const { tabs: groups } = planNewTabs(hosts, plan.hostIds);
     for (const group of groups) {
       dispatch({
         type: "openTemplate",
@@ -290,15 +296,23 @@ export function AppShell() {
     return pane && !isPicker(pane) ? pane : undefined;
   })();
 
-  /** Typed input goes to its own session, with broadcast on to every session of the tab. */
+  /** Typed input goes to its own session, with broadcast on to every session of the tab. The
+   * other panes follow it in their typed line. */
   const sendInput = useCallback((paneId: string, data: string, report: boolean) => {
     const tab = tabsRef.current.tabs.find(
       (t): t is SessionTab => t.kind === "session" && t.panes.some((p) => p.id === paneId),
     );
     const pane = tab?.panes.find((p) => p.id === paneId);
     if (!tab || !pane || isPicker(pane)) return;
-    const targets = tab.broadcast && !report ? broadcastTargets(tab) : pane.sessionId ? [pane.sessionId] : [];
-    for (const id of targets) void sessionWrite(id, data).catch(() => {});
+    if (tab.broadcast && !report) {
+      for (const other of tab.panes) {
+        if (isPicker(other) || !other.sessionId) continue;
+        if (other.id !== paneId) paneInput(other.id)?.track(data);
+        void sessionWrite(other.sessionId, data).catch(() => {});
+      }
+      return;
+    }
+    if (pane.sessionId) void sessionWrite(pane.sessionId, data).catch(() => {});
   }, []);
 
   const paneStatus = useCallback(
@@ -549,8 +563,11 @@ export function AppShell() {
         {sidebarOpen && activeSession && focusedPane && (
           <TerminalSidebar
             scope={historyScope(focusedPane.target)}
-            onInsert={(text) => sendInput(focusedPane.id, text, false)}
-            onRun={(text) => sendInput(focusedPane.id, text, false)}
+            onPaste={(content, run) => {
+              const input = paneInput(focusedPane.id);
+              if (input) input.paste(content, run);
+              else sendInput(focusedPane.id, snippetInput(content, run), false);
+            }}
           />
         )}
         <WorkspaceView

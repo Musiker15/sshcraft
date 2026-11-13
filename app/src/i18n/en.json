@@ -638,5 +638,7 @@
   "settings.historyClear": "Clear the history",
   "settings.historyCleared": "The history is cleared.",
   "settings.autocomplete": "Suggestions while typing",
-  "settings.autocompleteHint": "Down arrow picks a suggestion, Tab or Enter takes it, Escape closes the list. Until then every key goes to the shell."
+  "settings.autocompleteHint": "Down arrow picks a suggestion, Tab or Enter takes it, Escape closes the list. Until then every key goes to the shell.",
+  "snippets.missingTargets": "{count} default host(s) no longer exist and are left out.",
+  "sidebar.clearHistory": "Clear this terminal's history"
 }

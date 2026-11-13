@@ -638,5 +638,7 @@
   "settings.historyClear": "Verlauf löschen",
   "settings.historyCleared": "Der Verlauf ist gelöscht.",
   "settings.autocomplete": "Vorschläge beim Tippen",
-  "settings.autocompleteHint": "Pfeil nach unten wählt einen Vorschlag, Tab oder Enter übernimmt ihn, Escape schließt die Liste. Bis dahin geht jede Taste an die Shell."
+  "settings.autocompleteHint": "Pfeil nach unten wählt einen Vorschlag, Tab oder Enter übernimmt ihn, Escape schließt die Liste. Bis dahin geht jede Taste an die Shell.",
+  "snippets.missingTargets": "{count} Standard-Host(s) gibt es nicht mehr, sie bleiben außen vor.",
+  "sidebar.clearHistory": "Verlauf dieses Terminals löschen"
 }

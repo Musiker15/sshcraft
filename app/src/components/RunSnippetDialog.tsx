@@ -25,10 +25,15 @@ export function RunSnippetDialog({ snippet, hosts, panes, onRun, onCancel }: Pro
   const t = useT();
   const lang = useLanguage();
   const known = new Set(hosts.map((h) => h.id));
-  const [hostIds, setHostIds] = useState(() => snippet.default_targets.filter((id) => known.has(id)));
+  // A default host runs once: in an open pane where it has one, else on a new connection.
   const [paneIds, setPaneIds] = useState(() =>
     panes.filter((p) => p.hostId !== null && snippet.default_targets.includes(p.hostId)).map((p) => p.paneId),
   );
+  const [hostIds, setHostIds] = useState(() => {
+    const open = new Set(panes.flatMap((p) => (p.hostId ? [p.hostId] : [])));
+    return snippet.default_targets.filter((id) => known.has(id) && !open.has(id));
+  });
+  const missing = snippet.default_targets.filter((id) => !known.has(id)).length;
   const [run, setRun] = useState(true);
   const nothing = hostIds.length === 0 && paneIds.length === 0;
 
@@ -36,6 +41,7 @@ export function RunSnippetDialog({ snippet, hosts, panes, onRun, onCancel }: Pro
     <div className="dialog run-snippet">
       <h2>{t("snippets.runTitle", { name: snippet.name })}</h2>
       <pre className="snippet-preview">{snippet.content}</pre>
+      {missing > 0 && <p className="hint">{t("snippets.missingTargets", { count: missing })}</p>}
 
       <fieldset className="choice">
         <legend>{t("snippets.mode")}</legend>

@@ -37,12 +37,16 @@ What a server prints may not reach beyond the terminal on its own:
 
 ## Command history and completion
 
-- The history is sealed with the vault per terminal target; nothing of it is on disk in plain
-  text, and it never syncs. Input after a password question, lines starting with a space and
-  input in full-screen programs are not kept.
-- Path completion over SSH runs `ls -1Ap -- '<dir>'` on its own exec channel: the directory is
-  quoted for a POSIX shell (a leading `~` stays outside the quotes), output is limited to 64 KiB
-  and 500 names, names with control characters are left out.
+- The history is sealed with the vault per terminal target, snippets per snippet; nothing of
+  them is on disk in plain text, and they never sync. Only lines typed at a shell prompt are
+  kept: not input after a password question (decided when the line starts, so asterisk feedback
+  does not hide it), not lines starting with a space, not input to mysql, psql, python and the
+  like, not input in full-screen programs. No suggestions and no path listing while such a line
+  is typed.
+- Path completion over SSH runs one fixed command on its own exec channel and sends the
+  directory on standard input, so no login shell parses a typed name. Output is limited to
+  64 KiB and 500 names, only what follows a marker line counts, names with control characters
+  are left out.
 
 ## One instance
 

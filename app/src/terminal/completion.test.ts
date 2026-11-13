@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { currentWord, insertText, keyAction, pathQuery, suggest } from "./completion";
+import { currentWord, insertText, keyAction, keyGate, pathQuery, snippetSource, suggest } from "./completion";
 
 const none = { history: [] as string[], snippets: [] as { name: string; content: string }[], paths: null };
 const labels = (line: string, sources = none) => suggest(line, sources).map((s) => s.label);
@@ -21,7 +21,7 @@ test("subcommands and flags of known commands", () => {
 test("a snippet is found by its name and replaces the line", () => {
   const s = suggest("upd", { ...none, snippets: [{ name: "System updaten", content: "sudo apt update && sudo apt upgrade -y" }] });
   expect(s[0]).toMatchObject({ label: "System updaten", replace: true, source: "snippet" });
-  expect(insertText(s[0])).toBe("\x15sudo apt update && sudo apt upgrade -y");
+  expect(insertText(s[0], 3)).toBe("\x7f\x7f\x7fsudo apt update && sudo apt upgrade -y");
 });
 
 test("a snippet whose content starts with the line only adds the rest", () => {
@@ -29,9 +29,11 @@ test("a snippet whose content starts with the line only adds the rest", () => {
   expect(s[0]).toMatchObject({ insert: "ose logs -f", replace: false, source: "snippet" });
 });
 
-test("multi-line snippets are inserted without running", () => {
-  const s = suggest("dep", { ...none, snippets: [{ name: "Deploy", content: "cd /srv\r\ngit pull\n" }] });
-  expect(insertText(s[0])).toBe("\x15cd /srv\rgit pull");
+test("snippet sources are prepared once: line ends as Enter, no Enter at the end", () => {
+  expect(snippetSource({ name: "Deploy", content: "cd /srv\r\ngit pull\n" })).toEqual({
+    name: "Deploy",
+    content: "cd /srv\rgit pull",
+  });
 });
 
 test("paths of the current word", () => {
@@ -59,8 +61,29 @@ test("current word and path queries", () => {
   expect(pathQuery("src/ma", "/home/me/")).toEqual({ dir: "/home/me/src/", prefix: "ma" });
 });
 
-test("insert text adds the rest or replaces the line", () => {
-  expect(insertText({ label: "git status", insert: "t status", replace: false, source: "history" })).toBe("t status");
+test("insert text adds the rest, or erases the typed line with Backspace first", () => {
+  expect(insertText({ label: "git status", insert: "t status", replace: false, source: "history" }, 2)).toBe("t status");
+  expect(insertText({ label: "x", insert: "uptime", replace: true, source: "snippet" }, 2)).toBe("\x7f\x7fuptime");
+});
+
+function keyEvent(type: string, key: string) {
+  return { type, key, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } };
+}
+
+test("a consumed key is cancelled, and so is the keypress that follows it", () => {
+  const gate = keyGate((e) => e.key === "Enter");
+  const down = keyEvent("keydown", "Enter");
+  expect(gate(down)).toBe(false);
+  expect(down.prevented && down.stopped).toBe(true);
+  const press = keyEvent("keypress", "Enter");
+  expect(gate(press)).toBe(false);
+  expect(press.prevented).toBe(true);
+  // Only that one keypress.
+  expect(gate(keyEvent("keypress", "a"))).toBe(true);
+  const other = keyEvent("keydown", "a");
+  expect(gate(other)).toBe(true);
+  expect(other.prevented).toBe(false);
+  expect(gate(keyEvent("keypress", "a"))).toBe(true);
 });
 
 test.each([

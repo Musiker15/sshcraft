@@ -1392,7 +1392,7 @@ textarea.mono {
   position: absolute;
   z-index: 5;
   min-width: 220px;
-  max-width: 480px;
+  max-width: 320px;
   margin: 0;
   padding: 4px;
   list-style: none;

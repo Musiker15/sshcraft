@@ -13,34 +13,43 @@ const host = (id: string, name: string): Host => ({
   group_id: null,
   settings: { address: null, port: null, username: null, key: null },
 });
-const hosts = [host("h1", "web"), host("h2", "db")];
-const snippet: Snippet = { id: "s", name: "Uptime", package: "", content: "uptime", default_targets: ["h2"] };
+const hosts = [host("h1", "web"), host("h2", "db"), host("h3", "mail")];
+const snippet: Snippet = { id: "s", name: "Uptime", package: "", content: "uptime", default_targets: ["h2", "h3"] };
 const panes = [
   { paneId: "p1", title: "web", sessionId: "s1", hostId: "h1" },
   { paneId: "p2", title: "db", sessionId: "s2", hostId: "h2" },
 ];
 
-function show() {
+function show(s: Snippet = snippet) {
   const onRun = vi.fn();
   render(
     <I18nProvider language="en">
-      <RunSnippetDialog snippet={snippet} hosts={hosts} panes={panes} onRun={onRun} onCancel={() => {}} />
+      <RunSnippetDialog snippet={s} hosts={hosts} panes={panes} onRun={onRun} onCancel={() => {}} />
     </I18nProvider>,
   );
   return onRun;
 }
 
-test("default targets are picked, as new connection and as open pane", () => {
+const checked = (name: string) =>
+  screen.getAllByRole("checkbox", { name }).map((c) => (c as HTMLInputElement).checked);
+
+test("a default host runs once: in its open pane, else as a new connection", () => {
   show();
-  const checked = (name: string) =>
-    screen.getAllByRole("checkbox", { name }).map((c) => (c as HTMLInputElement).checked);
-  expect(checked("db")).toEqual([true, true]);
+  // db has an open pane: only that is picked, no second run on a new connection.
+  expect(checked("db")).toEqual([false, true]);
+  // mail has none: a new connection.
+  expect(checked("mail")).toEqual([true]);
   expect(checked("web")).toEqual([false, false]);
+});
+
+test("default hosts that are gone are named", () => {
+  show({ ...snippet, default_targets: ["h2", "gone-1", "gone-2"] });
+  expect(screen.getByText(en["snippets.missingTargets"].replace("{count}", "2"))).toBeTruthy();
 });
 
 test("run passes the chosen hosts and panes", () => {
   const onRun = show();
-  fireEvent.click(screen.getAllByRole("checkbox", { name: "db" })[0]);
+  fireEvent.click(screen.getAllByRole("checkbox", { name: "mail" })[0]);
   fireEvent.click(screen.getAllByRole("checkbox", { name: "web" })[1]);
   fireEvent.click(screen.getByRole("button", { name: en["snippets.run"] }));
   expect(onRun).toHaveBeenCalledWith({ hostIds: [], paneIds: ["p2", "p1"], run: true });
@@ -50,7 +59,8 @@ test("paste instead of run, and nothing chosen blocks it", () => {
   const onRun = show();
   fireEvent.click(screen.getByRole("radio", { name: en["snippets.modePaste"] }));
   fireEvent.click(screen.getByRole("button", { name: en["snippets.run"] }));
-  expect(onRun).toHaveBeenCalledWith({ hostIds: ["h2"], paneIds: ["p2"], run: false });
-  for (const box of screen.getAllByRole("checkbox", { name: "db" })) fireEvent.click(box);
+  expect(onRun).toHaveBeenCalledWith({ hostIds: ["h3"], paneIds: ["p2"], run: false });
+  fireEvent.click(screen.getAllByRole("checkbox", { name: "db" })[1]);
+  fireEvent.click(screen.getAllByRole("checkbox", { name: "mail" })[0]);
   expect((screen.getByRole("button", { name: en["snippets.run"] }) as HTMLButtonElement).disabled).toBe(true);
 });
