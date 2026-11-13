@@ -7,7 +7,7 @@ import { errorDetail } from "../i18n/errors";
 import { useSettings } from "../settings/SettingsProvider";
 import { terminalTheme } from "../settings/themes";
 import { syncTerminalFocus } from "../shell/focus";
-import { matchShortcut } from "../shell/shortcuts";
+import { matchShortcut, resolveBindings } from "../shell/shortcuts";
 import type { SessionTab } from "../state/tabs";
 
 type Props = {
@@ -41,7 +41,9 @@ export function TerminalView({ tab, active, onAttach, onStatus }: Props) {
     });
     term.current = terminal;
     // Window shortcuts are handled by the shell; xterm must not also send them to the server.
-    terminal.attachCustomKeyEventHandler((e) => matchShortcut(e, "terminal") === null);
+    terminal.attachCustomKeyEventHandler(
+      (e) => matchShortcut(e, "terminal", resolveBindings(look.current.shortcuts)) === null,
+    );
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(element);

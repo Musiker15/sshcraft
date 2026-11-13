@@ -59,7 +59,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { Drawer } from "./Drawer";
 import { ErrorMessage } from "./ErrorMessage";
 import { NavSidebar, type Page } from "./NavSidebar";
-import { matchShortcut, type ShortcutAction } from "./shortcuts";
+import { matchShortcut, resolveBindings, type ShortcutAction } from "./shortcuts";
+import { useSettings } from "../settings/SettingsProvider";
 import { TabStrip } from "./TabStrip";
 
 type Editor =
@@ -180,11 +181,14 @@ export function AppShell() {
   );
   const actionRef = useRef(runAction);
   actionRef.current = runAction;
+  const { settings } = useSettings();
+  const bindings = useRef(resolveBindings(settings.shortcuts));
+  bindings.current = resolveBindings(settings.shortcuts);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const inTerminal = e.target instanceof Element && e.target.closest(".terminal-host") !== null;
-      const action = matchShortcut(e, inTerminal ? "terminal" : "app");
+      const action = matchShortcut(e, inTerminal ? "terminal" : "app", bindings.current);
       if (!action) return;
       e.preventDefault();
       actionRef.current(action);
