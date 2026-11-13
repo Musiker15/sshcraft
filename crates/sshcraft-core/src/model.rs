@@ -30,6 +30,7 @@ id_type!(ServerId);
 id_type!(IdentityId);
 id_type!(PasswordId);
 id_type!(SnippetId);
+id_type!(LogId);
 
 /// Where the private key for a connection comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +65,9 @@ pub struct ConnectionSettings {
     /// Merged with the groups above: a name set lower wins.
     #[serde(default)]
     pub env: Vec<EnvVar>,
+    /// Record sessions to this host; `None` up to the top means the app setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_log: Option<bool>,
 }
 
 impl ConnectionSettings {
@@ -208,6 +212,18 @@ pub fn normalize_tags(tags: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// Whether sessions to `host` are recorded by its own or its groups' choice, nearest first;
+/// `None` when no level decides (the app setting applies).
+pub fn session_log_for(host: &Host, groups: &[Group]) -> Option<bool> {
+    host.settings.session_log.or_else(|| {
+        host.group_id
+            .map(|g| group_chain(groups, g))
+            .unwrap_or_default()
+            .iter()
+            .find_map(|g| g.defaults.session_log)
+    })
 }
 
 /// A group and the groups above it, nearest first. Stops at a missing group, at a cycle and
@@ -451,6 +467,7 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
         env: normalize_env(&env),
+        session_log: levels.iter().find_map(|l| l.settings.session_log),
     }
 }
 
