@@ -85,6 +85,30 @@ impl russh::Signer for SignerAdapter<'_> {
     }
 }
 
+/// Signs with a key in memory, RSA with the chosen hash (`rsa-sha2-256` or `-512`).
+struct HashedKeySigner {
+    key: Arc<russh::keys::PrivateKey>,
+    hash: Option<HashAlg>,
+}
+
+#[async_trait::async_trait]
+impl crate::KeySigner for HashedKeySigner {
+    async fn sign(&mut self, data: &[u8]) -> Result<Vec<u8>, SshError> {
+        use russh::keys::signature::Signer;
+        use russh::keys::ssh_encoding::Encode;
+        let failed = |e: russh::keys::signature::Error| SshError::SignerFailed(e.to_string());
+        let signature: russh::keys::ssh_key::Signature = match self.key.key_data() {
+            russh::keys::ssh_key::private::KeypairData::Rsa(pair) => {
+                (pair, self.hash).try_sign(data).map_err(failed)?
+            }
+            other => other.try_sign(data).map_err(failed)?,
+        };
+        signature
+            .encode_vec()
+            .map_err(|e| SshError::SignerFailed(e.to_string()))
+    }
+}
+
 /// Whether a failed attempt still leaves `publickey` to try.
 fn may_retry_key(result: &russh::client::AuthResult) -> bool {
     match result {
@@ -334,10 +358,23 @@ async fn publickey<H: client::Handler>(
         Credential::Key(key) => {
             let key = Arc::new(key);
             if let Some(cert) = certificate {
-                let result = handle
-                    .authenticate_openssh_cert(username, key.clone(), cert)
-                    .await
-                    .map_err(protocol)?;
+                let result = if key.algorithm().is_rsa() {
+                    // russh's own certificate method announces `ssh-rsa-cert-v01` (SHA-1),
+                    // which OpenSSH refuses since 8.8: sign with the server's best RSA hash.
+                    let mut signer = HashedKeySigner {
+                        key: key.clone(),
+                        hash,
+                    };
+                    let mut adapter = SignerAdapter(&mut signer);
+                    handle
+                        .authenticate_certificate_with(username, cert, hash, &mut adapter)
+                        .await?
+                } else {
+                    handle
+                        .authenticate_openssh_cert(username, key.clone(), cert)
+                        .await
+                        .map_err(protocol)?
+                };
                 if !may_retry_key(&result) {
                     return Ok(result);
                 }

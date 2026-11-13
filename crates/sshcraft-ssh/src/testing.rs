@@ -40,6 +40,8 @@ pub struct TestAuth {
     pub password_then_kbd: bool,
     /// User certificates signed by this CA are accepted when their principals name the user.
     pub ca: Option<PublicKey>,
+    /// Turns down `ssh-rsa` (SHA-1) for keys and certificates, as OpenSSH does since 8.8.
+    pub refuse_sha1_rsa: bool,
 }
 
 /// A user certificate for `key`, signed by `ca`, for `principal`, valid in the given window.
@@ -285,6 +287,17 @@ impl server::Handler for Handler {
                 proceed_with_methods: Some(MethodSet::from(&[MethodKind::KeyboardInteractive][..])),
                 partial_success: true,
             });
+        }
+        Ok(Auth::Accept)
+    }
+
+    async fn auth_publickey_offered(
+        &mut self,
+        _user: &str,
+        offer: server::PublicKeyOffer<'_>,
+    ) -> Result<Auth, Self::Error> {
+        if self.auth.refuse_sha1_rsa && *offer.algorithm == (Algorithm::Rsa { hash: None }) {
+            return Ok(Auth::reject());
         }
         Ok(Auth::Accept)
     }

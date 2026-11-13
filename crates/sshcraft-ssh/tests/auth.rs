@@ -501,3 +501,28 @@ fn certificate_validity_window() {
         u64::MAX
     )));
 }
+
+fn rsa_key() -> PrivateKey {
+    use russh::keys::ssh_key::private::{KeypairData, RsaKeypair};
+    let pair = RsaKeypair::random(&mut rand::rng(), 2048).unwrap();
+    PrivateKey::new(KeypairData::from(pair), "rsa").unwrap()
+}
+
+#[tokio::test]
+async fn rsa_certificate_signs_with_sha2() {
+    let (k, ca) = (rsa_key(), key());
+    let server = TestServer::start_with(TestAuth {
+        ca: Some(ca.public_key().clone()),
+        refuse_sha1_rsa: true,
+        ..Default::default()
+    })
+    .await;
+    let cert = user_certificate(k.public_key(), &ca, "tester", 0, u64::MAX);
+    let auth = Auth {
+        key: Some(Credential::Key(k)),
+        certificate: Some(cert),
+        ..Default::default()
+    };
+    run(&server, auth, Recording::new(vec![])).await.unwrap();
+    assert_eq!(server.received_certificates(), 1);
+}
