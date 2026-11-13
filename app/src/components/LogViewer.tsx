@@ -8,7 +8,7 @@ import { ArrowLeft, Bookmark, ChevronDown, ChevronUp, Download, MessageSquare, T
 import { useEffect, useRef, useState } from "react";
 import { logExport, logRead, logSaveMarks, type LogExportFormat, type LogMark, type LogMeta, type MarkKind } from "../api";
 import { useLanguage, useT } from "../i18n/i18n";
-import { lineForOffset, offsetForLine, pieces, type LineAt } from "../logs/marks";
+import { lineForOffset, offsetForLine, pieces, type LineAt } from "../sessionlog/marks";
 import { useSettings } from "../settings/SettingsProvider";
 import { terminalTheme } from "../settings/themes";
 import { ErrorMessage } from "../shell/ErrorMessage";
