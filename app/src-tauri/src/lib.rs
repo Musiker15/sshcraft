@@ -6,6 +6,7 @@ pub mod links;
 pub mod listing;
 pub mod passcli;
 pub mod prompts;
+pub mod recording;
 pub mod sessions;
 pub mod settings;
 pub mod state;
@@ -33,6 +34,22 @@ pub fn run() {
     builder
         .setup(|app| {
             let state = state::AppState::init(app.handle())?;
+            // Before any tab records: logs a stopped app left open are ended here.
+            if let Ok(vault) = state.vault.clone() {
+                let store = state.store.clone();
+                let days = settings::load(&store.lock().expect("store lock")).log_retention_days;
+                let _ = recording::housekeeping(&store, &vault, days, recording::now_ms(), true);
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(recording::tidy_regularly(
+                    store,
+                    vault,
+                    move |servers| {
+                        if let Some(state) = handle.try_state::<state::AppState>() {
+                            state.sync.nudge(servers);
+                        }
+                    },
+                ));
+            }
             app.manage(state);
             // Runtimes need the async runtime; start them on it.
             let handle = app.handle().clone();
@@ -50,6 +67,16 @@ pub fn run() {
             commands::data::delete_host,
             commands::data::forget_host_key,
             commands::data::get_settings,
+            commands::logs::logs_list,
+            commands::logs::log_read,
+            commands::logs::log_add_mark,
+            commands::logs::log_remove_mark,
+            commands::logs::logs_delete,
+            commands::logs::logs_search,
+            commands::logs::log_export,
+            commands::logs::session_bookmark,
+            commands::logs::session_recording,
+            commands::sync::set_server_logs,
             commands::snippets::snippets_list,
             commands::snippets::snippet_save,
             commands::snippets::snippet_delete,
@@ -128,6 +155,13 @@ pub fn run() {
             commands::sync::move_item,
             commands::sync::account_key_qr,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event
+                && let Some(state) = app.try_state::<state::AppState>()
+            {
+                state.sessions.finish_recordings();
+            }
+        });
 }

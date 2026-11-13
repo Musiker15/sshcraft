@@ -1936,3 +1936,137 @@ fn history_off_records_nothing() {
     // Without an unlocked vault nothing is stored and that is said.
     assert!(crate::commands::snippets::record_history(&store, None, &scope, "pwd", 2).is_err());
 }
+
+/// Sets whether the fixture's host records and what the app setting says.
+fn set_recording(f: &Fixture, host: Option<bool>, app: bool) {
+    let store = f.store.lock().unwrap();
+    let mut h = store
+        .list_hosts()
+        .unwrap()
+        .into_iter()
+        .find(|h| h.id == f.host_id)
+        .unwrap();
+    h.settings.session_log = host;
+    store.upsert_host(&h).unwrap();
+    let mut settings = crate::settings::load(&store);
+    settings.session_logs = app;
+    crate::settings::save(&store, settings).unwrap();
+}
+
+async fn echo(f: &Fixture, sink: &RecordingSink, id: SessionId, text: &[u8]) {
+    f.manager.write(id, text).unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !sink
+        .data
+        .lock()
+        .unwrap()
+        .windows(text.len())
+        .any(|w| w == text)
+    {
+        assert!(tokio::time::Instant::now() < deadline, "no echo");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn logs(f: &Fixture) -> Vec<sshcraft_core::session_log::LogSummary> {
+    sshcraft_core::session_log::list(&f.vault, &f.store.lock().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn a_host_that_asks_for_it_is_recorded() {
+    let f = fixture(true).await;
+    set_recording(&f, Some(true), false);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    assert!(f.manager.is_recording(id));
+    echo(&f, &sink, id, b"first-line").await;
+    let mark = f.manager.bookmark(id, "here").unwrap();
+    echo(&f, &sink, id, b"second-line").await;
+    f.manager.close(id);
+    let logs = logs(&f);
+    assert_eq!(logs.len(), 1);
+    let meta = &logs[0].meta;
+    assert_eq!(meta.title, "test host");
+    assert_eq!(meta.host_id, Some(f.host_id));
+    assert!(meta.ended_at.is_some());
+    assert_eq!(meta.marks, vec![mark.clone()]);
+    let bytes =
+        sshcraft_core::session_log::read(&f.vault, &f.store.lock().unwrap(), meta.id).unwrap();
+    assert_eq!(bytes, *sink.data.lock().unwrap());
+    assert!(bytes[..mark.offset as usize].ends_with(b"first-line"));
+}
+
+#[tokio::test]
+async fn a_host_that_declines_is_not_recorded() {
+    let f = fixture(true).await;
+    set_recording(&f, Some(false), true);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    assert!(!f.manager.is_recording(id));
+    echo(&f, &sink, id, b"unrecorded").await;
+    f.manager.close(id);
+    assert!(logs(&f).is_empty());
+    assert!(f.manager.bookmark(id, "x").is_err());
+}
+
+#[tokio::test]
+async fn the_app_setting_applies_when_the_host_does_not_decide() {
+    let f = fixture(true).await;
+    set_recording(&f, None, true);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    echo(&f, &sink, id, b"recorded").await;
+    f.manager.close(id);
+    assert_eq!(logs(&f).len(), 1);
+}
+
+#[tokio::test]
+async fn nothing_is_recorded_without_the_vault() {
+    let f = fixture(true).await;
+    set_recording(&f, Some(true), true);
+    let manager = f.manager_with(None, true);
+    let host = f.agent_host();
+    let sink = Arc::new(RecordingSink::default());
+    let id = manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    assert!(!manager.is_recording(id));
+    manager.close(id);
+}
+
+#[tokio::test]
+async fn quitting_ends_running_recordings() {
+    let f = fixture(true).await;
+    set_recording(&f, Some(true), false);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    echo(&f, &sink, id, b"before quit").await;
+    f.manager.finish_recordings();
+    assert!(!f.manager.is_recording(id));
+    let logs = logs(&f);
+    assert!(logs[0].meta.ended_at.is_some());
+    f.manager.close(id);
+}

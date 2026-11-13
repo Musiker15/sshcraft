@@ -118,6 +118,7 @@ test.each([
   ["Ctrl+Shift+X", key("X", { ctrl: true, shift: true }), "closePane"],
   ["Ctrl+Shift+B", key("B", { ctrl: true, shift: true }), "toggleBroadcast"],
   ["Ctrl+Shift+S", key("S", { ctrl: true, shift: true }), "toggleSidebar"],
+  ["Ctrl+Shift+L", key("L", { ctrl: true, shift: true }), "bookmark"],
   ["Ctrl+Shift+M", key("M", { ctrl: true, shift: true }), "toggleLayout"],
   ["Ctrl+Shift+PageDown", key("PageDown", { ctrl: true, shift: true }), "nextPane"],
   ["Ctrl+Shift+PageUp", key("PageUp", { ctrl: true, shift: true }), "prevPane"],

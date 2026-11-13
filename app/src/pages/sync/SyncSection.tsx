@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
-import { listServers, removeServer, setServerSync, type AccountCreated, type ServerView } from "../../api";
+import { listServers, removeServer, setServerLogs, setServerSync, type AccountCreated, type ServerView } from "../../api";
 import { useT } from "../../i18n/i18n";
 import { ConfirmDialog } from "../../shell/ConfirmDialog";
 import { Drawer } from "../../shell/Drawer";
@@ -50,6 +50,15 @@ export function SyncSection({ onChanged }: { onChanged: () => void }) {
       await setServerSync(server.id, syncEnabled, syncKeys);
       load();
       onChanged();
+    } catch (e) {
+      setError(e);
+    }
+  }
+
+  async function toggleLogs(server: ServerView, on: boolean) {
+    try {
+      await setServerLogs(server.id, on);
+      load();
     } catch (e) {
       setError(e);
     }
@@ -110,6 +119,15 @@ export function SyncSection({ onChanged }: { onChanged: () => void }) {
                 onChange={(e) => void toggle(server, server.sync_enabled, e.target.checked)}
               />
               {t("sync.syncKeys")}
+            </label>
+            <label className="check" title={t("sync.syncLogsHint")}>
+              <input
+                type="checkbox"
+                checked={server.sync_logs}
+                disabled={server.revoked}
+                onChange={(e) => void toggleLogs(server, e.target.checked)}
+              />
+              {t("sync.syncLogs")}
             </label>
             <button disabled={server.revoked} onClick={() => setPanel({ kind: "devices", server })}>
               {t("sync.devices")}

@@ -15,6 +15,7 @@ export const SHORTCUT_ACTIONS = [
   "toggleLayout",
   "toggleBroadcast",
   "toggleSidebar",
+  "bookmark",
 ] as const;
 export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number];
 export type Bindings = Record<ShortcutAction, string[]>;
@@ -32,6 +33,7 @@ export const DEFAULT_SHORTCUTS: Bindings = {
   toggleLayout: ["Ctrl+Shift+M"],
   toggleBroadcast: ["Ctrl+Shift+B"],
   toggleSidebar: ["Ctrl+Shift+S"],
+  bookmark: ["Ctrl+Shift+L"],
 };
 
 export type KeyLike = { key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean };

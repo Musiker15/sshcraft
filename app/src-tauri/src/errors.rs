@@ -99,6 +99,12 @@ pub enum ErrorCode {
     InvalidSnippet,
     /// The command history needs the unlocked vault.
     HistoryUnavailable,
+    /// A bookmark or comment is not valid (too long, past the end, more than 500).
+    InvalidLogMark,
+    /// A part of a session log is missing or does not open.
+    LogDamaged,
+    /// The session is not being recorded.
+    NotRecording,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -161,6 +167,19 @@ impl From<sshcraft_core::snippets::SnippetStoreError> for CommandError {
         use sshcraft_core::snippets::SnippetStoreError as E;
         match e {
             E::Invalid(e) => Self::new(ErrorCode::InvalidSnippet, e),
+            E::Vault(e) => e.into(),
+            E::Store(e) => e.into(),
+        }
+    }
+}
+
+impl From<sshcraft_core::session_log::LogError> for CommandError {
+    fn from(e: sshcraft_core::session_log::LogError) -> Self {
+        use sshcraft_core::session_log::LogError as E;
+        match e {
+            E::Invalid(what) => Self::new(ErrorCode::InvalidLogMark, what),
+            E::NotFound => Self::code(ErrorCode::NotFound),
+            E::Damaged => Self::code(ErrorCode::LogDamaged),
             E::Vault(e) => e.into(),
             E::Store(e) => e.into(),
         }

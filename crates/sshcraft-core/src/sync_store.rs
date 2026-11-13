@@ -17,6 +17,10 @@ pub enum ItemKind {
     Key,
     Identity,
     Password,
+    /// The header of a session log.
+    Log,
+    /// One part of a session log's output.
+    LogChunk,
 }
 
 impl ItemKind {
@@ -27,7 +31,14 @@ impl ItemKind {
             Self::Key => "key",
             Self::Identity => "identity",
             Self::Password => "password",
+            Self::Log => "log",
+            Self::LogChunk => "log_chunk",
         }
+    }
+
+    /// Session logs and their parts: personal, never in a share.
+    pub fn is_log(self) -> bool {
+        matches!(self, Self::Log | Self::LogChunk)
     }
 
     pub fn parse(text: &str) -> Result<Self, StoreError> {
@@ -37,6 +48,8 @@ impl ItemKind {
             "key" => Ok(Self::Key),
             "identity" => Ok(Self::Identity),
             "password" => Ok(Self::Password),
+            "log" => Ok(Self::Log),
+            "log_chunk" => Ok(Self::LogChunk),
             other => Err(StoreError::Malformed(format!("unknown item kind {other}"))),
         }
     }
@@ -48,6 +61,8 @@ impl ItemKind {
             Self::Key => "keys",
             Self::Identity => "identities",
             Self::Password => "passwords",
+            Self::Log => "session_logs",
+            Self::LogChunk => "session_log_chunks",
         }
     }
 }
@@ -222,6 +237,45 @@ impl Store {
         Ok(())
     }
 
+    /// Whether session logs sync with this server (off until switched on).
+    pub fn sync_logs(&self, id: ServerId) -> Result<bool, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT sync_logs FROM sync_servers WHERE id = ?1",
+                [id.0.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(false))
+    }
+
+    /// Switches log sync. Turning it on fetches every area from the start again, like key sync:
+    /// log records skipped while it was off were never counted.
+    pub fn set_sync_logs(&self, id: ServerId, on: bool) -> Result<(), StoreError> {
+        self.atomic(|| {
+            let was: Option<bool> = self
+                .conn
+                .query_row(
+                    "SELECT sync_logs FROM sync_servers WHERE id = ?1",
+                    [id.0.to_string()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            self.conn.execute(
+                "UPDATE sync_servers SET sync_logs = ?2 WHERE id = ?1",
+                params![id.0.to_string(), on],
+            )?;
+            if on && was == Some(false) {
+                self.conn.execute(
+                    "UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1",
+                    [id.0.to_string()],
+                )?;
+            }
+            Ok(())
+        })
+    }
+
     pub fn mark_server_revoked(&self, id: ServerId) -> Result<(), StoreError> {
         self.conn.execute(
             "UPDATE sync_servers SET revoked = 1 WHERE id = ?1",
@@ -247,7 +301,13 @@ impl Store {
     pub fn remove_server(&self, id: ServerId) -> Result<(), StoreError> {
         let tx = self.conn.unchecked_transaction()?;
         let key = id.0.to_string();
-        for table in ["groups", "hosts", "keys"] {
+        for table in [
+            "groups",
+            "hosts",
+            "keys",
+            "session_logs",
+            "session_log_chunks",
+        ] {
             tx.execute(
                 &format!("UPDATE {table} SET location = NULL WHERE location = ?1"),
                 [&key],

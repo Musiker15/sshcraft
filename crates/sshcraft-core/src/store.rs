@@ -48,7 +48,7 @@ pub struct Store {
     pub(crate) conn: rusqlite::Connection,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 9;
+pub(crate) const SCHEMA_VERSION: i64 = 10;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -184,7 +184,40 @@ type KeyRow = (
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        Self::init(rusqlite::Connection::open(path)?)
+        let conn = rusqlite::Connection::open(path)?;
+        // Many small writes (recorded output, the sync outbox): WAL with NORMAL sync keeps each
+        // commit from waiting for the disk; a crash loses no transaction that reached the log.
+        let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        Self::init(conn)
+    }
+
+    /// Runs `f` as one unit: all its writes or none. Nests (savepoints), unlike a transaction.
+    pub fn atomic<T, E: From<StoreError>>(&self, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        self.conn
+            .execute_batch("SAVEPOINT atomic")
+            .map_err(|e| E::from(e.into()))?;
+        match f() {
+            Ok(value) => {
+                self.conn
+                    .execute_batch("RELEASE atomic")
+                    .map_err(|e| E::from(e.into()))?;
+                Ok(value)
+            }
+            Err(err) => {
+                let _ = self
+                    .conn
+                    .execute_batch("ROLLBACK TO atomic; RELEASE atomic");
+                Err(err)
+            }
+        }
+    }
+
+    /// Runs SQL on the database as it is, for tests that need a broken or odd state.
+    #[cfg(feature = "testing")]
+    pub fn execute_raw(&self, sql: &str) -> Result<(), StoreError> {
+        self.conn.execute_batch(sql)?;
+        Ok(())
     }
 
     pub fn open_in_memory() -> Result<Self, StoreError> {
@@ -247,6 +280,12 @@ impl Store {
         if version < 9 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V9)?;
+            tx.pragma_update(None, "user_version", 9)?;
+            tx.commit()?;
+        }
+        if version < 10 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(crate::session_log::SCHEMA_V10)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }

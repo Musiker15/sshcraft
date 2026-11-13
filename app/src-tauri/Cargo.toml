@@ -48,6 +48,8 @@ windows-future = "0.3.2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+sshcraft-core = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["test-util"] }
 sshcraft-ssh = { workspace = true, features = ["testing"] }
 sshcraft-fido = { workspace = true, features = ["testing"] }
 rand = { workspace = true }

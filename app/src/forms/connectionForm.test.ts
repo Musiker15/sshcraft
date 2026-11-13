@@ -76,3 +76,12 @@ test("agent forwarding has three states", () => {
   expect(toConnectionOptions({ ...emptyConnection, agent: "off" }).agent_forwarding).toBe(false);
   expect(fromConnectionOptions({ ...base, agent_forwarding: false }).agent).toBe("off");
 });
+
+test("recording has three states", () => {
+  expect(toConnectionOptions(emptyConnection).session_log).toBeNull();
+  expect(toConnectionOptions({ ...emptyConnection, record: "on" }).session_log).toBe(true);
+  expect(toConnectionOptions({ ...emptyConnection, record: "off" }).session_log).toBe(false);
+  expect(fromConnectionOptions({ ...base, session_log: false }).record).toBe("off");
+  expect(fromConnectionOptions({ ...base, session_log: true }).record).toBe("on");
+  expect(fromConnectionOptions(base).record).toBe("inherit");
+});

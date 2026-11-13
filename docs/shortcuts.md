@@ -19,9 +19,10 @@ Ctrl+R, Ctrl+C, Alt+..., AltGr) reaches the server unchanged.
 | Ctrl+Shift+M | Switch between split and focus layout |
 | Ctrl+Shift+B | Broadcast on or off |
 | Ctrl+Shift+S | Snippets and history beside the terminal |
+| Ctrl+Shift+L | Bookmark in the session log of the focused pane (if it records) |
 
 Panes and broadcast are described in [workspaces.md](workspaces.md), the sidebar and the keys of the
-completion list in [snippets.md](snippets.md).
+completion list in [snippets.md](snippets.md), bookmarks in [session-logs.md](session-logs.md).
 
 ## Your own shortcuts
 

@@ -8,9 +8,11 @@ import {
   historyRecord,
   openLink,
   sessionAck,
+  sessionBookmark,
   sessionClose,
   sessionListDir,
   sessionOpen,
+  sessionRecording,
   sessionResize,
   sessionWrite,
   snippetsList,
@@ -31,6 +33,7 @@ import {
 import { emptyLine, shouldRecord, track, type Line } from "../terminal/lineTracker";
 import { HISTORY_CLEARED, SNIPPETS_CHANGED, pasteBytes, registerPane } from "../terminal/panes";
 import { errorDetail } from "../i18n/errors";
+import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { terminalTheme } from "../settings/themes";
 import { syncTerminalFocus } from "../shell/focus";
@@ -127,6 +130,37 @@ export function TerminalView({
   const look = useRef(settings);
   look.current = settings;
   const sessionId = useRef<string | null>(null);
+  const t = useT();
+  const lang = useLanguage();
+  // Whether Rust records this session into a session log, and a short note after a bookmark.
+  const [recording, setRecording] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  // Recording can stop on its own (size limit, storage failure): ask again now and then.
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => {
+      const id = sessionId.current;
+      if (id) sessionRecording(id).then(setRecording, () => {});
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+  const noteTimer = useRef<number | undefined>(undefined);
+  const showNote = (text: string) => {
+    window.clearTimeout(noteTimer.current);
+    setNote(text);
+    noteTimer.current = window.setTimeout(() => setNote(null), 2000);
+  };
+  const bookmark = useRef(async () => {});
+  bookmark.current = async () => {
+    const id = sessionId.current;
+    if (!id) return;
+    try {
+      await sessionBookmark(id, new Date().toLocaleTimeString(lang));
+      showNote(t("terminal.bookmarkSet"));
+    } catch {
+      showNote(t("errors.not_recording"));
+    }
+  };
   const callbacks = useRef({ onAttach, onStatus, onInput, onActivity, onCwd, onFocus });
   callbacks.current = { onAttach, onStatus, onInput, onActivity, onCwd, onFocus };
   const startup = useRef({ target: pane.target, startup: pane.startup, typed: false });
@@ -325,6 +359,7 @@ export function TerminalView({
     const unregister = registerPane(pane.id, {
       track: (data) => typed.current(data),
       paste: (content, run) => pasteInto.current(content, run),
+      bookmark: () => void bookmark.current(),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -387,6 +422,7 @@ export function TerminalView({
       },
       (status) => {
         callbacks.current.onStatus(status);
+        if (status.state === "ended") setRecording(false);
         // A template types its start once, into this pane only.
         const start = startup.current;
         if (status.state === "connected" && !start.typed && sessionId.current) {
@@ -406,6 +442,12 @@ export function TerminalView({
         }
         sessionId.current = id;
         callbacks.current.onAttach(id);
+        sessionRecording(id).then(
+          (on) => {
+            if (!disposed) setRecording(on);
+          },
+          () => {},
+        );
         if (unacked > 0) {
           void sessionAck(id, unacked).catch(() => {});
           unacked = 0;
@@ -485,6 +527,12 @@ export function TerminalView({
   return (
     <>
       <div className="terminal-host" ref={host} />
+      {(recording || note) && (
+        <span className="recording-badge" role="status" title={recording ? t("terminal.recording") : undefined}>
+          {recording && <span className="recording-dot" aria-hidden="true" />}
+          {note ?? t("terminal.rec")}
+        </span>
+      )}
       {focused && visible && (
         <CompletionPopup suggestions={completion.suggestions} selected={completion.selected} at={completion.at} />
       )}

@@ -11,6 +11,7 @@ pub mod creds;
 pub mod devices;
 pub mod engine;
 pub mod items;
+pub mod logs;
 pub mod runtime;
 pub mod shares;
 

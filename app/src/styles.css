@@ -1422,3 +1422,148 @@ textarea.mono {
   color: var(--text-muted);
   font-family: inherit;
 }
+
+/* Session logs */
+.logs-tools {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.logs-tools .search {
+  flex: 1;
+  min-width: 220px;
+}
+
+.log-row .palette-name {
+  min-width: 140px;
+}
+
+.log-row .badge {
+  margin-left: auto;
+}
+
+.hit-row code {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-viewer {
+  height: 100%;
+  grid-template-rows: auto auto 1fr;
+}
+
+.log-viewer-layout {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+
+.log-terminal {
+  min-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.log-marks {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-marks ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.log-marks .mark {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.log-marks .mark .card-sub {
+  grid-column: 1;
+}
+
+.mark-jump {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.mark-form {
+  display: grid;
+  gap: 6px;
+}
+
+.mark-form textarea {
+  min-height: 80px;
+}
+
+.menu-anchor {
+  position: relative;
+}
+
+.menu-anchor .menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  padding: 4px;
+  min-width: 200px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.menu-anchor .menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+}
+
+.menu-anchor .menu button:hover {
+  background: var(--bg-hover);
+}
+
+.recording-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5484d;
+}
+
+.recording-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  text-transform: uppercase;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  opacity: 0.85;
+  pointer-events: none;
+}

@@ -249,6 +249,8 @@ struct Live {
     size: Arc<Mutex<(u32, u32)>>,
     flow: Arc<Flow>,
     task: JoinHandle<()>,
+    /// Present while the session is recorded into a session log.
+    recorder: Option<Arc<crate::recording::Recorder>>,
 }
 
 pub struct SessionManager {
@@ -266,6 +268,8 @@ pub(crate) struct Context {
     pub(crate) delay_scale: f32,
     /// Signs for FIDO2 and Windows Hello keys; `None` where there is none.
     security: Option<Arc<dyn Authenticator>>,
+    /// Told when a session log ended.
+    log_finished: Mutex<Option<crate::recording::OnFinish>>,
 }
 
 /// How often SSHCraft asks for a key's passphrase before giving up.
@@ -402,6 +406,11 @@ impl SessionManager {
         *self.ctx.gate.on_unavailable.lock().expect("hook lock") = Some(report);
     }
 
+    /// Called with each session log that ended, after it is stored.
+    pub fn on_log_finished(&self, report: crate::recording::OnFinish) {
+        *self.ctx.log_finished.lock().expect("hook lock") = Some(report);
+    }
+
     /// True once Windows Hello turned out not to be set up on this PC.
     pub fn hello_missing(&self) -> bool {
         self.ctx
@@ -430,6 +439,7 @@ impl SessionManager {
                 gate: KeyGate::new(presence),
                 delay_scale,
                 security: None,
+                log_finished: Mutex::new(None),
             }),
             sessions: Mutex::new(HashMap::new()),
         }
@@ -478,6 +488,14 @@ impl SessionManager {
     ) -> SessionId {
         let id = Uuid::new_v4();
         let (input, input_rx) = mpsc::unbounded_channel();
+        let recorder = start_recording(&self.ctx, &target);
+        let sink: Arc<dyn SessionSink> = match &recorder {
+            Some(recorder) => Arc::new(crate::recording::LogSink {
+                inner: sink,
+                recorder: recorder.clone(),
+            }),
+            None => sink,
+        };
         let shared = Shared {
             sink,
             input: Arc::new(tokio::sync::Mutex::new(input_rx)),
@@ -491,6 +509,7 @@ impl SessionManager {
             size: shared.size.clone(),
             flow: shared.flow.clone(),
             task: tokio::spawn(run(self.ctx.clone(), target, shared)),
+            recorder,
         };
         self.sessions
             .lock()
@@ -553,13 +572,124 @@ impl SessionManager {
     }
 
     pub fn close(&self, id: SessionId) {
-        if let Some(live) = self.sessions.lock().expect("sessions lock").remove(&id) {
+        let live = self.sessions.lock().expect("sessions lock").remove(&id);
+        if let Some(live) = live {
             if let Some(writer) = live.writer.lock().expect("writer lock").clone() {
                 writer.close();
             }
             live.task.abort();
+            if let Some(recorder) = live.recorder {
+                recorder.finish();
+            }
         }
     }
+
+    /// Whether the session is being recorded.
+    pub fn is_recording(&self, id: SessionId) -> bool {
+        self.sessions
+            .lock()
+            .expect("sessions lock")
+            .get(&id)
+            .and_then(|live| live.recorder.as_ref())
+            .is_some_and(|recorder| recorder.is_active())
+    }
+
+    /// Ends every running recording (the app is quitting): the rest is stored and each log
+    /// ends now instead of at the next start.
+    pub fn finish_recordings(&self) {
+        let recorders: Vec<_> = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .values()
+            .filter_map(|live| live.recorder.clone())
+            .collect();
+        for recorder in recorders {
+            recorder.finish();
+        }
+    }
+
+    /// A bookmark in the session's log at the output so far.
+    pub fn bookmark(
+        &self,
+        id: SessionId,
+        text: &str,
+    ) -> Result<sshcraft_core::session_log::LogMark, sshcraft_core::session_log::LogError> {
+        let recorder = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .get(&id)
+            .and_then(|live| live.recorder.clone())
+            .ok_or(sshcraft_core::session_log::LogError::NotFound)?;
+        recorder.bookmark(text)
+    }
+}
+
+/// Starts a session log when the host, its groups or the app setting ask for one and the vault
+/// is open.
+fn start_recording(
+    ctx: &Context,
+    target: &SessionTarget,
+) -> Option<Arc<crate::recording::Recorder>> {
+    use sshcraft_core::session_log::{LogKind, LogMeta, MAX_TITLE};
+    let vault = ctx.vault.clone()?;
+    let (title, kind, host_id, enabled) = {
+        let store = ctx.store.lock().expect("store lock");
+        let global = crate::settings::load(&store).session_logs;
+        match target {
+            SessionTarget::Host { host_id } => {
+                let host = store
+                    .list_hosts()
+                    .ok()?
+                    .into_iter()
+                    .find(|h| h.id == *host_id)?;
+                let groups = store.list_groups().ok()?;
+                let enabled =
+                    sshcraft_core::model::session_log_for(&host, &groups).unwrap_or(global);
+                (host.name, LogKind::Ssh, Some(*host_id), enabled)
+            }
+            #[cfg(desktop)]
+            SessionTarget::Local { shell, .. } => {
+                (shell.label.clone(), LogKind::Local, None, global)
+            }
+            #[cfg(desktop)]
+            SessionTarget::Serial { settings } => {
+                (settings.port.clone(), LogKind::Serial, None, global)
+            }
+        }
+    };
+    if !enabled {
+        return None;
+    }
+    let title: String = title
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_TITLE)
+        .collect();
+    let title = if title.trim().is_empty() {
+        "Terminal".to_owned()
+    } else {
+        title
+    };
+    let meta = LogMeta {
+        id: sshcraft_core::model::LogId(Uuid::new_v4()),
+        title,
+        kind,
+        host_id,
+        started_at: crate::recording::now_ms(),
+        ended_at: None,
+        size: 0,
+        truncated: false,
+        marks: Vec::new(),
+    };
+    crate::recording::Recorder::start(
+        ctx.store.clone(),
+        vault,
+        &meta,
+        crate::recording::Limits::default(),
+        ctx.log_finished.lock().expect("hook lock").clone(),
+    )
 }
 
 /// Marks the host as connected to just now, for "recent connections". A failure here must

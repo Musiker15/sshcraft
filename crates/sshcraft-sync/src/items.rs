@@ -7,8 +7,9 @@ use crate::creds::{CredentialRefs, drop_unreferenced, keep_local, same_proxy_end
 use serde::{Deserialize, Serialize};
 use sshcraft_core::keytypes::KeyKind;
 use sshcraft_core::model::{
-    Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, PasswordId, ServerId,
+    Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, LogId, PasswordId, ServerId,
 };
+use sshcraft_core::session_log::{self, LogError, LogMeta};
 use sshcraft_core::store::{ItemKind, Store};
 use sshcraft_core::vault::Vault;
 use sshcraft_proto::ProtoError;
@@ -40,6 +41,19 @@ pub enum ItemBody {
         id: PasswordId,
         secret: Zeroizing<String>,
     },
+    /// The header of a finished session log: title, times, bookmarks and comments.
+    Log {
+        meta: LogMeta,
+    },
+    /// One part of a session log's output; written once, never changed.
+    LogChunk {
+        id: Uuid,
+        log_id: LogId,
+        seq: u32,
+        #[serde(with = "sshcraft_proto::encoding::b64")]
+        data: Vec<u8>,
+        written_at: i64,
+    },
     Deleted {
         item_kind: ItemKind,
         item_id: String,
@@ -62,6 +76,8 @@ impl SyncItem {
             ItemBody::Key { id, .. } => (ItemKind::Key, id.0.to_string()),
             ItemBody::Identity { identity } => (ItemKind::Identity, identity.id.0.to_string()),
             ItemBody::Password { id, .. } => (ItemKind::Password, id.0.to_string()),
+            ItemBody::Log { meta } => (ItemKind::Log, meta.id.0.to_string()),
+            ItemBody::LogChunk { id, .. } => (ItemKind::LogChunk, id.to_string()),
             ItemBody::Deleted { item_kind, item_id } => (*item_kind, item_id.clone()),
         }
     }
@@ -144,6 +160,21 @@ pub fn local_item(
                 None => deleted(),
             }
         }
+        // Only a finished log goes; a running one has no place yet.
+        ItemKind::Log => match session_log::meta(vault, store, LogId(uuid)).map_err(log_error)? {
+            Some(meta) if meta.ended_at.is_some() => ItemBody::Log { meta },
+            _ => deleted(),
+        },
+        ItemKind::LogChunk => match session_log::chunk(vault, store, id).map_err(log_error)? {
+            Some(chunk) => ItemBody::LogChunk {
+                id: uuid,
+                log_id: chunk.log,
+                seq: chunk.seq,
+                data: chunk.bytes,
+                written_at: chunk.written_at,
+            },
+            None => deleted(),
+        },
     };
     Ok(SyncItem {
         modified_at: now_ms,
@@ -278,6 +309,28 @@ pub fn apply_in(
         ItemBody::Password { id, secret } => {
             vault.store_password(store, *id, secret, Some(server))?;
         }
+        ItemBody::Log { meta } => {
+            session_log::put_meta(vault, store, meta, Some(server)).map_err(log_error)?;
+        }
+        ItemBody::LogChunk {
+            id,
+            log_id,
+            seq,
+            data,
+            written_at,
+        } => {
+            session_log::put_chunk(
+                vault,
+                store,
+                *id,
+                *log_id,
+                *seq,
+                data,
+                *written_at,
+                Some(server),
+            )
+            .map_err(log_error)?;
+        }
         ItemBody::Deleted { item_kind, item_id } => {
             let uuid = parse_id(item_id)?;
             match item_kind {
@@ -294,10 +347,23 @@ pub fn apply_in(
                 }
                 ItemKind::Identity => store.delete_identity(IdentityId(uuid))?,
                 ItemKind::Password => store.delete_password(PasswordId(uuid))?,
+                ItemKind::Log => session_log::delete(store, LogId(uuid)).map_err(log_error)?,
+                ItemKind::LogChunk => {
+                    session_log::delete_chunk(store, item_id).map_err(log_error)?
+                }
             }
         }
     }
     Ok(())
+}
+
+/// A log that does not fit (from an older or broken client) is a record to skip, not a failure
+/// of the whole sync.
+pub(crate) fn log_error(e: LogError) -> SyncError {
+    match e {
+        LogError::Store(e) => SyncError::Store(e.to_string()),
+        other => SyncError::Proto(ProtoError::Malformed(other.to_string())),
+    }
 }
 
 /// A proxy password this device had before a record came in and that is now gone (the proxy was
