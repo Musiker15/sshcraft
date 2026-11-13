@@ -24,8 +24,6 @@ pub enum StoreError {
     DeviceBound,
     #[error(transparent)]
     InvalidForward(#[from] crate::forward::ForwardError),
-    #[error(transparent)]
-    InvalidSnippet(#[from] crate::snippets::SnippetError),
 }
 
 /// A key as stored on disk. `sealed_secret` is the vault's ciphertext, never plaintext.
@@ -96,8 +94,7 @@ CREATE TABLE IF NOT EXISTS recent_hosts (
 pub(crate) const SCHEMA_V9: &str = "
 CREATE TABLE snippets (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    body TEXT NOT NULL
+    sealed BLOB NOT NULL
 );
 CREATE TABLE command_history (
     scope TEXT PRIMARY KEY,

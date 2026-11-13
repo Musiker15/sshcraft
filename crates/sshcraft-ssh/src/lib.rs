@@ -344,11 +344,16 @@ impl client::Handler for ClientHandler {
 async fn exec_on(
     handle: &client::Handle<ClientHandler>,
     command: &str,
+    input: Option<&[u8]>,
     limit: usize,
 ) -> Result<Vec<u8>, SshError> {
     let run = async {
         let mut channel = handle.channel_open_session().await.map_err(protocol)?;
         channel.exec(true, command).await.map_err(protocol)?;
+        if let Some(input) = input {
+            channel.data(input).await.map_err(protocol)?;
+            channel.eof().await.map_err(protocol)?;
+        }
         let mut out = Vec::new();
         while let Some(msg) = channel.wait().await {
             match msg {
@@ -618,7 +623,7 @@ impl Session {
     /// Runs a command on its own channel and returns at most `limit` bytes of its output;
     /// gives up after a few seconds.
     pub async fn exec(&self, command: &str, limit: usize) -> Result<Vec<u8>, SshError> {
-        exec_on(&self.handle, command, limit).await
+        exec_on(&self.handle, command, None, limit).await
     }
 
     /// Opens a shell with a terminal of type `term` (`TERM` on the server).
@@ -706,9 +711,14 @@ impl Shell {
 
 impl ShellWriter {
     /// Runs a command on its own channel of the same connection, beside the shell (for path
-    /// completion); at most `limit` bytes of output.
-    pub async fn exec(&self, command: &str, limit: usize) -> Result<Vec<u8>, SshError> {
-        exec_on(&self.session, command, limit).await
+    /// completion), with `input` on its standard input; at most `limit` bytes of output.
+    pub async fn exec(
+        &self,
+        command: &str,
+        input: Option<&[u8]>,
+        limit: usize,
+    ) -> Result<Vec<u8>, SshError> {
+        exec_on(&self.session, command, input, limit).await
     }
 
     pub async fn write(&self, data: &[u8]) -> Result<(), SshError> {

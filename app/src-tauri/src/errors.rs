@@ -148,13 +148,21 @@ impl From<sshcraft_core::store::StoreError> for CommandError {
             sshcraft_core::store::StoreError::GroupCycle => Self::code(ErrorCode::GroupCycle),
             sshcraft_core::store::StoreError::TooDeep => Self::code(ErrorCode::GroupTooDeep),
             sshcraft_core::store::StoreError::DeviceBound => Self::code(ErrorCode::DeviceBound),
-            sshcraft_core::store::StoreError::InvalidSnippet(e) => {
-                Self::new(ErrorCode::InvalidSnippet, e)
-            }
             sshcraft_core::store::StoreError::InvalidForward(e) => {
                 Self::new(ErrorCode::InvalidForward, e)
             }
             e => Self::new(ErrorCode::Store, e),
+        }
+    }
+}
+
+impl From<sshcraft_core::snippets::SnippetStoreError> for CommandError {
+    fn from(e: sshcraft_core::snippets::SnippetStoreError) -> Self {
+        use sshcraft_core::snippets::SnippetStoreError as E;
+        match e {
+            E::Invalid(e) => Self::new(ErrorCode::InvalidSnippet, e),
+            E::Vault(e) => e.into(),
+            E::Store(e) => e.into(),
         }
     }
 }

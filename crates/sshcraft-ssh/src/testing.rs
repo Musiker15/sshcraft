@@ -85,6 +85,8 @@ struct Records {
     exec_output: Mutex<Option<String>>,
     /// Terminal types clients asked for with `pty-req`.
     terms: Mutex<Vec<String>>,
+    /// What clients sent on the standard input of `exec` channels.
+    exec_input: Mutex<Vec<u8>>,
 }
 
 pub struct TestServer {
@@ -137,6 +139,11 @@ impl TestServer {
     /// How many certificates clients offered.
     pub fn received_certificates(&self) -> usize {
         *self.records.certificates.lock().unwrap()
+    }
+
+    /// Everything clients sent to commands run with `exec`.
+    pub fn received_exec_input(&self) -> Vec<u8> {
+        self.records.exec_input.lock().unwrap().clone()
     }
 
     /// Terminal types clients asked for, in order.
@@ -245,6 +252,7 @@ impl server::Server for Factory {
             key_ok: false,
             kbd_round: 0,
             sessions: std::collections::HashSet::new(),
+            execs: std::collections::HashSet::new(),
             listeners: Vec::new(),
         }
     }
@@ -258,6 +266,8 @@ struct Handler {
     kbd_round: usize,
     /// Session channels: only their bytes are echoed (tunnels pass theirs through).
     sessions: std::collections::HashSet<ChannelId>,
+    /// Channels that run a command: their bytes are its input.
+    execs: std::collections::HashSet<ChannelId>,
     /// Listeners for `tcpip-forward`: (address, port, accept task).
     listeners: Vec<(String, u32, JoinHandle<()>)>,
 }
@@ -590,6 +600,9 @@ impl server::Handler for Handler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
+        // A command's input is recorded, not echoed like a shell's.
+        self.sessions.remove(&channel);
+        self.execs.insert(channel);
         self.records
             .commands
             .lock()
@@ -630,6 +643,14 @@ impl server::Handler for Handler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if self.execs.contains(&channel) {
+            self.records
+                .exec_input
+                .lock()
+                .unwrap()
+                .extend_from_slice(data);
+            return Ok(());
+        }
         if !self.sessions.contains(&channel) {
             return Ok(());
         }

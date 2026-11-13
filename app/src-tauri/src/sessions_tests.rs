@@ -1836,7 +1836,7 @@ mod forwards;
 #[tokio::test]
 async fn host_session_lists_a_directory() {
     let f = fixture(true).await;
-    f.server.set_exec_output("a/\nb\n");
+    f.server.set_exec_output("motd\nSSHCRAFT-LS\na/\nb\n");
     let sink = Arc::new(RecordingSink::default());
     let id = f.manager.open(
         SessionTarget::Host { host_id: f.host_id },
@@ -1846,14 +1846,22 @@ async fn host_session_lists_a_directory() {
     );
     sink.wait_for(connected).await;
     assert_eq!(
-        f.manager.list_dir(id, "/tmp").await.unwrap(),
+        f.manager.list_dir(id, "/tmp", "").await.unwrap(),
         vec!["a/".to_owned(), "b".to_owned()]
     );
     assert!(
         f.server
             .received_commands()
-            .contains(&"ls -1Ap -- '/tmp'".to_owned())
+            .contains(&crate::listing::LIST_COMMAND.to_owned())
     );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !f.server.received_exec_input().ends_with(b"/tmp\n") {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no directory on stdin"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[cfg(desktop)]
@@ -1889,7 +1897,10 @@ async fn local_session_lists_a_directory() {
     sink.wait_for(connected).await;
     let dir = std::env::temp_dir().join(format!("sshcraft-ls-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("inner")).unwrap();
-    let names = manager.list_dir(id, &dir.to_string_lossy()).await.unwrap();
+    let names = manager
+        .list_dir(id, &dir.to_string_lossy(), "")
+        .await
+        .unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     manager.close(id);
     assert_eq!(names, vec!["inner/".to_owned()]);

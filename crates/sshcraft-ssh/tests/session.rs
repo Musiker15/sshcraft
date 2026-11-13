@@ -343,10 +343,12 @@ async fn shell_writer_runs_exec_beside_the_shell() {
     .unwrap();
     let shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     let (writer, _events) = shell.split();
-    let out = writer.exec("ls -1Ap -- '/tmp'", 1024).await.unwrap();
+    let out = writer.exec("ls", Some(b"/tmp\n"), 1024).await.unwrap();
     assert_eq!(out, b"a/\nb\n");
-    assert_eq!(
-        server.received_commands(),
-        vec!["ls -1Ap -- '/tmp'".to_owned()]
-    );
+    assert_eq!(server.received_commands(), vec!["ls".to_owned()]);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while server.received_exec_input().is_empty() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(server.received_exec_input(), b"/tmp\n");
 }

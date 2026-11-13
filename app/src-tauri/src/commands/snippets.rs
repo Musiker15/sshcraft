@@ -1,9 +1,11 @@
 //! Snippets, the command history and directory listings for completion. All of it stays on
-//! this device.
+//! this device, snippets and history sealed with the vault.
+
+use std::sync::Arc;
 
 use sshcraft_core::history::{self, HistoryEntry, HistoryError};
 use sshcraft_core::model::SnippetId;
-use sshcraft_core::snippets::Snippet;
+use sshcraft_core::snippets::{self, Snippet};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
 use tauri::State;
@@ -26,24 +28,33 @@ fn history_error(e: HistoryError) -> CommandError {
     }
 }
 
+/// Snippets are sealed: they need the unlocked vault.
+fn vault(state: &AppState) -> CommandResult<Arc<Vault>> {
+    state.vault.clone()
+}
+
 #[tauri::command]
 pub fn snippets_list(state: State<'_, AppState>) -> CommandResult<Vec<Snippet>> {
-    Ok(state.store.lock().expect("store lock").list_snippets()?)
+    let vault = vault(&state)?;
+    Ok(snippets::list(
+        &vault,
+        &state.store.lock().expect("store lock"),
+    )?)
 }
 
 #[tauri::command]
 pub fn snippet_save(state: State<'_, AppState>, snippet: Snippet) -> CommandResult<Snippet> {
-    state
-        .store
-        .lock()
-        .expect("store lock")
-        .upsert_snippet(&snippet)?;
+    let vault = vault(&state)?;
+    snippets::save(&vault, &state.store.lock().expect("store lock"), &snippet)?;
     Ok(snippet)
 }
 
 #[tauri::command]
 pub fn snippet_delete(state: State<'_, AppState>, id: SnippetId) -> CommandResult<()> {
-    Ok(state.store.lock().expect("store lock").delete_snippet(id)?)
+    Ok(snippets::delete(
+        &state.store.lock().expect("store lock"),
+        id,
+    )?)
 }
 
 /// Keeps `command` in the history of `scope`, unless the history is switched off.
@@ -61,15 +72,21 @@ pub(crate) fn record_history(
     history::record(vault, store, scope, command, now).map_err(history_error)
 }
 
+/// Off the main thread: it opens and seals up to 1000 entries.
 #[tauri::command]
-pub fn history_record(
+pub async fn history_record(
     state: State<'_, AppState>,
     scope: String,
     command: String,
 ) -> CommandResult<()> {
     let vault = state.vault.as_ref().ok().cloned();
-    let store = state.store.lock().expect("store lock");
-    record_history(&store, vault.as_deref(), &scope, &command, now_ms())
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = store.lock().expect("store lock");
+        record_history(&store, vault.as_deref(), &scope, &command, now_ms())
+    })
+    .await
+    .map_err(|e| CommandError::new(ErrorCode::Internal, e))?
 }
 
 #[tauri::command]
@@ -88,16 +105,17 @@ pub fn history_clear(state: State<'_, AppState>, scope: Option<String>) -> Comma
     history::clear(&store, scope.as_deref()).map_err(history_error)
 }
 
-/// Names in `dir` of the session's machine, for path completion.
+/// Names in `dir` starting with `prefix` on the session's machine, for path completion.
 #[tauri::command]
 pub async fn session_list_dir(
     state: State<'_, AppState>,
     id: SessionId,
     dir: String,
+    prefix: String,
 ) -> CommandResult<Vec<String>> {
     state
         .sessions
-        .list_dir(id, &dir)
+        .list_dir(id, &dir, &prefix)
         .await
         .map_err(|e| CommandError::new(ErrorCode::Session, e))
 }

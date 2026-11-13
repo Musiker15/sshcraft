@@ -344,7 +344,8 @@ export const historyRecord = (scope: string, command: string) => invoke<void>("h
 export const historyList = (scope: string) => invoke<HistoryEntry[]>("history_list", { scope });
 export const historyClear = (scope: string | null) => invoke<void>("history_clear", { scope });
 /** Names in `dir` on the session's machine; directories end in "/". */
-export const sessionListDir = (id: string, dir: string) => invoke<string[]>("session_list_dir", { id, dir });
+export const sessionListDir = (id: string, dir: string, prefix: string) =>
+  invoke<string[]>("session_list_dir", { id, dir, prefix });
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
 
 export type SyncStatusView =

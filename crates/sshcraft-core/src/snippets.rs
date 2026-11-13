@@ -1,10 +1,11 @@
 //! Snippets: commands or short scripts, sorted into packages, with hosts they usually run on.
-//! Kept on this device only.
+//! Kept on this device only, sealed with the vault (a command can hold a password or token).
 
 use serde::{Deserialize, Serialize};
 
 use crate::model::{HostId, SnippetId};
 use crate::store::{Store, StoreError};
+use crate::vault::{Vault, VaultError};
 
 pub const MAX_SNIPPETS: usize = 1000;
 pub const MAX_NAME: usize = 100;
@@ -29,6 +30,22 @@ pub struct Snippet {
 pub enum SnippetError {
     #[error("invalid snippet: {0}")]
     Invalid(&'static str),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SnippetStoreError {
+    #[error(transparent)]
+    Invalid(#[from] SnippetError),
+    #[error(transparent)]
+    Vault(#[from] VaultError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+impl From<rusqlite::Error> for SnippetStoreError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Store(e.into())
+    }
 }
 
 fn text_ok(text: &str, max: usize) -> bool {
@@ -58,85 +75,77 @@ pub fn validate(snippet: &Snippet) -> Result<(), SnippetError> {
     Ok(())
 }
 
-/// What the `body` column holds: everything but id and name.
-#[derive(Serialize, Deserialize)]
-struct Body {
-    package: String,
-    content: String,
-    default_targets: Vec<HostId>,
+/// Sealed under the snippet's id: a block moved to another id does not open.
+fn label(id: SnippetId) -> String {
+    format!("snippet:{}", id.0)
+}
+
+/// All snippets by name; one that cannot be opened or read is left out.
+pub fn list(vault: &Vault, store: &Store) -> Result<Vec<Snippet>, SnippetStoreError> {
+    let mut stmt = store.conn.prepare("SELECT id, sealed FROM snippets")?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut snippets: Vec<Snippet> = rows
+        .into_iter()
+        .filter_map(|(id, sealed)| {
+            let id = SnippetId(uuid::Uuid::parse_str(&id).ok()?);
+            let plain = vault.open_secret(&label(id), &sealed).ok()?;
+            let snippet: Snippet = serde_json::from_slice(&plain).ok()?;
+            (snippet.id == id && validate(&snippet).is_ok()).then_some(snippet)
+        })
+        .collect();
+    snippets.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then(a.id.0.cmp(&b.id.0))
+    });
+    Ok(snippets)
+}
+
+/// Stores a valid snippet; a new one only while there are fewer than [`MAX_SNIPPETS`].
+pub fn save(vault: &Vault, store: &Store, snippet: &Snippet) -> Result<(), SnippetStoreError> {
+    validate(snippet)?;
+    let id = snippet.id.0.to_string();
+    let exists: bool = store.conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM snippets WHERE id = ?1)",
+        [&id],
+        |r| r.get(0),
+    )?;
+    let count: i64 = store
+        .conn
+        .query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get(0))?;
+    if !exists && usize::try_from(count).unwrap_or(usize::MAX) >= MAX_SNIPPETS {
+        return Err(SnippetError::Invalid("too many").into());
+    }
+    let clean = Snippet {
+        name: snippet.name.trim().to_owned(),
+        package: snippet.package.trim().to_owned(),
+        ..snippet.clone()
+    };
+    let plain = zeroize::Zeroizing::new(
+        serde_json::to_vec(&clean).map_err(|e| StoreError::Malformed(e.to_string()))?,
+    );
+    let sealed = vault.seal_secret(&label(snippet.id), &plain)?;
+    store.conn.execute(
+        "INSERT INTO snippets (id, sealed) VALUES (?1, ?2)
+         ON CONFLICT(id) DO UPDATE SET sealed = excluded.sealed",
+        rusqlite::params![id, sealed],
+    )?;
+    Ok(())
+}
+
+pub fn delete(store: &Store, id: SnippetId) -> Result<(), SnippetStoreError> {
+    store
+        .conn
+        .execute("DELETE FROM snippets WHERE id = ?1", [id.0.to_string()])?;
+    Ok(())
 }
 
 impl Store {
-    /// All snippets by name; a row that cannot be read is left out.
-    pub fn list_snippets(&self) -> Result<Vec<Snippet>, StoreError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, body FROM snippets ORDER BY name COLLATE NOCASE, id")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        let mut snippets = Vec::new();
-        for row in rows {
-            let (id, name, body) = row?;
-            let (Ok(id), Ok(body)) = (
-                uuid::Uuid::parse_str(&id),
-                serde_json::from_str::<Body>(&body),
-            ) else {
-                continue;
-            };
-            let snippet = Snippet {
-                id: SnippetId(id),
-                name,
-                package: body.package,
-                content: body.content,
-                default_targets: body.default_targets,
-            };
-            if validate(&snippet).is_ok() {
-                snippets.push(snippet);
-            }
-        }
-        Ok(snippets)
-    }
-
-    /// Stores a valid snippet; a new one only while there are fewer than [`MAX_SNIPPETS`].
-    pub fn upsert_snippet(&self, snippet: &Snippet) -> Result<(), StoreError> {
-        validate(snippet)?;
-        let id = snippet.id.0.to_string();
-        let exists: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM snippets WHERE id = ?1)",
-            [&id],
-            |r| r.get(0),
-        )?;
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get(0))?;
-        if !exists && usize::try_from(count).unwrap_or(usize::MAX) >= MAX_SNIPPETS {
-            return Err(SnippetError::Invalid("too many").into());
-        }
-        let body = serde_json::to_string(&Body {
-            package: snippet.package.trim().to_owned(),
-            content: snippet.content.clone(),
-            default_targets: snippet.default_targets.clone(),
-        })
-        .map_err(|e| StoreError::Malformed(e.to_string()))?;
-        self.conn.execute(
-            "INSERT INTO snippets (id, name, body) VALUES (?1, ?2, ?3)
-             ON CONFLICT(id) DO UPDATE SET name = excluded.name, body = excluded.body",
-            rusqlite::params![id, snippet.name.trim(), body],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_snippet(&self, id: SnippetId) -> Result<(), StoreError> {
-        self.conn
-            .execute("DELETE FROM snippets WHERE id = ?1", [id.0.to_string()])?;
-        Ok(())
-    }
-
     pub(crate) fn history_block(&self, scope: &str) -> Result<Option<Vec<u8>>, StoreError> {
         use rusqlite::OptionalExtension;
         Ok(self
@@ -172,6 +181,13 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::MemoryMasterKey;
+
+    fn setup() -> (Store, Vault) {
+        let store = Store::open_in_memory().unwrap();
+        let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+        (store, vault)
+    }
 
     fn snippet(name: &str) -> Snippet {
         Snippet {
@@ -219,57 +235,80 @@ mod tests {
 
     #[test]
     fn save_list_change_delete() {
-        let store = Store::open_in_memory().unwrap();
+        let (store, vault) = setup();
         let mut a = snippet("B second");
-        let b = snippet("A first");
-        store.upsert_snippet(&a).unwrap();
-        store.upsert_snippet(&b).unwrap();
-        assert_eq!(store.list_snippets().unwrap(), vec![b.clone(), a.clone()]);
+        let b = snippet("a first");
+        save(&vault, &store, &a).unwrap();
+        save(&vault, &store, &b).unwrap();
+        assert_eq!(list(&vault, &store).unwrap(), vec![b.clone(), a.clone()]);
         a.content = "uptime".into();
-        store.upsert_snippet(&a).unwrap();
-        assert_eq!(store.list_snippets().unwrap()[1].content, "uptime");
-        store.delete_snippet(b.id).unwrap();
-        assert_eq!(store.list_snippets().unwrap(), vec![a]);
+        save(&vault, &store, &a).unwrap();
+        assert_eq!(list(&vault, &store).unwrap()[1].content, "uptime");
+        delete(&store, b.id).unwrap();
+        assert_eq!(list(&vault, &store).unwrap(), vec![a]);
     }
 
     #[test]
     fn invalid_snippets_are_not_saved() {
-        let store = Store::open_in_memory().unwrap();
+        let (store, vault) = setup();
         assert!(matches!(
-            store.upsert_snippet(&snippet("")),
-            Err(StoreError::InvalidSnippet(_))
+            save(&vault, &store, &snippet("")),
+            Err(SnippetStoreError::Invalid(_))
         ));
-        assert!(store.list_snippets().unwrap().is_empty());
+        assert!(list(&vault, &store).unwrap().is_empty());
     }
 
     #[test]
     fn the_1001st_snippet_is_refused() {
-        let store = Store::open_in_memory().unwrap();
+        let (store, vault) = setup();
         for i in 0..MAX_SNIPPETS {
-            store.upsert_snippet(&snippet(&format!("s{i}"))).unwrap();
+            save(&vault, &store, &snippet(&format!("s{i}"))).unwrap();
         }
         assert!(matches!(
-            store.upsert_snippet(&snippet("one more")),
-            Err(StoreError::InvalidSnippet(_))
+            save(&vault, &store, &snippet("one more")),
+            Err(SnippetStoreError::Invalid(_))
         ));
-        // Changing an existing one still works.
-        let mut first = store.list_snippets().unwrap().remove(0);
+        let mut first = list(&vault, &store).unwrap().remove(0);
         first.content = "changed".into();
-        store.upsert_snippet(&first).unwrap();
+        save(&vault, &store, &first).unwrap();
     }
 
     #[test]
-    fn a_broken_row_is_left_out() {
-        let store = Store::open_in_memory().unwrap();
+    fn nothing_in_plain_text() {
+        let (store, vault) = setup();
+        let mut s = snippet("Datenbank");
+        s.content = "mysql -uroot -pGeheim42".into();
+        save(&vault, &store, &s).unwrap();
+        let blob: Vec<u8> = store
+            .conn
+            .query_row("SELECT sealed FROM snippets", [], |r| r.get(0))
+            .unwrap();
+        assert!(!blob.windows(8).any(|w| w == b"Geheim42"));
+        assert!(!blob.windows(9).any(|w| w == b"Datenbank"));
+    }
+
+    #[test]
+    fn a_broken_or_moved_block_is_left_out() {
+        let (store, vault) = setup();
         let good = snippet("good");
-        store.upsert_snippet(&good).unwrap();
+        save(&vault, &store, &good).unwrap();
+        let other = snippet("other");
+        save(&vault, &store, &other).unwrap();
+        // The block of "other" under a new id does not open.
         store
             .conn
             .execute(
-                "INSERT INTO snippets (id, name, body) VALUES ('not-a-uuid', 'bad', '{')",
+                "UPDATE snippets SET id = ?1 WHERE id = ?2",
+                [uuid::Uuid::new_v4().to_string(), other.id.0.to_string()],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO snippets (id, sealed) VALUES ('not-a-uuid', x'00')",
                 [],
             )
             .unwrap();
-        assert_eq!(store.list_snippets().unwrap(), vec![good]);
+        assert_eq!(list(&vault, &store).unwrap(), vec![good]);
     }
 }

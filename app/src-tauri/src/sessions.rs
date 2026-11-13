@@ -150,8 +150,9 @@ pub(crate) trait TermWriter: Send + Sync {
     async fn resize(&self, cols: u32, rows: u32) -> Result<(), String>;
     /// The tab is closed: end what runs behind it now (a local shell).
     fn close(&self) {}
-    /// Names in `dir`, for path completion; nothing where a terminal has no files.
-    async fn list_dir(&self, _dir: &str) -> Result<Vec<String>, String> {
+    /// Names in `dir` starting with `prefix`, for path completion; nothing where a terminal has
+    /// no files.
+    async fn list_dir(&self, _dir: &str, _prefix: &str) -> Result<Vec<String>, String> {
         Ok(Vec::new())
     }
 }
@@ -170,13 +171,19 @@ impl TermWriter for ShellWriter {
             .map_err(|e| e.to_string())
     }
 
-    async fn list_dir(&self, dir: &str) -> Result<Vec<String>, String> {
-        let command = crate::listing::list_dir_command(dir);
+    async fn list_dir(&self, dir: &str, prefix: &str) -> Result<Vec<String>, String> {
+        let Some(input) = crate::listing::listing_input(dir) else {
+            return Ok(Vec::new());
+        };
         let output = self
-            .exec(&command, crate::listing::MAX_OUTPUT)
+            .exec(
+                crate::listing::LIST_COMMAND,
+                Some(input.as_bytes()),
+                crate::listing::MAX_OUTPUT,
+            )
             .await
             .map_err(|e| e.to_string())?;
-        Ok(crate::listing::parse_listing(&output))
+        Ok(crate::listing::parse_listing(&output, prefix))
     }
 }
 
@@ -206,9 +213,9 @@ impl TermWriter for sshcraft_local::pty::LocalWriter {
         sshcraft_local::pty::LocalWriter::close(self);
     }
 
-    async fn list_dir(&self, dir: &str) -> Result<Vec<String>, String> {
-        let dir = dir.to_owned();
-        tokio::task::spawn_blocking(move || crate::listing::list_local(&dir))
+    async fn list_dir(&self, dir: &str, prefix: &str) -> Result<Vec<String>, String> {
+        let (dir, prefix) = (dir.to_owned(), prefix.to_owned());
+        tokio::task::spawn_blocking(move || crate::listing::list_local(&dir, &prefix))
             .await
             .map_err(|e| e.to_string())?
     }
@@ -515,9 +522,13 @@ impl SessionManager {
         }
     }
 
-    /// The UI has rendered `bytes` more output bytes.
-    /// Names in `dir` of the session's machine (path completion).
-    pub async fn list_dir(&self, id: SessionId, dir: &str) -> Result<Vec<String>, String> {
+    /// Names in `dir` starting with `prefix` on the session's machine (path completion).
+    pub async fn list_dir(
+        &self,
+        id: SessionId,
+        dir: &str,
+        prefix: &str,
+    ) -> Result<Vec<String>, String> {
         let writer = self
             .sessions
             .lock()
@@ -525,9 +536,10 @@ impl SessionManager {
             .get(&id)
             .and_then(|live| live.writer.lock().expect("writer lock").clone())
             .ok_or("not connected")?;
-        writer.list_dir(dir).await
+        writer.list_dir(dir, prefix).await
     }
 
+    /// The UI has rendered `bytes` more output bytes.
     pub fn ack(&self, id: SessionId, bytes: usize) {
         if let Some(live) = self.sessions.lock().expect("sessions lock").get(&id) {
             live.flow.ack(bytes);
