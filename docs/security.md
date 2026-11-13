@@ -35,6 +35,15 @@ What a server prints may not reach beyond the terminal on its own:
   session asked for; anything else is refused.
 - Every rule carries at most 256 connections at a time, and a SOCKS handshake has 10 seconds.
 
+## Command history and completion
+
+- The history is sealed with the vault per terminal target; nothing of it is on disk in plain
+  text, and it never syncs. Input after a password question, lines starting with a space and
+  input in full-screen programs are not kept.
+- Path completion over SSH runs `ls -1Ap -- '<dir>'` on its own exec channel: the directory is
+  quoted for a POSIX shell (a leading `~` stays outside the quotes), output is limited to 64 KiB
+  and 500 names, names with control characters are left out.
+
 ## One instance
 
 Only one SSHCraft runs at a time. A second start brings the open window to the front and exits,

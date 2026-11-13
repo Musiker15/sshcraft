@@ -18,8 +18,10 @@ Ctrl+R, Ctrl+C, Alt+..., AltGr) reaches the server unchanged.
 | Ctrl+Shift+PageDown, Ctrl+Shift+PageUp | Next and previous pane |
 | Ctrl+Shift+M | Switch between split and focus layout |
 | Ctrl+Shift+B | Broadcast on or off |
+| Ctrl+Shift+S | Snippets and history beside the terminal |
 
-Panes and broadcast are described in [workspaces.md](workspaces.md).
+Panes and broadcast are described in [workspaces.md](workspaces.md), the sidebar and the keys of the
+completion list in [snippets.md](snippets.md).
 
 ## Your own shortcuts
 
