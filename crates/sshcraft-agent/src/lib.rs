@@ -96,6 +96,9 @@ pub struct ExecResult {
     pub output: String,
     /// The output went past [`MAX_OUTPUT`] and was cut.
     pub truncated: bool,
+    /// The command's exit status, if the server reported one (0 is success).
+    #[serde(default)]
+    pub exit_status: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

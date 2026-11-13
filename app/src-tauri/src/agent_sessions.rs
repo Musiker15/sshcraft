@@ -65,30 +65,27 @@ pub struct AgentSessions {
 pub type ExecError = (ErrorCode, Option<String>);
 
 impl AgentSessions {
-    /// Runs `command` on a host on a connection of its own; at most `limit` bytes of output,
-    /// `true` when it was cut.
+    /// Runs `command` on a host on a connection of its own, to its end or `timeout`: output and
+    /// errors (at most `limit` bytes) and the exit status.
     pub async fn exec(
         manager: &SessionManager,
         host: HostId,
         command: &str,
         limit: usize,
         timeout: Duration,
-    ) -> Result<(Vec<u8>, bool), ExecError> {
+    ) -> Result<sshcraft_ssh::RunOutput, ExecError> {
         let ctx = manager.context();
         let run = async {
             let (session, _) = connect_session(&ctx, host, &OpenedKeys::default())
                 .await
                 .map_err(failure_code)?;
-            let output = session.exec(command, limit.saturating_add(1)).await;
+            let output = session.run(command, limit).await;
             session.disconnect().await;
             output.map_err(|e| (ErrorCode::Session, Some(e.to_string())))
         };
-        let mut output = tokio::time::timeout(timeout, run)
+        tokio::time::timeout(timeout, run)
             .await
-            .map_err(|_| (ErrorCode::Timeout, None))??;
-        let cut = output.len() > limit;
-        output.truncate(limit);
-        Ok((output, cut))
+            .map_err(|_| (ErrorCode::Timeout, None))?
     }
 
     pub fn open(&self, manager: &SessionManager, host: HostId) -> SessionId {

@@ -104,13 +104,13 @@ impl AgentBackend for TauriBackend {
         timeout: Duration,
     ) -> Result<ExecResult, AgentError> {
         let state = self.state();
-        let (output, truncated) =
-            AgentSessions::exec(&state.sessions, host, command, MAX_OUTPUT, timeout)
-                .await
-                .map_err(|(code, detail)| failed(CommandError { code, detail }))?;
+        let run = AgentSessions::exec(&state.sessions, host, command, MAX_OUTPUT, timeout)
+            .await
+            .map_err(|(code, detail)| failed(CommandError { code, detail }))?;
         Ok(ExecResult {
-            output: String::from_utf8_lossy(&output).into_owned(),
-            truncated,
+            output: String::from_utf8_lossy(&run.output).into_owned(),
+            truncated: run.truncated,
+            exit_status: run.exit_status,
         })
     }
 

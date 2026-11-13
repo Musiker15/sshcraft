@@ -2078,7 +2078,7 @@ mod agents {
     #[tokio::test]
     async fn exec_returns_the_output() {
         let f = fixture(true).await;
-        let (out, cut) = AgentSessions::exec(
+        let run = AgentSessions::exec(
             &f.manager,
             f.host_id,
             "uptime",
@@ -2087,8 +2087,12 @@ mod agents {
         )
         .await
         .unwrap();
-        assert_eq!(out, sshcraft_ssh::testing::TEST_EXEC_OUTPUT.as_bytes());
-        assert!(!cut);
+        assert_eq!(
+            run.output,
+            sshcraft_ssh::testing::TEST_EXEC_OUTPUT.as_bytes()
+        );
+        assert!(!run.truncated);
+        assert_eq!(run.exit_status, Some(0));
         assert!(f.server.received_commands().contains(&"uptime".to_owned()));
     }
 
@@ -2096,12 +2100,40 @@ mod agents {
     async fn exec_output_is_cut_at_the_limit() {
         let f = fixture(true).await;
         f.server.set_exec_output(&"y".repeat(5000));
-        let (out, cut) =
-            AgentSessions::exec(&f.manager, f.host_id, "yes", 1000, Duration::from_secs(10))
-                .await
-                .unwrap();
-        assert_eq!(out.len(), 1000);
-        assert!(cut);
+        let run = AgentSessions::exec(&f.manager, f.host_id, "yes", 1000, Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(run.output.len(), 1000);
+        assert!(run.truncated);
+    }
+
+    #[tokio::test]
+    async fn exec_waits_as_long_as_asked_and_reports_errors_and_status() {
+        let f = fixture(true).await;
+        f.server.set_exec_output("");
+        f.server
+            .set_exec_result("ls: /nope: No such file\n", 2, Duration::from_secs(6));
+        let run = AgentSessions::exec(
+            &f.manager,
+            f.host_id,
+            "ls /nope",
+            1024,
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.exit_status, Some(2));
+        assert!(String::from_utf8_lossy(&run.output).contains("No such file"));
+        // A shorter limit than the command needs ends in a timeout.
+        let short = AgentSessions::exec(
+            &f.manager,
+            f.host_id,
+            "ls /nope",
+            1024,
+            Duration::from_secs(3),
+        )
+        .await;
+        assert_eq!(short.unwrap_err().0, ErrorCode::Timeout);
     }
 
     #[tokio::test]

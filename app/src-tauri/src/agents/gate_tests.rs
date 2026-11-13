@@ -68,6 +68,7 @@ impl AgentBackend for Fake {
         Ok(ExecResult {
             output: "ok\n".into(),
             truncated: false,
+            exit_status: Some(0),
         })
     }
     fn session_open(&self, host: HostId) -> Result<String, AgentError> {
