@@ -446,6 +446,12 @@ pub(crate) fn copy_item(
         ItemBody::Identity { identity } => identity.id = IdentityId(copy_uuid),
         ItemBody::Password { id, .. } => *id = PasswordId(copy_uuid),
         ItemBody::Deleted { item_id, .. } => *item_id = copy,
+        // Session logs are personal: they have no copies in shares.
+        ItemBody::Log { .. } | ItemBody::LogChunk { .. } => {
+            return Err(SyncError::Proto(sshcraft_proto::ProtoError::Malformed(
+                "session logs are not shared".into(),
+            )));
+        }
     }
     Ok(item)
 }

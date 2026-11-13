@@ -530,6 +530,7 @@ impl Engine {
         let sync_keys = lock(store)?
             .server(self.server)?
             .is_some_and(|row| row.sync_keys);
+        let sync_logs = lock(store)?.sync_logs(self.server)?;
         // Key assignments of own shared items, applied once their items are here.
         let mut assignments = Vec::new();
         // The personal area first: originals are there before their copies in own shares.
@@ -612,8 +613,14 @@ impl Engine {
                     };
                     // Keys are skipped uncounted while key sync is off, so turning it on (which
                     // fetches from the start) still brings them.
-                    if !sync_keys && is_key_record(&record, &key, &manifest, &author_devices) {
-                        continue;
+                    // Logs likewise while log sync is off.
+                    if !sync_keys || !sync_logs {
+                        let kind = record_kind(&record, &key, &manifest, &author_devices);
+                        if kind.is_some_and(|k| {
+                            (!sync_keys && is_secret(k)) || (!sync_logs && k.is_log())
+                        }) {
+                            continue;
+                        }
                     }
                     let before = tracker.clone();
                     match tracker.accept_record(&record, &key, &manifest, &author_devices) {
@@ -979,7 +986,7 @@ impl Engine {
                     guard.upsert_identity(&identity)?;
                 }
             }
-            ItemKind::Key | ItemKind::Password => {}
+            ItemKind::Key | ItemKind::Password | ItemKind::Log | ItemKind::LogChunk => {}
         }
         Ok(())
     }
@@ -998,13 +1005,19 @@ impl Engine {
         &mut self,
         store: &Mutex<Store>,
         vault: &Vault,
-        _now_ms: i64,
+        now_ms: i64,
     ) -> Result<usize, SyncError> {
         self.warnings.clear();
         let sync_keys = lock(store)?
             .server(self.server)?
             .ok_or(SyncError::NotSetUp)?
             .sync_keys;
+        let sync_logs = {
+            let guard = lock(store)?;
+            // Logs follow their hosts, wherever those moved since.
+            crate::logs::place_logs(&guard, now_ms)?;
+            guard.sync_logs(self.server)?
+        };
         let mut outbox = lock(store)?.outbox(self.server)?;
         // Keys and passwords before what uses them, then identities, a group before its
         // subgroups, groups before hosts, so a device fetching in order can apply each record as
@@ -1022,12 +1035,15 @@ impl Engine {
                     }),
                 ),
                 ItemKind::Host => (3, 0),
+                // The parts of a log before its header, so a log is whole once it shows.
+                ItemKind::LogChunk => (4, 0),
+                ItemKind::Log => (5, 0),
             };
             outbox.sort_by_key(rank);
         }
         let mut sent = 0;
         for (kind, id) in outbox {
-            if is_secret(kind) && !sync_keys {
+            if (is_secret(kind) && !sync_keys) || (kind.is_log() && !sync_logs) {
                 lock(store)?.dequeue(self.server, kind, &id)?;
                 continue;
             }
@@ -1296,6 +1312,12 @@ impl Engine {
             modified_at: item.modified_at,
         };
         let deleted = matches!(item.body, ItemBody::Deleted { .. });
+        // Session logs live in the personal area only; one elsewhere was put there by someone
+        // else and is not taken.
+        if kind.is_log() && (Some(area) != personal || header.author_account != self.account) {
+            store.put_record_entry(self.server, &entry, kind, &item_id)?;
+            return Ok(false);
+        }
         // In an own share with all hosts, a member neither moves nor deletes the shared group,
         // nor hangs anything into groups outside the share.
         if header.author_account != self.account
@@ -1329,9 +1351,12 @@ impl Engine {
                 ItemBody::Group { group } => outside(group.parent_id)?,
                 ItemBody::Host { host } => outside(host.group_id)?,
                 // Keys, passwords and identities of a share are the owner's alone.
-                ItemBody::Key { .. } | ItemBody::Identity { .. } | ItemBody::Password { .. } => {
-                    true
-                }
+                // Logs are personal and never part of a share.
+                ItemBody::Key { .. }
+                | ItemBody::Identity { .. }
+                | ItemBody::Password { .. }
+                | ItemBody::Log { .. }
+                | ItemBody::LogChunk { .. } => true,
             };
             if refuse {
                 store.put_record_entry(self.server, &entry, kind, &item_id)?;
@@ -1440,6 +1465,7 @@ fn find_original(
             .into_iter()
             .map(|i| i.id.0)
             .collect(),
+        ItemKind::Log | ItemKind::LogChunk => Vec::new(),
         ItemKind::Password => store
             .list_password_ids()?
             .into_iter()
@@ -1602,7 +1628,7 @@ fn own_assignment(
                 password: i.password,
                 ..Default::default()
             }),
-        ItemKind::Key | ItemKind::Password => None,
+        ItemKind::Key | ItemKind::Password | ItemKind::Log | ItemKind::LogChunk => None,
     };
     Ok(refs)
 }
@@ -1718,22 +1744,30 @@ fn remove_item(store: &Store, kind: ItemKind, id: &str) -> Result<(), SyncError>
         }
         ItemKind::Identity => store.delete_identity(sshcraft_core::model::IdentityId(uuid))?,
         ItemKind::Password => store.delete_password(sshcraft_core::model::PasswordId(uuid))?,
+        ItemKind::Log => {
+            sshcraft_core::session_log::delete(store, sshcraft_core::model::LogId(uuid))
+                .map_err(crate::items::log_error)?
+        }
+        ItemKind::LogChunk => {
+            sshcraft_core::session_log::delete_chunk(store, id).map_err(crate::items::log_error)?
+        }
     }
     Ok(())
 }
 
 /// Whether a record holds a key or a password, read without counting it in the tracker.
-fn is_key_record(
+/// The kind of item a record holds, if it opens.
+fn record_kind(
     record: &SealedRecord,
     key: &AreaKey,
     manifest: &AreaManifest,
     devices: &DeviceSet,
-) -> bool {
+) -> Option<ItemKind> {
     record
         .open(key, manifest, devices)
         .ok()
         .and_then(|body| decode(&body).ok())
-        .is_some_and(|item| is_secret(item.item().0))
+        .map(|item| item.item().0)
 }
 
 /// A host, group or identity that points to a key, password or identity which does not live at

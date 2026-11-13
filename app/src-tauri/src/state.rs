@@ -57,6 +57,20 @@ impl AppState {
         sessions.on_hello_unavailable(Box::new(move || {
             let _ = events.emit("hello-unavailable", ());
         }));
+        // An ended log moves to where its host lives and goes to that server.
+        let logs_app = app.clone();
+        let logs_store = store.clone();
+        sessions.on_log_finished(Arc::new(move |_id| {
+            let servers = {
+                let store = logs_store.lock().expect("store lock");
+                sshcraft_sync::logs::place_logs(&store, crate::recording::now_ms())
+            };
+            if let Ok(servers) = servers
+                && let Some(state) = tauri::Manager::try_state::<AppState>(&logs_app)
+            {
+                state.sync.nudge(&servers);
+            }
+        }));
         let forwards =
             ForwardManager::new(sessions.context(), Arc::new(TauriForwardSink(app.clone())));
         let sync = SyncManager::new(

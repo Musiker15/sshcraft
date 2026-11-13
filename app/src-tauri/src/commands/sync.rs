@@ -24,6 +24,8 @@ pub struct ServerView {
     pub origin: String,
     pub sync_enabled: bool,
     pub sync_keys: bool,
+    /// Session logs sync too.
+    pub sync_logs: bool,
     pub revoked: bool,
     pub status: StatusView,
 }
@@ -99,6 +101,12 @@ pub fn list_servers(state: State<'_, AppState>) -> CommandResult<Vec<ServerView>
             origin: row.origin,
             sync_enabled: row.sync_enabled,
             sync_keys: row.sync_keys,
+            sync_logs: state
+                .store
+                .lock()
+                .expect("store lock")
+                .sync_logs(row.id)
+                .unwrap_or(false),
             revoked: row.revoked,
         })
         .collect())
@@ -182,6 +190,20 @@ pub async fn set_server_sync(
     } else {
         state.sync.stop(id);
     }
+    Ok(())
+}
+
+/// Switches log sync for a server; turning it on sends the logs already there.
+#[tauri::command]
+pub fn set_server_logs(state: State<'_, AppState>, id: ServerId, on: bool) -> CommandResult<()> {
+    sshcraft_sync::logs::set_sync_logs(
+        &state.store.lock().expect("store lock"),
+        id,
+        on,
+        crate::recording::now_ms(),
+    )
+    .map_err(crate::sync::sync_error)?;
+    state.sync.nudge(&[id]);
     Ok(())
 }
 

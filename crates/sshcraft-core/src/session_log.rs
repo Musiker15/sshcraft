@@ -483,6 +483,42 @@ pub fn logs_of_host(store: &Store, host: HostId) -> Result<Vec<LogId>, LogError>
     )
 }
 
+/// A log whose place differs from its host's: `(log, where it is, where its host is)`.
+pub type Misplaced = (LogId, Option<ServerId>, Option<ServerId>);
+
+/// Ended logs of hosts on this device that live elsewhere than their host.
+pub fn misplaced(store: &Store) -> Result<Vec<Misplaced>, LogError> {
+    let mut stmt = store.conn.prepare(
+        "SELECT l.id, l.location, h.location FROM session_logs l JOIN hosts h ON h.id = l.host_id
+         WHERE l.ended_at IS NOT NULL AND l.location IS NOT h.location",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let server = |t: Option<String>| t.and_then(|t| Uuid::parse_str(&t).ok()).map(ServerId);
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, at, host)| {
+            Some((LogId(Uuid::parse_str(&id).ok()?), server(at), server(host)))
+        })
+        .collect())
+}
+
+/// Ended logs that live at `server`.
+pub fn logs_at(store: &Store, server: ServerId) -> Result<Vec<LogId>, LogError> {
+    ids(
+        store,
+        "SELECT id FROM session_logs WHERE location = ?1 AND ended_at IS NOT NULL",
+        params![server.0.to_string()],
+    )
+}
+
 /// Ended logs that ended before `before_ms`.
 pub fn expired(store: &Store, before_ms: i64) -> Result<Vec<LogId>, LogError> {
     ids(

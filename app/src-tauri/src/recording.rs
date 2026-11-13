@@ -53,12 +53,16 @@ struct State {
     pending_since: Option<Instant>,
 }
 
+/// Told the id of each log that ended (to place it and send it to its sync server).
+pub type OnFinish = Arc<dyn Fn(LogId) + Send + Sync>;
+
 pub struct Recorder {
     store: Arc<Mutex<Store>>,
     vault: Arc<Vault>,
     id: LogId,
     limits: Limits,
     state: Mutex<State>,
+    on_finish: Option<OnFinish>,
 }
 
 impl Recorder {
@@ -68,6 +72,7 @@ impl Recorder {
         vault: Arc<Vault>,
         meta: &LogMeta,
         limits: Limits,
+        on_finish: Option<OnFinish>,
     ) -> Option<Arc<Self>> {
         session_log::create(&vault, &store.lock().expect("store lock"), meta).ok()?;
         let recorder = Arc::new(Self {
@@ -76,6 +81,7 @@ impl Recorder {
             id: meta.id,
             limits,
             state: Mutex::new(State::default()),
+            on_finish,
         });
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(flush_regularly(Arc::downgrade(&recorder)));
@@ -190,23 +196,31 @@ impl Recorder {
 
     /// Stores the rest and ends the log; later calls do nothing.
     pub fn finish(&self) -> Option<LogMeta> {
-        let mut state = self.state();
-        if state.finished {
-            return None;
+        let done = {
+            let mut state = self.state();
+            if state.finished {
+                return None;
+            }
+            self.flush(&mut state);
+            state.finished = true;
+            let size = self.stored(&state);
+            let store = self.store.lock().expect("store lock");
+            session_log::finish(
+                &self.vault,
+                &store,
+                self.id,
+                now_ms(),
+                size,
+                state.truncated,
+            )
+            .ok()
+        };
+        if done.is_some()
+            && let Some(on_finish) = &self.on_finish
+        {
+            on_finish(self.id);
         }
-        self.flush(&mut state);
-        state.finished = true;
-        let size = self.stored(&state);
-        let store = self.store.lock().expect("store lock");
-        session_log::finish(
-            &self.vault,
-            &store,
-            self.id,
-            now_ms(),
-            size,
-            state.truncated,
-        )
-        .ok()
+        done
     }
 }
 

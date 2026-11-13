@@ -215,7 +215,7 @@ pub(crate) fn carry_passwords(
                 }
             }
         }
-        ItemKind::Key | ItemKind::Password => {}
+        ItemKind::Key | ItemKind::Password | ItemKind::Log | ItemKind::LogChunk => {}
     }
     Ok(())
 }

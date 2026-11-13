@@ -26,3 +26,4 @@ rand = { workspace = true }
 sshcraft-server = { workspace = true }
 tempfile = { workspace = true }
 rusqlite = { workspace = true }
+sshcraft-core = { workspace = true, features = ["testing"] }

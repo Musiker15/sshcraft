@@ -268,6 +268,8 @@ pub(crate) struct Context {
     pub(crate) delay_scale: f32,
     /// Signs for FIDO2 and Windows Hello keys; `None` where there is none.
     security: Option<Arc<dyn Authenticator>>,
+    /// Told when a session log ended.
+    log_finished: Mutex<Option<crate::recording::OnFinish>>,
 }
 
 /// How often SSHCraft asks for a key's passphrase before giving up.
@@ -404,6 +406,11 @@ impl SessionManager {
         *self.ctx.gate.on_unavailable.lock().expect("hook lock") = Some(report);
     }
 
+    /// Called with each session log that ended, after it is stored.
+    pub fn on_log_finished(&self, report: crate::recording::OnFinish) {
+        *self.ctx.log_finished.lock().expect("hook lock") = Some(report);
+    }
+
     /// True once Windows Hello turned out not to be set up on this PC.
     pub fn hello_missing(&self) -> bool {
         self.ctx
@@ -432,6 +439,7 @@ impl SessionManager {
                 gate: KeyGate::new(presence),
                 delay_scale,
                 security: None,
+                log_finished: Mutex::new(None),
             }),
             sessions: Mutex::new(HashMap::new()),
         }
@@ -665,6 +673,7 @@ fn start_recording(
         vault,
         &meta,
         crate::recording::Limits::default(),
+        ctx.log_finished.lock().expect("hook lock").clone(),
     )
 }
 

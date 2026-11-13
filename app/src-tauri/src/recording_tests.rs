@@ -65,8 +65,14 @@ fn parts(store: &Mutex<Store>, id: LogId) -> usize {
 #[tokio::test]
 async fn output_is_stored_in_parts() {
     let (store, vault) = setup();
-    let recorder =
-        Recorder::start(store.clone(), vault.clone(), &meta(), Limits::default()).unwrap();
+    let recorder = Recorder::start(
+        store.clone(),
+        vault.clone(),
+        &meta(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
     let output: Vec<u8> = (0..70 * 1024).map(|i| (i % 251) as u8).collect();
     for piece in output.chunks(1000) {
         recorder.record(piece);
@@ -82,8 +88,14 @@ async fn output_is_stored_in_parts() {
 #[tokio::test]
 async fn the_sink_passes_everything_on_and_ends_the_log() {
     let (store, vault) = setup();
-    let recorder =
-        Recorder::start(store.clone(), vault.clone(), &meta(), Limits::default()).unwrap();
+    let recorder = Recorder::start(
+        store.clone(),
+        vault.clone(),
+        &meta(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
     let id = recorder.id();
     let inner = Arc::new(Collect::default());
     let sink = LogSink {
@@ -107,8 +119,14 @@ async fn the_sink_passes_everything_on_and_ends_the_log() {
 #[tokio::test]
 async fn dropping_the_recorder_ends_the_log() {
     let (store, vault) = setup();
-    let recorder =
-        Recorder::start(store.clone(), vault.clone(), &meta(), Limits::default()).unwrap();
+    let recorder = Recorder::start(
+        store.clone(),
+        vault.clone(),
+        &meta(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
     let id = recorder.id();
     recorder.record(b"closed tab");
     drop(recorder);
@@ -120,7 +138,7 @@ async fn dropping_the_recorder_ends_the_log() {
 #[tokio::test(start_paused = true)]
 async fn waiting_output_is_stored_after_five_seconds() {
     let (store, vault) = setup();
-    let recorder = Recorder::start(store.clone(), vault, &meta(), Limits::default()).unwrap();
+    let recorder = Recorder::start(store.clone(), vault, &meta(), Limits::default(), None).unwrap();
     recorder.record(b"prompt$ ");
     tokio::time::sleep(Duration::from_millis(4_500)).await;
     assert_eq!(parts(&store, recorder.id()), 0);
@@ -131,7 +149,8 @@ async fn waiting_output_is_stored_after_five_seconds() {
 #[tokio::test]
 async fn recording_stops_at_the_limit() {
     let (store, vault) = setup();
-    let recorder = Recorder::start(store.clone(), vault.clone(), &meta(), small(16, 40)).unwrap();
+    let recorder =
+        Recorder::start(store.clone(), vault.clone(), &meta(), small(16, 40), None).unwrap();
     recorder.record(&[b'a'; 30]);
     recorder.record(&[b'b'; 30]);
     recorder.record(&[b'c'; 30]);
@@ -146,7 +165,8 @@ async fn recording_stops_at_the_limit() {
 #[tokio::test]
 async fn a_failing_store_stops_only_the_recording() {
     let (store, vault) = setup();
-    let recorder = Recorder::start(store.clone(), vault.clone(), &meta(), small(4, 1000)).unwrap();
+    let recorder =
+        Recorder::start(store.clone(), vault.clone(), &meta(), small(4, 1000), None).unwrap();
     let id = recorder.id();
     let inner = Arc::new(Collect::default());
     let sink = LogSink {
@@ -179,8 +199,14 @@ fn rusqlite_break(store: &Mutex<Store>) {
 #[tokio::test]
 async fn a_bookmark_points_at_the_output_so_far() {
     let (store, vault) = setup();
-    let recorder =
-        Recorder::start(store.clone(), vault.clone(), &meta(), Limits::default()).unwrap();
+    let recorder = Recorder::start(
+        store.clone(),
+        vault.clone(),
+        &meta(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
     recorder.record(b"0123456789");
     let mark = recorder.bookmark("deploy").unwrap();
     assert_eq!(mark.offset, 10);
@@ -231,4 +257,18 @@ async fn housekeeping_at_start_ends_abandoned_logs() {
     assert!(stored_meta(&store, &vault, meta.id).ended_at.is_none());
     housekeeping(&store, &vault, 0, now_ms(), true).unwrap();
     assert!(stored_meta(&store, &vault, meta.id).ended_at.is_some());
+}
+
+#[tokio::test]
+async fn the_end_is_reported_once() {
+    let (store, vault) = setup();
+    let ended = Arc::new(Mutex::new(Vec::new()));
+    let seen = ended.clone();
+    let report: OnFinish = Arc::new(move |id| seen.lock().unwrap().push(id));
+    let recorder = Recorder::start(store, vault, &meta(), Limits::default(), Some(report)).unwrap();
+    recorder.record(b"x");
+    recorder.finish();
+    let id = recorder.id();
+    drop(recorder);
+    assert_eq!(*ended.lock().unwrap(), vec![id]);
 }
