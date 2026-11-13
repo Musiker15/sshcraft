@@ -1832,3 +1832,96 @@ async fn install_key_reports_write_failure_and_cancelled_sign_in() {
 
 #[path = "forwards_tests.rs"]
 mod forwards;
+
+#[tokio::test]
+async fn host_session_lists_a_directory() {
+    let f = fixture(true).await;
+    f.server.set_exec_output("a/\nb\n");
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(connected).await;
+    assert_eq!(
+        f.manager.list_dir(id, "/tmp").await.unwrap(),
+        vec!["a/".to_owned(), "b".to_owned()]
+    );
+    assert!(
+        f.server
+            .received_commands()
+            .contains(&"ls -1Ap -- '/tmp'".to_owned())
+    );
+}
+
+#[cfg(desktop)]
+#[tokio::test]
+async fn local_session_lists_a_directory() {
+    let w = PasswordWorld::new();
+    let manager = w.manager(
+        None,
+        trusting(),
+        Arc::new(sshcraft_ssh::NoPrompter),
+        verified(),
+    );
+    let shell = if cfg!(windows) {
+        sshcraft_local::pty::ShellCommand {
+            program: "cmd.exe".into(),
+            args: Vec::new(),
+            label: "cmd".into(),
+        }
+    } else {
+        sshcraft_local::pty::ShellCommand {
+            program: "sh".into(),
+            args: Vec::new(),
+            label: "sh".into(),
+        }
+    };
+    let sink = Arc::new(RecordingSink::default());
+    let id = manager.open(
+        SessionTarget::Local { shell, cwd: None },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(connected).await;
+    let dir = std::env::temp_dir().join(format!("sshcraft-ls-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("inner")).unwrap();
+    let names = manager.list_dir(id, &dir.to_string_lossy()).await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    manager.close(id);
+    assert_eq!(names, vec!["inner/".to_owned()]);
+}
+
+#[test]
+fn history_off_records_nothing() {
+    let store = Store::open_in_memory().unwrap();
+    let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+    let scope = format!("host:{}", HostId::new().0);
+    crate::settings::save(
+        &store,
+        crate::settings::AppSettings {
+            history: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    crate::commands::snippets::record_history(&store, Some(&vault), &scope, "ls", 1).unwrap();
+    assert!(
+        sshcraft_core::history::list(&vault, &store, &scope)
+            .unwrap()
+            .is_empty()
+    );
+    crate::settings::save(&store, crate::settings::AppSettings::default()).unwrap();
+    crate::commands::snippets::record_history(&store, Some(&vault), &scope, "ls", 1).unwrap();
+    assert_eq!(
+        sshcraft_core::history::list(&vault, &store, &scope)
+            .unwrap()
+            .len(),
+        1
+    );
+    // Without an unlocked vault nothing is stored and that is said.
+    assert!(crate::commands::snippets::record_history(&store, None, &scope, "pwd", 2).is_err());
+}

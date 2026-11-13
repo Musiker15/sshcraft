@@ -593,5 +593,7 @@
   "forwarding.exposed": "auch von anderen Rechnern erreichbar",
   "forwarding.orphan": "Eine Regel, die es nicht mehr gibt, läuft noch. Doppelklick stoppt sie.",
   "forwarding.orphanGroup": "Ohne Regel",
-  "forwarding.refused": "Der Server hat {count} Verbindung(en) abgelehnt (Weiterleitung dort nicht erlaubt?)."
+  "forwarding.refused": "Der Server hat {count} Verbindung(en) abgelehnt (Weiterleitung dort nicht erlaubt?).",
+  "errors.invalid_snippet": "Das Snippet ist ungültig (Name, Inhalt ohne Steuerzeichen, höchstens 1000 Snippets).",
+  "errors.history_unavailable": "Der Befehlsverlauf braucht den entsperrten Tresor."
 }

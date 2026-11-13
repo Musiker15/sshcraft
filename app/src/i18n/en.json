@@ -593,5 +593,7 @@
   "forwarding.exposed": "reachable from other machines",
   "forwarding.orphan": "A rule that no longer exists is still running. Double click stops it.",
   "forwarding.orphanGroup": "Without a rule",
-  "forwarding.refused": "The server refused {count} connection(s) (forwarding not allowed there?)."
+  "forwarding.refused": "The server refused {count} connection(s) (forwarding not allowed there?).",
+  "errors.invalid_snippet": "The snippet is not valid (a name, content without control characters, at most 1000 snippets).",
+  "errors.history_unavailable": "The command history needs the unlocked vault."
 }

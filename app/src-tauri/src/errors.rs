@@ -95,6 +95,10 @@ pub enum ErrorCode {
     BindFailed,
     /// The server does not allow the remote forwarding.
     ForwardRefused,
+    /// A snippet is not valid (name, content, more than 1000 snippets).
+    InvalidSnippet,
+    /// The command history needs the unlocked vault.
+    HistoryUnavailable,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -144,6 +148,9 @@ impl From<sshcraft_core::store::StoreError> for CommandError {
             sshcraft_core::store::StoreError::GroupCycle => Self::code(ErrorCode::GroupCycle),
             sshcraft_core::store::StoreError::TooDeep => Self::code(ErrorCode::GroupTooDeep),
             sshcraft_core::store::StoreError::DeviceBound => Self::code(ErrorCode::DeviceBound),
+            sshcraft_core::store::StoreError::InvalidSnippet(e) => {
+                Self::new(ErrorCode::InvalidSnippet, e)
+            }
             sshcraft_core::store::StoreError::InvalidForward(e) => {
                 Self::new(ErrorCode::InvalidForward, e)
             }

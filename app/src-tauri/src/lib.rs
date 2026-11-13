@@ -3,6 +3,7 @@ pub mod errors;
 pub mod forwards;
 pub mod hello;
 pub mod links;
+pub mod listing;
 pub mod passcli;
 pub mod prompts;
 pub mod sessions;
@@ -49,6 +50,13 @@ pub fn run() {
             commands::data::delete_host,
             commands::data::forget_host_key,
             commands::data::get_settings,
+            commands::snippets::snippets_list,
+            commands::snippets::snippet_save,
+            commands::snippets::snippet_delete,
+            commands::snippets::history_record,
+            commands::snippets::history_list,
+            commands::snippets::history_clear,
+            commands::snippets::session_list_dir,
             commands::forwards::forward_start,
             commands::forwards::forward_stop,
             commands::forwards::forward_statuses,

@@ -9,6 +9,7 @@ pub mod local;
 pub mod passwords;
 pub mod sessions;
 pub mod shares;
+pub mod snippets;
 pub mod sshconfig;
 pub mod sync;
 pub mod workspaces;

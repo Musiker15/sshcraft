@@ -329,3 +329,24 @@ async fn exec_returns_output() {
         Some(sshcraft_core::model::HostOs::Debian)
     );
 }
+
+#[tokio::test]
+async fn shell_writer_runs_exec_beside_the_shell() {
+    let (server, k) = setup().await;
+    server.set_exec_output("a/\nb\n");
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
+    let shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
+    let (writer, _events) = shell.split();
+    let out = writer.exec("ls -1Ap -- '/tmp'", 1024).await.unwrap();
+    assert_eq!(out, b"a/\nb\n");
+    assert_eq!(
+        server.received_commands(),
+        vec!["ls -1Ap -- '/tmp'".to_owned()]
+    );
+}
