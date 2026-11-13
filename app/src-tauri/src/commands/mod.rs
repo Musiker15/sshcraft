@@ -1,5 +1,6 @@
 //! Tauri commands. None of them ever returns private key material.
 
+pub mod agents;
 pub mod data;
 pub mod forwards;
 pub mod identities;

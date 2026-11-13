@@ -597,3 +597,8 @@ fn guard(value: Value) -> Result<Value, AgentError> {
 #[cfg(test)]
 #[path = "gate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    pub(crate) use super::tests::Fake;
+}

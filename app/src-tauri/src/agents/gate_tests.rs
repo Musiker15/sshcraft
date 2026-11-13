@@ -7,7 +7,7 @@ use sshcraft_core::model::ConnectionSettings;
 use super::*;
 
 #[derive(Default)]
-struct Fake {
+pub(crate) struct Fake {
     policy: Mutex<AgentPolicy>,
     hosts: Mutex<Vec<Host>>,
     groups: Mutex<Vec<Group>>,
@@ -18,6 +18,12 @@ struct Fake {
 }
 
 impl Fake {
+    /// One free host, `web`.
+    pub(crate) fn with_web() -> Self {
+        let fake = Self::default();
+        *fake.hosts.lock().unwrap() = vec![host("web", None)];
+        fake
+    }
     fn called(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }

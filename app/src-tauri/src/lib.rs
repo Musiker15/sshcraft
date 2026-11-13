@@ -52,7 +52,17 @@ pub fn run() {
                     },
                 ));
             }
+            #[cfg(desktop)]
+            let confirmer = state.agent_confirms.clone();
             app.manage(state);
+            // AI agents reach the app through `sshcraft` (MCP and command line).
+            #[cfg(desktop)]
+            agents::server::start(std::sync::Arc::new(agents::gate::Gate::new(
+                std::sync::Arc::new(agents::tauri::TauriBackend {
+                    app: app.handle().clone(),
+                }),
+                confirmer,
+            )));
             // Runtimes need the async runtime; start them on it.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -69,6 +79,11 @@ pub fn run() {
             commands::data::delete_host,
             commands::data::forget_host_key,
             commands::data::get_settings,
+            commands::agents::agent_policy_get,
+            commands::agents::agent_policy_set,
+            commands::agents::agent_log_list,
+            commands::agents::agent_log_clear,
+            commands::agents::answer_agent,
             commands::logs::logs_list,
             commands::logs::log_read,
             commands::logs::log_add_mark,
