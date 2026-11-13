@@ -6,6 +6,7 @@ pub mod links;
 pub mod listing;
 pub mod passcli;
 pub mod prompts;
+pub mod recording;
 pub mod sessions;
 pub mod settings;
 pub mod state;
@@ -33,6 +34,13 @@ pub fn run() {
     builder
         .setup(|app| {
             let state = state::AppState::init(app.handle())?;
+            // Before any tab records: logs a stopped app left open are ended here.
+            if let Ok(vault) = state.vault.clone() {
+                let store = state.store.clone();
+                let days = settings::load(&store.lock().expect("store lock")).log_retention_days;
+                let _ = recording::housekeeping(&store, &vault, days, recording::now_ms(), true);
+                tauri::async_runtime::spawn(recording::tidy_regularly(store, vault));
+            }
             app.manage(state);
             // Runtimes need the async runtime; start them on it.
             let handle = app.handle().clone();

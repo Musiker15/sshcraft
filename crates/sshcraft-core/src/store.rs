@@ -187,6 +187,13 @@ impl Store {
         Self::init(rusqlite::Connection::open(path)?)
     }
 
+    /// Runs SQL on the database as it is, for tests that need a broken or odd state.
+    #[cfg(feature = "testing")]
+    pub fn execute_raw(&self, sql: &str) -> Result<(), StoreError> {
+        self.conn.execute_batch(sql)?;
+        Ok(())
+    }
+
     pub fn open_in_memory() -> Result<Self, StoreError> {
         Self::init(rusqlite::Connection::open_in_memory()?)
     }

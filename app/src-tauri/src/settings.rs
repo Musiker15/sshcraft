@@ -22,7 +22,7 @@ pub const TERMINAL_TYPES: [&str; 7] = [
 ];
 
 /// Actions a shortcut can trigger; the same names as `ShortcutAction` in the UI.
-pub const SHORTCUT_ACTIONS: [&str; 12] = [
+pub const SHORTCUT_ACTIONS: [&str; 13] = [
     "palette",
     "newTab",
     "closeTab",
@@ -35,7 +35,10 @@ pub const SHORTCUT_ACTIONS: [&str; 12] = [
     "toggleLayout",
     "toggleBroadcast",
     "toggleSidebar",
+    "bookmark",
 ];
+/// Days a finished session log is kept; 0 keeps it until it is deleted.
+pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
 const MAX_COMBOS: usize = 4;
 const MAX_COMBO_LEN: usize = 40;
 const MODIFIERS: [&str; 4] = ["Ctrl", "Alt", "Shift", "Meta"];
@@ -130,6 +133,10 @@ pub struct AppSettings {
     pub history: bool,
     /// Suggestions while typing in a terminal.
     pub autocomplete: bool,
+    /// Record sessions unless a host or group says otherwise.
+    pub session_logs: bool,
+    /// One of [`LOG_RETENTION_DAYS`].
+    pub log_retention_days: u32,
 }
 
 impl Default for AppSettings {
@@ -146,6 +153,8 @@ impl Default for AppSettings {
             shortcuts: BTreeMap::new(),
             history: true,
             autocomplete: true,
+            session_logs: false,
+            log_retention_days: 0,
         }
     }
 }
@@ -160,6 +169,9 @@ impl AppSettings {
         } else {
             family.to_owned()
         };
+        if !LOG_RETENTION_DAYS.contains(&self.log_retention_days) {
+            self.log_retention_days = 0;
+        }
         if !TERMINAL_TYPES.contains(&self.terminal_type.as_str()) {
             self.terminal_type = TERMINAL_TYPES[0].into();
         }
@@ -210,6 +222,9 @@ pub fn load(store: &Store) -> AppSettings {
         shortcuts: field(&map, "shortcuts").unwrap_or(defaults.shortcuts),
         history: field(&map, "history").unwrap_or(defaults.history),
         autocomplete: field(&map, "autocomplete").unwrap_or(defaults.autocomplete),
+        session_logs: field(&map, "session_logs").unwrap_or(defaults.session_logs),
+        log_retention_days: field(&map, "log_retention_days")
+            .unwrap_or(defaults.log_retention_days),
     }
     .sanitized()
 }
@@ -337,6 +352,8 @@ mod tests {
             shortcuts: BTreeMap::from([("newTab".to_owned(), vec!["Ctrl+Shift+N".to_owned()])]),
             history: false,
             autocomplete: false,
+            session_logs: true,
+            log_retention_days: 90,
         };
         save(&store, wanted.clone()).unwrap();
         assert_eq!(load(&store), wanted);
@@ -433,7 +450,8 @@ mod tests {
 
     #[test]
     fn every_action_is_known() {
-        assert_eq!(SHORTCUT_ACTIONS.len(), 12);
+        assert_eq!(SHORTCUT_ACTIONS.len(), 13);
+        assert!(SHORTCUT_ACTIONS.contains(&"bookmark"));
         assert!(SHORTCUT_ACTIONS.contains(&"toggleSidebar"));
         assert!(SHORTCUT_ACTIONS.contains(&"toggleBroadcast"));
     }
@@ -446,5 +464,18 @@ mod tests {
         assert!(old.history && old.autocomplete);
         let off = load(&store_with(r#"{"history":false,"autocomplete":false}"#));
         assert!(!off.history && !off.autocomplete);
+    }
+
+    #[test]
+    fn log_settings_default_off_and_keep_known_retention() {
+        let defaults = AppSettings::default();
+        assert!(!defaults.session_logs);
+        assert_eq!(defaults.log_retention_days, 0);
+        let store = store_with(r#"{"session_logs": true, "log_retention_days": 30}"#);
+        let loaded = load(&store);
+        assert!(loaded.session_logs);
+        assert_eq!(loaded.log_retention_days, 30);
+        let odd = load(&store_with(r#"{"log_retention_days": 45}"#));
+        assert_eq!(odd.log_retention_days, 0);
     }
 }
