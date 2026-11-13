@@ -598,6 +598,7 @@
   "errors.invalid_log_mark": "The bookmark or comment is not valid.",
   "errors.log_damaged": "The session log is damaged: a part is missing or does not open.",
   "errors.not_recording": "This session is not being recorded.",
+  "errors.timeout": "That took too long.",
   "snippets.all": "All snippets",
   "snippets.content": "Commands",
   "snippets.defaultTargets": "Runs on (default hosts)",

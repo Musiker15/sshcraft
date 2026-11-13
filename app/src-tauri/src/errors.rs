@@ -105,6 +105,8 @@ pub enum ErrorCode {
     LogDamaged,
     /// The session is not being recorded.
     NotRecording,
+    /// It took longer than allowed.
+    Timeout,
 }
 
 impl From<&ResolveError> for ErrorCode {

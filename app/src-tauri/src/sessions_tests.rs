@@ -2070,3 +2070,122 @@ async fn quitting_ends_running_recordings() {
     assert!(logs[0].meta.ended_at.is_some());
     f.manager.close(id);
 }
+
+mod agents {
+    use super::*;
+    use crate::agent_sessions::AgentSessions;
+
+    #[tokio::test]
+    async fn exec_returns_the_output() {
+        let f = fixture(true).await;
+        let (out, cut) = AgentSessions::exec(
+            &f.manager,
+            f.host_id,
+            "uptime",
+            1024,
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, sshcraft_ssh::testing::TEST_EXEC_OUTPUT.as_bytes());
+        assert!(!cut);
+        assert!(f.server.received_commands().contains(&"uptime".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn exec_output_is_cut_at_the_limit() {
+        let f = fixture(true).await;
+        f.server.set_exec_output(&"y".repeat(5000));
+        let (out, cut) =
+            AgentSessions::exec(&f.manager, f.host_id, "yes", 1000, Duration::from_secs(10))
+                .await
+                .unwrap();
+        assert_eq!(out.len(), 1000);
+        assert!(cut);
+    }
+
+    #[tokio::test]
+    async fn exec_on_an_unknown_host_fails() {
+        let f = fixture(true).await;
+        assert!(
+            AgentSessions::exec(&f.manager, HostId::new(), "ls", 10, Duration::from_secs(5))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_is_written_read_and_closed() {
+        let f = fixture(true).await;
+        let agents = AgentSessions::default();
+        let id = agents.open(&f.manager, f.host_id);
+        agents.write(&f.manager, id, b"hello-agent").unwrap();
+        let mut seen = Vec::new();
+        for _ in 0..50 {
+            let read = agents
+                .read(&f.manager, id, 1 << 20, Duration::from_millis(200))
+                .await
+                .unwrap();
+            seen.extend(read.output);
+            if seen.windows(11).any(|w| w == b"hello-agent") {
+                break;
+            }
+        }
+        assert!(seen.windows(11).any(|w| w == b"hello-agent"));
+        assert!(agents.close(&f.manager, id));
+        assert!(
+            agents
+                .read(&f.manager, id, 10, Duration::ZERO)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_reach_only_their_own_sessions() {
+        let f = fixture(true).await;
+        let agents = AgentSessions::default();
+        let sink = Arc::new(RecordingSink::default());
+        let tab = f
+            .manager
+            .open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink);
+        assert!(agents.write(&f.manager, tab, b"rm -rf /\n").is_err());
+        assert!(
+            agents
+                .read(&f.manager, tab, 10, Duration::ZERO)
+                .await
+                .is_err()
+        );
+        assert!(!agents.close(&f.manager, tab));
+        f.manager.close(tab);
+    }
+
+    #[tokio::test]
+    async fn unread_output_stays_bounded() {
+        let f = fixture(true).await;
+        let agents = AgentSessions::default();
+        let id = agents.open(&f.manager, f.host_id);
+        // Wait until connected: the first echo arrives.
+        agents.write(&f.manager, id, b"x").unwrap();
+        while agents.buffered(id) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let chunk = vec![b'z'; 64 * 1024];
+        for _ in 0..40 {
+            agents.write(&f.manager, id, &chunk).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let held = agents.buffered(id);
+        assert!(
+            held <= crate::sessions::OUTPUT_HIGH_WATERMARK + 2 * chunk.len(),
+            "{held}"
+        );
+        // Reading lets the rest through.
+        let read = agents
+            .read(&f.manager, id, 1 << 20, Duration::from_millis(100))
+            .await
+            .unwrap();
+        assert!(!read.output.is_empty());
+        agents.close(&f.manager, id);
+    }
+}

@@ -598,6 +598,7 @@
   "errors.invalid_log_mark": "Lesezeichen oder Kommentar ist ungültig.",
   "errors.log_damaged": "Das Protokoll ist beschädigt: ein Teil fehlt oder lässt sich nicht öffnen.",
   "errors.not_recording": "Diese Sitzung wird nicht aufgezeichnet.",
+  "errors.timeout": "Das hat zu lange gedauert.",
   "snippets.all": "Alle Snippets",
   "snippets.content": "Befehle",
   "snippets.defaultTargets": "Läuft auf (Standard-Hosts)",
