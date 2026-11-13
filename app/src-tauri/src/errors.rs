@@ -83,6 +83,10 @@ pub enum ErrorCode {
     DeviceBound,
     /// The user cancelled a sign-in question (password, code, passphrase).
     SignInCancelled,
+    InvalidTemplate,
+    TooManyTemplates,
+    /// Only `http` and `https` links are opened.
+    InvalidLink,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -133,6 +137,18 @@ impl From<sshcraft_core::store::StoreError> for CommandError {
             sshcraft_core::store::StoreError::TooDeep => Self::code(ErrorCode::GroupTooDeep),
             sshcraft_core::store::StoreError::DeviceBound => Self::code(ErrorCode::DeviceBound),
             e => Self::new(ErrorCode::Store, e),
+        }
+    }
+}
+
+impl From<crate::workspaces::TemplateError> for CommandError {
+    fn from(e: crate::workspaces::TemplateError) -> Self {
+        match e {
+            crate::workspaces::TemplateError::Invalid(what) => {
+                Self::new(ErrorCode::InvalidTemplate, what)
+            }
+            crate::workspaces::TemplateError::TooMany => Self::code(ErrorCode::TooManyTemplates),
+            crate::workspaces::TemplateError::Store(e) => Self::new(ErrorCode::Store, e),
         }
     }
 }
