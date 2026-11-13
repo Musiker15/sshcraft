@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/sshcraft-core", "crates/sshcraft-ssh", "crates/sshcraft-proto", "crates/sshcraft-server", "crates/sshcraft-sync", "crates/sshcraft-local", "crates/sshcraft-fido", "app/src-tauri"]
+members = ["crates/sshcraft-core", "crates/sshcraft-agent", "crates/sshcraft-ssh", "crates/sshcraft-proto", "crates/sshcraft-server", "crates/sshcraft-sync", "crates/sshcraft-local", "crates/sshcraft-fido", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -35,6 +35,7 @@ sshcraft-proto = { path = "crates/sshcraft-proto" }
 sshcraft-sync = { path = "crates/sshcraft-sync" }
 sshcraft-local = { path = "crates/sshcraft-local" }
 sshcraft-fido = { path = "crates/sshcraft-fido" }
+sshcraft-agent = { path = "crates/sshcraft-agent" }
 axum = { version = "0.8.9", features = ["ws"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 tracing = "0.1.44"

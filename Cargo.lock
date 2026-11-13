@@ -5553,6 +5553,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcraft-agent"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+ "windows",
+]
+
+[[package]]
 name = "sshcraft-app"
 version = "0.1.0"
 dependencies = [
