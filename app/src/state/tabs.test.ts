@@ -285,6 +285,13 @@ test("resize stores the sizes and a pane count change resets them", () => {
   expect(session(s, "a").colSizes).toEqual([]);
 });
 
+test("activity or a directory that changes nothing keeps the state as it is", () => {
+  let s = run(open(open(initialTabs, "a"), "b"), { type: "activity", paneId: "a", activity: "output" });
+  expect(run(s, { type: "activity", paneId: "a", activity: "output" })).toBe(s);
+  s = run(s, { type: "cwd", paneId: "a", cwd: "/srv" });
+  expect(run(s, { type: "cwd", paneId: "a", cwd: "/srv" })).toBe(s);
+});
+
 test("the working directory a shell reports is kept", () => {
   const s = run(open(initialTabs, "a"), { type: "cwd", paneId: "a", cwd: "/srv" });
   expect(pane(s, "a").cwd).toBe("/srv");

@@ -33,7 +33,7 @@ const tab: SessionTab = {
   colSizes: [2, 1],
   rowSizes: [1],
   panes: [
-    { id: "a", target: { kind: "host", host_id: "h1" }, title: "web", status: { state: "connected" }, activity: "none", cwd: "/srv/app" },
+    { id: "a", target: { kind: "host", host_id: "h1" }, title: "web", status: { state: "connected" }, activity: "none", cwd: "/srv/app", startup: { cwd: "/old" } },
     { id: "b", target: { kind: "local", shell, cwd: "C:\\x" }, title: "PowerShell", status: { state: "connected" }, activity: "none" },
   ],
 };

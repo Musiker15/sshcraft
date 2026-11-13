@@ -4,7 +4,7 @@ import { Maximize2, SquareArrowUpRight, X } from "lucide-react";
 import { useRef, type CSSProperties, type Dispatch, type ReactNode } from "react";
 import type { SessionStatus } from "../api";
 import { useT } from "../i18n/i18n";
-import { cellOf, dragSizes, gridShape, normalizeSizes } from "../state/grid";
+import { cellOf, colDividerRows, dragSizes, gridShape, normalizeSizes } from "../state/grid";
 import { isPicker, type Activity, type AnyPane, type Pane, type SessionTab, type TabsAction, type TabsState } from "../state/tabs";
 import { SessionStatusLine } from "./SessionStatusLine";
 import { TerminalView } from "./TerminalView";
@@ -36,6 +36,17 @@ type Props = {
   onInput: (paneId: string, data: string, report: boolean) => void;
   onStatus: (paneId: string, status: SessionStatus) => void;
 };
+
+/** Gives the keyboard back to a pane's terminal (after a click on its title or status line). */
+function focusTerminal(section: Element | null) {
+  const input = section?.querySelector<HTMLElement>(".terminal-host textarea");
+  input?.focus();
+}
+
+/** Clicks on these keep their own focus. */
+function isControl(target: EventTarget): boolean {
+  return target instanceof Element && target.closest("button, input, select, textarea, a, .terminal-host") !== null;
+}
 
 function activityLabel(activity: Activity): string | null {
   return activity === "none" ? null : `workspace.activity.${activity}`;
@@ -82,9 +93,12 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
     const length = axis === "col" ? box.width : box.height;
     const base = axis === "col" ? cols : rows;
     const tabId = active.id;
-    const move = (e: PointerEvent) => {
-      const delta = ((axis === "col" ? e.clientX : e.clientY) - start) / length;
-      const sizes = dragSizes(base, index, delta);
+    // At most one resize per frame: every resize reaches the servers of the affected panes.
+    let frame: number | null = null;
+    let latest = start;
+    const apply = () => {
+      frame = null;
+      const sizes = dragSizes(base, index, (latest - start) / length);
       dispatch({
         type: "resize",
         tabId,
@@ -92,7 +106,15 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
         rowSizes: axis === "row" ? sizes : rows,
       });
     };
+    const move = (e: PointerEvent) => {
+      latest = axis === "col" ? e.clientX : e.clientY;
+      frame ??= requestAnimationFrame(apply);
+    };
     const up = () => {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        apply();
+      }
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
@@ -102,10 +124,16 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
 
   function dividers(axis: "col" | "row", sizes: number[]) {
     const total = sizes.reduce((a, b) => a + b, 0);
+    const rowTotal = rows.reduce((a, b) => a + b, 0);
+    const count = active?.panes.length ?? 1;
     let sum = 0;
     return sizes.slice(0, -1).map((size, index) => {
       sum += size;
       const at = `${(sum / total) * 100}%`;
+      // A column divider stops above a last pane that spans it.
+      const covered = axis === "col" ? colDividerRows(index, count) : rows.length;
+      const coveredShare = rows.slice(0, covered).reduce((a, b) => a + b, 0) / rowTotal;
+      const bottom = `${(1 - coveredShare) * 100}%`;
       return (
         <div
           key={`${axis}-${index}`}
@@ -113,7 +141,7 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
           role="separator"
           aria-orientation={axis === "col" ? "vertical" : "horizontal"}
           aria-label={t("workspace.resize")}
-          style={axis === "col" ? { left: at } : { top: at }}
+          style={axis === "col" ? { left: at, bottom } : { top: at }}
           onPointerDown={(e) => startDrag(e, axis, index)}
         />
       );
@@ -156,6 +184,10 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
               onMouseDown={() => {
                 if (!focused && tab === active) dispatch({ type: "focusPane", paneId: pane.id });
               }}
+              onClick={(e) => {
+                // A click on the title or status line must not leave the keyboard nowhere.
+                if (!isPicker(pane) && !isControl(e.target)) focusTerminal(e.currentTarget);
+              }}
             >
               {tab.panes.length > 1 && (
                 <header
@@ -169,6 +201,7 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
                     const other = e.dataTransfer.getData(PANE_TYPE);
                     if (other) dispatch({ type: "swapPanes", a: other, b: pane.id });
                   }}
+                  onDragEnd={(e) => focusTerminal(e.currentTarget.closest(".ws-pane"))}
                 >
                   {!isPicker(pane) && (
                     <span className={dotClass(pane)} role="img" aria-label={label ? t(label) : undefined} />

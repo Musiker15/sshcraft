@@ -21,9 +21,9 @@ function templateTarget(target: SessionTarget): SessionTarget {
   return target.kind === "local" ? { kind: "local", shell: target.shell } : target;
 }
 
+/** Where the shell is now (OSC 7), else where the template started it. */
 function startDir(pane: Pane): string {
-  if (pane.startup?.cwd) return pane.startup.cwd;
-  return pane.cwd ?? "";
+  return pane.cwd ?? pane.startup?.cwd ?? "";
 }
 
 const orNull = (text: string) => (text.trim() === "" ? null : text.trim());

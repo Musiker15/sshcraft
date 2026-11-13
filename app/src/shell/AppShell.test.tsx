@@ -81,7 +81,11 @@ vi.mock("../components/TerminalView", async () => {
           state.unmounted += 1;
         };
       }, []);
-      return <div data-testid="terminal" />;
+      return (
+        <div data-testid="terminal" className="terminal-host">
+          <textarea className="xterm-helper-textarea" />
+        </div>
+      );
     },
   };
 });
@@ -252,4 +256,13 @@ test("a template opens its panes with their start, leaving out deleted hosts", a
   expect(views).toHaveLength(1);
   expect(views[0].pane).toMatchObject({ title: "web", startup: { cwd: "/srv", command: "htop" } });
   expect(screen.getByText(en["workspaces.skipped"].replace("{count}", "1"))).toBeTruthy();
+});
+
+test("clicking a pane's title bar gives that pane's terminal the keyboard", async () => {
+  const [, b] = await twoPanes();
+  const pane = document.querySelector(`[data-pane="${b}"]`) as HTMLElement;
+  const title = pane.querySelector(".pane-title") as HTMLElement;
+  fireEvent.mouseDown(title);
+  fireEvent.click(title);
+  expect(document.activeElement).toBe(pane.querySelector("textarea"));
 });

@@ -1,5 +1,16 @@
 import { expect, test } from "vitest";
-import { cellOf, dragSizes, gridShape, normalizeSizes } from "./grid";
+import { cellOf, colDividerRows, dragSizes, gridShape, normalizeSizes } from "./grid";
+
+test("a column divider stops above a last pane that spans its boundary", () => {
+  // 3 panes: the last one spans both columns of the second row.
+  expect(colDividerRows(0, 3)).toBe(1);
+  // 4 panes: every boundary runs through both rows.
+  expect(colDividerRows(0, 4)).toBe(2);
+  // 5 panes: the last one starts in the middle column.
+  expect(colDividerRows(0, 5)).toBe(2);
+  expect(colDividerRows(1, 5)).toBe(1);
+  expect(colDividerRows(0, 2)).toBe(1);
+});
 
 test.each([
   [1, 1, 1],

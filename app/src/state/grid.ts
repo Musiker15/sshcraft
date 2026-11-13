@@ -17,6 +17,15 @@ export function cellOf(index: number, n: number): { row: number; col: number; co
   return { row, col, colSpan: index === n - 1 ? cols - col : 1 };
 }
 
+/**
+ * How many rows, from the top, the divider between column `boundary` and `boundary + 1` runs
+ * through: it stops above a last pane that spans that boundary.
+ */
+export function colDividerRows(boundary: number, n: number): number {
+  const { rows } = gridShape(n);
+  return boundary < cellOf(n - 1, n).col ? rows : rows - 1;
+}
+
 /** `sizes` when they fit `count` cells and are all positive numbers, else equal shares. */
 export function normalizeSizes(sizes: number[], count: number): number[] {
   const fits = sizes.length === count && sizes.every((s) => Number.isFinite(s) && s > 0);

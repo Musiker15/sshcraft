@@ -201,12 +201,16 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
     case "activity": {
       const tab = tabOfPane(state, action.paneId);
       if (!tab || (tab.id === state.activeId && tab.focusedId === action.paneId)) return state;
-      return mapPane(state, action.paneId, (p) =>
-        URGENCY[action.activity] > URGENCY[p.activity] ? { ...p, activity: action.activity } : p,
-      );
+      const pane = tab.panes.find((p) => p.id === action.paneId);
+      // Busy background panes report often: only a rise changes anything (and renders).
+      if (!pane || isPicker(pane) || URGENCY[action.activity] <= URGENCY[pane.activity]) return state;
+      return mapPane(state, action.paneId, (p) => ({ ...p, activity: action.activity }));
     }
-    case "cwd":
+    case "cwd": {
+      const pane = tabOfPane(state, action.paneId)?.panes.find((p) => p.id === action.paneId);
+      if (!pane || isPicker(pane) || pane.cwd === action.cwd) return state;
       return mapPane(state, action.paneId, (p) => ({ ...p, cwd: action.cwd }));
+    }
     case "activate":
       return state.tabs.some((t) => t.id === action.id) ? markSeen({ ...state, activeId: action.id }) : state;
     case "next":
