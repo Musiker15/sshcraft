@@ -57,6 +57,10 @@ connecting. The working directory is taken from the shell if it reports it (OSC 
 - A pane whose host was deleted in the meantime is left out, and a notice says how many.
 - Limits: 100 templates, 16 panes, 100 characters for the name, 1000 for directory and command.
   Directory and command are single lines.
+- A stored template this version cannot read (damaged, or written by a newer version) is not
+  shown, and it is dropped the next time a template is saved or deleted.
+- A local shell starts only in a local, absolute directory. A network path (`\\server\share`)
+  or a relative one is ignored and the shell starts in your home directory.
 
 ## Terminal type
 

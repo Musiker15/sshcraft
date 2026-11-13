@@ -183,6 +183,14 @@ impl LocalWriter {
     }
 }
 
+/// Whether a shell may start in `dir`: an absolute, local directory. A network path (UNC) is
+/// refused before anything touches it, since even looking at it connects to that server.
+fn usable_cwd(dir: &std::path::Path) -> bool {
+    let text = dir.as_os_str().to_string_lossy();
+    let network = text.starts_with(r"\\") || text.starts_with("//");
+    !network && dir.is_absolute() && dir.is_dir()
+}
+
 fn home() -> Option<std::path::PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(std::path::PathBuf::from)
@@ -211,7 +219,7 @@ pub fn spawn(
     builder.args(&cmd.args);
     builder.env("TERM", term);
     let dir = cwd
-        .filter(|dir| dir.is_dir())
+        .filter(|dir| usable_cwd(dir))
         .map(std::path::Path::to_path_buf)
         .or_else(home);
     if let Some(dir) = dir {
@@ -307,6 +315,20 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_local_absolute_directories_are_used() {
+        assert!(usable_cwd(&std::env::temp_dir()));
+        for bad in [
+            r"\\attacker\share",
+            "//attacker/share",
+            r"\\?\UNC\attacker\share",
+            "relative/dir",
+            ".",
+        ] {
+            assert!(!usable_cwd(std::path::Path::new(bad)), "{bad}");
+        }
+    }
 
     fn utf16(text: &str, bom: bool) -> Vec<u8> {
         let mut out = Vec::new();
