@@ -749,6 +749,8 @@
   "agents.outcome.denied": "gesperrt",
   "agents.outcome.hidden": "ausgeblendet",
   "agents.outcome.failed": "fehlgeschlagen",
+  "agents.outcome.cancelled": "abgebrochen",
+  "agents.readAll": "Mehrzeilig, sehr lang oder mit versteckten Zeichen: bitte ganz lesen, bevor du erlaubst.",
   "hosts.agentHide": "Für Agents ausblenden",
   "hosts.agentShow": "Für Agents wieder zeigen"
 }

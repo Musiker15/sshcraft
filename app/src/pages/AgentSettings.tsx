@@ -7,7 +7,8 @@ import {
   agentLogClear,
   agentLogList,
   agentPolicyGet,
-  agentPolicySet,
+  agentSetHidden,
+  agentSetLevel,
   type AgentCategory,
   type AgentLevel,
   type AgentLogEntry,
@@ -15,7 +16,8 @@ import {
   type Group,
   type Host,
 } from "../api";
-import { emptyPolicy, withHidden } from "../agents/policy";
+import { emptyPolicy } from "../agents/policy";
+import { visibleText } from "../agents/visible";
 import { useLanguage, useT } from "../i18n/i18n";
 import { ErrorMessage } from "../shell/ErrorMessage";
 
@@ -36,10 +38,7 @@ export function AgentSettings({ hosts, groups }: Props) {
     loadLog();
   }, [loadLog]);
 
-  const store = (next: AgentPolicy) => {
-    setPolicy(next);
-    agentPolicySet(next).then((saved) => setPolicy(saved ?? next), setProblem);
-  };
+  const apply = (change: Promise<AgentPolicy>) => change.then((saved) => saved && setPolicy(saved), setProblem);
   const level = (category: AgentCategory): AgentLevel => policy.levels[category] ?? AGENT_DEFAULTS[category];
   const name = (id: string) =>
     hosts.find((h) => h.id === id)?.name ?? groups.find((g) => g.id === id)?.name ?? t("agents.unknownItem");
@@ -55,9 +54,7 @@ export function AgentSettings({ hosts, groups }: Props) {
             {t(`agents.category.${category}`)}
             <select
               value={level(category)}
-              onChange={(e) =>
-                store({ ...policy, levels: { ...policy.levels, [category]: e.target.value as AgentLevel } })
-              }
+              onChange={(e) => void apply(agentSetLevel(category, e.target.value as AgentLevel))}
             >
               <option value="allow">{t("agents.level.allow")}</option>
               <option value="ask">{t("agents.level.ask")}</option>
@@ -74,7 +71,7 @@ export function AgentSettings({ hosts, groups }: Props) {
           {policy.hidden.map((id) => (
             <li key={id}>
               {name(id)}{" "}
-              <button className="link" onClick={() => store(withHidden(policy, id, false))}>
+              <button className="link" onClick={() => void apply(agentSetHidden(id, false))}>
                 {t("agents.show")}
               </button>
             </li>
@@ -94,7 +91,7 @@ export function AgentSettings({ hosts, groups }: Props) {
                   <td>{entry.agent}</td>
                   <td>{t(`agents.action.${entry.action}`)}</td>
                   <td>{entry.target}</td>
-                  <td className="mono">{entry.detail}</td>
+                  <td className="mono">{visibleText(entry.detail)}</td>
                   <td>{t(`agents.outcome.${entry.outcome}`)}</td>
                 </tr>
               ))}

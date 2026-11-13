@@ -580,7 +580,14 @@ export const AGENT_DEFAULTS: Record<AgentCategory, AgentLevel> = {
   share: "deny",
   sync: "deny",
 };
-export type AgentOutcome = "allowed" | "asked_allowed" | "asked_denied" | "denied" | "hidden" | "failed";
+export type AgentOutcome =
+  | "allowed"
+  | "asked_allowed"
+  | "asked_denied"
+  | "denied"
+  | "hidden"
+  | "failed"
+  | "cancelled";
 export type AgentLogEntry = {
   id: string;
   at: number;
@@ -593,7 +600,10 @@ export type AgentLogEntry = {
 /** A question about an agent's action, answered in this window only. */
 export type AgentQuestion = { prompt_id: number; agent: string; action: string; target: string; detail: string };
 export const agentPolicyGet = () => invoke<AgentPolicy>("agent_policy_get");
-export const agentPolicySet = (policy: AgentPolicy) => invoke<AgentPolicy>("agent_policy_set", { policy });
+/** One change at a time on the stored policy (a window that has not loaded it cannot overwrite it). */
+export const agentSetHidden = (id: string, hidden: boolean) => invoke<AgentPolicy>("agent_set_hidden", { id, hidden });
+export const agentSetLevel = (category: AgentCategory, level: AgentLevel) =>
+  invoke<AgentPolicy>("agent_set_level", { category, level });
 export const agentLogList = () => invoke<AgentLogEntry[]>("agent_log_list");
 export const agentLogClear = () => invoke<void>("agent_log_clear");
 export const answerAgent = (promptId: number, allow: boolean) => invoke<void>("answer_agent", { promptId, allow });

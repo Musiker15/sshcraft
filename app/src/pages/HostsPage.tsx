@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Folder, LayoutGrid, List, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { agentPolicyGet, agentPolicySet, type AgentPolicy, type Group, type Host, type ItemKind, type ItemShare, type KeyInfo, type ServerView } from "../api";
-import { emptyPolicy, withHidden } from "../agents/policy";
+import { agentPolicyGet, agentSetHidden, type AgentPolicy, type Group, type Host, type ItemKind, type ItemShare, type KeyInfo, type ServerView } from "../api";
+import { emptyPolicy } from "../agents/policy";
 import { useLanguage, useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
@@ -63,9 +63,10 @@ export function HostsPage(props: HostsPageProps) {
     return {
       label: hidden ? t("hosts.agentShow") : t("hosts.agentHide"),
       onSelect: () => {
-        const next = withHidden(agentPolicy, id, !hidden);
-        setAgentPolicy(next);
-        void agentPolicySet(next).then((saved) => setAgentPolicy(saved ?? next), () => {});
+        void agentSetHidden(id, !hidden).then(
+          (saved) => saved && setAgentPolicy(saved),
+          () => {},
+        );
       },
     };
   };

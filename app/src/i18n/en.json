@@ -749,6 +749,8 @@
   "agents.outcome.denied": "blocked",
   "agents.outcome.hidden": "hidden",
   "agents.outcome.failed": "failed",
+  "agents.outcome.cancelled": "cancelled",
+  "agents.readAll": "Several lines, very long or with hidden characters: read all of it before you allow it.",
   "hosts.agentHide": "Hide from agents",
   "hosts.agentShow": "Show to agents again"
 }
