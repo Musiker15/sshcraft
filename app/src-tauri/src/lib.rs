@@ -1,4 +1,5 @@
 pub mod agent_sessions;
+pub mod agents;
 pub mod commands;
 pub mod errors;
 pub mod forwards;

@@ -5575,6 +5575,7 @@ dependencies = [
  "russh",
  "serde",
  "serde_json",
+ "sshcraft-agent",
  "sshcraft-core",
  "sshcraft-fido",
  "sshcraft-local",
