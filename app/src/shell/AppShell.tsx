@@ -52,6 +52,7 @@ import { TemplateDialog } from "../components/TemplateDialog";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
+import { ForwardingPage } from "../pages/ForwardingPage";
 import { KeysPage } from "../pages/KeysPage";
 import { NewTabPage } from "../pages/NewTabPage";
 import { CommandPalette } from "../palette/CommandPalette";
@@ -433,7 +434,8 @@ export function AppShell() {
                 />
               )}
               {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
-              {(page === "snippets" || page === "forwarding" || page === "logs") && <PlaceholderPage page={page} />}
+              {page === "forwarding" && <ForwardingPage hosts={hosts} onChanged={() => void reload()} />}
+              {(page === "snippets" || page === "logs") && <PlaceholderPage page={page} />}
             </main>
           </div>
         )}

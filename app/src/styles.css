@@ -1230,3 +1230,52 @@ button.link[aria-current="page"] {
   display: flex;
   gap: 8px;
 }
+
+/* Port forwarding */
+.forward-row {
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+.forward-row code {
+  font-family: var(--mono, monospace);
+}
+
+.forward-error {
+  flex-basis: 100%;
+  padding-left: 18px;
+}
+
+.kind-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kind-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.kind-card .hint {
+  grid-column: 2;
+}
+
+.kind-card.active {
+  border-color: var(--accent);
+}
+
+.forward-summary code {
+  display: block;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  font-family: var(--mono, monospace);
+  user-select: all;
+}
