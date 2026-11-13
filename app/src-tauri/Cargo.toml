@@ -21,6 +21,7 @@ sshcraft-core = { workspace = true }
 sshcraft-ssh = { workspace = true }
 sshcraft-proto = { workspace = true }
 sshcraft-sync = { workspace = true }
+sshcraft-fido = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 directories = { workspace = true }
@@ -46,4 +47,5 @@ windows-future = "0.3.2"
 [dev-dependencies]
 tempfile = { workspace = true }
 sshcraft-ssh = { workspace = true, features = ["testing"] }
+sshcraft-fido = { workspace = true, features = ["testing"] }
 rand = { workspace = true }

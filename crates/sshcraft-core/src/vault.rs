@@ -8,10 +8,13 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rand::RngExt;
 use russh::keys::ssh_key::LineEnding;
-use russh::keys::{Algorithm, HashAlg, PrivateKey};
+use russh::keys::ssh_key::certificate::CertType;
+use russh::keys::ssh_key::private::{KeypairData, RsaKeypair};
+use russh::keys::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 use serde::Serialize;
 use zeroize::Zeroizing;
 
+use crate::keytypes::{CertificateInfo, EcdsaCurveName, KeyKind, KeySpec, RSA_BITS};
 use crate::model::{KeyId, PasswordId, ServerId};
 use crate::store::{KeyRecord, Store, StoreError};
 
@@ -30,6 +33,15 @@ pub enum VaultError {
     InvalidKey(String),
     #[error("wrong or missing passphrase")]
     WrongPassphrase,
+    /// The key's passphrase is not saved: it has to be asked.
+    #[error("the key's passphrase is needed")]
+    PassphraseRequired,
+    #[error("this key type or size is not supported")]
+    UnsupportedKeyType,
+    #[error("the certificate belongs to another key")]
+    CertificateMismatch,
+    #[error("not a valid OpenSSH user certificate: {0}")]
+    InvalidCertificate(String),
     #[error("stored key data is corrupt")]
     Corrupt,
     #[error("key not found")]
@@ -110,6 +122,10 @@ pub struct KeyInfo {
     /// The sync server this key belongs to; missing means "only on this device".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<ServerId>,
+    pub kind: KeyKind,
+    /// The passphrase is asked on each use instead of being saved.
+    pub protected: bool,
+    pub certificate: Option<CertificateInfo>,
 }
 
 impl From<KeyRecord> for KeyInfo {
@@ -121,6 +137,9 @@ impl From<KeyRecord> for KeyInfo {
             fingerprint: r.fingerprint,
             public_key: r.public_key,
             location: r.location,
+            kind: r.kind,
+            protected: r.protected,
+            certificate: r.certificate.as_deref().and_then(certificate_info),
         }
     }
 }
@@ -216,17 +235,204 @@ impl Vault {
         Ok(Zeroizing::new(text.to_owned()))
     }
 
+    /// Shorthand for a new Ed25519 key without passphrase.
     pub fn generate_ed25519(&self, store: &Store, name: &str) -> Result<KeyInfo, VaultError> {
-        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
-            .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
-        self.seal_and_store(store, name, &key)
+        self.generate(store, name, &KeySpec::Ed25519, None)
     }
 
+    /// Creates a key. With a (non-empty) passphrase it is stored protected: asked on each use.
+    pub fn generate(
+        &self,
+        store: &Store,
+        name: &str,
+        spec: &KeySpec,
+        passphrase: Option<&str>,
+    ) -> Result<KeyInfo, VaultError> {
+        let key = new_key(spec, name.trim())?;
+        match non_empty(passphrase) {
+            Some(passphrase) => self.store_protected(store, name, &key, passphrase),
+            None => self.seal_and_store(store, name, &key),
+        }
+    }
+
+    /// Imports a key whose passphrase is not saved: checks the passphrase, then keeps the key
+    /// encrypted with it.
+    pub fn import_key_protected(
+        &self,
+        store: &Store,
+        name: &str,
+        text: &str,
+        passphrase: &str,
+    ) -> Result<KeyInfo, VaultError> {
+        let passphrase = non_empty(Some(passphrase)).ok_or(VaultError::WrongPassphrase)?;
+        let key = parse_private_key(text, Some(passphrase))?;
+        self.store_protected(store, name, &key, passphrase)
+    }
+
+    /// Stores `key` encrypted with `passphrase`; the decrypted key is never written. A security
+    /// key (`sk-`) holds only a key handle and is stored as it is: its authenticator checks the
+    /// user, a passphrase would only lock it out.
+    pub fn store_protected(
+        &self,
+        store: &Store,
+        name: &str,
+        key: &PrivateKey,
+        passphrase: &str,
+    ) -> Result<KeyInfo, VaultError> {
+        if is_security_key(key) {
+            return self.seal_and_store(store, name, key);
+        }
+        let encrypted = encrypt(key, passphrase)?;
+        self.write_record(
+            store,
+            KeyId::new(),
+            name,
+            &encrypted,
+            KeyKind::Vault,
+            None,
+            None,
+        )
+    }
+
+    /// Stores a key bound to this device (Windows Hello). It stays "only on this device".
+    pub fn store_device_key(
+        &self,
+        store: &Store,
+        name: &str,
+        key: &PrivateKey,
+    ) -> Result<KeyInfo, VaultError> {
+        self.write_record(store, KeyId::new(), name, key, KeyKind::Device, None, None)
+    }
+
+    /// Stores a key received as OpenSSH text (encrypted or not) under its own id.
+    pub fn store_openssh_with_id(
+        &self,
+        store: &Store,
+        id: KeyId,
+        name: &str,
+        openssh: &str,
+        certificate: Option<&str>,
+        location: Option<ServerId>,
+    ) -> Result<KeyInfo, VaultError> {
+        let normalized = Zeroizing::new(openssh.replace("\r\n", "\n"));
+        let key = PrivateKey::from_openssh(normalized.trim())
+            .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
+        // A certificate that does not fit the key is dropped, not stored.
+        let certificate =
+            certificate.and_then(|text| check_certificate(key.public_key(), text).ok());
+        self.write_record(store, id, name, &key, KeyKind::Vault, location, certificate)
+    }
+
+    /// Attaches an OpenSSH user certificate; it must be for this key.
+    pub fn attach_certificate(
+        &self,
+        store: &Store,
+        id: KeyId,
+        text: &str,
+    ) -> Result<KeyInfo, VaultError> {
+        let mut record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+        let public =
+            PublicKey::from_openssh(&record.public_key).map_err(|_| VaultError::Corrupt)?;
+        record.certificate = Some(check_certificate(&public, text)?);
+        store.put_key_record(&record)?;
+        Ok(record.into())
+    }
+
+    pub fn detach_certificate(&self, store: &Store, id: KeyId) -> Result<KeyInfo, VaultError> {
+        let mut record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+        record.certificate = None;
+        store.put_key_record(&record)?;
+        Ok(record.into())
+    }
+
+    /// The key, ready to sign. A key whose passphrase is not saved gives `PassphraseRequired`.
     pub fn private_key(&self, store: &Store, id: KeyId) -> Result<PrivateKey, VaultError> {
+        let key = self.stored_key(store, id)?;
+        if key.is_encrypted() {
+            return Err(VaultError::PassphraseRequired);
+        }
+        Ok(key)
+    }
+
+    /// The key, decrypted with `passphrase` if its passphrase is not saved.
+    pub fn unlock_key(
+        &self,
+        store: &Store,
+        id: KeyId,
+        passphrase: &str,
+    ) -> Result<PrivateKey, VaultError> {
+        let key = self.stored_key(store, id)?;
+        if !key.is_encrypted() {
+            return Ok(key);
+        }
+        key.decrypt(passphrase)
+            .map_err(|_| VaultError::WrongPassphrase)
+    }
+
+    /// Saves the passphrase from now on: the key is kept decrypted (inside the vault).
+    pub fn remember_passphrase(
+        &self,
+        store: &Store,
+        id: KeyId,
+        passphrase: &str,
+    ) -> Result<KeyInfo, VaultError> {
+        let record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+        let key = self.unlock_key(store, id, passphrase)?;
+        self.rewrite(store, &record, &key)
+    }
+
+    /// Stops saving the passphrase: the key is kept encrypted with `passphrase`.
+    pub fn protect_key(
+        &self,
+        store: &Store,
+        id: KeyId,
+        passphrase: &str,
+    ) -> Result<KeyInfo, VaultError> {
+        let record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+        if record.protected {
+            return Ok(record.into());
+        }
+        let key = self.private_key(store, id)?;
+        if record.kind == KeyKind::Device || is_security_key(&key) {
+            return Err(VaultError::UnsupportedKeyType);
+        }
+        let encrypted = encrypt(&key, passphrase)?;
+        self.rewrite(store, &record, &encrypted)
+    }
+
+    /// The stored OpenSSH text as it is, encrypted with the user's passphrase or not.
+    pub fn stored_openssh(
+        &self,
+        store: &Store,
+        id: KeyId,
+    ) -> Result<Zeroizing<String>, VaultError> {
         let record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
         let plain = self.open(id, &record.sealed_secret)?;
         let text = std::str::from_utf8(&plain).map_err(|_| VaultError::Corrupt)?;
-        PrivateKey::from_openssh(text).map_err(|_| VaultError::Corrupt)
+        Ok(Zeroizing::new(text.to_owned()))
+    }
+
+    fn stored_key(&self, store: &Store, id: KeyId) -> Result<PrivateKey, VaultError> {
+        let text = self.stored_openssh(store, id)?;
+        PrivateKey::from_openssh(text.as_str()).map_err(|_| VaultError::Corrupt)
+    }
+
+    /// Replaces the stored key text of `record`, keeping everything else about it.
+    fn rewrite(
+        &self,
+        store: &Store,
+        record: &KeyRecord,
+        key: &PrivateKey,
+    ) -> Result<KeyInfo, VaultError> {
+        self.write_record(
+            store,
+            record.id,
+            &record.name,
+            key,
+            record.kind,
+            record.location,
+            record.certificate.clone(),
+        )
     }
 
     fn seal_and_store(
@@ -246,6 +452,22 @@ impl Vault {
         key: &PrivateKey,
         location: Option<ServerId>,
     ) -> Result<KeyInfo, VaultError> {
+        self.write_record(store, id, name, key, KeyKind::Vault, location, None)
+    }
+
+    /// Seals and writes `key` (encrypted with a passphrase or not) with all its public facts.
+    /// The location of an existing record is kept; see [`Store::put_key_record`].
+    #[allow(clippy::too_many_arguments)]
+    fn write_record(
+        &self,
+        store: &Store,
+        id: KeyId,
+        name: &str,
+        key: &PrivateKey,
+        kind: KeyKind,
+        location: Option<ServerId>,
+        certificate: Option<String>,
+    ) -> Result<KeyInfo, VaultError> {
         let openssh = key
             .to_openssh(LineEnding::LF)
             .map_err(|e| VaultError::InvalidKey(e.to_string()))?;
@@ -261,6 +483,9 @@ impl Vault {
             public_key,
             sealed_secret: self.seal(id, openssh.as_bytes())?,
             location,
+            kind,
+            protected: key.is_encrypted(),
+            certificate,
         };
         store.put_key_record(&record)?;
         Ok(record.into())
@@ -348,6 +573,93 @@ pub fn parse_private_key(
     } else {
         Ok(parsed)
     }
+}
+
+/// The certificate attached to a key, if any.
+pub fn certificate(store: &Store, id: KeyId) -> Result<Option<Certificate>, VaultError> {
+    let record = store.key_record(id)?.ok_or(VaultError::NotFound)?;
+    record
+        .certificate
+        .as_deref()
+        .map(|text| Certificate::from_openssh(text).map_err(|_| VaultError::Corrupt))
+        .transpose()
+}
+
+/// Checks that `text` is an OpenSSH user certificate for `public`; returns the trimmed line.
+fn check_certificate(public: &PublicKey, text: &str) -> Result<String, VaultError> {
+    let line = text.trim();
+    let cert = Certificate::from_openssh(line)
+        .map_err(|e| VaultError::InvalidCertificate(e.to_string()))?;
+    if cert.cert_type() != CertType::User {
+        return Err(VaultError::InvalidCertificate(
+            "not a user certificate".into(),
+        ));
+    }
+    if cert.public_key() != public.key_data() {
+        return Err(VaultError::CertificateMismatch);
+    }
+    // A damaged or altered certificate would only be refused by the server later.
+    cert.verify_signature()
+        .map_err(|e| VaultError::InvalidCertificate(e.to_string()))?;
+    Ok(line.to_owned())
+}
+
+fn certificate_info(text: &str) -> Option<CertificateInfo> {
+    let cert = Certificate::from_openssh(text).ok()?;
+    Some(CertificateInfo {
+        key_id: cert.key_id().to_owned(),
+        principals: cert.valid_principals().to_vec(),
+        valid_after: cert.valid_after(),
+        valid_before: cert.valid_before(),
+        ca_fingerprint: cert
+            .signature_key()
+            .fingerprint(HashAlg::Sha256)
+            .to_string(),
+    })
+}
+
+/// A FIDO2 or Windows Hello key: signs through an authenticator, holds no secret.
+fn is_security_key(key: &PrivateKey) -> bool {
+    matches!(
+        key.algorithm(),
+        Algorithm::SkEcdsaSha2NistP256 | Algorithm::SkEd25519
+    )
+}
+
+/// `None` for a missing or empty passphrase.
+fn non_empty(passphrase: Option<&str>) -> Option<&str> {
+    passphrase.filter(|p| !p.is_empty())
+}
+
+fn encrypt(key: &PrivateKey, passphrase: &str) -> Result<PrivateKey, VaultError> {
+    let passphrase = non_empty(Some(passphrase)).ok_or(VaultError::WrongPassphrase)?;
+    key.encrypt(&mut rand::rng(), passphrase)
+        .map_err(|e| VaultError::InvalidKey(e.to_string()))
+}
+
+fn new_key(spec: &KeySpec, comment: &str) -> Result<PrivateKey, VaultError> {
+    let mut rng = rand::rng();
+    let invalid = |e: russh::keys::ssh_key::Error| VaultError::InvalidKey(e.to_string());
+    let mut key = match *spec {
+        KeySpec::Ed25519 => PrivateKey::random(&mut rng, Algorithm::Ed25519).map_err(invalid)?,
+        KeySpec::Ecdsa { curve } => {
+            let curve = match curve {
+                EcdsaCurveName::Nistp256 => EcdsaCurve::NistP256,
+                EcdsaCurveName::Nistp384 => EcdsaCurve::NistP384,
+                EcdsaCurveName::Nistp521 => EcdsaCurve::NistP521,
+            };
+            PrivateKey::random(&mut rng, Algorithm::Ecdsa { curve }).map_err(invalid)?
+        }
+        KeySpec::Rsa { bits } => {
+            if !RSA_BITS.contains(&bits) {
+                return Err(VaultError::UnsupportedKeyType);
+            }
+            let pair = RsaKeypair::random(&mut rng, bits as usize).map_err(invalid)?;
+            PrivateKey::new(KeypairData::from(pair), comment).map_err(invalid)?
+        }
+    };
+    key.set_comment(comment);
+    Ok(key)
 }
 
 pub fn list_keys(store: &Store) -> Result<Vec<KeyInfo>, VaultError> {

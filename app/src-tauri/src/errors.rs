@@ -69,6 +69,20 @@ pub enum ErrorCode {
     SerialFailed,
     JumpIncomplete,
     AgentForwardingUnavailable,
+    CertificateMismatch,
+    InvalidCertificate,
+    /// The certificate had expired: signed in with the key alone.
+    CertificateExpired,
+    UnsupportedKeyType,
+    SecurityKeyCancelled,
+    SecurityKeyFailed,
+    /// The server did not run the `authorized_keys` script (no `sh`).
+    InstallKeyUnsupported,
+    InstallKeyFailed,
+    /// A key bound to this device cannot go to a sync server.
+    DeviceBound,
+    /// The user cancelled a sign-in question (password, code, passphrase).
+    SignInCancelled,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -117,6 +131,7 @@ impl From<sshcraft_core::store::StoreError> for CommandError {
         match e {
             sshcraft_core::store::StoreError::GroupCycle => Self::code(ErrorCode::GroupCycle),
             sshcraft_core::store::StoreError::TooDeep => Self::code(ErrorCode::GroupTooDeep),
+            sshcraft_core::store::StoreError::DeviceBound => Self::code(ErrorCode::DeviceBound),
             e => Self::new(ErrorCode::Store, e),
         }
     }
@@ -128,9 +143,24 @@ impl From<sshcraft_core::vault::VaultError> for CommandError {
         let code = match e {
             V::MasterKeyMissing => ErrorCode::MasterKeyMissing,
             V::InvalidKey(_) => ErrorCode::InvalidKey,
-            V::WrongPassphrase => ErrorCode::WrongPassphrase,
+            V::WrongPassphrase | V::PassphraseRequired => ErrorCode::WrongPassphrase,
             V::NotFound => ErrorCode::NotFound,
+            V::UnsupportedKeyType => ErrorCode::UnsupportedKeyType,
+            V::CertificateMismatch => ErrorCode::CertificateMismatch,
+            V::InvalidCertificate(_) => ErrorCode::InvalidCertificate,
             _ => ErrorCode::Vault,
+        };
+        Self::new(code, e)
+    }
+}
+
+impl From<sshcraft_fido::FidoError> for CommandError {
+    fn from(e: sshcraft_fido::FidoError) -> Self {
+        use sshcraft_fido::FidoError as F;
+        let code = match e {
+            F::NotSupported => ErrorCode::NotSupported,
+            F::Cancelled => ErrorCode::SecurityKeyCancelled,
+            F::Failed(_) | F::BadResponse(_) => ErrorCode::SecurityKeyFailed,
         };
         Self::new(code, e)
     }

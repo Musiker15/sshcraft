@@ -271,13 +271,31 @@ pub fn import_key_file(
     passphrase: Option<String>,
 ) -> CommandResult<KeyInfo> {
     let vault = state.vault.clone()?;
-    let store = state.store.lock().expect("store lock");
-    Ok(keyfiles::import(
-        &vault,
-        &store,
-        Path::new(&path),
-        passphrase.as_deref(),
-    )?)
+    let servers = {
+        let store = state.store.lock().expect("store lock");
+        let had_certificate: std::collections::HashSet<_> = store
+            .list_key_records()?
+            .into_iter()
+            .filter(|r| r.certificate.is_some())
+            .map(|r| r.id)
+            .collect();
+        let info = keyfiles::import(&vault, &store, Path::new(&path), passphrase.as_deref())?;
+        // A certificate next to a key that is already synced goes to the other devices too,
+        // unless the key came in a share (then it stays here).
+        let servers = match info.location {
+            Some(server)
+                if info.certificate.is_some()
+                    && !had_certificate.contains(&info.id)
+                    && crate::sync::share_rights_for_key(&store, server, info.id).is_ok() =>
+            {
+                crate::commands::keys::key_changed(&store, info.id)?
+            }
+            _ => Vec::new(),
+        };
+        (info, servers)
+    };
+    state.sync.nudge(&servers.1);
+    Ok(servers.0)
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

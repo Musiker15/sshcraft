@@ -446,3 +446,36 @@ async fn member_edit_elsewhere_keeps_the_owners_proxy_password() {
         Some(PROXY_SECRET)
     );
 }
+
+#[tokio::test]
+async fn device_key_never_shared_even_with_keys() {
+    let server = TestServer::start().await;
+    let (a, b) = people(&server).await;
+    let s = team(&a).await;
+    {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "plain").unwrap();
+        let key = a.vault.private_key(&store, info.id).unwrap();
+        store.delete_key_record(info.id).unwrap();
+        let device = a.vault.store_device_key(&store, "hello", &key).unwrap();
+        let mut host = s.host.clone();
+        host.settings.key = Some(sshcraft_core::model::KeyRef::Stored { id: device.id });
+        store.upsert_host(&host).unwrap();
+        record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 2).unwrap();
+        record_local_change(&store, ItemKind::Key, &device.id.0.to_string(), 2).unwrap();
+    }
+    sync(&a).await;
+    share_it(&a, &b, ShareWhat::GroupAll(s.group.id), Role::Read, true).await;
+    let route = route_on(&b, "one");
+    assert_eq!(route.key, None);
+    assert!(
+        b.store
+            .lock()
+            .unwrap()
+            .list_key_records()
+            .unwrap()
+            .is_empty()
+    );
+    // The password still went with the keys: the share itself worked.
+    assert_eq!(secret(&b, route.password).as_deref(), Some(SECRET));
+}

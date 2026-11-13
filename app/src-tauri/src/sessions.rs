@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use russh::keys::{Certificate, PrivateKey, PublicKey};
 use serde::Serialize;
+use sshcraft_core::authorized_keys::{InstallOutcome, install_command, parse_outcome};
+use sshcraft_core::keytypes::KeyKind;
 use sshcraft_core::model::{
     Directory, HostId, KeyId, KeyRef, PasswordId, Proxy, ProxyEndpoint, ResolveError, ResolvedHost,
     Route, resolve_route,
@@ -14,9 +17,10 @@ use sshcraft_core::model::{
 use sshcraft_core::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
+use sshcraft_fido::{Attachment, Authenticator, SkSigner};
 use sshcraft_ssh::{
-    Auth, AuthPrompter, Credential, Hop, HostKeyVerifier, ProxyConfig, ProxyTarget, RouteParams,
-    SessionOptions, ShellEvent, ShellWriter, SshError,
+    Auth, AuthPromptLine, AuthPrompter, AuthRequest, Credential, Hop, HostKeyVerifier, ProxyConfig,
+    ProxyTarget, RouteParams, SessionOptions, ShellEvent, ShellWriter, SshError,
 };
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
@@ -230,7 +234,12 @@ struct Context {
     agent: Arc<dyn AgentConnector>,
     gate: KeyGate,
     delay_scale: f32,
+    /// Signs for FIDO2 and Windows Hello keys; `None` where there is none.
+    security: Option<Arc<dyn Authenticator>>,
 }
+
+/// How often SSHCraft asks for a key's passphrase before giving up.
+const MAX_PASSPHRASE_TRIES: usize = 3;
 
 /// Asks Windows Hello once per app run before a key from the vault is used.
 pub struct KeyGate {
@@ -390,9 +399,44 @@ impl SessionManager {
                 agent,
                 gate: KeyGate::new(presence),
                 delay_scale,
+                security: None,
             }),
             sessions: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Lets FIDO2 and Windows Hello keys sign through `auth`. Call before the first session.
+    pub fn with_security_keys(mut self, auth: Arc<dyn Authenticator>) -> Self {
+        Arc::get_mut(&mut self.ctx)
+            .expect("no session started yet")
+            .security = Some(auth);
+        self
+    }
+
+    /// Puts a public key into `authorized_keys` on a host: connects like a tab does (with every
+    /// question), runs one command, opens no shell.
+    pub async fn install_key(
+        &self,
+        host_id: HostId,
+        key: KeyRef,
+    ) -> Result<InstallOutcome, (ErrorCode, Option<String>)> {
+        let (public, verify_required) = public_half(&self.ctx, &key).await?;
+        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default())
+            .await
+            .map_err(failure_code)?;
+        let output = session
+            .exec(&install_command(&public, verify_required), 64 * 1024)
+            .await
+            .map_err(|e| (ErrorCode::InstallKeyFailed, Some(e.to_string())))?;
+        session.disconnect().await;
+        parse_outcome(&output).map_err(|e| match e {
+            sshcraft_core::authorized_keys::AuthorizedKeysError::Failed => {
+                (ErrorCode::InstallKeyFailed, None)
+            }
+            sshcraft_core::authorized_keys::AuthorizedKeysError::Unsupported => {
+                (ErrorCode::InstallKeyUnsupported, None)
+            }
+        })
     }
 
     pub fn open(
@@ -505,9 +549,10 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let sink = shared.sink.clone();
     let mut attempt = 0u32;
     let mut ever_connected = false;
+    let opened = OpenedKeys::default();
     loop {
         sink.status(SessionStatus::Connecting);
-        let reason = match connect_target(&ctx, &target, &shared.size).await {
+        let reason = match connect_target(&ctx, &target, &shared.size, &opened).await {
             Ok((writer, mut events, notice)) => {
                 *shared.writer.lock().expect("writer lock") = Some(writer.clone());
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
@@ -615,22 +660,204 @@ fn vault_failure(e: sshcraft_core::vault::VaultError) -> Failure {
     end_error(e.code, e.detail)
 }
 
-async fn stored_key(ctx: &Context, id: KeyId) -> Result<russh::keys::PrivateKey, Failure> {
+/// A stored key ready to sign in, with its certificate. Windows Hello guards only keys whose
+/// secret lies open in the vault: a key with a passphrase asks for it instead, and a security
+/// key's authenticator checks the user itself.
+/// Keys opened with their passphrase during one tab: a reconnect or a second hop with the same
+/// key does not ask again. Lives as long as the tab's task, then drops (and wipes) the keys.
+#[derive(Default)]
+struct OpenedKeys(Mutex<HashMap<KeyId, PrivateKey>>);
+
+impl OpenedKeys {
+    fn get(&self, id: KeyId) -> Option<PrivateKey> {
+        self.0.lock().expect("opened keys lock").get(&id).cloned()
+    }
+
+    fn keep(&self, id: KeyId, key: &PrivateKey) {
+        self.0
+            .lock()
+            .expect("opened keys lock")
+            .insert(id, key.clone());
+    }
+}
+
+async fn stored_credential(
+    ctx: &Context,
+    id: KeyId,
+    resolved: &ResolvedHost,
+    opened: &OpenedKeys,
+) -> Result<(Credential, Option<Certificate>), Failure> {
     // A synced host can point to a key that lives on another device: say so before asking for
     // Windows Hello for nothing.
-    let here = ctx
+    let record = ctx
         .store
         .lock()
         .expect("store lock")
         .key_record(id)
         .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?
-        .is_some();
-    if !here {
-        return Err(end_error(ErrorCode::KeyNotOnDevice, None));
+        .ok_or_else(|| end_error(ErrorCode::KeyNotOnDevice, None))?;
+    let certificate = record
+        .certificate
+        .as_deref()
+        .and_then(|text| Certificate::from_openssh(text).ok());
+    let vault = ctx
+        .vault
+        .as_ref()
+        .ok_or_else(|| end_error(ErrorCode::VaultLocked, None))?;
+    let stored = {
+        let store = ctx.store.lock().expect("store lock");
+        vault.stored_openssh(&store, id).map_err(vault_failure)?
+    };
+    let key = PrivateKey::from_openssh(stored.as_str())
+        .map_err(|e| end_error(ErrorCode::Vault, Some(e.to_string())))?;
+    // A key with a passphrase is opened first, whatever kind it is: a security key that came
+    // encrypted (from `ssh-keygen`) signs once its handle is readable.
+    let asked = key.is_encrypted();
+    let key = if !asked {
+        key
+    } else if let Some(open) = opened.get(id) {
+        open
+    } else {
+        let open = ask_passphrase(ctx, &record.name, &key, resolved).await?;
+        opened.keep(id, &open);
+        open
+    };
+    if sshcraft_fido::is_security_key(&key) {
+        let auth = ctx
+            .security
+            .clone()
+            .ok_or_else(|| end_error(ErrorCode::NotSupported, None))?;
+        let attachment = match record.kind {
+            KeyKind::Device => Attachment::Platform,
+            KeyKind::Vault => Attachment::CrossPlatform,
+        };
+        let signer = SkSigner::new(auth, &key, attachment)
+            .map_err(|e| end_error(ErrorCode::SecurityKeyFailed, Some(e.to_string())))?;
+        let credential = Credential::Signer {
+            public_key: key.public_key().clone(),
+            signer: Box::new(signer),
+        };
+        return Ok((credential, certificate));
     }
-    let vault = unlock_secrets(ctx).await?;
-    let store = ctx.store.lock().expect("store lock");
-    vault.private_key(&store, id).map_err(vault_failure)
+    if asked {
+        return Ok((Credential::Key(key), certificate));
+    }
+    unlock_secrets(ctx).await?;
+    Ok((Credential::Key(key), certificate))
+}
+
+/// Asks for the passphrase of `key` (named `name`) at most [`MAX_PASSPHRASE_TRIES`] times.
+async fn ask_passphrase(
+    ctx: &Context,
+    name: &str,
+    key: &PrivateKey,
+    resolved: &ResolvedHost,
+) -> Result<PrivateKey, Failure> {
+    for _ in 0..MAX_PASSPHRASE_TRIES {
+        let answers = ctx
+            .auth
+            .answer(AuthRequest {
+                host_name: resolved.name.clone(),
+                username: resolved.username.clone(),
+                name: String::new(),
+                instructions: String::new(),
+                prompts: vec![AuthPromptLine {
+                    text: "Passphrase:".into(),
+                    echo: false,
+                }],
+                passphrase_for: Some(name.to_owned()),
+            })
+            .await
+            .ok_or(Failure::End(EndReason::AuthCancelled, None, None))?;
+        let Some(passphrase) = answers.into_iter().next() else {
+            return Err(Failure::End(EndReason::AuthCancelled, None, None));
+        };
+        // bcrypt takes up to a second per try: not on an async worker.
+        let encrypted = key.clone();
+        let opened = tokio::task::spawn_blocking(move || encrypted.decrypt(passphrase.as_str()))
+            .await
+            .map_err(|e| end_error(ErrorCode::Internal, Some(e.to_string())))?;
+        if let Ok(key) = opened {
+            return Ok(key);
+        }
+    }
+    Err(Failure::End(
+        EndReason::AuthFailed,
+        Some(ErrorCode::WrongPassphrase),
+        None,
+    ))
+}
+
+/// The public half of a key to put into `authorized_keys`, and whether the server should
+/// demand the key's PIN (`verify-required`).
+async fn public_half(
+    ctx: &Context,
+    key: &KeyRef,
+) -> Result<(PublicKey, bool), (ErrorCode, Option<String>)> {
+    match key {
+        KeyRef::Stored { id } => {
+            let record = ctx
+                .store
+                .lock()
+                .expect("store lock")
+                .key_record(*id)
+                .map_err(|e| (ErrorCode::Store, Some(e.to_string())))?
+                .ok_or((ErrorCode::KeyNotOnDevice, None))?;
+            let public = PublicKey::from_openssh(&record.public_key)
+                .map_err(|e| (ErrorCode::InvalidKey, Some(e.to_string())))?;
+            let mut verify_required = false;
+            if record.algorithm.starts_with("sk-")
+                && let Some(vault) = &ctx.vault
+            {
+                let stored = vault
+                    .stored_openssh(&ctx.store.lock().expect("store lock"), *id)
+                    .map_err(|e| (ErrorCode::Vault, Some(e.to_string())))?;
+                let flags = match PrivateKey::from_openssh(stored.as_str())
+                    .ok()
+                    .map(|k| k.key_data().clone())
+                {
+                    Some(russh::keys::ssh_key::private::KeypairData::SkEcdsaSha2NistP256(sk)) => {
+                        sk.flags()
+                    }
+                    Some(russh::keys::ssh_key::private::KeypairData::SkEd25519(sk)) => sk.flags(),
+                    _ => 0,
+                };
+                verify_required = flags & sshcraft_fido::FLAG_USER_VERIFICATION != 0;
+            }
+            Ok((public, verify_required))
+        }
+        KeyRef::Agent { fingerprint } => {
+            let mut agent = ctx
+                .agent
+                .connect()
+                .await
+                .map_err(|e| (ErrorCode::AgentUnavailable, Some(e.to_string())))?;
+            let keys = sshcraft_ssh::list_agent_keys(&mut agent)
+                .await
+                .map_err(|e| (ErrorCode::AgentUnavailable, Some(e.to_string())))?;
+            let found = keys
+                .into_iter()
+                .find(|k| &k.fingerprint == fingerprint)
+                .ok_or((ErrorCode::AgentKeyMissing, None))?;
+            let public = PublicKey::from_openssh(&found.public_key)
+                .map_err(|e| (ErrorCode::InvalidKey, Some(e.to_string())))?;
+            Ok((public, false))
+        }
+    }
+}
+
+/// A failure as a command error.
+fn failure_code(f: Failure) -> (ErrorCode, Option<String>) {
+    match f {
+        Failure::End(reason, code, detail) => (
+            code.unwrap_or(match reason {
+                EndReason::AuthCancelled => ErrorCode::SignInCancelled,
+                _ => ErrorCode::Session,
+            }),
+            detail,
+        ),
+        Failure::Lost(code, detail) => (code, Some(detail)),
+    }
 }
 
 /// A stored password, or `None` when it is not on this device (then the server's question goes
@@ -655,10 +882,15 @@ async fn stored_password(
 }
 
 /// One hop with its own credentials only.
-async fn hop(ctx: &Context, resolved: &ResolvedHost) -> Result<Hop, Failure> {
+async fn hop(ctx: &Context, resolved: &ResolvedHost, opened: &OpenedKeys) -> Result<Hop, Failure> {
+    let mut certificate = None;
     let key = match &resolved.key {
         None => None,
-        Some(KeyRef::Stored { id }) => Some(Credential::Key(stored_key(ctx, *id).await?)),
+        Some(KeyRef::Stored { id }) => {
+            let (credential, cert) = stored_credential(ctx, *id, resolved, opened).await?;
+            certificate = cert;
+            Some(credential)
+        }
         Some(KeyRef::Agent { fingerprint }) => Some(Credential::Agent {
             fingerprint: fingerprint.clone(),
             agent: ctx
@@ -677,7 +909,11 @@ async fn hop(ctx: &Context, resolved: &ResolvedHost) -> Result<Hop, Failure> {
         address: resolved.address.clone(),
         port: resolved.port,
         username: resolved.username.clone(),
-        auth: Auth { key, password },
+        auth: Auth {
+            key,
+            password,
+            certificate,
+        },
     })
 }
 
@@ -720,6 +956,16 @@ fn failure(e: SshError, verifier: &StoreVerifier) -> Failure {
         SshError::AgentRefused => {
             Failure::End(EndReason::AuthFailed, Some(ErrorCode::AgentRefused), None)
         }
+        SshError::SignerCancelled => Failure::End(
+            EndReason::AuthCancelled,
+            Some(ErrorCode::SecurityKeyCancelled),
+            None,
+        ),
+        SshError::SignerFailed(detail) => Failure::End(
+            EndReason::AuthFailed,
+            Some(ErrorCode::SecurityKeyFailed),
+            Some(detail),
+        ),
         SshError::Proxy(detail) => Failure::Lost(ErrorCode::ProxyFailed, detail),
         SshError::Hop {
             host_name, error, ..
@@ -749,9 +995,10 @@ async fn connect_target(
     ctx: &Context,
     target: &SessionTarget,
     size: &Mutex<(u32, u32)>,
+    opened: &OpenedKeys,
 ) -> Result<Connected, Failure> {
     match target {
-        SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size).await,
+        SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size, opened).await,
         #[cfg(desktop)]
         SessionTarget::Local { shell } => {
             let (cols, rows) = *size.lock().expect("size lock");
@@ -777,7 +1024,28 @@ async fn connect_once(
     ctx: &Context,
     host_id: HostId,
     size: &Mutex<(u32, u32)>,
+    opened: &OpenedKeys,
 ) -> Result<Connected, Failure> {
+    let (session, notice) = connect_session(ctx, host_id, opened).await?;
+    let (cols, rows) = *size.lock().expect("size lock");
+    let shell = session
+        .open_shell(cols, rows)
+        .await
+        .map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    if needs_os(&ctx.store, host_id) {
+        tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
+    }
+    let (writer, events) = shell.split();
+    Ok((Arc::new(writer), events, notice))
+}
+
+/// Connects to a host along its route and signs in on every hop; no shell yet. The notice is
+/// something to show while connected.
+async fn connect_session(
+    ctx: &Context,
+    host_id: HostId,
+    opened: &OpenedKeys,
+) -> Result<(sshcraft_ssh::Session, Option<ErrorCode>), Failure> {
     let route = {
         let store = ctx.store.lock().expect("store lock");
         lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
@@ -785,14 +1053,14 @@ async fn connect_once(
     let mut hops = Vec::new();
     for resolved in &route.jumps {
         // A jump host that cannot be used is named.
-        hops.push(hop(ctx, resolved).await.map_err(|f| match f {
+        hops.push(hop(ctx, resolved, opened).await.map_err(|f| match f {
             Failure::End(reason, code, None) => {
                 Failure::End(reason, code, Some(resolved.name.clone()))
             }
             other => other,
         })?);
     }
-    hops.push(hop(ctx, &route.target).await?);
+    hops.push(hop(ctx, &route.target, opened).await?);
     let proxy = match &route.target.proxy {
         Some(Proxy::Http(endpoint)) => Some(ProxyConfig::Http(proxy_target(ctx, endpoint).await?)),
         Some(Proxy::Socks5(endpoint)) => {
@@ -831,16 +1099,10 @@ async fn connect_once(
     let session = sshcraft_ssh::connect_route(params, verifier.clone(), ctx.auth.clone())
         .await
         .map_err(|e| failure(e, &verifier))?;
-    let (cols, rows) = *size.lock().expect("size lock");
-    let shell = session
-        .open_shell(cols, rows)
-        .await
-        .map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
-    if needs_os(&ctx.store, host_id) {
-        tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
-    }
-    let (writer, events) = shell.split();
-    Ok((Arc::new(writer), events, notice))
+    let notice = notice.or(session
+        .certificate_expired()
+        .then_some(ErrorCode::CertificateExpired));
+    Ok((session, notice))
 }
 
 fn probed_setting(host_id: HostId) -> String {

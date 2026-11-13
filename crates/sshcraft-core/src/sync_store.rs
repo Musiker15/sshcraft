@@ -268,6 +268,14 @@ impl Store {
     ) -> Result<(), StoreError> {
         let target = location.map(|s| s.0.to_string());
         let tx = self.conn.unchecked_transaction()?;
+        if kind == ItemKind::Key && location.is_some() {
+            let key_kind: Option<String> = tx
+                .query_row("SELECT kind FROM keys WHERE id = ?1", [id], |r| r.get(0))
+                .optional()?;
+            if key_kind.as_deref() == Some(crate::keytypes::KeyKind::Device.as_str()) {
+                return Err(StoreError::DeviceBound);
+            }
+        }
         if kind == ItemKind::Host {
             let group: Option<Option<String>> = tx
                 .query_row("SELECT group_id FROM hosts WHERE id = ?1", [id], |r| {

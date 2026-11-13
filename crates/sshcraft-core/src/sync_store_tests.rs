@@ -84,7 +84,7 @@ fn migration_from_v2_keeps_data() {
         .conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, crate::store::SCHEMA_VERSION);
 }
 
 #[test]
@@ -258,6 +258,9 @@ fn key_location_follows_set_location() {
             public_key: "ssh-ed25519 AAAA".into(),
             sealed_secret: vec![1],
             location: None,
+            kind: Default::default(),
+            protected: false,
+            certificate: None,
         })
         .unwrap();
     store
@@ -311,4 +314,24 @@ fn turning_key_sync_on_refetches_from_the_start() {
     assert_eq!(store.areas(s).unwrap()[0].cursor, 40);
     store.update_server_flags(s, true, true).unwrap();
     assert_eq!(store.areas(s).unwrap()[0].cursor, 0);
+}
+
+#[test]
+fn device_key_cannot_move_to_server() {
+    let store = Store::open_in_memory().unwrap();
+    let server = server(&store);
+    let vault =
+        crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default()))
+            .unwrap();
+    let key =
+        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let info = vault.store_device_key(&store, "hello", &key).unwrap();
+    let id = info.id.0.to_string();
+    assert!(matches!(
+        store.set_location(ItemKind::Key, &id, Some(server)),
+        Err(StoreError::DeviceBound)
+    ));
+    assert_eq!(store.location_of(ItemKind::Key, &id).unwrap(), None);
+    // Back to "only on this device" is fine.
+    store.set_location(ItemKind::Key, &id, None).unwrap();
 }

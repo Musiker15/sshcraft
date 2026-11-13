@@ -28,6 +28,9 @@ import {
   type HostKeyPrompt,
   type ItemKind,
   type KeyInfo,
+  type KeyRef,
+  type AgentKey,
+  listAgentKeys,
   type ItemShare,
   type ServerView,
   type VaultStatus,
@@ -39,6 +42,7 @@ import { HostKeyDialog } from "../components/HostKeyDialog";
 import { SessionStatusLine } from "../components/SessionStatusLine";
 import { ExportDialog } from "../components/ExportDialog";
 import { ImportDialog } from "../components/ImportDialog";
+import { InstallKeyDialog } from "../components/KeyDialogs";
 import { TerminalView } from "../components/TerminalView";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
@@ -77,6 +81,8 @@ export function AppShell() {
   const [servers, setServers] = useState<ServerView[]>([]);
   const [shares, setShares] = useState<ItemShare[]>([]);
   const [sharing, setSharing] = useState<{ target: ShareTarget; server: ServerView } | null>(null);
+  const [installing, setInstalling] = useState<{ host?: string; key?: KeyRef } | null>(null);
+  const [agentKeys, setAgentKeys] = useState<AgentKey[]>([]);
   const [vault, setVault] = useState<VaultStatus | null>(null);
   const [problem, setProblem] = useState<unknown>(null);
   const [editor, setEditor] = useState<Editor>(null);
@@ -88,6 +94,12 @@ export function AppShell() {
   const [helloDismissed, setHelloDismissed] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  /** "Add to authorized_keys": the agent's keys are offered too, fetched when it opens. */
+  const openInstall = useCallback((start: { host?: string; key?: KeyRef }) => {
+    setInstalling(start);
+    listAgentKeys().then(setAgentKeys, () => setAgentKeys([]));
+  }, []);
 
   const reloadRecent = useCallback(() => {
     listRecent(20).then(setRecent, () => {});
@@ -282,6 +294,7 @@ export function AppShell() {
                   }
                   shares={shares}
                   onShare={(target, server) => setSharing({ target, server })}
+                  onInstallKey={(host) => openInstall({ host: host.id })}
                 />
               )}
               {page === "keys" && (
@@ -293,6 +306,7 @@ export function AppShell() {
                   onMove={(id: string, location: string | null) =>
                     void moveItem("key", id, location).then(() => reload(), setProblem)
                   }
+                  onInstall={(key) => openInstall({ key })}
                 />
               )}
               {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
@@ -368,6 +382,19 @@ export function AppShell() {
           )}
           {editor.kind === "import" && <ImportDialog servers={servers} onDone={done} onCancel={done} />}
           {editor.kind === "export" && <ExportDialog groups={groups} servers={servers} onDone={() => setEditor(null)} />}
+        </Drawer>
+      )}
+
+      {installing && (
+        <Drawer onClose={() => setInstalling(null)}>
+          <InstallKeyDialog
+            hosts={hosts}
+            keys={keys}
+            agentKeys={agentKeys}
+            host={installing.host}
+            keyRef={installing.key}
+            onClose={() => setInstalling(null)}
+          />
         </Drawer>
       )}
 

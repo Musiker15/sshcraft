@@ -4,7 +4,8 @@ import { useT } from "../i18n/i18n";
 
 type Props = { prompt: AuthPrompt; onAnswer: (answers: string[] | null) => void };
 
-/** The server's sign-in questions (a password, a one-time code). Answers are not kept. */
+/** The server's sign-in questions (a password, a one-time code), or SSHCraft's question for a
+ * key's passphrase. Answers are not kept. */
 export function AuthPromptDialog({ prompt, onAnswer }: Props) {
   const t = useT();
   const [answers, setAnswers] = useState<string[]>(prompt.prompts.map(() => ""));
@@ -19,8 +20,17 @@ export function AuthPromptDialog({ prompt, onAnswer }: Props) {
           onAnswer(answers);
         }}
       >
-        <h2>{prompt.name || t("auth.title")}</h2>
-        <p>{t("auth.text", { host: prompt.host_name, user: prompt.username })}</p>
+        {prompt.passphrase_for ? (
+          <>
+            <h2>{t("auth.passphraseTitle", { name: prompt.passphrase_for })}</h2>
+            <p>{t("auth.passphraseText", { host: prompt.host_name })}</p>
+          </>
+        ) : (
+          <>
+            <h2>{prompt.name || t("auth.title")}</h2>
+            <p>{t("auth.text", { host: prompt.host_name, user: prompt.username })}</p>
+          </>
+        )}
         {prompt.instructions && <p className="hint">{prompt.instructions}</p>}
         {prompt.prompts.map((line, index) => (
           <label key={index}>

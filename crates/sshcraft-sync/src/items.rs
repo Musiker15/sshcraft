@@ -5,11 +5,12 @@
 use crate::SyncError;
 use crate::creds::{CredentialRefs, drop_unreferenced, keep_local, same_proxy_endpoint};
 use serde::{Deserialize, Serialize};
+use sshcraft_core::keytypes::KeyKind;
 use sshcraft_core::model::{
     Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, PasswordId, ServerId,
 };
 use sshcraft_core::store::{ItemKind, Store};
-use sshcraft_core::vault::{Vault, parse_private_key};
+use sshcraft_core::vault::Vault;
 use sshcraft_proto::ProtoError;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -26,7 +27,11 @@ pub enum ItemBody {
     Key {
         id: KeyId,
         name: String,
+        /// The stored OpenSSH text; encrypted when the passphrase is not saved.
         openssh: Zeroizing<String>,
+        /// An OpenSSH user certificate for the key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        certificate: Option<String>,
     },
     Identity {
         identity: Identity,
@@ -109,19 +114,16 @@ pub fn local_item(
                 ItemBody::Host { host }
             })
             .unwrap_or_else(deleted),
+        // The stored text goes as it is: a key whose passphrase is not saved stays encrypted
+        // with it. A key bound to this device never leaves it.
         ItemKind::Key => match store.key_record(KeyId(uuid))? {
-            Some(record) => {
-                let key = vault.private_key(store, record.id)?;
-                let openssh = key
-                    .to_openssh(russh::keys::ssh_key::LineEnding::LF)
-                    .map_err(|e| SyncError::Vault(e.to_string()))?;
-                ItemBody::Key {
-                    id: record.id,
-                    name: record.name,
-                    openssh: Zeroizing::new(openssh.to_string()),
-                }
-            }
-            None => deleted(),
+            Some(record) if record.kind != KeyKind::Device => ItemBody::Key {
+                id: record.id,
+                name: record.name,
+                openssh: vault.stored_openssh(store, record.id)?,
+                certificate: record.certificate,
+            },
+            _ => deleted(),
         },
         ItemKind::Identity => store
             .list_identities()?
@@ -219,9 +221,27 @@ pub fn apply_in(
                 store.set_location(ItemKind::Host, &id, Some(server))?;
             }
         }
-        ItemBody::Key { id, name, openssh } => {
-            let key = parse_private_key(openssh, None)?;
-            vault.store_key_with_id(store, *id, name, &key, Some(server))?;
+        ItemBody::Key {
+            id,
+            name,
+            openssh,
+            certificate,
+        } => {
+            // A key bound to this device is never replaced from outside.
+            if store
+                .key_record(*id)?
+                .is_some_and(|r| r.kind == KeyKind::Device)
+            {
+                return Ok(());
+            }
+            vault.store_openssh_with_id(
+                store,
+                *id,
+                name,
+                openssh,
+                certificate.as_deref(),
+                Some(server),
+            )?;
             if store.location_of(ItemKind::Key, &id.0.to_string())? != Some(server) {
                 store.set_location(ItemKind::Key, &id.0.to_string(), Some(server))?;
             }
@@ -263,7 +283,15 @@ pub fn apply_in(
             match item_kind {
                 ItemKind::Group => store.delete_group(GroupId(uuid))?,
                 ItemKind::Host => store.delete_host(HostId(uuid))?,
-                ItemKind::Key => store.delete_key_record(KeyId(uuid))?,
+                // A key bound to this device was never sent; no record may remove it.
+                ItemKind::Key => {
+                    if !store
+                        .key_record(KeyId(uuid))?
+                        .is_some_and(|r| r.kind == KeyKind::Device)
+                    {
+                        store.delete_key_record(KeyId(uuid))?;
+                    }
+                }
                 ItemKind::Identity => store.delete_identity(IdentityId(uuid))?,
                 ItemKind::Password => store.delete_password(PasswordId(uuid))?,
             }

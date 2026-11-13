@@ -4,6 +4,7 @@ use std::path::Path;
 
 use rusqlite::OptionalExtension;
 
+use crate::keytypes::KeyKind;
 use crate::model::{Group, GroupId, Host, HostId, KeyId, ServerId};
 
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +19,9 @@ pub enum StoreError {
     /// Groups would nest deeper than `MAX_GROUP_DEPTH`.
     #[error("groups nest too deep")]
     TooDeep,
+    /// A key bound to this device cannot move to a sync server.
+    #[error("this key is bound to this device")]
+    DeviceBound,
 }
 
 /// A key as stored on disk. `sealed_secret` is the vault's ciphertext, never plaintext.
@@ -31,13 +35,18 @@ pub struct KeyRecord {
     pub sealed_secret: Vec<u8>,
     /// The sync server this key belongs to; `None` means "only on this device".
     pub location: Option<ServerId>,
+    pub kind: KeyKind,
+    /// The sealed OpenSSH text is itself encrypted with a passphrase the user types.
+    pub protected: bool,
+    /// An OpenSSH user certificate for this key (public data).
+    pub certificate: Option<String>,
 }
 
 pub struct Store {
     conn: rusqlite::Connection,
 }
 
-const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -77,6 +86,13 @@ CREATE TABLE IF NOT EXISTS recent_hosts (
     host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
     connected_at INTEGER NOT NULL
 );
+";
+
+/// Version 7: what kind of key, whether its passphrase is asked, and its certificate.
+pub(crate) const SCHEMA_V7: &str = "
+ALTER TABLE keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'vault';
+ALTER TABLE keys ADD COLUMN protected INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE keys ADD COLUMN certificate TEXT;
 ";
 
 /// Version 5: nested groups, tags, and the operating system of a host.
@@ -142,6 +158,9 @@ type KeyRow = (
     String,
     Vec<u8>,
     Option<String>,
+    String,
+    bool,
+    Option<String>,
 );
 
 impl Store {
@@ -191,6 +210,12 @@ impl Store {
         if version < 6 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(credential_store::SCHEMA_V6)?;
+            tx.pragma_update(None, "user_version", 6)?;
+            tx.commit()?;
+        }
+        if version < 7 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V7)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -431,11 +456,13 @@ impl Store {
 
     pub fn put_key_record(&self, record: &KeyRecord) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO keys (id, name, algorithm, fingerprint, public_key, sealed_secret, location)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO keys (id, name, algorithm, fingerprint, public_key, sealed_secret, location,
+                 kind, protected, certificate)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, algorithm = excluded.algorithm,
              fingerprint = excluded.fingerprint, public_key = excluded.public_key,
-             sealed_secret = excluded.sealed_secret",
+             sealed_secret = excluded.sealed_secret, kind = excluded.kind,
+             protected = excluded.protected, certificate = excluded.certificate",
             rusqlite::params![
                 record.id.0.to_string(),
                 record.name,
@@ -443,7 +470,10 @@ impl Store {
                 record.fingerprint,
                 record.public_key,
                 record.sealed_secret,
-                record.location.map(|s| s.0.to_string())
+                record.location.map(|s| s.0.to_string()),
+                record.kind.as_str(),
+                record.protected,
+                record.certificate,
             ],
         )?;
         Ok(())
@@ -515,7 +545,8 @@ impl Store {
         params: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<KeyRecord>, StoreError> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, name, algorithm, fingerprint, public_key, sealed_secret, location
+            "SELECT id, name, algorithm, fingerprint, public_key, sealed_secret, location,
+                 kind, protected, certificate
              FROM keys {tail}"
         ))?;
         let rows = stmt.query_map(params, |r| -> rusqlite::Result<KeyRow> {
@@ -527,10 +558,24 @@ impl Store {
                 r.get(4)?,
                 r.get(5)?,
                 r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+                r.get(9)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, algorithm, fingerprint, public_key, sealed_secret, location) = row?;
+            let (
+                id,
+                name,
+                algorithm,
+                fingerprint,
+                public_key,
+                sealed_secret,
+                location,
+                kind,
+                protected,
+                certificate,
+            ) = row?;
             Ok(KeyRecord {
                 id: KeyId(parse_uuid(&id)?),
                 name,
@@ -539,6 +584,10 @@ impl Store {
                 public_key,
                 sealed_secret,
                 location: parse_location(location)?,
+                kind: KeyKind::parse(&kind)
+                    .ok_or_else(|| StoreError::Malformed(format!("key kind {kind}")))?,
+                protected,
+                certificate,
             })
         })
         .collect()

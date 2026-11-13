@@ -52,7 +52,10 @@ fn key_body_carries_the_private_key_and_is_zeroized() {
     let (store, vault) = setup();
     let info = vault.generate_ed25519(&store, "deploy").unwrap();
     let item = local_item(&store, &vault, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
-    let ItemBody::Key { id, name, openssh } = &item.body else {
+    let ItemBody::Key {
+        id, name, openssh, ..
+    } = &item.body
+    else {
         panic!("expected a key");
     };
     let _: &Zeroizing<String> = openssh;
@@ -132,4 +135,27 @@ fn decode_rejects_garbage() {
         decode(br#"{"modified_at":1,"body":{"kind":"spaceship"}}"#),
         Err(SyncError::Proto(_))
     ));
+}
+
+#[test]
+fn remote_deletion_never_removes_a_device_key() {
+    let store = sshcraft_core::store::Store::open_in_memory().unwrap();
+    let vault = sshcraft_core::vault::Vault::unlock(
+        &store,
+        Box::new(sshcraft_core::vault::MemoryMasterKey::default()),
+    )
+    .unwrap();
+    let key =
+        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let info = vault.store_device_key(&store, "hello", &key).unwrap();
+    let item = sshcraft_sync::items::SyncItem {
+        body: sshcraft_sync::items::ItemBody::Deleted {
+            item_kind: sshcraft_core::store::ItemKind::Key,
+            item_id: info.id.0.to_string(),
+        },
+        modified_at: 1,
+    };
+    sshcraft_sync::items::apply(&store, &vault, sshcraft_core::model::ServerId::new(), &item)
+        .unwrap();
+    assert!(store.key_record(info.id).unwrap().is_some());
 }

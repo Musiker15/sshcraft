@@ -31,6 +31,8 @@ export type HostsPageProps = {
   /** Which items are shared or came in a share. */
   shares?: ItemShare[];
   onShare?: (target: ShareTarget, server: ServerView) => void;
+  /** Opens "add a key to authorized_keys" for this host. */
+  onInstallKey?: (host: Host) => void;
 };
 
 type Menu = { items: MenuItem[]; at: { x: number; y: number } };
@@ -121,6 +123,9 @@ export function HostsPage(props: HostsPageProps) {
               { label: t("hosts.connect"), onSelect: () => props.onConnect(host) },
               // A read-only host can still be edited to assign an own key.
               { label: t("hosts.edit"), onSelect: () => props.onEditHost(host) },
+              ...(props.onInstallKey
+                ? [{ label: t("hosts.installKey"), onSelect: () => props.onInstallKey?.(host) }]
+                : []),
               ...shareItems({ kind: "host", host }, host.location, share),
               ...(received ? [] : moveItems("host", host.id, host.location, host.group_id !== null)),
               ...(readOnly ? [] : [{ label: t("common.delete"), onSelect: () => props.onDeleteHost(host), danger: true }]),

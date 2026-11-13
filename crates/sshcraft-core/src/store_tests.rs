@@ -89,6 +89,9 @@ fn key_records_roundtrip() {
         fingerprint: "SHA256:x".into(),
         public_key: "ssh-ed25519 AAAA".into(),
         sealed_secret: vec![1, 2, 3],
+        kind: Default::default(),
+        protected: false,
+        certificate: None,
     };
     store.put_key_record(&rec).unwrap();
     assert!(store.has_key_records().unwrap());
@@ -227,4 +230,37 @@ fn half_done_upgrade_to_v2_recovers() {
     let store = Store::open(&path).unwrap();
     store.put_setting("app", "{}").unwrap();
     assert!(store.recent_hosts(1).unwrap().is_empty());
+}
+
+#[test]
+fn schema_7_adds_key_columns_with_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v6.db");
+    let id = KeyId::new();
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for batch in [
+            SCHEMA_V1,
+            SCHEMA_V2,
+            SCHEMA_V3,
+            super::share_store::SCHEMA_V4,
+            SCHEMA_V5,
+            super::credential_store::SCHEMA_V6,
+        ] {
+            conn.execute_batch(batch).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 6).unwrap();
+        conn.execute(
+            "INSERT INTO keys (id, name, algorithm, fingerprint, public_key, sealed_secret)
+             VALUES (?1, 'k', 'ssh-ed25519', 'SHA256:x', 'ssh-ed25519 AAAA', x'01')",
+            [id.0.to_string()],
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let record = store.key_record(id).unwrap().unwrap();
+    assert_eq!(record.kind, crate::keytypes::KeyKind::Vault);
+    assert!(!record.protected);
+    assert_eq!(record.certificate, None);
 }

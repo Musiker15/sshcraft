@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
 use russh::keys::ssh_encoding::bytes::Bytes;
-use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
+use russh::keys::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Server as _, Session, VerifiedPublicKey};
 use russh::{Channel, ChannelId};
 use russh::{MethodKind, MethodSet};
@@ -38,6 +38,32 @@ pub struct TestAuth {
     pub key_then_kbd: bool,
     /// The password alone is not enough: keyboard-interactive follows it.
     pub password_then_kbd: bool,
+    /// User certificates signed by this CA are accepted when their principals name the user.
+    pub ca: Option<PublicKey>,
+    /// Turns down `ssh-rsa` (SHA-1) for keys and certificates, as OpenSSH does since 8.8.
+    pub refuse_sha1_rsa: bool,
+}
+
+/// A user certificate for `key`, signed by `ca`, for `principal`, valid in the given window.
+pub fn user_certificate(
+    key: &PublicKey,
+    ca: &PrivateKey,
+    principal: &str,
+    valid_after: u64,
+    valid_before: u64,
+) -> Certificate {
+    use russh::keys::ssh_key::certificate::{Builder, CertType};
+    let mut builder = Builder::new_with_random_nonce(
+        &mut rand::rng(),
+        key.key_data().clone(),
+        valid_after,
+        valid_before,
+    )
+    .expect("certificate builder");
+    builder.cert_type(CertType::User).expect("cert type");
+    builder.key_id("test").expect("key id");
+    builder.valid_principal(principal).expect("principal");
+    builder.sign(ca).expect("signed certificate")
 }
 
 /// What clients sent to the test server.
@@ -49,6 +75,12 @@ struct Records {
     env: Mutex<Vec<(String, String)>>,
     /// The first try to use a forwarded agent: how many keys it listed, `None` if refused.
     agent: Mutex<Option<Option<usize>>>,
+    /// How many certificates clients offered.
+    certificates: Mutex<usize>,
+    /// Commands clients ran over `exec`, in order.
+    commands: Mutex<Vec<String>>,
+    /// What `exec` answers; `None`: [`TEST_EXEC_OUTPUT`].
+    exec_output: Mutex<Option<String>>,
 }
 
 pub struct TestServer {
@@ -86,6 +118,21 @@ impl TestServer {
     /// Passwords and keyboard-interactive answers clients sent, in order.
     pub fn received_passwords(&self) -> Vec<String> {
         self.records.passwords.lock().unwrap().clone()
+    }
+
+    /// Answers every later `exec` with `output`.
+    pub fn set_exec_output(&self, output: &str) {
+        *self.records.exec_output.lock().unwrap() = Some(output.to_owned());
+    }
+
+    /// Commands clients ran over `exec`, in order.
+    pub fn received_commands(&self) -> Vec<String> {
+        self.records.commands.lock().unwrap().clone()
+    }
+
+    /// How many certificates clients offered.
+    pub fn received_certificates(&self) -> usize {
+        *self.records.certificates.lock().unwrap()
     }
 
     pub fn received_env(&self) -> Vec<(String, String)> {
@@ -242,6 +289,38 @@ impl server::Handler for Handler {
             });
         }
         Ok(Auth::Accept)
+    }
+
+    async fn auth_publickey_offered(
+        &mut self,
+        _user: &str,
+        offer: server::PublicKeyOffer<'_>,
+    ) -> Result<Auth, Self::Error> {
+        if self.auth.refuse_sha1_rsa && *offer.algorithm == (Algorithm::Rsa { hash: None }) {
+            return Ok(Auth::reject());
+        }
+        Ok(Auth::Accept)
+    }
+
+    async fn auth_openssh_certificate(
+        &mut self,
+        user: &str,
+        certificate: &Certificate,
+    ) -> Result<Auth, Self::Error> {
+        *self.records.certificates.lock().unwrap() += 1;
+        let trusted = self
+            .auth
+            .ca
+            .as_ref()
+            .is_some_and(|ca| certificate.signature_key() == ca.key_data());
+        let for_user = certificate.valid_principals().iter().any(|p| p == user);
+        Ok(
+            if trusted && for_user && crate::certificate_valid_now(certificate) {
+                Auth::Accept
+            } else {
+                Auth::reject()
+            },
+        )
     }
 
     async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
@@ -421,15 +500,25 @@ impl server::Handler for Handler {
     async fn exec_request(
         &mut self,
         channel: ChannelId,
-        _data: &[u8],
+        data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
+        self.records
+            .commands
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(data).into_owned());
+        let output = self
+            .records
+            .exec_output
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| TEST_EXEC_OUTPUT.to_owned());
         let handle = session.handle();
         tokio::spawn(async move {
-            let _ = handle
-                .data(channel, Bytes::from_static(TEST_EXEC_OUTPUT.as_bytes()))
-                .await;
+            let _ = handle.data(channel, Bytes::from(output.into_bytes())).await;
             let _ = handle.exit_status_request(channel, 0).await;
             let _ = handle.eof(channel).await;
             let _ = handle.close(channel).await;

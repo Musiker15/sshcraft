@@ -1707,7 +1707,15 @@ fn remove_item(store: &Store, kind: ItemKind, id: &str) -> Result<(), SyncError>
     match kind {
         ItemKind::Group => store.delete_group(sshcraft_core::model::GroupId(uuid))?,
         ItemKind::Host => store.delete_host(sshcraft_core::model::HostId(uuid))?,
-        ItemKind::Key => store.delete_key_record(sshcraft_core::model::KeyId(uuid))?,
+        ItemKind::Key => {
+            let id = sshcraft_core::model::KeyId(uuid);
+            if !store
+                .key_record(id)?
+                .is_some_and(|r| r.kind == sshcraft_core::keytypes::KeyKind::Device)
+            {
+                store.delete_key_record(id)?;
+            }
+        }
         ItemKind::Identity => store.delete_identity(sshcraft_core::model::IdentityId(uuid))?,
         ItemKind::Password => store.delete_password(sshcraft_core::model::PasswordId(uuid))?,
     }

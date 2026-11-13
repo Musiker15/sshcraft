@@ -244,3 +244,120 @@ async fn deleting_identity_reaches_second_device() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn protected_key_syncs_encrypted_and_stays_protected() {
+    let server = TestServer::start().await;
+    let (a, b) = pair(&server).await;
+    let server_a = server_id(&a);
+    let id = {
+        let store = a.store.lock().unwrap();
+        let info = a
+            .vault
+            .generate(
+                &store,
+                "deploy",
+                &sshcraft_core::keytypes::KeySpec::Ed25519,
+                Some("pw-sshcraft"),
+            )
+            .unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
+            .unwrap();
+        record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 100).unwrap();
+        info.id
+    };
+    sync(&a).await;
+    sync(&b).await;
+    let store = b.store.lock().unwrap();
+    let record = store.key_record(id).unwrap().expect("key reached b");
+    assert!(record.protected);
+    assert!(matches!(
+        b.vault.private_key(&store, id),
+        Err(sshcraft_core::vault::VaultError::PassphraseRequired)
+    ));
+    let a_key = {
+        let a_store = a.store.lock().unwrap();
+        a.vault.unlock_key(&a_store, id, "pw-sshcraft").unwrap()
+    };
+    let b_key = b.vault.unlock_key(&store, id, "pw-sshcraft").unwrap();
+    assert_eq!(
+        b_key.fingerprint(russh::keys::HashAlg::Sha256),
+        a_key.fingerprint(russh::keys::HashAlg::Sha256)
+    );
+}
+
+#[tokio::test]
+async fn device_key_never_syncs() {
+    let server = TestServer::start().await;
+    let (a, b) = pair(&server).await;
+    let key = {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "plain").unwrap();
+        let key = a.vault.private_key(&store, info.id).unwrap();
+        store.delete_key_record(info.id).unwrap();
+        a.vault.store_device_key(&store, "hello", &key).unwrap()
+    };
+    let host = host_with(ConnectionSettings {
+        key: Some(sshcraft_core::model::KeyRef::Stored { id: key.id }),
+        ..Default::default()
+    });
+    save_host(&a, &host);
+    // Even a stray outbox entry for the key must not send it.
+    record_local_change(
+        &a.store.lock().unwrap(),
+        ItemKind::Key,
+        &key.id.0.to_string(),
+        100,
+    )
+    .unwrap();
+    sync(&a).await;
+    sync(&b).await;
+    let store = b.store.lock().unwrap();
+    let hosts = store.list_hosts().unwrap();
+    let synced = hosts
+        .iter()
+        .find(|h| h.id == host.id)
+        .expect("host reached b");
+    assert_eq!(synced.settings.key, None);
+    assert!(store.key_record(key.id).unwrap().is_none());
+    assert!(store.list_key_records().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn certificate_travels_with_key() {
+    use russh::keys::ssh_key::certificate::{Builder, CertType};
+    let server = TestServer::start().await;
+    let (a, b) = pair(&server).await;
+    let server_a = server_id(&a);
+    let id = {
+        let store = a.store.lock().unwrap();
+        let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
+        let key = a.vault.private_key(&store, info.id).unwrap();
+        let ca = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+            .unwrap();
+        let mut builder = Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            key.public_key().key_data().clone(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.cert_type(CertType::User).unwrap();
+        builder.valid_principal("deploy").unwrap();
+        let text = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        a.vault.attach_certificate(&store, info.id, &text).unwrap();
+        store
+            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
+            .unwrap();
+        record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 100).unwrap();
+        info.id
+    };
+    sync(&a).await;
+    sync(&b).await;
+    let store = b.store.lock().unwrap();
+    let cert = sshcraft_core::vault::certificate(&store, id)
+        .unwrap()
+        .expect("certificate reached b");
+    assert_eq!(cert.valid_principals(), ["deploy".to_owned()]);
+}
