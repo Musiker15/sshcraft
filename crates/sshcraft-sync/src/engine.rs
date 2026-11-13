@@ -613,18 +613,20 @@ impl Engine {
                     };
                     // Keys are skipped uncounted while key sync is off, so turning it on (which
                     // fetches from the start) still brings them.
-                    // Logs likewise while log sync is off.
-                    if !sync_keys || !sync_logs {
-                        let kind = record_kind(&record, &key, &manifest, &author_devices);
-                        if kind.is_some_and(|k| {
-                            (!sync_keys && is_secret(k)) || (!sync_logs && k.is_log())
-                        }) {
-                            continue;
-                        }
-                    }
+                    // Logs likewise while log sync is off. The record is opened once: a skipped
+                    // one leaves the tracker as it was.
                     let before = tracker.clone();
                     match tracker.accept_record(&record, &key, &manifest, &author_devices) {
                         Ok((Freshness::Unchanged, _)) => {}
+                        Ok((Freshness::New, body))
+                            if decode(&body).ok().is_some_and(|item| {
+                                let kind = item.item().0;
+                                (!sync_keys && is_secret(kind)) || (!sync_logs && kind.is_log())
+                            }) =>
+                        {
+                            tracker = before;
+                            continue;
+                        }
                         Ok((Freshness::New, body)) => {
                             if let Some(assignment) = decode_key_assignment(&body) {
                                 if author == self.account && Some(area_id.0) == personal {
@@ -1047,6 +1049,15 @@ impl Engine {
                 lock(store)?.dequeue(self.server, kind, &id)?;
                 continue;
             }
+            // A log that does not open here is reported and left out; the rest still goes.
+            if kind.is_log() {
+                let guard = lock(store)?;
+                if let Err(err) = local_item(&guard, vault, kind, &id, 0) {
+                    guard.dequeue(self.server, kind, &id)?;
+                    self.warnings.push(format!("log_skipped: {err}"));
+                    continue;
+                }
+            }
             let mut conflicts = 0;
             while conflicts < CONFLICT_ROUNDS {
                 let personal = self.personal_area(store)?.0.area_id.0;
@@ -1428,7 +1439,15 @@ impl Engine {
             store.put_record_entry(self.server, &entry, kind, &item_id)?;
             return Err(SyncError::GroupCycle);
         }
-        apply_in(&store, vault, self.server, &item, Some(area), personal)?;
+        if let Err(err) = apply_in(&store, vault, self.server, &item, Some(area), personal) {
+            // A log record that does not fit (broken, or from a client that writes them
+            // differently) is refused for good instead of fetched again on every sync.
+            if kind.is_log() && matches!(err, SyncError::Proto(_)) {
+                store.put_record_entry(self.server, &entry, kind, &item_id)?;
+                return Ok(false);
+            }
+            return Err(err);
+        }
         if deleted || Some(area) == personal {
             store.clear_item_area(self.server, kind, &item_id)?;
         } else if store.effective_area(self.server, kind, &item_id)? != Some(area) {
@@ -1756,20 +1775,6 @@ fn remove_item(store: &Store, kind: ItemKind, id: &str) -> Result<(), SyncError>
 }
 
 /// Whether a record holds a key or a password, read without counting it in the tracker.
-/// The kind of item a record holds, if it opens.
-fn record_kind(
-    record: &SealedRecord,
-    key: &AreaKey,
-    manifest: &AreaManifest,
-    devices: &DeviceSet,
-) -> Option<ItemKind> {
-    record
-        .open(key, manifest, devices)
-        .ok()
-        .and_then(|body| decode(&body).ok())
-        .map(|item| item.item().0)
-}
-
 /// A host, group or identity that points to a key, password or identity which does not live at
 /// this server, or not in the area the record goes to, sends no reference to it: each device
 /// (each member) assigns its own (design, sections 7 and 8). Agent keys never go into a share.

@@ -591,7 +591,22 @@ impl SessionManager {
             .expect("sessions lock")
             .get(&id)
             .and_then(|live| live.recorder.as_ref())
-            .is_some_and(|recorder| !recorder.is_finished())
+            .is_some_and(|recorder| recorder.is_active())
+    }
+
+    /// Ends every running recording (the app is quitting): the rest is stored and each log
+    /// ends now instead of at the next start.
+    pub fn finish_recordings(&self) {
+        let recorders: Vec<_> = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .values()
+            .filter_map(|live| live.recorder.clone())
+            .collect();
+        for recorder in recorders {
+            recorder.finish();
+        }
     }
 
     /// A bookmark in the session's log at the output so far.

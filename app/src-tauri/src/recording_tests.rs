@@ -236,9 +236,11 @@ async fn housekeeping_deletes_only_expired_logs() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(
-        housekeeping(&store, &vault, 30, now, false).unwrap(),
-        vec![ids[0]]
+    // Both logs are on this device only: nothing to send anywhere.
+    assert!(
+        housekeeping(&store, &vault, 30, now, false)
+            .unwrap()
+            .is_empty()
     );
     let left: Vec<LogId> = session_log::list(&vault, &store.lock().unwrap())
         .unwrap()
@@ -271,4 +273,95 @@ async fn the_end_is_reported_once() {
     let id = recorder.id();
     drop(recorder);
     assert_eq!(*ended.lock().unwrap(), vec![id]);
+}
+
+fn server_row(store: &Store) -> sshcraft_core::model::ServerId {
+    let server = sshcraft_core::model::ServerId(Uuid::new_v4());
+    store
+        .add_server(&sshcraft_core::store::ServerRow {
+            id: server,
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [7; 32],
+            device_id: Uuid::new_v4(),
+            sealed_device: Vec::new(),
+            sync_enabled: true,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    server
+}
+
+#[tokio::test]
+async fn expired_synced_logs_are_deleted_at_their_server_too() {
+    let (store, vault) = setup();
+    let day = 24 * 60 * 60 * 1000;
+    let now = 100 * day;
+    let meta = meta();
+    let server = {
+        let guard = store.lock().unwrap();
+        session_log::create(&vault, &guard, &meta).unwrap();
+        session_log::append_chunk(&vault, &guard, meta.id, 0, b"old", 1).unwrap();
+        session_log::finish(&vault, &guard, meta.id, now - 40 * day, 3, false).unwrap();
+        let server = server_row(&guard);
+        session_log::set_location(&guard, meta.id, Some(server)).unwrap();
+        server
+    };
+    assert_eq!(
+        housekeeping(&store, &vault, 30, now, false).unwrap(),
+        vec![server]
+    );
+    let outbox = store.lock().unwrap().outbox(server).unwrap();
+    assert!(outbox.contains(&(sshcraft_core::store::ItemKind::Log, meta.id.0.to_string())));
+    assert_eq!(outbox.len(), 2);
+}
+
+#[tokio::test]
+async fn a_session_without_output_leaves_no_log() {
+    let (store, vault) = setup();
+    let recorder = Recorder::start(
+        store.clone(),
+        vault.clone(),
+        &meta(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
+    assert!(recorder.finish().is_none());
+    assert!(
+        session_log::list(&vault, &store.lock().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn no_bookmark_after_the_end() {
+    let (store, vault) = setup();
+    let recorder = Recorder::start(
+        store.clone(),
+        vault.clone(),
+        &meta(),
+        Limits::default(),
+        None,
+    )
+    .unwrap();
+    recorder.record(b"output");
+    recorder.finish();
+    assert!(matches!(recorder.bookmark("late"), Err(LogError::NotFound)));
+    let id = recorder.id();
+    assert!(stored_meta(&store, &vault, id).marks.is_empty());
+}
+
+#[tokio::test]
+async fn a_cut_recording_is_no_longer_active() {
+    let (store, vault) = setup();
+    let recorder = Recorder::start(store, vault, &meta(), small(16, 20), None).unwrap();
+    assert!(recorder.is_active());
+    recorder.record(&[b'x'; 30]);
+    assert!(!recorder.is_active());
 }

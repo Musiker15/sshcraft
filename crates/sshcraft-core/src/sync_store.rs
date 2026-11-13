@@ -253,26 +253,27 @@ impl Store {
     /// Switches log sync. Turning it on fetches every area from the start again, like key sync:
     /// log records skipped while it was off were never counted.
     pub fn set_sync_logs(&self, id: ServerId, on: bool) -> Result<(), StoreError> {
-        let tx = self.conn.unchecked_transaction()?;
-        let was: Option<bool> = tx
-            .query_row(
-                "SELECT sync_logs FROM sync_servers WHERE id = ?1",
-                [id.0.to_string()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        tx.execute(
-            "UPDATE sync_servers SET sync_logs = ?2 WHERE id = ?1",
-            params![id.0.to_string(), on],
-        )?;
-        if on && was == Some(false) {
-            tx.execute(
-                "UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1",
-                [id.0.to_string()],
+        self.atomic(|| {
+            let was: Option<bool> = self
+                .conn
+                .query_row(
+                    "SELECT sync_logs FROM sync_servers WHERE id = ?1",
+                    [id.0.to_string()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            self.conn.execute(
+                "UPDATE sync_servers SET sync_logs = ?2 WHERE id = ?1",
+                params![id.0.to_string(), on],
             )?;
-        }
-        tx.commit()?;
-        Ok(())
+            if on && was == Some(false) {
+                self.conn.execute(
+                    "UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1",
+                    [id.0.to_string()],
+                )?;
+            }
+            Ok(())
+        })
     }
 
     pub fn mark_server_revoked(&self, id: ServerId) -> Result<(), StoreError> {

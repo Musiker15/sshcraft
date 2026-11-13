@@ -387,3 +387,98 @@ fn session_log_setting_inherits_from_groups() {
     host.settings.session_log = None;
     assert_eq!(crate::model::session_log_for(&host, &groups), None);
 }
+
+#[test]
+fn adding_a_mark_keeps_marks_added_meanwhile() {
+    let (store, vault) = setup();
+    let meta = recorded(&store, &vault, 1, &[b"0123456789"]);
+    // The terminal sets a bookmark while a viewer still shows no marks.
+    add_mark(
+        &vault,
+        &store,
+        meta.id,
+        mark(MarkKind::Bookmark, 4, "terminal"),
+    )
+    .unwrap();
+    let from_viewer = mark(MarkKind::Comment, 8, "viewer");
+    let saved = add_mark(&vault, &store, meta.id, from_viewer.clone()).unwrap();
+    let texts: Vec<&str> = saved.marks.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(texts, vec!["terminal", "viewer"]);
+    let after = remove_mark(&vault, &store, meta.id, from_viewer.id).unwrap();
+    assert_eq!(after.marks.len(), 1);
+    assert_eq!(after.marks[0].text, "terminal");
+}
+
+#[test]
+fn orphaned_local_parts_are_purged_synced_ones_kept() {
+    let (store, vault) = setup();
+    let kept = recorded(&store, &vault, 1, &[b"keep"]);
+    let gone = LogId(Uuid::new_v4());
+    append_chunk(&vault, &store, gone, 0, b"left over", 2).unwrap();
+    let early = LogId(Uuid::new_v4());
+    put_chunk(
+        &vault,
+        &store,
+        Uuid::new_v4(),
+        early,
+        0,
+        b"header follows",
+        2,
+        Some(ServerId(Uuid::new_v4())),
+    )
+    .unwrap();
+    assert_eq!(purge_orphans(&store).unwrap(), 1);
+    assert!(chunk_ids(&store, gone).unwrap().is_empty());
+    assert_eq!(chunk_ids(&store, early).unwrap().len(), 1);
+    assert_eq!(read(&vault, &store, kept.id).unwrap(), b"keep");
+}
+
+#[test]
+fn running_tells_logs_being_recorded() {
+    let (store, vault) = setup();
+    let open = new_meta(1);
+    create(&vault, &store, &open).unwrap();
+    let done = recorded(&store, &vault, 2, &[b"x"]);
+    assert!(running(&store, open.id).unwrap());
+    assert!(!running(&store, done.id).unwrap());
+    assert!(!running(&store, LogId(Uuid::new_v4())).unwrap());
+}
+
+#[test]
+fn atomic_undoes_everything_on_error_and_nests() {
+    let (store, vault) = setup();
+    let meta = recorded(&store, &vault, 1, &[b"a", b"b"]);
+    let server = ServerId(Uuid::new_v4());
+    let result: Result<(), LogError> = store.atomic(|| {
+        set_location(&store, meta.id, Some(server))?;
+        delete(&store, meta.id)?;
+        Err(LogError::Invalid("stop"))
+    });
+    assert!(result.is_err());
+    assert_eq!(location(&store, meta.id).unwrap(), Some(None));
+    assert_eq!(read(&vault, &store, meta.id).unwrap(), b"ab");
+}
+
+#[test]
+fn search_bytes_counts_towards_one_limit() {
+    let id = LogId(Uuid::new_v4());
+    let mut hits = Vec::new();
+    let text = "x match\n".repeat(150);
+    search_bytes(id, text.as_bytes(), "match", &mut hits);
+    search_bytes(id, text.as_bytes(), "match", &mut hits);
+    assert_eq!(hits.len(), MAX_HITS);
+    let mut none = Vec::new();
+    search_bytes(id, b"match", "m", &mut none);
+    assert!(none.is_empty());
+}
+
+#[test]
+fn a_file_store_writes_ahead() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("s.db")).unwrap();
+    let mode: String = store
+        .conn
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(mode, "wal");
+}

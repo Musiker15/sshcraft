@@ -39,7 +39,16 @@ pub fn run() {
                 let store = state.store.clone();
                 let days = settings::load(&store.lock().expect("store lock")).log_retention_days;
                 let _ = recording::housekeeping(&store, &vault, days, recording::now_ms(), true);
-                tauri::async_runtime::spawn(recording::tidy_regularly(store, vault));
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(recording::tidy_regularly(
+                    store,
+                    vault,
+                    move |servers| {
+                        if let Some(state) = handle.try_state::<state::AppState>() {
+                            state.sync.nudge(servers);
+                        }
+                    },
+                ));
             }
             app.manage(state);
             // Runtimes need the async runtime; start them on it.
@@ -60,7 +69,8 @@ pub fn run() {
             commands::data::get_settings,
             commands::logs::logs_list,
             commands::logs::log_read,
-            commands::logs::log_save_marks,
+            commands::logs::log_add_mark,
+            commands::logs::log_remove_mark,
             commands::logs::logs_delete,
             commands::logs::logs_search,
             commands::logs::log_export,
@@ -145,6 +155,13 @@ pub fn run() {
             commands::sync::move_item,
             commands::sync::account_key_qr,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event
+                && let Some(state) = app.try_state::<state::AppState>()
+            {
+                state.sessions.finish_recordings();
+            }
+        });
 }

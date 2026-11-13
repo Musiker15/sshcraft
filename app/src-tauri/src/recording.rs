@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use sshcraft_core::model::LogId;
+use sshcraft_core::model::{LogId, ServerId};
 use sshcraft_core::session_log::{self, LogError, LogMark, LogMeta, MarkKind};
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::Vault;
@@ -164,6 +164,12 @@ impl Recorder {
         self.state().finished
     }
 
+    /// Still taking output: not ended, not cut at the size limit, storing works.
+    pub fn is_active(&self) -> bool {
+        let state = self.state();
+        !state.finished && !state.failed && !state.truncated
+    }
+
     /// Bytes stored so far: what a bookmark points at and what the log ends with.
     fn stored(&self, state: &State) -> u64 {
         if state.failed {
@@ -176,6 +182,10 @@ impl Recorder {
     /// A bookmark at the output recorded so far, with `text` (the time when empty).
     pub fn bookmark(&self, text: &str) -> Result<LogMark, LogError> {
         let mut state = self.state();
+        // An ended log is placed and maybe synced already; the viewer edits it from then on.
+        if state.finished || state.failed {
+            return Err(LogError::NotFound);
+        }
         self.flush(&mut state);
         let offset = self.stored(&state);
         let mark = LogMark {
@@ -186,11 +196,7 @@ impl Recorder {
             created_at: now_ms(),
         };
         let store = self.store.lock().expect("store lock");
-        let mut marks = session_log::meta(&self.vault, &store, self.id)?
-            .ok_or(LogError::NotFound)?
-            .marks;
-        marks.push(mark.clone());
-        session_log::save_marks(&self.vault, &store, self.id, marks)?;
+        session_log::add_mark(&self.vault, &store, self.id, mark.clone())?;
         Ok(mark)
     }
 
@@ -205,15 +211,25 @@ impl Recorder {
             state.finished = true;
             let size = self.stored(&state);
             let store = self.store.lock().expect("store lock");
-            session_log::finish(
-                &self.vault,
-                &store,
-                self.id,
-                now_ms(),
-                size,
-                state.truncated,
-            )
-            .ok()
+            let marked = session_log::meta(&self.vault, &store, self.id)
+                .ok()
+                .flatten()
+                .is_some_and(|m| !m.marks.is_empty());
+            if size == 0 && !marked {
+                // Nothing came (the connection failed, or the tab closed at once): no log.
+                let _ = session_log::delete(&store, self.id);
+                None
+            } else {
+                session_log::finish(
+                    &self.vault,
+                    &store,
+                    self.id,
+                    now_ms(),
+                    size,
+                    state.truncated,
+                )
+                .ok()
+            }
         };
         if done.is_some()
             && let Some(on_finish) = &self.on_finish
@@ -264,36 +280,51 @@ impl SessionSink for LogSink {
     }
 }
 
-/// Ends logs left open by a stopped app (at start only) and deletes those older than the
-/// retention allows.
+/// Ends logs left open by a stopped app and removes their stray parts (at start only), and
+/// deletes those older than the retention allows, here and at their sync servers. Returns the
+/// servers that have deletions to send.
 pub fn housekeeping(
     store: &Mutex<Store>,
     vault: &Vault,
     retention_days: u32,
     now_ms: i64,
     at_start: bool,
-) -> Result<Vec<LogId>, LogError> {
+) -> Result<Vec<ServerId>, String> {
     let store = store.lock().expect("store lock");
     if at_start {
-        session_log::finish_abandoned(vault, &store)?;
+        session_log::finish_abandoned(vault, &store).map_err(|e| e.to_string())?;
+        session_log::purge_orphans(&store).map_err(|e| e.to_string())?;
     }
     if retention_days == 0 {
         return Ok(Vec::new());
     }
     let before = now_ms.saturating_sub(i64::from(retention_days) * 24 * 60 * 60 * 1000);
-    let expired = session_log::expired(&store, before)?;
-    for id in &expired {
-        session_log::delete(&store, *id)?;
+    let expired = session_log::expired(&store, before).map_err(|e| e.to_string())?;
+    let mut servers = Vec::new();
+    for id in expired {
+        if let Some(server) =
+            sshcraft_sync::logs::delete_log(&store, id, now_ms).map_err(|e| e.to_string())?
+            && !servers.contains(&server)
+        {
+            servers.push(server);
+        }
     }
-    Ok(expired)
+    Ok(servers)
 }
 
-/// Deletes expired logs every hour (the first run is at start, see `housekeeping`).
-pub async fn tidy_regularly(store: Arc<Mutex<Store>>, vault: Arc<Vault>) {
+/// Deletes expired logs every hour (the first run is at start, see `housekeeping`) and tells
+/// `nudge` the servers that have deletions to send.
+pub async fn tidy_regularly(
+    store: Arc<Mutex<Store>>,
+    vault: Arc<Vault>,
+    nudge: impl Fn(&[ServerId]) + Send + 'static,
+) {
     loop {
         tokio::time::sleep(Duration::from_secs(60 * 60)).await;
         let days = crate::settings::load(&store.lock().expect("store lock")).log_retention_days;
-        let _ = housekeeping(&store, &vault, days, now_ms(), false);
+        if let Ok(servers) = housekeeping(&store, &vault, days, now_ms(), false) {
+            nudge(&servers);
+        }
     }
 }
 

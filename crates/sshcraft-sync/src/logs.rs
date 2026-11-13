@@ -20,6 +20,10 @@ fn queue_log(store: &Store, server: ServerId, id: LogId, now_ms: i64) -> Result<
 /// Moves every ended log to where its host lives now and queues it at the old and the new
 /// place. Returns the servers that have something to send.
 pub fn place_logs(store: &Store, now_ms: i64) -> Result<Vec<ServerId>, SyncError> {
+    store.atomic(|| place_logs_inner(store, now_ms))
+}
+
+fn place_logs_inner(store: &Store, now_ms: i64) -> Result<Vec<ServerId>, SyncError> {
     let mut servers = Vec::new();
     for (id, at, wanted) in session_log::misplaced(store).map_err(log_error)? {
         if let Some(old) = at {
@@ -39,6 +43,10 @@ pub fn place_logs(store: &Store, now_ms: i64) -> Result<Vec<ServerId>, SyncError
 
 /// Deletes a log here and, if it lives at a server, there too. Returns that server.
 pub fn delete_log(store: &Store, id: LogId, now_ms: i64) -> Result<Option<ServerId>, SyncError> {
+    store.atomic(|| delete_log_inner(store, id, now_ms))
+}
+
+fn delete_log_inner(store: &Store, id: LogId, now_ms: i64) -> Result<Option<ServerId>, SyncError> {
     let at = session_log::location(store, id)
         .map_err(log_error)?
         .flatten();
@@ -49,19 +57,27 @@ pub fn delete_log(store: &Store, id: LogId, now_ms: i64) -> Result<Option<Server
     Ok(at)
 }
 
-/// Switches log sync for a server; turning it on queues the logs already there.
+/// Switches log sync for a server; turning it on queues the logs there that it has not had yet
+/// (a log already sent, or received from another device, is not sent again).
 pub fn set_sync_logs(
     store: &Store,
     server: ServerId,
     on: bool,
     now_ms: i64,
 ) -> Result<(), SyncError> {
-    store.set_sync_logs(server, on)?;
-    if on {
-        place_logs(store, now_ms)?;
-        for id in session_log::logs_at(store, server).map_err(log_error)? {
-            queue_log(store, server, id, now_ms)?;
+    store.atomic(|| {
+        store.set_sync_logs(server, on)?;
+        if on {
+            place_logs_inner(store, now_ms)?;
+            for id in session_log::logs_at(store, server).map_err(log_error)? {
+                if store
+                    .record_entry(server, ItemKind::Log, &id.0.to_string())?
+                    .is_none()
+                {
+                    queue_log(store, server, id, now_ms)?;
+                }
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }

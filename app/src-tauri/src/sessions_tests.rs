@@ -2050,3 +2050,23 @@ async fn nothing_is_recorded_without_the_vault() {
     assert!(!manager.is_recording(id));
     manager.close(id);
 }
+
+#[tokio::test]
+async fn quitting_ends_running_recordings() {
+    let f = fixture(true).await;
+    set_recording(&f, Some(true), false);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(
+        SessionTarget::Host { host_id: f.host_id },
+        80,
+        24,
+        sink.clone(),
+    );
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    echo(&f, &sink, id, b"before quit").await;
+    f.manager.finish_recordings();
+    assert!(!f.manager.is_recording(id));
+    let logs = logs(&f);
+    assert!(logs[0].meta.ended_at.is_some());
+    f.manager.close(id);
+}

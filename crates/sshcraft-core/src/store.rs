@@ -184,7 +184,33 @@ type KeyRow = (
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        Self::init(rusqlite::Connection::open(path)?)
+        let conn = rusqlite::Connection::open(path)?;
+        // Many small writes (recorded output, the sync outbox): WAL with NORMAL sync keeps each
+        // commit from waiting for the disk; a crash loses no transaction that reached the log.
+        let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        Self::init(conn)
+    }
+
+    /// Runs `f` as one unit: all its writes or none. Nests (savepoints), unlike a transaction.
+    pub fn atomic<T, E: From<StoreError>>(&self, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        self.conn
+            .execute_batch("SAVEPOINT atomic")
+            .map_err(|e| E::from(e.into()))?;
+        match f() {
+            Ok(value) => {
+                self.conn
+                    .execute_batch("RELEASE atomic")
+                    .map_err(|e| E::from(e.into()))?;
+                Ok(value)
+            }
+            Err(err) => {
+                let _ = self
+                    .conn
+                    .execute_batch("ROLLBACK TO atomic; RELEASE atomic");
+                Err(err)
+            }
+        }
     }
 
     /// Runs SQL on the database as it is, for tests that need a broken or odd state.

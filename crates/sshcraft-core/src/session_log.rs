@@ -377,6 +377,31 @@ pub fn save_marks(
     Ok(meta)
 }
 
+/// Adds one bookmark or comment to what the log has now (others may have added theirs since).
+pub fn add_mark(
+    vault: &Vault,
+    store: &Store,
+    id: LogId,
+    mark: LogMark,
+) -> Result<LogMeta, LogError> {
+    let mut marks = meta(vault, store, id)?.ok_or(LogError::NotFound)?.marks;
+    marks.retain(|m| m.id != mark.id);
+    marks.push(mark);
+    save_marks(vault, store, id, marks)
+}
+
+/// Removes one bookmark or comment and keeps the others as they are now.
+pub fn remove_mark(
+    vault: &Vault,
+    store: &Store,
+    id: LogId,
+    mark: Uuid,
+) -> Result<LogMeta, LogError> {
+    let mut marks = meta(vault, store, id)?.ok_or(LogError::NotFound)?.marks;
+    marks.retain(|m| m.id != mark);
+    save_marks(vault, store, id, marks)
+}
+
 /// Every log with a header that opens, newest first.
 pub fn list(vault: &Vault, store: &Store) -> Result<Vec<LogSummary>, LogError> {
     let mut stmt = store
@@ -400,8 +425,11 @@ pub fn list(vault: &Vault, store: &Store) -> Result<Vec<LogSummary>, LogError> {
         .collect())
 }
 
-/// The recorded output of a log, all parts in order.
-pub fn read(vault: &Vault, store: &Store, id: LogId) -> Result<Vec<u8>, LogError> {
+/// A log's header and its sealed parts as stored, in order; opened with [`open_parts`]. Reading
+/// them is quick, so a caller can hold the store only for this and decrypt afterwards.
+pub type SealedLog = (LogMeta, Vec<(u32, Vec<u8>)>);
+
+pub fn sealed_log(vault: &Vault, store: &Store, id: LogId) -> Result<SealedLog, LogError> {
     let meta = meta(vault, store, id)?.ok_or(LogError::NotFound)?;
     let mut stmt = store
         .conn
@@ -411,6 +439,17 @@ pub fn read(vault: &Vault, store: &Store, id: LogId) -> Result<Vec<u8>, LogError
             Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    Ok((meta, rows))
+}
+
+/// The recorded output of a log, all parts in order.
+pub fn read(vault: &Vault, store: &Store, id: LogId) -> Result<Vec<u8>, LogError> {
+    open_parts(vault, sealed_log(vault, store, id)?)
+}
+
+/// Opens the parts of [`sealed_log`]: none may be missing, out of place or foreign.
+pub fn open_parts(vault: &Vault, (meta, rows): SealedLog) -> Result<Vec<u8>, LogError> {
+    let id = meta.id;
     let mut out = Vec::new();
     for (expected, (seq, sealed)) in rows.into_iter().enumerate() {
         if usize::try_from(seq).ok() != Some(expected) {
@@ -429,14 +468,39 @@ pub fn read(vault: &Vault, store: &Store, id: LogId) -> Result<Vec<u8>, LogError
 
 /// Removes a log and its parts. Parts that came without their header go too.
 pub fn delete(store: &Store, id: LogId) -> Result<(), LogError> {
-    let tx = store.conn.unchecked_transaction()?;
-    tx.execute(
-        "DELETE FROM session_log_chunks WHERE log_id = ?1",
-        [id.0.to_string()],
-    )?;
-    tx.execute("DELETE FROM session_logs WHERE id = ?1", [id.0.to_string()])?;
-    tx.commit()?;
-    Ok(())
+    store.atomic(|| {
+        store.conn.execute(
+            "DELETE FROM session_log_chunks WHERE log_id = ?1",
+            [id.0.to_string()],
+        )?;
+        store
+            .conn
+            .execute("DELETE FROM session_logs WHERE id = ?1", [id.0.to_string()])?;
+        Ok(())
+    })
+}
+
+/// Whether a log is still being recorded (has no end yet).
+pub fn running(store: &Store, id: LogId) -> Result<bool, LogError> {
+    let ended: Option<Option<i64>> = store
+        .conn
+        .query_row(
+            "SELECT ended_at FROM session_logs WHERE id = ?1",
+            [id.0.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(matches!(ended, Some(None)))
+}
+
+/// Removes parts on this device only that have no header (left by a log deleted while it was
+/// recorded). Call it only while nothing records. Returns how many went.
+pub fn purge_orphans(store: &Store) -> Result<usize, LogError> {
+    Ok(store.conn.execute(
+        "DELETE FROM session_log_chunks WHERE location IS NULL
+             AND log_id NOT IN (SELECT id FROM session_logs)",
+        [],
+    )?)
 }
 
 /// Removes one part (a deletion that came by sync).
@@ -461,17 +525,17 @@ pub fn chunk_ids(store: &Store, id: LogId) -> Result<Vec<String>, LogError> {
 /// Moves a log with its parts to a server or back to this device.
 pub fn set_location(store: &Store, id: LogId, location: Option<ServerId>) -> Result<(), LogError> {
     let target = location.map(|s| s.0.to_string());
-    let tx = store.conn.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE session_logs SET location = ?2 WHERE id = ?1",
-        params![id.0.to_string(), target],
-    )?;
-    tx.execute(
-        "UPDATE session_log_chunks SET location = ?2 WHERE log_id = ?1",
-        params![id.0.to_string(), target],
-    )?;
-    tx.commit()?;
-    Ok(())
+    store.atomic(|| {
+        store.conn.execute(
+            "UPDATE session_logs SET location = ?2 WHERE id = ?1",
+            params![id.0.to_string(), target],
+        )?;
+        store.conn.execute(
+            "UPDATE session_log_chunks SET location = ?2 WHERE log_id = ?1",
+            params![id.0.to_string(), target],
+        )?;
+        Ok(())
+    })
 }
 
 /// The ended logs of a host.
@@ -578,22 +642,34 @@ pub fn search(vault: &Vault, store: &Store, query: &str) -> Result<Vec<LogHit>, 
         let Ok(bytes) = read(vault, store, summary.meta.id) else {
             continue;
         };
-        for (number, line) in plain_text(&bytes).lines().enumerate() {
-            let lower = line.to_lowercase();
-            let Some(at) = lower.find(&needle) else {
-                continue;
-            };
-            hits.push(LogHit {
-                log_id: summary.meta.id,
-                line: u32::try_from(number).unwrap_or(u32::MAX),
-                snippet: snippet(line, lower[..at].chars().count()),
-            });
-            if hits.len() == MAX_HITS {
-                return Ok(hits);
-            }
+        search_bytes(summary.meta.id, &bytes, query, &mut hits);
+        if hits.len() >= MAX_HITS {
+            break;
         }
     }
     Ok(hits)
+}
+
+/// Adds the lines of one log's output containing `query` to `hits`, up to [`MAX_HITS`] in all.
+pub fn search_bytes(log: LogId, bytes: &[u8], query: &str, hits: &mut Vec<LogHit>) {
+    let needle = query.trim().to_lowercase();
+    if !(MIN_QUERY..=MAX_QUERY).contains(&needle.chars().count()) {
+        return;
+    }
+    for (number, line) in plain_text(bytes).lines().enumerate() {
+        if hits.len() >= MAX_HITS {
+            return;
+        }
+        let lower = line.to_lowercase();
+        let Some(at) = lower.find(&needle) else {
+            continue;
+        };
+        hits.push(LogHit {
+            log_id: log,
+            line: u32::try_from(number).unwrap_or(u32::MAX),
+            snippet: snippet(line, lower[..at].chars().count()),
+        });
+    }
 }
 
 /// Up to [`MAX_SNIPPET`] characters of `line` around the character position `at`.
