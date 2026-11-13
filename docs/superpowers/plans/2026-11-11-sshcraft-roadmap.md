@@ -21,7 +21,7 @@ mit dem Wissen aus den vorherigen.
 | 10 | Schlüssel erweitert | ECDSA und RSA erzeugen, Passphrase speichern, öffentlichen Schlüssel in `authorized_keys` eintragen, SSH-Zertifikate, FIDO2-Hardwareschlüssel, gerätegebundene Schlüssel (Windows Hello mit TPM) | fertig, auf `main` |
 | 11 | Workspaces | Split und Fokus mit 2 bis 16 Sitzungen, Broadcast, Workspace-Vorlagen, Statuspunkte, Tastenkürzel, Terminaltyp, OSC 52, Links | fertig, auf `main` |
 | 12 | Portweiterleitung | lokal, entfernt, dynamisch (SOCKS), Regelseite, Assistent | fertig, auf `main` |
-| 13 | Snippets und Autovervollständigung | Snippets in Paketen, auf mehreren Hosts ausführen, Seitenleiste mit Verlauf, Autovervollständigung aus Verlauf, Pfaden, Snippets und Befehlen (ohne KI) | offen |
+| 13 | Snippets und Autovervollständigung | Snippets in Paketen, auf mehreren Hosts ausführen, Seitenleiste mit Verlauf, Autovervollständigung aus Verlauf, Pfaden, Snippets und Befehlen (ohne KI) | fertig, auf `main` |
 | 14 | Sitzungsprotokolle | Aufzeichnung, Lesezeichen, Kommentare, Suche, Löschen, Export, Aufbewahrung, Sync | offen |
 | 15 | Agent-Anbindung | `sshcraft mcp`, Kommandozeile `sshcraft`, Rechte pro Aktion, Bestätigungsfenster, Ausblenden, Protokoll | offen |
 | 16 | Desktop-Plattformen | macOS, Linux und FreeBSD: Agent über `SSH_AUTH_SOCK`, Keychain und Secret Service, Touch ID, Login-Shell als lokales Terminal, `pass-cli`-Pfade; CI-Matrix für alle Desktop-Ziele | offen |

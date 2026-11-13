@@ -45,10 +45,10 @@ pub struct KeyRecord {
 }
 
 pub struct Store {
-    conn: rusqlite::Connection,
+    pub(crate) conn: rusqlite::Connection,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 8;
+pub(crate) const SCHEMA_VERSION: i64 = 9;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS recent_hosts (
     host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
     connected_at INTEGER NOT NULL
+);
+";
+
+/// Version 9: snippets, and the sealed command history per terminal target.
+pub(crate) const SCHEMA_V9: &str = "
+CREATE TABLE snippets (
+    id TEXT PRIMARY KEY,
+    sealed BLOB NOT NULL
+);
+CREATE TABLE command_history (
+    scope TEXT PRIMARY KEY,
+    sealed BLOB NOT NULL
 );
 ";
 
@@ -229,6 +241,12 @@ impl Store {
         if version < 8 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V8)?;
+            tx.pragma_update(None, "user_version", 8)?;
+            tx.commit()?;
+        }
+        if version < 9 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V9)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }

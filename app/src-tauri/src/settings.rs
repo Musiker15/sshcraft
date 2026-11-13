@@ -22,7 +22,7 @@ pub const TERMINAL_TYPES: [&str; 7] = [
 ];
 
 /// Actions a shortcut can trigger; the same names as `ShortcutAction` in the UI.
-pub const SHORTCUT_ACTIONS: [&str; 11] = [
+pub const SHORTCUT_ACTIONS: [&str; 12] = [
     "palette",
     "newTab",
     "closeTab",
@@ -34,6 +34,7 @@ pub const SHORTCUT_ACTIONS: [&str; 11] = [
     "prevPane",
     "toggleLayout",
     "toggleBroadcast",
+    "toggleSidebar",
 ];
 const MAX_COMBOS: usize = 4;
 const MAX_COMBO_LEN: usize = 40;
@@ -125,6 +126,10 @@ pub struct AppSettings {
     pub clipboard_osc52: Osc52,
     /// Shortcuts that differ from the defaults, by action; an empty list unbinds the action.
     pub shortcuts: BTreeMap<String, Vec<String>>,
+    /// Commands typed in terminals are kept (sealed) for the sidebar and completion.
+    pub history: bool,
+    /// Suggestions while typing in a terminal.
+    pub autocomplete: bool,
 }
 
 impl Default for AppSettings {
@@ -139,6 +144,8 @@ impl Default for AppSettings {
             terminal_type: TERMINAL_TYPES[0].into(),
             clipboard_osc52: Osc52::Write,
             shortcuts: BTreeMap::new(),
+            history: true,
+            autocomplete: true,
         }
     }
 }
@@ -201,6 +208,8 @@ pub fn load(store: &Store) -> AppSettings {
         terminal_type: field(&map, "terminal_type").unwrap_or(defaults.terminal_type),
         clipboard_osc52: field(&map, "clipboard_osc52").unwrap_or(defaults.clipboard_osc52),
         shortcuts: field(&map, "shortcuts").unwrap_or(defaults.shortcuts),
+        history: field(&map, "history").unwrap_or(defaults.history),
+        autocomplete: field(&map, "autocomplete").unwrap_or(defaults.autocomplete),
     }
     .sanitized()
 }
@@ -326,6 +335,8 @@ mod tests {
             terminal_type: "vt100".into(),
             clipboard_osc52: Osc52::Off,
             shortcuts: BTreeMap::from([("newTab".to_owned(), vec!["Ctrl+Shift+N".to_owned()])]),
+            history: false,
+            autocomplete: false,
         };
         save(&store, wanted.clone()).unwrap();
         assert_eq!(load(&store), wanted);
@@ -422,7 +433,18 @@ mod tests {
 
     #[test]
     fn every_action_is_known() {
-        assert_eq!(SHORTCUT_ACTIONS.len(), 11);
+        assert_eq!(SHORTCUT_ACTIONS.len(), 12);
+        assert!(SHORTCUT_ACTIONS.contains(&"toggleSidebar"));
         assert!(SHORTCUT_ACTIONS.contains(&"toggleBroadcast"));
+    }
+
+    #[test]
+    fn history_and_autocomplete_are_on_by_default_and_kept() {
+        let defaults = AppSettings::default();
+        assert!(defaults.history && defaults.autocomplete);
+        let old = load(&store_with(r#"{"language":"de"}"#));
+        assert!(old.history && old.autocomplete);
+        let off = load(&store_with(r#"{"history":false,"autocomplete":false}"#));
+        assert!(!off.history && !off.autocomplete);
     }
 }

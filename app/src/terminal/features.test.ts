@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { expectsInput, isOpenableLink, isTerminalReport, osc52Text, osc7Path, startupInput } from "./features";
+import { expectsInput, historyScope, isOpenableLink, isTerminalReport, osc52Text, osc7Path, startupInput } from "./features";
 
 const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
 
@@ -125,3 +125,14 @@ test.each([["ls\r"], ["a"], ["\x1b[A"], ["\x1b[1;5C"], ["\x1b"], ["\x1bOP"], ["\
   },
 );
 
+
+test("a snippet start is typed exactly as given", () => {
+  expect(startupInput(host, { raw: "uptime\rdf -h\r" })).toBe("uptime\rdf -h\r");
+  expect(startupInput(serial, { raw: "AT\r" })).toBe("AT\r");
+});
+
+test("history scopes per host and local shell, none for serial", () => {
+  expect(historyScope(host)).toBe("host:h");
+  expect(historyScope(local)).toBe("local:cmd");
+  expect(historyScope(serial)).toBeNull();
+});

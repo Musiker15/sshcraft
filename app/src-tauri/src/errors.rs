@@ -95,6 +95,10 @@ pub enum ErrorCode {
     BindFailed,
     /// The server does not allow the remote forwarding.
     ForwardRefused,
+    /// A snippet is not valid (name, content, more than 1000 snippets).
+    InvalidSnippet,
+    /// The command history needs the unlocked vault.
+    HistoryUnavailable,
 }
 
 impl From<&ResolveError> for ErrorCode {
@@ -148,6 +152,17 @@ impl From<sshcraft_core::store::StoreError> for CommandError {
                 Self::new(ErrorCode::InvalidForward, e)
             }
             e => Self::new(ErrorCode::Store, e),
+        }
+    }
+}
+
+impl From<sshcraft_core::snippets::SnippetStoreError> for CommandError {
+    fn from(e: sshcraft_core::snippets::SnippetStoreError) -> Self {
+        use sshcraft_core::snippets::SnippetStoreError as E;
+        match e {
+            E::Invalid(e) => Self::new(ErrorCode::InvalidSnippet, e),
+            E::Vault(e) => e.into(),
+            E::Store(e) => e.into(),
         }
     }
 }

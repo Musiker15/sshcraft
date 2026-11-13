@@ -38,6 +38,7 @@ encrypted vault.
 | Sync server API | [docs/server-api.md](docs/server-api.md) |
 | Workspaces, broadcast, templates and terminal settings | [docs/workspaces.md](docs/workspaces.md) |
 | Port forwarding: local, remote, SOCKS | [docs/forwarding.md](docs/forwarding.md) |
+| Snippets, history and completion | [docs/snippets.md](docs/snippets.md) |
 | Keyboard shortcuts | [docs/shortcuts.md](docs/shortcuts.md) |
 | Security notes | [docs/security.md](docs/security.md) |
 

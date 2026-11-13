@@ -172,6 +172,8 @@ pub fn delete_host(state: State<'_, AppState>, id: HostId) -> CommandResult<()> 
         Ok(s.delete_host(id)?)
     })?;
     state.forwards.stop_host(id);
+    // The host's commands go with it.
+    let _ = sshcraft_core::history::clear(&store(&state), Some(&format!("host:{}", id.0)));
     drop_orphans(&state, &passwords)
 }
 

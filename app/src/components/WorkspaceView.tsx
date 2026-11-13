@@ -35,6 +35,8 @@ type Props = {
   renderPicker: (paneId: string) => ReactNode;
   onInput: (paneId: string, data: string, report: boolean) => void;
   onStatus: (paneId: string, status: SessionStatus) => void;
+  /** The terminal sidebar takes the right edge. */
+  sidebar?: boolean;
 };
 
 /** Gives the keyboard back to a pane's terminal (after a click on its title or status line). */
@@ -52,7 +54,7 @@ function activityLabel(activity: Activity): string | null {
   return activity === "none" ? null : `workspace.activity.${activity}`;
 }
 
-export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus }: Props) {
+export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus, sidebar = false }: Props) {
   const t = useT();
   const container = useRef<HTMLDivElement>(null);
   const active = state.tabs.find((tab): tab is SessionTab => tab.id === state.activeId && tab.kind === "session");
@@ -149,7 +151,7 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
   }
 
   const sessionTabs = state.tabs.filter((tab): tab is SessionTab => tab.kind === "session");
-  const classes = ["workspace", active ? "" : "hidden", active?.broadcast ? "broadcast" : ""].filter(Boolean);
+  const classes = ["workspace", active ? "" : "hidden", active?.broadcast ? "broadcast" : "", sidebar ? "with-sidebar" : ""].filter(Boolean);
 
   return (
     <div className={classes.join(" ")} ref={container} style={gridStyle}>
@@ -254,6 +256,7 @@ export function WorkspaceView({ state, dispatch, renderPicker, onInput, onStatus
                     onFocus={() => {
                       if (!focused) dispatch({ type: "focusPane", paneId: pane.id });
                     }}
+                    broadcast={tab.broadcast}
                   />
                   <SessionStatusLine status={pane.status} />
                 </>

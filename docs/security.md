@@ -35,6 +35,19 @@ What a server prints may not reach beyond the terminal on its own:
   session asked for; anything else is refused.
 - Every rule carries at most 256 connections at a time, and a SOCKS handshake has 10 seconds.
 
+## Command history and completion
+
+- The history is sealed with the vault per terminal target, snippets per snippet; nothing of
+  them is on disk in plain text, and they never sync. Only lines typed at a shell prompt are
+  kept: not input after a password question (decided when the line starts, so asterisk feedback
+  does not hide it), not lines starting with a space, not input to mysql, psql, python and the
+  like, not input in full-screen programs. No suggestions and no path listing while such a line
+  is typed.
+- Path completion over SSH runs one fixed command on its own exec channel and sends the
+  directory on standard input, so no login shell parses a typed name. Output is limited to
+  64 KiB and 500 names, only what follows a marker line counts, names with control characters
+  are left out.
+
 ## One instance
 
 Only one SSHCraft runs at a time. A second start brings the open window to the front and exits,

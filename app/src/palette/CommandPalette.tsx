@@ -1,6 +1,6 @@
-import { LayoutGrid, Search, Server, SquareTerminal, Zap } from "lucide-react";
+import { LayoutGrid, Play, Search, Server, SquareTerminal, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Group, Host, ShellCommand, WorkspaceTemplate } from "../api";
+import type { Group, Host, ShellCommand, Snippet, WorkspaceTemplate } from "../api";
 import { useT } from "../i18n/i18n";
 import { hostSubtitle } from "../pages/hostsView";
 import { rankPalette, type PaletteActionId, type PaletteItem } from "./rank";
@@ -8,7 +8,8 @@ import { rankPalette, type PaletteActionId, type PaletteItem } from "./rank";
 type Item =
   | PaletteItem
   | { kind: "shell"; shell: ShellCommand; label: string }
-  | { kind: "template"; template: WorkspaceTemplate; label: string };
+  | { kind: "template"; template: WorkspaceTemplate; label: string }
+  | { kind: "snippet"; snippet: Snippet; label: string };
 
 const ACTIONS: PaletteActionId[] = [
   "newTab",
@@ -34,6 +35,8 @@ type Props = {
   onShell?: (shell: ShellCommand) => void;
   templates?: WorkspaceTemplate[];
   onTemplate?: (template: WorkspaceTemplate) => void;
+  snippets?: Snippet[];
+  onSnippet?: (snippet: Snippet) => void;
 };
 
 /** Search box over hosts and actions; arrows move, Enter picks, Escape closes. */
@@ -48,6 +51,8 @@ export function CommandPalette({
   onShell,
   templates = [],
   onTemplate,
+  snippets = [],
+  onSnippet,
 }: Props) {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -66,8 +71,13 @@ export function CommandPalette({
           .map((template) => ({ kind: "template" as const, template, label: t("workspaces.open", { name: template.name }) }))
           .filter((item) => q === "" || item.label.toLocaleLowerCase().includes(q))
       : [];
-    return [...ranked, ...workspaces, ...local];
-  }, [query, hosts, groups, recent, actions, shells, onShell, templates, onTemplate, t]);
+    const runnable: Item[] = onSnippet
+      ? snippets
+          .map((snippet) => ({ kind: "snippet" as const, snippet, label: t("palette.snippet", { name: snippet.name }) }))
+          .filter((item) => q === "" || item.label.toLocaleLowerCase().includes(q))
+      : [];
+    return [...ranked, ...workspaces, ...runnable, ...local];
+  }, [query, hosts, groups, recent, actions, shells, onShell, templates, onTemplate, snippets, onSnippet, t]);
   const current = Math.min(selected, Math.max(items.length - 1, 0));
 
   function pick(index: number) {
@@ -77,6 +87,7 @@ export function CommandPalette({
     if (item.kind === "host") onHost(item.host);
     else if (item.kind === "shell") onShell?.(item.shell);
     else if (item.kind === "template") onTemplate?.(item.template);
+    else if (item.kind === "snippet") onSnippet?.(item.snippet);
     else onAction(item.id);
   }
 
@@ -124,7 +135,9 @@ export function CommandPalette({
                     ? `s:${item.label}`
                     : item.kind === "template"
                       ? `w:${item.template.id}`
-                      : `a:${item.id}`
+                      : item.kind === "snippet"
+                        ? `n:${item.snippet.id}`
+                        : `a:${item.id}`
               }
               role="option"
               aria-selected={index === current}
@@ -149,6 +162,8 @@ export function CommandPalette({
                     <SquareTerminal size={16} aria-hidden="true" />
                   ) : item.kind === "template" ? (
                     <LayoutGrid size={16} aria-hidden="true" />
+                  ) : item.kind === "snippet" ? (
+                    <Play size={16} aria-hidden="true" />
                   ) : (
                     <Zap size={16} aria-hidden="true" />
                   )}

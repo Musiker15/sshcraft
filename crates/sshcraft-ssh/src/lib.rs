@@ -339,6 +339,43 @@ impl client::Handler for ClientHandler {
     }
 }
 
+/// Runs a command on its own channel and returns at most `limit` bytes of its output; gives up
+/// after a few seconds.
+async fn exec_on(
+    handle: &client::Handle<ClientHandler>,
+    command: &str,
+    input: Option<&[u8]>,
+    limit: usize,
+) -> Result<Vec<u8>, SshError> {
+    let run = async {
+        let mut channel = handle.channel_open_session().await.map_err(protocol)?;
+        channel.exec(true, command).await.map_err(protocol)?;
+        if let Some(input) = input {
+            channel.data(input).await.map_err(protocol)?;
+            channel.eof().await.map_err(protocol)?;
+        }
+        let mut out = Vec::new();
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => {
+                    let room = limit.saturating_sub(out.len());
+                    out.extend_from_slice(&data[..data.len().min(room)]);
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+                ChannelMsg::Eof | ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        let _ = channel.close().await;
+        Ok(out)
+    };
+    tokio::time::timeout(EXEC_TIMEOUT, run)
+        .await
+        .map_err(|_| SshError::Timeout)?
+}
+
 /// An authenticated SSH connection. Shells opened from it keep it alive.
 pub struct Session {
     handle: Arc<client::Handle<ClientHandler>>,
@@ -361,7 +398,7 @@ pub struct Shell {
 #[derive(Clone)]
 pub struct ShellWriter {
     channel: Arc<ChannelWriteHalf<Msg>>,
-    _session: Arc<client::Handle<ClientHandler>>,
+    session: Arc<client::Handle<ClientHandler>>,
     _jumps: Arc<Vec<client::Handle<ClientHandler>>>,
 }
 
@@ -586,29 +623,7 @@ impl Session {
     /// Runs a command on its own channel and returns at most `limit` bytes of its output;
     /// gives up after a few seconds.
     pub async fn exec(&self, command: &str, limit: usize) -> Result<Vec<u8>, SshError> {
-        let run = async {
-            let mut channel = self.handle.channel_open_session().await.map_err(protocol)?;
-            channel.exec(true, command).await.map_err(protocol)?;
-            let mut out = Vec::new();
-            while let Some(msg) = channel.wait().await {
-                match msg {
-                    ChannelMsg::Data { data } => {
-                        let room = limit.saturating_sub(out.len());
-                        out.extend_from_slice(&data[..data.len().min(room)]);
-                        if out.len() >= limit {
-                            break;
-                        }
-                    }
-                    ChannelMsg::Eof | ChannelMsg::Close => break,
-                    _ => {}
-                }
-            }
-            let _ = channel.close().await;
-            Ok(out)
-        };
-        tokio::time::timeout(EXEC_TIMEOUT, run)
-            .await
-            .map_err(|_| SshError::Timeout)?
+        exec_on(&self.handle, command, None, limit).await
     }
 
     /// Opens a shell with a terminal of type `term` (`TERM` on the server).
@@ -661,7 +676,7 @@ impl Session {
             events: rx,
             writer: ShellWriter {
                 channel: Arc::new(write),
-                _session: self.handle.clone(),
+                session: self.handle.clone(),
                 _jumps: self.jumps.clone(),
             },
         })
@@ -695,6 +710,17 @@ impl Shell {
 }
 
 impl ShellWriter {
+    /// Runs a command on its own channel of the same connection, beside the shell (for path
+    /// completion), with `input` on its standard input; at most `limit` bytes of output.
+    pub async fn exec(
+        &self,
+        command: &str,
+        input: Option<&[u8]>,
+        limit: usize,
+    ) -> Result<Vec<u8>, SshError> {
+        exec_on(&self.session, command, input, limit).await
+    }
+
     pub async fn write(&self, data: &[u8]) -> Result<(), SshError> {
         self.channel.data(data).await.map_err(protocol)
     }

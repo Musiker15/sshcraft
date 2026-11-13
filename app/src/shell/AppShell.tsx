@@ -14,6 +14,8 @@ import {
   localShells,
   serialRemember,
   sessionWrite,
+  snippetsList,
+  type Snippet,
   workspaceTemplates,
   deleteWorkspaceTemplate,
   type WorkspaceTemplate,
@@ -49,6 +51,12 @@ import { ImportDialog } from "../components/ImportDialog";
 import { InstallKeyDialog } from "../components/KeyDialogs";
 import { WorkspaceView } from "../components/WorkspaceView";
 import { TemplateDialog } from "../components/TemplateDialog";
+import { RunSnippetDialog, type OpenPane, type RunPlan } from "../components/RunSnippetDialog";
+import { planNewTabs, snippetInput } from "../forms/snippetRun";
+import { SnippetsPage } from "../pages/SnippetsPage";
+import { TerminalSidebar } from "../components/TerminalSidebar";
+import { historyScope } from "../terminal/features";
+import { paneInput } from "../terminal/panes";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
@@ -62,10 +70,10 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { ShareDialog, type ShareTarget } from "../pages/sync/ShareDialog";
 import {
   HOME_ID,
-  broadcastTargets,
   initialTabs,
   isPicker,
   tabsReducer,
+  tabTitle,
   targetTitle,
   type Pane,
   type SessionTab,
@@ -112,6 +120,10 @@ export function AppShell() {
   const [helloDismissed, setHelloDismissed] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** The snippet whose run dialog is open. */
+  const [running, setRunning] = useState<Snippet | null>(null);
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
   const [templateFor, setTemplateFor] = useState<SessionTab | null>(null);
   /** Panes of the last opened template left out because their host is gone. */
@@ -213,6 +225,64 @@ export function AppShell() {
     [hosts],
   );
 
+  // The palette offers snippets too; they are read when it opens.
+  useEffect(() => {
+    if (paletteOpen) snippetsList().then((list) => setSnippets(list ?? []), () => setSnippets([]));
+  }, [paletteOpen]);
+
+  /** Panes with a live session, for "run in open tabs"; a pane of a workspace is named with it. */
+  const openPanes: OpenPane[] = tabs.tabs.flatMap((tab) =>
+    tab.kind === "session"
+      ? tab.panes.flatMap((pane) =>
+          !isPicker(pane) && pane.sessionId && pane.status.state !== "ended"
+            ? [
+                {
+                  paneId: pane.id,
+                  title:
+                    tab.panes.length > 1 || tab.name ? `${tab.name ?? tabTitle(tab) ?? ""} · ${pane.title}` : pane.title,
+                  sessionId: pane.sessionId,
+                  hostId: pane.target.kind === "host" ? pane.target.host_id : null,
+                },
+              ]
+            : [],
+        )
+      : [],
+  );
+
+  /** Types the snippet into the chosen panes, and opens new connections that type it. */
+  const runSnippet = (snippet: Snippet, plan: RunPlan) => {
+    const input = snippetInput(snippet.content, plan.run);
+    for (const paneId of plan.paneIds) {
+      const pane = openPanes.find((p) => p.paneId === paneId);
+      if (!pane) continue;
+      // Through the pane: a paste where its shell allows, and its typed line follows.
+      const target = paneInput(paneId);
+      if (target) target.paste(snippet.content, plan.run);
+      else void sessionWrite(pane.sessionId, input).catch(() => {});
+    }
+    const byId = new Map(hosts.map((h) => [h.id, h]));
+    // Deleted default hosts are named in the dialog already.
+    const { tabs: groups } = planNewTabs(hosts, plan.hostIds);
+    for (const group of groups) {
+      dispatch({
+        type: "openTemplate",
+        tabId: crypto.randomUUID(),
+        name: t("snippets.tabTitle", { name: snippet.name }),
+        layout: "split",
+        colSizes: [],
+        rowSizes: [],
+        panes: group.map((hostId) => ({
+          id: crypto.randomUUID(),
+          target: { kind: "host", host_id: hostId },
+          title: byId.get(hostId)?.name ?? "",
+          status: { state: "connecting" },
+          activity: "none",
+          startup: { raw: input },
+        })),
+      });
+    }
+  };
+
   const connect = useCallback((host: Host) => {
     dispatch({ type: "open", tab: { id: crypto.randomUUID(), target: { kind: "host", host_id: host.id }, title: host.name } });
   }, []);
@@ -221,15 +291,28 @@ export function AppShell() {
     (tab): tab is SessionTab => tab.id === tabs.activeId && tab.kind === "session",
   );
 
-  /** Typed input goes to its own session, with broadcast on to every session of the tab. */
+  const focusedPane = (() => {
+    const pane = activeSession?.panes.find((p) => p.id === activeSession.focusedId);
+    return pane && !isPicker(pane) ? pane : undefined;
+  })();
+
+  /** Typed input goes to its own session, with broadcast on to every session of the tab. The
+   * other panes follow it in their typed line. */
   const sendInput = useCallback((paneId: string, data: string, report: boolean) => {
     const tab = tabsRef.current.tabs.find(
       (t): t is SessionTab => t.kind === "session" && t.panes.some((p) => p.id === paneId),
     );
     const pane = tab?.panes.find((p) => p.id === paneId);
     if (!tab || !pane || isPicker(pane)) return;
-    const targets = tab.broadcast && !report ? broadcastTargets(tab) : pane.sessionId ? [pane.sessionId] : [];
-    for (const id of targets) void sessionWrite(id, data).catch(() => {});
+    if (tab.broadcast && !report) {
+      for (const other of tab.panes) {
+        if (isPicker(other) || !other.sessionId) continue;
+        if (other.id !== paneId) paneInput(other.id)?.track(data);
+        void sessionWrite(other.sessionId, data).catch(() => {});
+      }
+      return;
+    }
+    if (pane.sessionId) void sessionWrite(pane.sessionId, data).catch(() => {});
   }, []);
 
   const paneStatus = useCallback(
@@ -280,6 +363,9 @@ export function AppShell() {
           break;
         case "toggleBroadcast":
           if (activeSession) dispatch({ type: "toggleBroadcast", tabId: activeSession.id });
+          break;
+        case "toggleSidebar":
+          setSidebarOpen((open) => !open);
           break;
       }
     },
@@ -362,6 +448,8 @@ export function AppShell() {
         onNewTab={() => runAction("newTab")}
         onSplit={() => runAction("splitPane")}
         onSaveTemplate={setTemplateFor}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((open) => !open)}
       />
       {vault && (
         <div className="banner">
@@ -435,7 +523,8 @@ export function AppShell() {
               )}
               {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
               {page === "forwarding" && <ForwardingPage hosts={hosts} onChanged={() => void reload()} />}
-              {(page === "snippets" || page === "logs") && <PlaceholderPage page={page} />}
+              {page === "snippets" && <SnippetsPage hosts={hosts} onRun={setRunning} />}
+              {page === "logs" && <PlaceholderPage page={page} />}
             </main>
           </div>
         )}
@@ -471,7 +560,18 @@ export function AppShell() {
           />
         )}
         {/* Panes stay mounted while hidden, so switching tabs never drops a connection. */}
+        {sidebarOpen && activeSession && focusedPane && (
+          <TerminalSidebar
+            scope={historyScope(focusedPane.target)}
+            onPaste={(content, run) => {
+              const input = paneInput(focusedPane.id);
+              if (input) input.paste(content, run);
+              else sendInput(focusedPane.id, snippetInput(content, run), false);
+            }}
+          />
+        )}
         <WorkspaceView
+          sidebar={sidebarOpen && activeSession !== undefined}
           state={tabs}
           dispatch={dispatch}
           onInput={sendInput}
@@ -543,6 +643,22 @@ export function AppShell() {
         </Drawer>
       )}
 
+      {running && (
+        <Drawer onClose={() => setRunning(null)}>
+          <RunSnippetDialog
+            snippet={running}
+            hosts={hosts}
+            panes={openPanes}
+            onRun={(plan) => {
+              const snippet = running;
+              setRunning(null);
+              runSnippet(snippet, plan);
+            }}
+            onCancel={() => setRunning(null)}
+          />
+        </Drawer>
+      )}
+
       {templateFor && (
         <Drawer onClose={() => setTemplateFor(null)}>
           <TemplateDialog
@@ -587,6 +703,8 @@ export function AppShell() {
           }}
           templates={templates}
           onTemplate={openTemplate}
+          snippets={snippets}
+          onSnippet={setRunning}
         />
       )}
 

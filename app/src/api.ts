@@ -289,6 +289,9 @@ export type AppSettings = {
   clipboard_osc52: "write" | "off";
   /** Shortcuts that differ from the defaults; an empty list unbinds the action. */
   shortcuts: Record<string, string[]>;
+  /** Typed commands are kept (sealed) for the sidebar and completion. */
+  history: boolean;
+  autocomplete: boolean;
 };
 export const getSettings = () => invoke<AppSettings>("get_settings");
 /** Returns what Rust stored, with values kept in their allowed ranges. */
@@ -325,6 +328,24 @@ export type ForwardStatus = { rule_id: string; host_id: string } & ForwardState;
 export const forwardStart = (hostId: string, ruleId: string) => invoke<void>("forward_start", { hostId, ruleId });
 export const forwardStop = (hostId: string, ruleId: string) => invoke<void>("forward_stop", { hostId, ruleId });
 export const forwardStatuses = () => invoke<ForwardStatus[]>("forward_statuses");
+export type Snippet = {
+  id: string;
+  name: string;
+  /** Empty for none. */
+  package: string;
+  content: string;
+  default_targets: string[];
+};
+export type HistoryEntry = { command: string; uses: number; last_used: number };
+export const snippetsList = () => invoke<Snippet[]>("snippets_list");
+export const snippetSave = (snippet: Snippet) => invoke<Snippet>("snippet_save", { snippet });
+export const snippetDelete = (id: string) => invoke<void>("snippet_delete", { id });
+export const historyRecord = (scope: string, command: string) => invoke<void>("history_record", { scope, command });
+export const historyList = (scope: string) => invoke<HistoryEntry[]>("history_list", { scope });
+export const historyClear = (scope: string | null) => invoke<void>("history_clear", { scope });
+/** Names in `dir` on the session's machine; directories end in "/". */
+export const sessionListDir = (id: string, dir: string, prefix: string) =>
+  invoke<string[]>("session_list_dir", { id, dir, prefix });
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
 
 export type SyncStatusView =

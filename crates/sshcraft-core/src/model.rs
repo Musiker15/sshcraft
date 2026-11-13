@@ -29,6 +29,7 @@ id_type!(KeyId);
 id_type!(ServerId);
 id_type!(IdentityId);
 id_type!(PasswordId);
+id_type!(SnippetId);
 
 /// Where the private key for a connection comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

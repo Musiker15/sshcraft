@@ -3,7 +3,8 @@ import { ShortcutSettings } from "../components/ShortcutSettings";
 import { TERMINAL_TYPES } from "../settings/terminal";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
-import type { AppSettings, AppTheme } from "../api";
+import { historyClear, type AppSettings, type AppTheme } from "../api";
+import { HISTORY_CLEARED } from "../terminal/panes";
 import { useT } from "../i18n/i18n";
 import { useSettings } from "../settings/SettingsProvider";
 import { FONT_PRESETS, TERMINAL_THEMES, terminalTheme } from "../settings/themes";
@@ -28,6 +29,7 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
   // Drafts are saved on Enter or when leaving the field: saving every keystroke would clamp
   // "1" (on the way to "16") to 8 and resize the running terminals with each partial value.
   const [fontSize, setFontSize] = useState(String(settings.font_size));
+  const [historyCleared, setHistoryCleared] = useState(false);
 
   useEffect(() => {
     getVersion().then(setVersion, () => setVersion(null));
@@ -150,6 +152,38 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
           {t("settings.osc52")}
         </label>
         <p className="hint">{t("settings.osc52Hint")}</p>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.history}
+            onChange={(e) => void update({ history: e.target.checked })}
+          />
+          {t("settings.history")}
+        </label>
+        <p className="hint">{t("settings.historyHint")}</p>
+        <div>
+          <button
+            onClick={() =>
+              void historyClear(null).then(() => {
+                setHistoryCleared(true);
+                // Open terminals and the sidebar forget it at once.
+                window.dispatchEvent(new CustomEvent(HISTORY_CLEARED, { detail: null }));
+              }, () => {})
+            }
+          >
+            {t("settings.historyClear")}
+          </button>
+          {historyCleared && <span className="hint"> {t("settings.historyCleared")}</span>}
+        </div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.autocomplete}
+            onChange={(e) => void update({ autocomplete: e.target.checked })}
+          />
+          {t("settings.autocomplete")}
+        </label>
+        <p className="hint">{t("settings.autocompleteHint")}</p>
       </div>
 
       <LocalShellSetting />

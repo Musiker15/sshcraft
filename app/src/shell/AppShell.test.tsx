@@ -6,7 +6,7 @@ import { AppShell } from "./AppShell";
 import { invoke } from "@tauri-apps/api/core";
 
 type ViewProps = {
-  pane: { id: string; title: string; startup?: { cwd?: string | null; command?: string | null } };
+  pane: { id: string; title: string; startup?: { cwd?: string | null; command?: string | null; raw?: string } };
   onAttach: (id: string) => void;
   onInput: (data: string, report: boolean) => void;
 };
@@ -16,6 +16,8 @@ const state = vi.hoisted(() => ({
   mounted: 0,
   unmounted: 0,
   views: {} as Record<string, ViewProps>,
+  tracked: [] as Array<[string, string]>,
+  pasted: [] as Array<[string, string, boolean]>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => {
@@ -27,6 +29,8 @@ vi.mock("@tauri-apps/api/core", () => {
     list_keys: [],
     list_recent: [],
     local_shells: [],
+    history_list: [],
+    snippets_list: [{ id: "sn", name: "Uptime", package: "", content: "uptime", default_targets: ["h1"] }],
     workspace_templates: [
       {
         id: "tpl",
@@ -72,9 +76,18 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("../components/TerminalView", async () => {
   const { useEffect } = await import("react");
+  const { registerPane } = await import("../terminal/panes");
   return {
     TerminalView: (props: ViewProps) => {
       state.views[props.pane.id] = props;
+      useEffect(
+        () =>
+          registerPane(props.pane.id, {
+            track: (data) => state.tracked.push([props.pane.id, data]),
+            paste: (content, run) => state.pasted.push([props.pane.id, content, run]),
+          }),
+        [],
+      );
       useEffect(() => {
         state.mounted += 1;
         return () => {
@@ -95,6 +108,8 @@ beforeEach(() => {
   state.unmounted = 0;
   state.handlers = {};
   state.views = {};
+  state.tracked = [];
+  state.pasted = [];
   vi.mocked(invoke).mockClear();
 });
 afterEach(cleanup);
@@ -265,4 +280,79 @@ test("clicking a pane's title bar gives that pane's terminal the keyboard", asyn
   fireEvent.mouseDown(title);
   fireEvent.click(title);
   expect(document.activeElement).toBe(pane.querySelector("textarea"));
+});
+
+const written = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "session_write")
+    .map(([, args]) => {
+      const { id, data } = args as { id: string; data: number[] };
+      return { id, text: new TextDecoder().decode(new Uint8Array(data)) };
+    });
+
+async function runDialog() {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  const [pane] = Object.keys(state.views);
+  act(() => state.views[pane].onAttach("s-1"));
+  fireEvent.click(screen.getByRole("tab", { name: en["tabs.home"] }));
+  fireEvent.click(screen.getByRole("button", { name: en["nav.snippets"] }));
+  const row = (await screen.findByText("Uptime")).closest(".snippet-row") as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: en["snippets.run"] }));
+  return within(screen.getByText(en["snippets.runTitle"].replace("{name}", "Uptime")).closest(".dialog") as HTMLElement);
+}
+
+test("a snippet runs in the open pane of its default host", async () => {
+  const dialog = await runDialog();
+  vi.mocked(invoke).mockClear();
+  // The open pane is picked, no new connection beside it.
+  expect((dialog.getAllByRole("checkbox", { name: "web" })[0] as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(dialog.getByRole("button", { name: en["snippets.run"] }));
+  // Through the pane (a paste where its shell allows), not around it.
+  const [pane] = Object.keys(state.views);
+  expect(state.pasted).toEqual([[pane, "uptime", true]]);
+  expect(written()).toEqual([]);
+  expect(Object.keys(state.views)).toHaveLength(1);
+});
+
+test("a snippet on new connections opens a tab that types it after connecting", async () => {
+  const dialog = await runDialog();
+  fireEvent.click(dialog.getAllByRole("checkbox", { name: "web" })[0]);
+  fireEvent.click(dialog.getAllByRole("checkbox", { name: "web" })[1]);
+  fireEvent.click(dialog.getByRole("button", { name: en["snippets.run"] }));
+  expect(await screen.findByRole("tab", { name: /Snippet: Uptime/ })).toBeTruthy();
+  const opened = Object.values(state.views).find((v) => v.pane.startup?.raw);
+  expect(opened?.pane.startup?.raw).toBe("uptime\r");
+});
+
+test("Ctrl+Shift+S shows the terminal sidebar beside a session", async () => {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  expect(screen.queryByRole("complementary", { name: en["sidebar.title"] })).toBeNull();
+  press("S");
+  expect(await screen.findByRole("complementary", { name: en["sidebar.title"] })).toBeTruthy();
+  press("S");
+  expect(screen.queryByRole("complementary", { name: en["sidebar.title"] })).toBeNull();
+});
+
+test("with broadcast the other panes follow the keys in their typed line", async () => {
+  const [a, b] = await twoPanes();
+  act(() => {
+    state.views[a].onAttach("s-a");
+    state.views[b].onAttach("s-b");
+  });
+  press("B");
+  act(() => state.views[a].onInput("ls", false));
+  expect(state.tracked).toEqual([[b, "ls"]]);
+});
+
+test("the sidebar pastes through the focused pane", async () => {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  const [pane] = Object.keys(state.views);
+  press("S");
+  const sidebar = await screen.findByRole("complementary", { name: en["sidebar.title"] });
+  fireEvent.click(await within(sidebar).findByText("Uptime"));
+  expect(state.pasted).toEqual([[pane, "uptime", false]]);
 });
