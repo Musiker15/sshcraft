@@ -65,7 +65,7 @@ import { KeysPage } from "../pages/KeysPage";
 import { NewTabPage } from "../pages/NewTabPage";
 import { CommandPalette } from "../palette/CommandPalette";
 import type { PaletteActionId } from "../palette/rank";
-import { PlaceholderPage } from "../pages/PlaceholderPage";
+import { LogsPage } from "../pages/LogsPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ShareDialog, type ShareTarget } from "../pages/sync/ShareDialog";
 import {
@@ -524,7 +524,7 @@ export function AppShell() {
               {page === "settings" && <SettingsPage onDataChanged={() => void reload()} />}
               {page === "forwarding" && <ForwardingPage hosts={hosts} onChanged={() => void reload()} />}
               {page === "snippets" && <SnippetsPage hosts={hosts} onRun={setRunning} />}
-              {page === "logs" && <PlaceholderPage page={page} />}
+              {page === "logs" && <LogsPage hosts={hosts} />}
             </main>
           </div>
         )}

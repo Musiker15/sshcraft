@@ -22,6 +22,8 @@ export type ConnectionSettings = {
   proxy?: Proxy | null;
   agent_forwarding?: boolean | null;
   env?: EnvVar[];
+  /** Record sessions; null or missing: as the group above, then the app setting. */
+  session_log?: boolean | null;
 };
 
 export const HOST_OS = [
@@ -292,7 +294,12 @@ export type AppSettings = {
   /** Typed commands are kept (sealed) for the sidebar and completion. */
   history: boolean;
   autocomplete: boolean;
+  /** Record sessions unless a host or group says otherwise. */
+  session_logs: boolean;
+  /** Days a finished log is kept; 0 keeps it. One of `LOG_RETENTION_DAYS`. */
+  log_retention_days: number;
 };
+export const LOG_RETENTION_DAYS = [0, 7, 30, 90, 365] as const;
 export const getSettings = () => invoke<AppSettings>("get_settings");
 /** Returns what Rust stored, with values kept in their allowed ranges. */
 export const saveSettings = (settings: AppSettings) => invoke<AppSettings>("save_settings", { settings });
@@ -363,6 +370,8 @@ export type ServerView = {
   origin: string;
   sync_enabled: boolean;
   sync_keys: boolean;
+  /** Session logs sync too. */
+  sync_logs: boolean;
   revoked: boolean;
   status: SyncStatusView;
 };
@@ -520,3 +529,36 @@ export const importKeyFile = (path: string, passphrase: string | null) =>
   invoke<KeyInfo>("import_key_file", { path, passphrase });
 export const exportHosts = (format: "csv" | "json", filter: ExportFilter, path: string) =>
   invoke<void>("export_hosts", { format, filter, path });
+
+// Session logs.
+export type LogKind = "ssh" | "serial" | "local";
+export type MarkKind = "bookmark" | "comment";
+/** A bookmark or comment at a byte position of the recorded output. */
+export type LogMark = { id: string; offset: number; kind: MarkKind; text: string; created_at: number };
+export type LogMeta = {
+  id: string;
+  title: string;
+  kind: LogKind;
+  host_id: string | null;
+  started_at: number;
+  /** null while it is being recorded. */
+  ended_at: number | null;
+  size: number;
+  truncated: boolean;
+  marks: LogMark[];
+};
+/** A log with the sync server it lives at (null: this device only). */
+export type LogSummary = LogMeta & { location: string | null };
+export type LogHit = { log_id: string; line: number; snippet: string };
+export type LogExportFormat = "text" | "raw";
+export const logsList = () => invoke<LogSummary[]>("logs_list");
+/** The recorded bytes. */
+export const logRead = async (id: string) => new Uint8Array(await invoke<ArrayBuffer>("log_read", { id }));
+export const logSaveMarks = (id: string, marks: LogMark[]) => invoke<LogMeta>("log_save_marks", { id, marks });
+export const logsDelete = (ids: string[]) => invoke<void>("logs_delete", { ids });
+export const logsSearch = (query: string) => invoke<LogHit[]>("logs_search", { query });
+export const logExport = (id: string, path: string, format: LogExportFormat) =>
+  invoke<void>("log_export", { id, path, format });
+export const sessionBookmark = (id: string, text: string) => invoke<LogMark>("session_bookmark", { id, text });
+export const sessionRecording = (id: string) => invoke<boolean>("session_recording", { id });
+export const setServerLogs = (id: string, on: boolean) => invoke<void>("set_server_logs", { id, on });

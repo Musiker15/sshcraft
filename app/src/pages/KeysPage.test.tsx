@@ -16,6 +16,7 @@ const server = (id: string, name: string, syncKeys: boolean): ServerView => ({
   origin: "https://sync.example.org",
   sync_enabled: true,
   sync_keys: syncKeys,
+  sync_logs: false,
   revoked: false,
   status: { state: "idle" },
 });
