@@ -42,6 +42,8 @@ pub struct TestAuth {
     pub ca: Option<PublicKey>,
     /// Turns down `ssh-rsa` (SHA-1) for keys and certificates, as OpenSSH does since 8.8.
     pub refuse_sha1_rsa: bool,
+    /// Turns down `tcpip-forward` (remote forwarding), as `AllowTcpForwarding no` does.
+    pub refuse_forwarding: bool,
 }
 
 /// A user certificate for `key`, signed by `ca`, for `principal`, valid in the given window.
@@ -242,7 +244,8 @@ impl server::Server for Factory {
             records: self.records.clone(),
             key_ok: false,
             kbd_round: 0,
-            tunnels: std::collections::HashSet::new(),
+            sessions: std::collections::HashSet::new(),
+            listeners: Vec::new(),
         }
     }
 }
@@ -253,8 +256,18 @@ struct Handler {
     /// The key was accepted and keyboard-interactive must follow.
     key_ok: bool,
     kbd_round: usize,
-    /// `direct-tcpip` channels: their bytes go to the tunnel, not to the echo.
-    tunnels: std::collections::HashSet<ChannelId>,
+    /// Session channels: only their bytes are echoed (tunnels pass theirs through).
+    sessions: std::collections::HashSet<ChannelId>,
+    /// Listeners for `tcpip-forward`: (address, port, accept task).
+    listeners: Vec<(String, u32, JoinHandle<()>)>,
+}
+
+impl Drop for Handler {
+    fn drop(&mut self) {
+        for (_, _, task) in &self.listeners {
+            task.abort();
+        }
+    }
 }
 
 impl Handler {
@@ -463,7 +476,6 @@ impl server::Handler for Handler {
         let Ok(mut tcp) = tokio::net::TcpStream::connect((host_to_connect, port)).await else {
             return Ok(());
         };
-        self.tunnels.insert(channel.id());
         reply.accept().await;
         tokio::spawn(async move {
             let mut stream = channel.into_stream();
@@ -474,12 +486,75 @@ impl server::Handler for Handler {
 
     async fn channel_open_session(
         &mut self,
-        _channel: Channel<Msg>,
+        channel: Channel<Msg>,
         reply: server::ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.sessions.insert(channel.id());
         reply.accept().await;
         Ok(())
+    }
+
+    /// Remote forwarding: listens like sshd and opens a `forwarded-tcpip` channel per connection.
+    async fn tcpip_forward(
+        &mut self,
+        address: &str,
+        port: &mut u32,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        if self.auth.refuse_forwarding {
+            return Ok(false);
+        }
+        let Ok(wanted) = u16::try_from(*port) else {
+            return Ok(false);
+        };
+        let Ok(listener) = TcpListener::bind((address, wanted)).await else {
+            return Ok(false);
+        };
+        let bound = u32::from(listener.local_addr().map(|a| a.port()).unwrap_or(wanted));
+        *port = bound;
+        let handle = session.handle();
+        let connected = address.to_owned();
+        let task = tokio::spawn(async move {
+            while let Ok((mut tcp, peer)) = listener.accept().await {
+                let handle = handle.clone();
+                let connected = connected.clone();
+                tokio::spawn(async move {
+                    let Ok(channel) = handle
+                        .channel_open_forwarded_tcpip(
+                            connected,
+                            bound,
+                            peer.ip().to_string(),
+                            u32::from(peer.port()),
+                        )
+                        .await
+                    else {
+                        return;
+                    };
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+                });
+            }
+        });
+        self.listeners.push((address.to_owned(), bound, task));
+        Ok(true)
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        address: &str,
+        port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let before = self.listeners.len();
+        self.listeners.retain(|(a, p, task)| {
+            let hit = a == address && *p == port;
+            if hit {
+                task.abort();
+            }
+            !hit
+        });
+        Ok(self.listeners.len() < before)
     }
 
     async fn pty_request(
@@ -552,7 +627,7 @@ impl server::Handler for Handler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if self.tunnels.contains(&channel) {
+        if !self.sessions.contains(&channel) {
             return Ok(());
         }
         let handle = session.handle();

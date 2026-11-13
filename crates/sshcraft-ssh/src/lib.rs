@@ -16,9 +16,12 @@ use tokio::sync::mpsc;
 pub mod agent;
 mod auth;
 mod proxy;
+pub mod socks;
+mod tunnel;
 pub use auth::{
     Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter, certificate_valid_now,
 };
+pub use tunnel::{MAX_TUNNEL_CONNECTIONS, Tunnel};
 
 /// Signs for a key whose private half SSHCraft does not hold (a FIDO2 key, Windows Hello).
 #[async_trait::async_trait]
@@ -96,6 +99,8 @@ pub async fn list_agent_keys(agent: &mut DynAgent) -> Result<Vec<AgentKey>, SshE
         .collect())
 }
 
+/// How often [`Session::closed`] looks whether the connection is still there.
+const CLOSED_POLL: Duration = Duration::from_millis(250);
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const KEEPALIVE_MAX: usize = 3;
 const EVENT_BUFFER: usize = 1024;
@@ -209,6 +214,12 @@ pub enum SshError {
     Proxy(String),
     #[error("the proxy rejected the credentials")]
     ProxyAuthFailed,
+    #[error("the port is already in use")]
+    PortInUse,
+    #[error("could not listen: {0}")]
+    Bind(String),
+    #[error("the server refused the remote forwarding")]
+    ForwardRefused,
     #[error("jump host {host_name}: {error}")]
     Hop {
         index: usize,
@@ -233,6 +244,8 @@ impl From<&SshError> for Disconnect {
             SshError::Timeout => Disconnect::Lost("timed out".into()),
             SshError::ProxyAuthFailed => Disconnect::AuthFailed,
             SshError::Proxy(m) => Disconnect::Lost(m.clone()),
+            SshError::PortInUse | SshError::ForwardRefused => Disconnect::Lost(e.to_string()),
+            SshError::Bind(m) => Disconnect::Lost(m.clone()),
             SshError::Hop { error, .. } => Disconnect::from(error.as_ref()),
         }
     }
@@ -252,6 +265,8 @@ struct ClientHandler {
     port: u16,
     verifier: Arc<dyn HostKeyVerifier>,
     rejected: Arc<AtomicBool>,
+    /// Targets of the remote forwardings on this connection.
+    remotes: tunnel::Remotes,
 }
 
 impl client::Handler for ClientHandler {
@@ -297,6 +312,31 @@ impl client::Handler for ClientHandler {
         });
         Ok(())
     }
+
+    /// A connection to a port the server listens on for us; one we did not ask for is refused
+    /// (dropping the reply refuses it).
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(target) = tunnel::remote_target(&self.remotes, connected_address, connected_port)
+        else {
+            return Ok(());
+        };
+        if target.count().load(std::sync::atomic::Ordering::SeqCst) >= MAX_TUNNEL_CONNECTIONS {
+            return Ok(());
+        }
+        reply.accept().await;
+        let count = target.count();
+        tunnel::serve_remote(channel, target, count);
+        Ok(())
+    }
 }
 
 /// An authenticated SSH connection. Shells opened from it keep it alive.
@@ -308,6 +348,8 @@ pub struct Session {
     jumps: Arc<Vec<client::Handle<ClientHandler>>>,
     /// The target's certificate had expired, so the key went alone.
     certificate_expired: bool,
+    /// Targets of this session's remote forwardings.
+    remotes: tunnel::Remotes,
 }
 
 pub struct Shell {
@@ -376,6 +418,7 @@ pub async fn connect_route(
     let timeout = params.connect_timeout;
     let mut connected: Vec<client::Handle<ClientHandler>> = Vec::new();
     let mut certificate_expired = false;
+    let remotes = tunnel::Remotes::default();
     for (index, hop) in params.hops.into_iter().enumerate() {
         let host_name = hop.host_name.clone();
         let wrap = |error: SshError| {
@@ -419,6 +462,12 @@ pub async fn connect_route(
             port: hop.port,
             verifier: verifier.clone(),
             rejected: rejected.clone(),
+            // Only the target forwards ports for us.
+            remotes: if index == last {
+                remotes.clone()
+            } else {
+                tunnel::Remotes::default()
+            },
         };
         let mut handle = client::connect_stream(config.clone(), stream, handler)
             .await
@@ -455,10 +504,80 @@ pub async fn connect_route(
         forward_agent: params.options.agent_forwarding.is_some(),
         jumps: Arc::new(connected),
         certificate_expired,
+        remotes,
     })
 }
 
 impl Session {
+    /// Listens on `bind_address:bind_port` here; connections reach `target_host:target_port`
+    /// as seen from the server (`ssh -L`).
+    pub async fn forward_local(
+        &self,
+        bind_address: &str,
+        bind_port: u16,
+        target_host: &str,
+        target_port: u16,
+    ) -> Result<Tunnel, SshError> {
+        let target = Some((target_host.to_owned(), target_port));
+        tunnel::listen(
+            self.handle.clone(),
+            self.jumps.clone(),
+            bind_address,
+            bind_port,
+            target,
+        )
+        .await
+    }
+
+    /// A SOCKS5 proxy on `bind_address:bind_port` here; each connection asks for its own target
+    /// (`ssh -D`).
+    pub async fn forward_dynamic(
+        &self,
+        bind_address: &str,
+        bind_port: u16,
+    ) -> Result<Tunnel, SshError> {
+        tunnel::listen(
+            self.handle.clone(),
+            self.jumps.clone(),
+            bind_address,
+            bind_port,
+            None,
+        )
+        .await
+    }
+
+    /// The server listens on `bind_address:bind_port`; connections reach
+    /// `target_host:target_port` as seen from here (`ssh -R`).
+    pub async fn forward_remote(
+        &self,
+        bind_address: &str,
+        bind_port: u16,
+        target_host: &str,
+        target_port: u16,
+    ) -> Result<Tunnel, SshError> {
+        tunnel::remote(
+            self.handle.clone(),
+            self.jumps.clone(),
+            self.remotes.clone(),
+            bind_address,
+            bind_port,
+            target_host,
+            target_port,
+        )
+        .await
+    }
+
+    /// Completes once the connection to the target or to a jump host is gone.
+    pub fn closed(&self) -> impl Future<Output = ()> + Send + 'static {
+        let handle = self.handle.clone();
+        let jumps = self.jumps.clone();
+        async move {
+            while !handle.is_closed() && !jumps.iter().any(|j| j.is_closed()) {
+                tokio::time::sleep(CLOSED_POLL).await;
+            }
+        }
+    }
+
     /// Whether the target's certificate had expired, so the key signed in alone.
     pub fn certificate_expired(&self) -> bool {
         self.certificate_expired
