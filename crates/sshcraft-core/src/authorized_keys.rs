@@ -10,6 +10,7 @@ use serde::Serialize;
 
 const ADDED: &str = "SSHCRAFT_ADDED";
 const PRESENT: &str = "SSHCRAFT_PRESENT";
+const FAILED: &str = "SSHCRAFT_FAILED";
 const MAX_COMMENT: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -24,6 +25,9 @@ pub enum AuthorizedKeysError {
     /// The server did not run the script (no `sh`, a Windows server, a forced command).
     #[error("the server did not run the install script")]
     Unsupported,
+    /// The script ran but could not write (`~/.ssh` not writable, a file in its way).
+    #[error("the key could not be written on the server")]
+    Failed,
 }
 
 /// The command that adds `public_key` to `authorized_keys`, unless it is there already (same type
@@ -48,12 +52,13 @@ pub fn install_command(public_key: &PublicKey, verify_required: bool) -> String 
         line.push(' ');
         line.push_str(&comment);
     }
+    // A commented-out line (`# ssh-ed25519 ...`) does not count: the key is added again.
     format!(
         "sh -c 'umask 077; d=\"$HOME/.ssh\"; f=\"$d/authorized_keys\"; \
-         mkdir -p \"$d\" && touch \"$f\" || exit 1; \
-         if grep -qF \"{body}\" \"$f\"; then echo {PRESENT}; exit 0; fi; \
+         mkdir -p \"$d\" && touch \"$f\" || {{ echo {FAILED}; exit 1; }}; \
+         if grep -v \"^[[:space:]]*#\" \"$f\" | grep -qF \"{body}\"; then echo {PRESENT}; exit 0; fi; \
          if [ -s \"$f\" ] && [ -n \"$(tail -c 1 \"$f\")\" ]; then echo >> \"$f\"; fi; \
-         printf \"%s\\n\" \"{line}\" >> \"$f\" && echo {ADDED}'"
+         if printf \"%s\\n\" \"{line}\" >> \"$f\"; then echo {ADDED}; else echo {FAILED}; fi'"
     )
 }
 
@@ -64,11 +69,12 @@ pub fn parse_outcome(output: &[u8]) -> Result<InstallOutcome, AuthorizedKeysErro
         .rev()
         .map(str::trim)
         .find_map(|line| match line {
-            ADDED => Some(InstallOutcome::Added),
-            PRESENT => Some(InstallOutcome::AlreadyPresent),
+            ADDED => Some(Ok(InstallOutcome::Added)),
+            PRESENT => Some(Ok(InstallOutcome::AlreadyPresent)),
+            FAILED => Some(Err(AuthorizedKeysError::Failed)),
             _ => None,
         })
-        .ok_or(AuthorizedKeysError::Unsupported)
+        .unwrap_or(Err(AuthorizedKeysError::Unsupported))
 }
 
 #[cfg(test)]

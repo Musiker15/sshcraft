@@ -1770,3 +1770,30 @@ async fn one_key_on_jump_host_and_target_is_asked_once() {
     assert!(connected(&statuses), "{statuses:?}");
     assert_eq!(auth.seen().len(), 1);
 }
+
+#[tokio::test]
+async fn install_key_reports_write_failure_and_cancelled_sign_in() {
+    let f = fixture(true).await;
+    let id = f.key_id();
+    f.server.set_exec_output("SSHCRAFT_FAILED\n");
+    let err = f
+        .manager
+        .install_key(f.host_id, KeyRef::Stored { id })
+        .await
+        .unwrap_err();
+    assert_eq!(err.0, ErrorCode::InstallKeyFailed);
+
+    {
+        let store = f.store.lock().unwrap();
+        f.vault.protect_key(&store, id, "pw").unwrap();
+    }
+    let manager = f.manager_with_auth(
+        ScriptedAuth::new(&[None]),
+        Arc::new(FakePresence::new(&[Presence::Verified])),
+    );
+    let err = manager
+        .install_key(f.host_id, KeyRef::Stored { id })
+        .await
+        .unwrap_err();
+    assert_eq!(err.0, ErrorCode::SignInCancelled);
+}

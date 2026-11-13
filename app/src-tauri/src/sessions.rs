@@ -429,7 +429,14 @@ impl SessionManager {
             .await
             .map_err(|e| (ErrorCode::InstallKeyFailed, Some(e.to_string())))?;
         session.disconnect().await;
-        parse_outcome(&output).map_err(|_| (ErrorCode::InstallKeyUnsupported, None))
+        parse_outcome(&output).map_err(|e| match e {
+            sshcraft_core::authorized_keys::AuthorizedKeysError::Failed => {
+                (ErrorCode::InstallKeyFailed, None)
+            }
+            sshcraft_core::authorized_keys::AuthorizedKeysError::Unsupported => {
+                (ErrorCode::InstallKeyUnsupported, None)
+            }
+        })
     }
 
     pub fn open(
@@ -839,7 +846,7 @@ fn failure_code(f: Failure) -> (ErrorCode, Option<String>) {
     match f {
         Failure::End(reason, code, detail) => (
             code.unwrap_or(match reason {
-                EndReason::AuthCancelled => ErrorCode::SecurityKeyCancelled,
+                EndReason::AuthCancelled => ErrorCode::SignInCancelled,
                 _ => ErrorCode::Session,
             }),
             detail,

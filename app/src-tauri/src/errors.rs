@@ -81,6 +81,8 @@ pub enum ErrorCode {
     InstallKeyFailed,
     /// A key bound to this device cannot go to a sync server.
     DeviceBound,
+    /// The user cancelled a sign-in question (password, code, passphrase).
+    SignInCancelled,
 }
 
 impl From<&ResolveError> for ErrorCode {

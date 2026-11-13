@@ -115,3 +115,52 @@ fn script_runs_in_sh() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.starts_with(&format!("verify-required {}", body(&key))));
 }
+
+#[test]
+fn failure_marker_is_its_own_outcome() {
+    assert!(matches!(
+        parse_outcome(b"SSHCRAFT_FAILED\n"),
+        Err(AuthorizedKeysError::Failed)
+    ));
+}
+
+#[test]
+fn script_reports_failure_and_ignores_commented_keys() {
+    if std::process::Command::new("sh")
+        .args(["-c", "true"])
+        .status()
+        .is_err()
+    {
+        eprintln!("no sh on this machine: skipped");
+        return;
+    }
+    let key = public_with_comment("deploy");
+    let command = install_command(&key, false);
+
+    // A commented-out line does not count as present.
+    let home = tempfile::tempdir().unwrap();
+    let ssh = home.path().join(".ssh");
+    std::fs::create_dir_all(&ssh).unwrap();
+    std::fs::write(
+        ssh.join("authorized_keys"),
+        format!("# {} old\n", body(&key)),
+    )
+    .unwrap();
+    let out = run_in_sh(home.path(), &command).unwrap();
+    assert_eq!(parse_outcome(&out).unwrap(), InstallOutcome::Added);
+
+    // `.ssh` is a file: mkdir fails, and the script says so.
+    let broken = tempfile::tempdir().unwrap();
+    std::fs::write(broken.path().join(".ssh"), "not a folder").unwrap();
+    let home = broken.path().to_string_lossy().replace('\\', "/");
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .env("HOME", home)
+        .output()
+        .unwrap();
+    assert!(matches!(
+        parse_outcome(&output.stdout),
+        Err(AuthorizedKeysError::Failed)
+    ));
+}
