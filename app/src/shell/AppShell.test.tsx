@@ -1,13 +1,21 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import en from "../i18n/en.json";
 import { SettingsProvider } from "../settings/SettingsProvider";
 import { AppShell } from "./AppShell";
+import { invoke } from "@tauri-apps/api/core";
+
+type ViewProps = {
+  pane: { id: string };
+  onAttach: (id: string) => void;
+  onInput: (data: string, report: boolean) => void;
+};
 
 const state = vi.hoisted(() => ({
   handlers: {} as Record<string, (event: { payload: unknown }) => void>,
   mounted: 0,
   unmounted: 0,
+  views: {} as Record<string, ViewProps>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => {
@@ -18,6 +26,7 @@ vi.mock("@tauri-apps/api/core", () => {
     ],
     list_keys: [],
     list_recent: [],
+    local_shells: [],
     vault_status: { ok: true, code: null, detail: null },
     hello_status: { missing: false },
     system_locale: "en-US",
@@ -51,7 +60,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("../components/TerminalView", async () => {
   const { useEffect } = await import("react");
   return {
-    TerminalView: () => {
+    TerminalView: (props: ViewProps) => {
+      state.views[props.pane.id] = props;
       useEffect(() => {
         state.mounted += 1;
         return () => {
@@ -67,6 +77,8 @@ beforeEach(() => {
   state.mounted = 0;
   state.unmounted = 0;
   state.handlers = {};
+  state.views = {};
+  vi.mocked(invoke).mockClear();
 });
 afterEach(cleanup);
 
@@ -132,4 +144,88 @@ test("a question withdrawn while it is answered does not take the next one with 
     fireEvent.click(reject);
   });
   expect(screen.getByText("SHA256:eight")).toBeTruthy();
+});
+
+const press = (key: string, mods: { shift?: boolean } = {}) =>
+  act(() => {
+    fireEvent.keyDown(window, { key, ctrlKey: true, shiftKey: mods.shift ?? true });
+  });
+
+/** Opens "web", splits and picks "web" again: one tab, two panes. */
+async function twoPanes() {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  press("D");
+  // The picker pane offers the hosts; pick "web" there.
+  const picker = await screen.findByTestId("pane-picker");
+  fireEvent.click(within(picker).getAllByText("web")[0]);
+  expect(Object.keys(state.views)).toHaveLength(2);
+  return Object.keys(state.views);
+}
+
+const writes = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "session_write")
+    .map(([, args]) => (args as { id: string }).id);
+
+test("split then detach keeps both sessions", async () => {
+  await twoPanes();
+  expect(state.mounted).toBe(2);
+  fireEvent.click(screen.getAllByRole("button", { name: en["workspace.detach"] })[1]);
+  expect(screen.getAllByRole("tab")).toHaveLength(3);
+  expect(state.mounted).toBe(2);
+  expect(state.unmounted).toBe(0);
+});
+
+test("broadcast writes to every pane of the tab, answers only to their own", async () => {
+  const [a, b] = await twoPanes();
+  act(() => {
+    state.views[a].onAttach("s-a");
+    state.views[b].onAttach("s-b");
+  });
+  act(() => state.views[a].onInput("x", false));
+  expect(writes()).toEqual(["s-a"]);
+  press("B");
+  vi.mocked(invoke).mockClear();
+  act(() => state.views[a].onInput("y", false));
+  expect(writes().sort()).toEqual(["s-a", "s-b"]);
+  vi.mocked(invoke).mockClear();
+  act(() => state.views[b].onInput("\x1b[1;1R", true));
+  expect(writes()).toEqual(["s-b"]);
+});
+
+test("dropping a tab on another merges them without reconnecting", async () => {
+  fireEvent.doubleClick(await renderShell());
+  fireEvent.click(screen.getByRole("tab", { name: en["tabs.home"] }));
+  fireEvent.doubleClick(within(screen.getByRole("main")).getByText("web"));
+  const tabs = await screen.findAllByRole("tab", { name: /web/ });
+  expect(tabs).toHaveLength(2);
+  const data = new Map<string, string>();
+  const dataTransfer = {
+    setData: (k: string, v: string) => data.set(k, v),
+    getData: (k: string) => data.get(k) ?? "",
+    get types() {
+      return [...data.keys()];
+    },
+    effectAllowed: "move",
+    dropEffect: "move",
+  };
+  fireEvent.dragStart(tabs[1], { dataTransfer });
+  fireEvent.dragOver(tabs[0], { dataTransfer });
+  fireEvent.drop(tabs[0], { dataTransfer });
+  expect(screen.getAllByRole("tab", { name: /web/ })).toHaveLength(1);
+  expect(state.mounted).toBe(2);
+  expect(state.unmounted).toBe(0);
+});
+
+test("the focus layout lists every pane and shows the one picked", async () => {
+  const [a, b] = await twoPanes();
+  press("M");
+  const list = screen.getByRole("list", { name: en["workspace.panes"] });
+  const entries = within(list).getAllByRole("button");
+  expect(entries).toHaveLength(2);
+  fireEvent.click(entries[0]);
+  expect(document.querySelector(`[data-pane="${a}"]`)?.classList.contains("offscreen")).toBe(false);
+  expect(document.querySelector(`[data-pane="${b}"]`)?.classList.contains("offscreen")).toBe(true);
 });

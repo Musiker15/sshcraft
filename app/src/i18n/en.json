@@ -493,5 +493,17 @@
   "tabs.new": "New tab",
   "tabs.newTitle": "New tab",
   "tags.placeholder": "Add a tag, Enter to confirm",
-  "tags.remove": "Remove tag {tag}"
+  "tags.remove": "Remove tag {tag}",
+  "workspace.activity.error": "Ended with an error",
+  "workspace.activity.input": "Waiting for input",
+  "workspace.activity.output": "New output",
+  "workspace.broadcast": "Broadcast: type into every pane of this tab",
+  "workspace.closePane": "Close pane",
+  "workspace.detach": "Move to its own tab",
+  "workspace.focus": "Show large",
+  "workspace.focusLayout": "Focus: one large pane, the others in a list",
+  "workspace.panes": "Panes",
+  "workspace.resize": "Drag to resize",
+  "workspace.saveTemplate": "Save as workspace template",
+  "workspace.split": "Split: add a pane"
 }

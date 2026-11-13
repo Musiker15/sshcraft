@@ -493,5 +493,17 @@
   "tabs.new": "Neuer Tab",
   "tabs.newTitle": "Neuer Tab",
   "tags.placeholder": "Tag eingeben, mit Enter übernehmen",
-  "tags.remove": "Tag {tag} entfernen"
+  "tags.remove": "Tag {tag} entfernen",
+  "workspace.activity.error": "Mit Fehler beendet",
+  "workspace.activity.input": "Wartet auf Eingabe",
+  "workspace.activity.output": "Neue Ausgabe",
+  "workspace.broadcast": "Broadcast: in alle Bereiche dieses Tabs tippen",
+  "workspace.closePane": "Bereich schließen",
+  "workspace.detach": "In eigenen Tab verschieben",
+  "workspace.focus": "Groß anzeigen",
+  "workspace.focusLayout": "Fokus: ein Bereich groß, die anderen in einer Liste",
+  "workspace.panes": "Bereiche",
+  "workspace.resize": "Ziehen, um die Größe zu ändern",
+  "workspace.saveTemplate": "Als Workspace-Vorlage speichern",
+  "workspace.split": "Teilen: Bereich hinzufügen"
 }

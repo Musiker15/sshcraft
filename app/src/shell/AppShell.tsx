@@ -13,7 +13,9 @@ import {
   identitiesList,
   localShells,
   serialRemember,
+  sessionWrite,
   type SerialSettings,
+  type SessionStatus,
   type SessionTarget,
   type ShellCommand,
   answerAuth,
@@ -39,11 +41,10 @@ import { GroupForm } from "../components/GroupForm";
 import { HostForm } from "../components/HostForm";
 import { AuthPromptDialog } from "../components/AuthPromptDialog";
 import { HostKeyDialog } from "../components/HostKeyDialog";
-import { SessionStatusLine } from "../components/SessionStatusLine";
 import { ExportDialog } from "../components/ExportDialog";
 import { ImportDialog } from "../components/ImportDialog";
 import { InstallKeyDialog } from "../components/KeyDialogs";
-import { TerminalView } from "../components/TerminalView";
+import { WorkspaceView } from "../components/WorkspaceView";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
@@ -54,7 +55,15 @@ import type { PaletteActionId } from "../palette/rank";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ShareDialog, type ShareTarget } from "../pages/sync/ShareDialog";
-import { HOME_ID, initialTabs, tabsReducer, targetTitle } from "../state/tabs";
+import {
+  HOME_ID,
+  broadcastTargets,
+  initialTabs,
+  isPicker,
+  tabsReducer,
+  targetTitle,
+  type SessionTab,
+} from "../state/tabs";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Drawer } from "./Drawer";
 import { ErrorMessage } from "./ErrorMessage";
@@ -90,6 +99,8 @@ export function AppShell() {
   const [confirming, setConfirming] = useState<Confirm>(null);
   const [prompts, setPrompts] = useState<HostKeyPrompt[]>([]);
   const [tabs, dispatch] = useReducer(tabsReducer, initialTabs);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const [page, setPage] = useState<Page>("hosts");
   const [helloMissing, setHelloMissing] = useState(false);
   const [helloDismissed, setHelloDismissed] = useState(false);
@@ -157,6 +168,29 @@ export function AppShell() {
     dispatch({ type: "open", tab: { id: crypto.randomUUID(), target: { kind: "host", host_id: host.id }, title: host.name } });
   }, []);
 
+  const activeSession = tabs.tabs.find(
+    (tab): tab is SessionTab => tab.id === tabs.activeId && tab.kind === "session",
+  );
+
+  /** Typed input goes to its own session, with broadcast on to every session of the tab. */
+  const sendInput = useCallback((paneId: string, data: string, report: boolean) => {
+    const tab = tabsRef.current.tabs.find(
+      (t): t is SessionTab => t.kind === "session" && t.panes.some((p) => p.id === paneId),
+    );
+    const pane = tab?.panes.find((p) => p.id === paneId);
+    if (!tab || !pane || isPicker(pane)) return;
+    const targets = tab.broadcast && !report ? broadcastTargets(tab) : pane.sessionId ? [pane.sessionId] : [];
+    for (const id of targets) void sessionWrite(id, data).catch(() => {});
+  }, []);
+
+  const paneStatus = useCallback(
+    (paneId: string, status: SessionStatus) => {
+      dispatch({ type: "status", paneId, status });
+      if (status.state === "connected") reloadRecent();
+    },
+    [reloadRecent],
+  );
+
   const runAction = useCallback(
     (action: ShortcutAction) => {
       switch (action) {
@@ -175,9 +209,32 @@ export function AppShell() {
         case "palette":
           setPaletteOpen(true);
           break;
+        case "splitPane":
+          if (activeSession) dispatch({ type: "split", tabId: activeSession.id, paneId: crypto.randomUUID() });
+          break;
+        case "closePane":
+          if (activeSession) dispatch({ type: "closePane", paneId: activeSession.focusedId });
+          break;
+        case "nextPane":
+          dispatch({ type: "nextPane" });
+          break;
+        case "prevPane":
+          dispatch({ type: "prevPane" });
+          break;
+        case "toggleLayout":
+          if (activeSession)
+            dispatch({
+              type: "setLayout",
+              tabId: activeSession.id,
+              layout: activeSession.layout === "focus" ? "split" : "focus",
+            });
+          break;
+        case "toggleBroadcast":
+          if (activeSession) dispatch({ type: "toggleBroadcast", tabId: activeSession.id });
+          break;
       }
     },
-    [tabs.activeId],
+    [tabs.activeId, activeSession],
   );
   const actionRef = useRef(runAction);
   actionRef.current = runAction;
@@ -250,7 +307,13 @@ export function AppShell() {
 
   return (
     <div className="shell">
-      <TabStrip state={tabs} dispatch={dispatch} onNewTab={() => runAction("newTab")} />
+      <TabStrip
+        state={tabs}
+        dispatch={dispatch}
+        onNewTab={() => runAction("newTab")}
+        onSplit={() => runAction("splitPane")}
+        onSaveTemplate={() => {}}
+      />
       {vault && (
         <div className="banner">
           {vault.code === "master_key_missing"
@@ -338,24 +401,33 @@ export function AppShell() {
             }}
           />
         )}
-        {/* Sessions stay mounted while hidden, so switching tabs never drops a connection. */}
-        {tabs.tabs.map(
-          (tab) =>
-            tab.kind === "session" && (
-              <div key={tab.id} className={tab.id === tabs.activeId ? "session-pane" : "session-pane hidden"}>
-                <TerminalView
-                  tab={tab}
-                  active={tab.id === tabs.activeId}
-                  onAttach={(sessionId) => dispatch({ type: "attach", id: tab.id, sessionId })}
-                  onStatus={(status) => {
-                    dispatch({ type: "status", id: tab.id, status });
-                    if (status.state === "connected") reloadRecent();
-                  }}
-                />
-                <SessionStatusLine status={tab.status} />
-              </div>
-            ),
-        )}
+        {/* Panes stay mounted while hidden, so switching tabs never drops a connection. */}
+        <WorkspaceView
+          state={tabs}
+          dispatch={dispatch}
+          onInput={sendInput}
+          onStatus={paneStatus}
+          renderPicker={(paneId) => (
+            <NewTabPage
+              hosts={hosts}
+              groups={groups}
+              recent={recent}
+              onPick={(host) =>
+                dispatch({ type: "pickPane", paneId, target: { kind: "host", host_id: host.id }, title: host.name })
+              }
+              shells={shells}
+              onShell={(shell) => {
+                const target: SessionTarget = { kind: "local", shell };
+                dispatch({ type: "pickPane", paneId, target, title: targetTitle(target) });
+              }}
+              onSerial={(settings: SerialSettings) => {
+                void serialRemember(settings).catch(() => {});
+                const target: SessionTarget = { kind: "serial", settings };
+                dispatch({ type: "pickPane", paneId, target, title: targetTitle(target) });
+              }}
+            />
+          )}
+        />
       </div>
 
       {editor && (
