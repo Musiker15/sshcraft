@@ -8,7 +8,7 @@ use sshcraft_agent::{Action, GroupInput, HostInput, KeyType};
 #[command(
     name = "sshcraft",
     version,
-    about = "Talk to the running SSHCraft app: list hosts, run commands, keep sessions. Private keys stay in SSHCraft."
+    about = "Talk to the running SSHCraft app: list hosts, run commands, edit hosts. Private keys stay in SSHCraft. Sessions are for MCP (`sshcraft mcp`)."
 )]
 pub struct Cli {
     /// Who asks; shown in SSHCraft's questions and log.
@@ -48,9 +48,6 @@ pub enum Command {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
-    /// Interactive sessions.
-    #[command(subcommand)]
-    Session(SessionCommand),
     /// Create or change a host from JSON (`{"name": …, "address": …}`).
     SaveHost {
         #[arg(value_name = "JSON")]
@@ -78,30 +75,6 @@ pub enum Command {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum SessionCommand {
-    /// Open a shell; prints the session id.
-    Open {
-        host: String,
-    },
-    /// Send text; `--enter` adds a line end.
-    Write {
-        session: String,
-        data: String,
-        #[arg(long)]
-        enter: bool,
-    },
-    /// Print new output, waiting up to `--wait` milliseconds.
-    Read {
-        session: String,
-        #[arg(long, default_value_t = 1000)]
-        wait: u64,
-    },
-    Close {
-        session: String,
-    },
-}
-
-#[derive(Debug, Subcommand)]
 pub enum DeleteCommand {
     Host { host: String },
     Group { group: String },
@@ -124,28 +97,6 @@ pub fn action(command: &Command) -> Result<Option<Action>, String> {
             host: host.clone(),
             command: command.join(" "),
             timeout_secs: *timeout,
-        },
-        Command::Session(SessionCommand::Open { host }) => {
-            Action::SessionOpen { host: host.clone() }
-        }
-        Command::Session(SessionCommand::Write {
-            session,
-            data,
-            enter,
-        }) => Action::SessionWrite {
-            session: session.clone(),
-            data: if *enter {
-                format!("{data}\n")
-            } else {
-                data.clone()
-            },
-        },
-        Command::Session(SessionCommand::Read { session, wait }) => Action::SessionRead {
-            session: session.clone(),
-            wait_ms: Some(*wait),
-        },
-        Command::Session(SessionCommand::Close { session }) => Action::SessionClose {
-            session: session.clone(),
         },
         Command::SaveHost { host } => Action::SaveHost {
             host: serde_json::from_str::<HostInput>(host).map_err(|e| format!("host JSON: {e}"))?,
@@ -229,23 +180,11 @@ mod tests {
     }
 
     #[test]
-    fn session_write_can_add_the_line_end() {
-        let cli = parse(&["session", "write", "abc", "uptime", "--enter"]);
-        assert_eq!(
-            action(&cli.command).unwrap(),
-            Some(Action::SessionWrite {
-                session: "abc".into(),
-                data: "uptime\n".into()
-            })
-        );
-    }
-
-    #[test]
     fn hosts_from_json_and_bad_json() {
         let cli = parse(&["save-host", r#"{"name": "db", "address": "10.0.0.5"}"#]);
         match action(&cli.command).unwrap() {
             Some(Action::SaveHost { host }) => {
-                assert_eq!(host.address.as_deref(), Some("10.0.0.5"))
+                assert_eq!(host.address, Some(Some("10.0.0.5".into())))
             }
             other => panic!("{other:?}"),
         }

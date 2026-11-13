@@ -2,9 +2,14 @@
 //! line). Every SSHCraft action is a tool; the agent's name is the client name it sends in
 //! `initialize`.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 use sshcraft_agent::{Action, valid_agent_name};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::client::Caller;
 
@@ -151,6 +156,7 @@ pub fn tools() -> Vec<Value> {
 pub fn action_for(tool: &str, arguments: &Value) -> Result<Action, String> {
     let name = tool
         .strip_prefix("sshcraft_")
+        .filter(|name| *name != "cancel")
         .ok_or_else(|| format!("unknown tool {tool}"))?;
     let mut message = match arguments {
         Value::Object(map) => map.clone(),
@@ -161,10 +167,11 @@ pub fn action_for(tool: &str, arguments: &Value) -> Result<Action, String> {
     serde_json::from_value(Value::Object(message)).map_err(|e| format!("invalid arguments: {e}"))
 }
 
-pub struct McpServer<C: Caller> {
-    caller: C,
-    agent: String,
-}
+/// JSON-RPC error codes.
+const INVALID_REQUEST: i64 = -32600;
+const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+const PARSE_ERROR: i64 = -32700;
 
 fn reply(id: &Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
@@ -178,11 +185,30 @@ fn text_result(text: String, is_error: bool) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
 
-impl<C: Caller> McpServer<C> {
-    pub fn new(caller: C) -> Self {
+/// The MCP side: who the agent is, and the answers that need no call to the app.
+pub struct McpServer {
+    agent: String,
+    /// `--agent` given on the command line wins over the client's own name.
+    fixed: bool,
+}
+
+/// What to do with one incoming message.
+pub enum Step {
+    /// Answer at once.
+    Answer(Value),
+    /// A tool call: run it (it may wait for the user) and answer when done.
+    Call { id: Value, action: Action },
+    /// Stop waiting for the call with this id.
+    Cancel(Value),
+    /// A notification: nothing to answer.
+    Nothing,
+}
+
+impl McpServer {
+    pub fn new(agent: Option<String>) -> Self {
         Self {
-            caller,
-            agent: "mcp".into(),
+            fixed: agent.is_some(),
+            agent: agent.unwrap_or_else(|| "mcp".into()),
         }
     }
 
@@ -190,21 +216,28 @@ impl<C: Caller> McpServer<C> {
         &self.agent
     }
 
-    /// The answer to one message; `None` for notifications.
-    pub async fn handle(&mut self, message: Value) -> Option<Value> {
-        let id = message.get("id").cloned();
+    pub fn step(&mut self, message: &Value) -> Step {
         let method = message.get("method").and_then(Value::as_str).unwrap_or("");
-        let Some(id) = id else {
-            // Notifications (initialized, cancelled, …) need no answer.
-            return None;
-        };
         let params = message.get("params").cloned().unwrap_or(Value::Null);
-        Some(match method {
+        let Some(id) = message.get("id").cloned() else {
+            if method == "notifications/cancelled"
+                && let Some(request) = params.get("requestId")
+            {
+                return Step::Cancel(request.clone());
+            }
+            return Step::Nothing;
+        };
+        // MCP request ids are strings or numbers, never null.
+        if !(id.is_string() || id.is_number()) {
+            return Step::Answer(failure(&Value::Null, INVALID_REQUEST, "invalid request id"));
+        }
+        Step::Answer(match method {
             "initialize" => {
-                if let Some(name) = params
-                    .pointer("/clientInfo/name")
-                    .and_then(Value::as_str)
-                    .filter(|n| valid_agent_name(n))
+                if !self.fixed
+                    && let Some(name) = params
+                        .pointer("/clientInfo/name")
+                        .and_then(Value::as_str)
+                        .filter(|n| valid_agent_name(n))
                 {
                     self.agent = name.to_owned();
                 }
@@ -214,7 +247,7 @@ impl<C: Caller> McpServer<C> {
                         "protocolVersion": PROTOCOL_VERSION,
                         "capabilities": {"tools": {"listChanged": false}},
                         "serverInfo": {"name": "sshcraft", "version": env!("CARGO_PKG_VERSION")},
-                        "instructions": "SSHCraft runs SSH commands and sessions on the user's hosts. Private keys never leave SSHCraft. Some actions need the user's approval in the SSHCraft window; a denied action is the user's decision.",
+                        "instructions": "SSHCraft runs SSH commands and sessions on the user's hosts. Private keys never leave SSHCraft. Some actions need the user's approval in the SSHCraft window; a denied action is the user's decision. Sessions end when this server stops.",
                     }),
                 )
             }
@@ -223,20 +256,23 @@ impl<C: Caller> McpServer<C> {
             "tools/call" => {
                 let tool = params.get("name").and_then(Value::as_str).unwrap_or("");
                 let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
-                let result = match action_for(tool, &arguments) {
-                    Err(problem) => text_result(problem, true),
-                    Ok(action) => match self.caller.call(&self.agent, action).await {
-                        Ok(value) => text_result(render(&value), false),
-                        Err(error) => {
-                            text_result(format!("{:?}: {}", error.kind, error.message), true)
-                        }
-                    },
-                };
-                reply(&id, result)
+                match action_for(tool, &arguments) {
+                    Ok(action) => return Step::Call { id, action },
+                    Err(problem) => failure(&id, INVALID_PARAMS, &problem),
+                }
             }
-            _ => failure(&id, -32601, "method not found"),
+            _ => failure(&id, METHOD_NOT_FOUND, "method not found"),
         })
     }
+}
+
+/// Runs one tool call against the app and turns the result into the tool result.
+pub async fn call_tool<C: Caller>(caller: &C, agent: &str, id: &Value, action: Action) -> Value {
+    let result = match caller.call(agent, action).await {
+        Ok(value) => text_result(render(&value), false),
+        Err(error) => text_result(format!("{:?}: {}", error.kind, error.message), true),
+    };
+    reply(id, result)
 }
 
 /// A result as text: plain output for command output, JSON otherwise.
@@ -247,6 +283,9 @@ fn render(value: &Value) -> String {
             if value.get("truncated") == Some(&Value::Bool(true)) {
                 text.push_str("\n[output cut at 1 MiB]");
             }
+            if let Some(status) = value.get("exit_status").and_then(Value::as_u64) {
+                text.push_str(&format!("\n[exit status {status}]"));
+            }
             if value.get("ended") == Some(&Value::Bool(true)) {
                 text.push_str("\n[session ended]");
             }
@@ -256,29 +295,71 @@ fn render(value: &Value) -> String {
     }
 }
 
-/// Serves MCP on `input`/`output` until the input ends.
-pub async fn serve<C: Caller, R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+fn key_of(id: &Value) -> String {
+    id.to_string()
+}
+
+/// Serves MCP on `input`/`output` until the input ends. Tool calls run side by side, so a call
+/// waiting for the user's answer holds up neither `ping` nor other calls; a cancelled call is
+/// dropped (and with it the question in SSHCraft).
+pub async fn serve<C: Caller, R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin + Send + 'static>(
     caller: C,
+    agent: Option<String>,
     input: R,
     mut output: W,
 ) -> std::io::Result<()> {
-    let mut server = McpServer::new(caller);
+    let caller = Arc::new(caller);
+    let mut server = McpServer::new(agent);
+    let (answers, mut outgoing) = mpsc::unbounded_channel::<Value>();
+    let writer = tokio::spawn(async move {
+        while let Some(answer) = outgoing.recv().await {
+            let mut text = serde_json::to_string(&answer).unwrap_or_default();
+            text.push('\n');
+            if output.write_all(text.as_bytes()).await.is_err() || output.flush().await.is_err() {
+                return;
+            }
+        }
+    });
+    let mut calls: HashMap<String, JoinHandle<()>> = HashMap::new();
     let mut lines = input.lines();
     while let Some(line) = lines.next_line().await? {
+        calls.retain(|_, task| !task.is_finished());
         if line.trim().is_empty() {
             continue;
         }
-        let answer = match serde_json::from_str::<Value>(&line) {
-            Ok(message) => server.handle(message).await,
-            Err(_) => Some(failure(&Value::Null, -32700, "parse error")),
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            let _ = answers.send(failure(&Value::Null, PARSE_ERROR, "parse error"));
+            continue;
         };
-        if let Some(answer) = answer {
-            let mut text = serde_json::to_string(&answer).unwrap_or_default();
-            text.push('\n');
-            output.write_all(text.as_bytes()).await?;
-            output.flush().await?;
+        match server.step(&message) {
+            Step::Answer(answer) => {
+                let _ = answers.send(answer);
+            }
+            Step::Call { id, action } => {
+                let caller = caller.clone();
+                let agent = server.agent().to_owned();
+                let answers = answers.clone();
+                let key = key_of(&id);
+                let task = tokio::spawn(async move {
+                    let answer = call_tool(caller.as_ref(), &agent, &id, action).await;
+                    let _ = answers.send(answer);
+                });
+                calls.insert(key, task);
+            }
+            Step::Cancel(id) => {
+                if let Some(task) = calls.remove(&key_of(&id)) {
+                    task.abort();
+                }
+            }
+            Step::Nothing => {}
         }
     }
+    // Input ended: running calls finish and answer, then the output closes.
+    for (_, task) in calls {
+        let _ = task.await;
+    }
+    drop(answers);
+    let _ = writer.await;
     Ok(())
 }
 

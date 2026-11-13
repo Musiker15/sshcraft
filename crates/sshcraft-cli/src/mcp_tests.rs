@@ -1,21 +1,41 @@
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 use super::*;
 use sshcraft_agent::{AgentError, ErrorKind};
+use tokio::io::{AsyncWriteExt, BufReader};
 
-/// Notes calls and answers with a fixed value or error.
+/// Notes calls; `exec` waits until dropped (as a question would), others answer at once.
 #[derive(Default)]
 struct Fake {
-    calls: Vec<(String, Action)>,
+    calls: Mutex<Vec<(String, Action)>>,
     error: Option<AgentError>,
+    dropped: Arc<AtomicBool>,
+}
+
+struct Flag(Arc<AtomicBool>);
+impl Drop for Flag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
 }
 
 #[async_trait::async_trait]
-impl Caller for &mut Fake {
-    async fn call(&mut self, agent: &str, action: Action) -> Result<Value, AgentError> {
-        self.calls.push((agent.to_owned(), action));
-        match &self.error {
-            Some(e) => Err(e.clone()),
-            None => Ok(json!({"output": "hello\n", "truncated": false})),
+impl Caller for Fake {
+    async fn call(&self, agent: &str, action: Action) -> Result<Value, AgentError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((agent.to_owned(), action.clone()));
+        if let Some(e) = &self.error {
+            return Err(e.clone());
         }
+        if matches!(action, Action::Exec { .. }) {
+            let _flag = Flag(self.dropped.clone());
+            std::future::pending::<()>().await;
+        }
+        Ok(json!({"output": "hello\n", "truncated": false, "exit_status": 0}))
     }
 }
 
@@ -23,39 +43,42 @@ fn call(id: i64, method: &str, params: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 }
 
-#[tokio::test]
-async fn initialize_names_the_agent_and_the_protocol() {
-    let mut fake = Fake::default();
-    let mut server = McpServer::new(&mut fake);
-    let answer = server
-        .handle(call(
-            1,
-            "initialize",
-            json!({"protocolVersion": "2025-06-18", "clientInfo": {"name": "claude-code", "version": "2"}, "capabilities": {}}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(answer["result"]["protocolVersion"], PROTOCOL_VERSION);
-    assert!(answer["result"]["capabilities"]["tools"].is_object());
-    assert_eq!(server.agent(), "claude-code");
-    // The notification that follows gets no answer.
-    assert!(
-        server
-            .handle(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-            .await
-            .is_none()
-    );
+fn answer(step: Step) -> Value {
+    match step {
+        Step::Answer(a) => a,
+        _ => panic!("expected an answer"),
+    }
 }
 
-#[tokio::test]
-async fn every_action_is_a_tool_with_a_schema() {
-    let mut fake = Fake::default();
-    let mut server = McpServer::new(&mut fake);
-    let answer = server
-        .handle(call(2, "tools/list", json!({})))
-        .await
-        .unwrap();
-    let tools = answer["result"]["tools"].as_array().unwrap();
+#[test]
+fn initialize_names_the_agent_unless_the_command_line_did() {
+    let mut server = McpServer::new(None);
+    let a = answer(server.step(&call(
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18", "clientInfo": {"name": "claude-code", "version": "2"}, "capabilities": {}}),
+    )));
+    assert_eq!(a["result"]["protocolVersion"], PROTOCOL_VERSION);
+    assert!(a["result"]["capabilities"]["tools"].is_object());
+    assert_eq!(server.agent(), "claude-code");
+    assert!(matches!(
+        server.step(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"})),
+        Step::Nothing
+    ));
+    let mut fixed = McpServer::new(Some("nightly-job".into()));
+    fixed.step(&call(
+        1,
+        "initialize",
+        json!({"clientInfo": {"name": "codex"}}),
+    ));
+    assert_eq!(fixed.agent(), "nightly-job");
+}
+
+#[test]
+fn every_action_is_a_tool_with_a_schema() {
+    let mut server = McpServer::new(None);
+    let a = answer(server.step(&call(2, "tools/list", json!({}))));
+    let tools = a["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 16);
     for tool in tools {
         assert!(tool["name"].as_str().unwrap().starts_with("sshcraft_"));
@@ -63,111 +86,104 @@ async fn every_action_is_a_tool_with_a_schema() {
     }
 }
 
-#[tokio::test]
-async fn a_tool_call_becomes_an_action_and_its_result_text() {
-    let mut fake = Fake::default();
-    {
-        let mut server = McpServer::new(&mut fake);
-        server
-            .handle(call(
-                1,
-                "initialize",
-                json!({"clientInfo": {"name": "codex"}}),
-            ))
-            .await;
-        let answer = server
-            .handle(call(
-                3,
-                "tools/call",
-                json!({"name": "sshcraft_exec", "arguments": {"host": "web", "command": "uptime"}}),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(answer["result"]["isError"], false);
-        assert_eq!(answer["result"]["content"][0]["text"], "hello\n");
-    }
-    assert_eq!(
-        fake.calls,
-        vec![(
-            "codex".to_owned(),
-            Action::Exec {
-                host: "web".into(),
-                command: "uptime".into(),
-                timeout_secs: None
-            }
-        )]
-    );
+#[test]
+fn unknown_tools_bad_arguments_and_bad_ids_are_protocol_errors() {
+    let mut server = McpServer::new(None);
+    let bad = answer(server.step(&call(
+        4,
+        "tools/call",
+        json!({"name": "sshcraft_exec", "arguments": {"host": "web"}}),
+    )));
+    assert_eq!(bad["error"]["code"], -32602);
+    let unknown = answer(server.step(&call(5, "tools/call", json!({"name": "rm_rf"}))));
+    assert_eq!(unknown["error"]["code"], -32602);
+    let cancel_is_no_tool = answer(server.step(&call(
+        6,
+        "tools/call",
+        json!({"name": "sshcraft_cancel", "arguments": {"request": 1}}),
+    )));
+    assert_eq!(cancel_is_no_tool["error"]["code"], -32602);
+    let null_id = answer(server.step(&json!({"jsonrpc": "2.0", "id": null, "method": "ping"})));
+    assert_eq!(null_id["error"]["code"], -32600);
+    let missing = answer(server.step(&call(7, "resources/list", json!({}))));
+    assert_eq!(missing["error"]["code"], -32601);
 }
 
 #[tokio::test]
-async fn wrong_arguments_and_refusals_are_tool_errors() {
-    let mut fake = Fake {
+async fn a_tool_call_becomes_an_action_and_its_result_text() {
+    let fake = Fake::default();
+    let a = call_tool(&fake, "codex", &json!(3), Action::ListHosts).await;
+    assert_eq!(a["result"]["isError"], false);
+    assert_eq!(
+        a["result"]["content"][0]["text"],
+        "hello\n\n[exit status 0]"
+    );
+    assert_eq!(fake.calls.lock().unwrap()[0].0, "codex");
+    let refused = Fake {
         error: Some(AgentError::new(ErrorKind::Denied, "declined in SSHCraft")),
         ..Fake::default()
     };
-    let mut server = McpServer::new(&mut fake);
-    let bad = server
-        .handle(call(
-            4,
-            "tools/call",
-            json!({"name": "sshcraft_exec", "arguments": {"host": "web"}}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(bad["result"]["isError"], true);
-    let unknown = server
-        .handle(call(
-            5,
-            "tools/call",
-            json!({"name": "rm_rf", "arguments": {}}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(unknown["result"]["isError"], true);
-    let denied = server
-        .handle(call(
-            6,
-            "tools/call",
-            json!({"name": "sshcraft_list_hosts"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(denied["result"]["isError"], true);
+    let a = call_tool(&refused, "codex", &json!(4), Action::ListHosts).await;
+    assert_eq!(a["result"]["isError"], true);
     assert!(
-        denied["result"]["content"][0]["text"]
+        a["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
             .contains("declined")
     );
 }
 
-#[tokio::test]
-async fn unknown_methods_get_the_json_rpc_error() {
-    let mut fake = Fake::default();
-    let mut server = McpServer::new(&mut fake);
-    let answer = server
-        .handle(call(7, "resources/list", json!({})))
+async fn next_line(read: &mut tokio::io::Lines<BufReader<tokio::io::DuplexStream>>) -> Value {
+    let line = tokio::time::timeout(Duration::from_secs(5), read.next_line())
         .await
+        .unwrap()
+        .unwrap()
         .unwrap();
-    assert_eq!(answer["error"]["code"], -32601);
-    let pong = server.handle(call(8, "ping", json!({}))).await.unwrap();
-    assert!(pong["result"].is_object());
+    serde_json::from_str(&line).unwrap()
 }
 
 #[tokio::test]
-async fn serve_answers_line_by_line_and_reports_broken_json() {
-    let mut fake = Fake::default();
-    let input = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\nnot json\n".to_vec();
-    let mut output = Vec::new();
-    serve(&mut fake, input.as_slice(), &mut output)
+async fn a_waiting_call_holds_up_nothing_and_cancelling_drops_it() {
+    let dropped = Arc::new(AtomicBool::new(false));
+    let fake = Fake {
+        dropped: dropped.clone(),
+        ..Fake::default()
+    };
+    let (mut to_server, server_in) = tokio::io::duplex(64 * 1024);
+    let (server_out, from_server) = tokio::io::duplex(64 * 1024);
+    let task = tokio::spawn(serve(fake, None, BufReader::new(server_in), server_out));
+    let mut read = BufReader::new(from_server).lines();
+    let send = |v: Value| format!("{v}\n");
+    to_server
+        .write_all(
+            send(call(
+                1,
+                "tools/call",
+                json!({"name": "sshcraft_exec", "arguments": {"host": "web", "command": "sleep"}}),
+            ))
+            .as_bytes(),
+        )
         .await
         .unwrap();
-    let lines: Vec<Value> = String::from_utf8(output)
+    to_server
+        .write_all(send(call(2, "ping", json!({}))).as_bytes())
+        .await
+        .unwrap();
+    assert_eq!(next_line(&mut read).await["id"], 2);
+    to_server
+        .write_all(
+            send(json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}))
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    to_server.write_all(b"not json\n").await.unwrap();
+    assert_eq!(next_line(&mut read).await["error"]["code"], -32700);
+    assert!(dropped.load(Ordering::SeqCst));
+    drop(to_server);
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
         .unwrap()
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(lines.len(), 2);
-    assert_eq!(lines[0]["id"], 1);
-    assert_eq!(lines[1]["error"]["code"], -32700);
+        .unwrap()
+        .unwrap();
 }

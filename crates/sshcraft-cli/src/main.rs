@@ -16,7 +16,7 @@ use crate::client::{AppClient, Caller};
 /// The app is not running (or not this user's).
 const EXIT_NOT_RUNNING: u8 = 3;
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() -> ExitCode {
     let args = cli::Cli::parse();
     if !sshcraft_agent::valid_agent_name(&args.agent) {
@@ -32,7 +32,9 @@ async fn main() -> ExitCode {
     };
     let Some(action) = action else {
         let input = tokio::io::BufReader::new(tokio::io::stdin());
-        return match mcp::serve(AppClient::default(), input, tokio::io::stdout()).await {
+        // `--agent` given explicitly names the agent; else the MCP client's own name does.
+        let agent = (args.agent != "cli").then(|| args.agent.clone());
+        return match mcp::serve(AppClient::default(), agent, input, tokio::io::stdout()).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("{e}");

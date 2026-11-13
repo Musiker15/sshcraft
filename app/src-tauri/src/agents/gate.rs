@@ -86,7 +86,7 @@ enum Op {
     SessionRead(String, Duration),
     SessionClose(String),
     SaveHost(Box<Host>),
-    SaveGroup(Group),
+    SaveGroup(Box<Group>),
     DeleteHost(HostId),
     DeleteGroup(GroupId),
     DeleteKey(KeyId),
@@ -810,7 +810,7 @@ impl<B: AgentBackend, C: Confirmer> Gate<B, C> {
                 };
                 stored.parent_id = parent;
                 stored.name = group.name;
-                (Op::SaveGroup(stored), target, detail)
+                (Op::SaveGroup(Box::new(stored)), target, detail)
             }
             Action::DeleteHost { host } => {
                 let h = view.host(&host).map_err(with(&host))?;
@@ -927,7 +927,7 @@ impl<B: AgentBackend, C: Confirmer> Gate<B, C> {
             }
             Op::SaveGroup(group) => {
                 let view = group_view(&group);
-                b.save_group(group)?;
+                b.save_group(*group)?;
                 Ok(json(&view))
             }
             Op::DeleteHost(host) => {
