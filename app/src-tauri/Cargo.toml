@@ -26,6 +26,7 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 directories = { workspace = true }
 uuid = { workspace = true }
+url = "2.5.8"
 zeroize = { workspace = true }
 thiserror = { workspace = true }
 strum = { version = "0.28.0", features = ["derive"] }
@@ -37,6 +38,7 @@ russh = { workspace = true }
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "freebsd"))'.dependencies]
 tauri-plugin-single-instance = "2.5.5"
 tauri-plugin-dialog = "2.8.4"
+tauri-plugin-opener = "2.7.3"
 sshcraft-local = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

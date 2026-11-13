@@ -1,4 +1,6 @@
 import { LocalShellSetting } from "../components/LocalShellSetting";
+import { ShortcutSettings } from "../components/ShortcutSettings";
+import { TERMINAL_TYPES } from "../settings/terminal";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 import type { AppSettings, AppTheme } from "../api";
@@ -126,7 +128,33 @@ export function SettingsPage({ onDataChanged }: { onDataChanged?: () => void } =
         </label>
       </div>
 
+      <div className="settings-block">
+        <h2 className="group-title">{t("settings.terminal")}</h2>
+        <label>
+          {t("settings.terminalType")}
+          <select value={settings.terminal_type} onChange={(e) => void update({ terminal_type: e.target.value })}>
+            {TERMINAL_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">{t("settings.terminalTypeHint")}</p>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.clipboard_osc52 === "write"}
+            onChange={(e) => void update({ clipboard_osc52: e.target.checked ? "write" : "off" })}
+          />
+          {t("settings.osc52")}
+        </label>
+        <p className="hint">{t("settings.osc52Hint")}</p>
+      </div>
+
       <LocalShellSetting />
+
+      <ShortcutSettings />
 
       <div className="settings-block">
         <h2 className="group-title">{t("settings.about")}</h2>

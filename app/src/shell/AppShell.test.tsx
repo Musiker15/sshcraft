@@ -1,13 +1,21 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import en from "../i18n/en.json";
 import { SettingsProvider } from "../settings/SettingsProvider";
 import { AppShell } from "./AppShell";
+import { invoke } from "@tauri-apps/api/core";
+
+type ViewProps = {
+  pane: { id: string; title: string; startup?: { cwd?: string | null; command?: string | null } };
+  onAttach: (id: string) => void;
+  onInput: (data: string, report: boolean) => void;
+};
 
 const state = vi.hoisted(() => ({
   handlers: {} as Record<string, (event: { payload: unknown }) => void>,
   mounted: 0,
   unmounted: 0,
+  views: {} as Record<string, ViewProps>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => {
@@ -18,6 +26,20 @@ vi.mock("@tauri-apps/api/core", () => {
     ],
     list_keys: [],
     list_recent: [],
+    local_shells: [],
+    workspace_templates: [
+      {
+        id: "tpl",
+        name: "Ops",
+        layout: "split",
+        col_sizes: [],
+        row_sizes: [],
+        panes: [
+          { target: { kind: "host", host_id: "h1" }, title: "web", cwd: "/srv", command: "htop" },
+          { target: { kind: "host", host_id: "gone" }, title: "old", cwd: null, command: null },
+        ],
+      },
+    ],
     vault_status: { ok: true, code: null, detail: null },
     hello_status: { missing: false },
     system_locale: "en-US",
@@ -28,6 +50,9 @@ vi.mock("@tauri-apps/api/core", () => {
       font_family: "Consolas",
       font_size: 14,
       host_view: "grid",
+      terminal_type: "xterm-256color",
+      clipboard_osc52: "write",
+      shortcuts: {},
     },
   };
   return {
@@ -48,14 +73,19 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("../components/TerminalView", async () => {
   const { useEffect } = await import("react");
   return {
-    TerminalView: () => {
+    TerminalView: (props: ViewProps) => {
+      state.views[props.pane.id] = props;
       useEffect(() => {
         state.mounted += 1;
         return () => {
           state.unmounted += 1;
         };
       }, []);
-      return <div data-testid="terminal" />;
+      return (
+        <div data-testid="terminal" className="terminal-host">
+          <textarea className="xterm-helper-textarea" />
+        </div>
+      );
     },
   };
 });
@@ -64,6 +94,8 @@ beforeEach(() => {
   state.mounted = 0;
   state.unmounted = 0;
   state.handlers = {};
+  state.views = {};
+  vi.mocked(invoke).mockClear();
 });
 afterEach(cleanup);
 
@@ -129,4 +161,108 @@ test("a question withdrawn while it is answered does not take the next one with 
     fireEvent.click(reject);
   });
   expect(screen.getByText("SHA256:eight")).toBeTruthy();
+});
+
+const press = (key: string, mods: { shift?: boolean } = {}) =>
+  act(() => {
+    fireEvent.keyDown(window, { key, ctrlKey: true, shiftKey: mods.shift ?? true });
+  });
+
+/** Opens "web", splits and picks "web" again: one tab, two panes. */
+async function twoPanes() {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  press("D");
+  // The picker pane offers the hosts; pick "web" there.
+  const picker = await screen.findByTestId("pane-picker");
+  fireEvent.click(within(picker).getAllByText("web")[0]);
+  expect(Object.keys(state.views)).toHaveLength(2);
+  return Object.keys(state.views);
+}
+
+const writes = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "session_write")
+    .map(([, args]) => (args as { id: string }).id);
+
+test("split then detach keeps both sessions", async () => {
+  await twoPanes();
+  expect(state.mounted).toBe(2);
+  fireEvent.click(screen.getAllByRole("button", { name: en["workspace.detach"] })[1]);
+  expect(screen.getAllByRole("tab")).toHaveLength(3);
+  expect(state.mounted).toBe(2);
+  expect(state.unmounted).toBe(0);
+});
+
+test("broadcast writes to every pane of the tab, answers only to their own", async () => {
+  const [a, b] = await twoPanes();
+  act(() => {
+    state.views[a].onAttach("s-a");
+    state.views[b].onAttach("s-b");
+  });
+  act(() => state.views[a].onInput("x", false));
+  expect(writes()).toEqual(["s-a"]);
+  press("B");
+  vi.mocked(invoke).mockClear();
+  act(() => state.views[a].onInput("y", false));
+  expect(writes().sort()).toEqual(["s-a", "s-b"]);
+  vi.mocked(invoke).mockClear();
+  act(() => state.views[b].onInput("\x1b[1;1R", true));
+  expect(writes()).toEqual(["s-b"]);
+});
+
+test("dropping a tab on another merges them without reconnecting", async () => {
+  fireEvent.doubleClick(await renderShell());
+  fireEvent.click(screen.getByRole("tab", { name: en["tabs.home"] }));
+  fireEvent.doubleClick(within(screen.getByRole("main")).getByText("web"));
+  const tabs = await screen.findAllByRole("tab", { name: /web/ });
+  expect(tabs).toHaveLength(2);
+  const data = new Map<string, string>();
+  const dataTransfer = {
+    setData: (k: string, v: string) => data.set(k, v),
+    getData: (k: string) => data.get(k) ?? "",
+    get types() {
+      return [...data.keys()];
+    },
+    effectAllowed: "move",
+    dropEffect: "move",
+  };
+  fireEvent.dragStart(tabs[1], { dataTransfer });
+  fireEvent.dragOver(tabs[0], { dataTransfer });
+  fireEvent.drop(tabs[0], { dataTransfer });
+  expect(screen.getAllByRole("tab", { name: /web/ })).toHaveLength(1);
+  expect(state.mounted).toBe(2);
+  expect(state.unmounted).toBe(0);
+});
+
+test("the focus layout lists every pane and shows the one picked", async () => {
+  const [a, b] = await twoPanes();
+  press("M");
+  const list = screen.getByRole("list", { name: en["workspace.panes"] });
+  const entries = within(list).getAllByRole("button");
+  expect(entries).toHaveLength(2);
+  fireEvent.click(entries[0]);
+  expect(document.querySelector(`[data-pane="${a}"]`)?.classList.contains("offscreen")).toBe(false);
+  expect(document.querySelector(`[data-pane="${b}"]`)?.classList.contains("offscreen")).toBe(true);
+});
+
+test("a template opens its panes with their start, leaving out deleted hosts", async () => {
+  await renderShell();
+  press("T");
+  fireEvent.click(await screen.findByRole("button", { name: /^Ops/ }));
+  expect(await screen.findByRole("tab", { name: /Ops/ })).toBeTruthy();
+  const views = Object.values(state.views);
+  expect(views).toHaveLength(1);
+  expect(views[0].pane).toMatchObject({ title: "web", startup: { cwd: "/srv", command: "htop" } });
+  expect(screen.getByText(en["workspaces.skipped"].replace("{count}", "1"))).toBeTruthy();
+});
+
+test("clicking a pane's title bar gives that pane's terminal the keyboard", async () => {
+  const [, b] = await twoPanes();
+  const pane = document.querySelector(`[data-pane="${b}"]`) as HTMLElement;
+  const title = pane.querySelector(".pane-title") as HTMLElement;
+  fireEvent.mouseDown(title);
+  fireEvent.click(title);
+  expect(document.activeElement).toBe(pane.querySelector("textarea"));
 });

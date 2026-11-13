@@ -1,11 +1,14 @@
-import { Search, Server, SquareTerminal, Zap } from "lucide-react";
+import { LayoutGrid, Search, Server, SquareTerminal, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { Group, Host, ShellCommand } from "../api";
+import type { Group, Host, ShellCommand, WorkspaceTemplate } from "../api";
 import { useT } from "../i18n/i18n";
 import { hostSubtitle } from "../pages/hostsView";
 import { rankPalette, type PaletteActionId, type PaletteItem } from "./rank";
 
-type Item = PaletteItem | { kind: "shell"; shell: ShellCommand; label: string };
+type Item =
+  | PaletteItem
+  | { kind: "shell"; shell: ShellCommand; label: string }
+  | { kind: "template"; template: WorkspaceTemplate; label: string };
 
 const ACTIONS: PaletteActionId[] = [
   "newTab",
@@ -29,10 +32,23 @@ type Props = {
   /** Local shells, listed after hosts and actions. */
   shells?: ShellCommand[];
   onShell?: (shell: ShellCommand) => void;
+  templates?: WorkspaceTemplate[];
+  onTemplate?: (template: WorkspaceTemplate) => void;
 };
 
 /** Search box over hosts and actions; arrows move, Enter picks, Escape closes. */
-export function CommandPalette({ hosts, groups, recent, onClose, onHost, onAction, shells = [], onShell }: Props) {
+export function CommandPalette({
+  hosts,
+  groups,
+  recent,
+  onClose,
+  onHost,
+  onAction,
+  shells = [],
+  onShell,
+  templates = [],
+  onTemplate,
+}: Props) {
   const t = useT();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
@@ -45,8 +61,13 @@ export function CommandPalette({ hosts, groups, recent, onClose, onHost, onActio
           .map((shell) => ({ kind: "shell" as const, shell, label: t("palette.localShell", { name: shell.label }) }))
           .filter((item) => q === "" || item.label.toLocaleLowerCase().includes(q))
       : [];
-    return [...ranked, ...local];
-  }, [query, hosts, groups, recent, actions, shells, onShell, t]);
+    const workspaces: Item[] = onTemplate
+      ? templates
+          .map((template) => ({ kind: "template" as const, template, label: t("workspaces.open", { name: template.name }) }))
+          .filter((item) => q === "" || item.label.toLocaleLowerCase().includes(q))
+      : [];
+    return [...ranked, ...workspaces, ...local];
+  }, [query, hosts, groups, recent, actions, shells, onShell, templates, onTemplate, t]);
   const current = Math.min(selected, Math.max(items.length - 1, 0));
 
   function pick(index: number) {
@@ -55,6 +76,7 @@ export function CommandPalette({ hosts, groups, recent, onClose, onHost, onActio
     onClose();
     if (item.kind === "host") onHost(item.host);
     else if (item.kind === "shell") onShell?.(item.shell);
+    else if (item.kind === "template") onTemplate?.(item.template);
     else onAction(item.id);
   }
 
@@ -95,7 +117,15 @@ export function CommandPalette({ hosts, groups, recent, onClose, onHost, onActio
           {items.length === 0 && <li className="empty">{t("palette.none")}</li>}
           {items.map((item, index) => (
             <li
-              key={item.kind === "host" ? `h:${item.host.id}` : item.kind === "shell" ? `s:${item.label}` : `a:${item.id}`}
+              key={
+                item.kind === "host"
+                  ? `h:${item.host.id}`
+                  : item.kind === "shell"
+                    ? `s:${item.label}`
+                    : item.kind === "template"
+                      ? `w:${item.template.id}`
+                      : `a:${item.id}`
+              }
               role="option"
               aria-selected={index === current}
               className={index === current ? "palette-item active" : "palette-item"}
@@ -117,6 +147,8 @@ export function CommandPalette({ hosts, groups, recent, onClose, onHost, onActio
                 <>
                   {item.kind === "shell" ? (
                     <SquareTerminal size={16} aria-hidden="true" />
+                  ) : item.kind === "template" ? (
+                    <LayoutGrid size={16} aria-hidden="true" />
                   ) : (
                     <Zap size={16} aria-hidden="true" />
                   )}

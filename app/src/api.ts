@@ -122,7 +122,7 @@ export type SerialPortInfo = { name: string; description: string };
 
 export type SessionTarget =
   | { kind: "host"; host_id: string }
-  | { kind: "local"; shell: ShellCommand }
+  | { kind: "local"; shell: ShellCommand; cwd?: string | null }
   | { kind: "serial"; settings: SerialSettings };
 
 export const localShells = () => invoke<ShellCommand[]>("local_shells");
@@ -270,11 +270,37 @@ export type AppSettings = {
   font_family: string;
   font_size: number;
   host_view: HostView;
+  /** One of `TERMINAL_TYPES` (settings/terminal.ts). */
+  terminal_type: string;
+  clipboard_osc52: "write" | "off";
+  /** Shortcuts that differ from the defaults; an empty list unbinds the action. */
+  shortcuts: Record<string, string[]>;
 };
 export const getSettings = () => invoke<AppSettings>("get_settings");
 /** Returns what Rust stored, with values kept in their allowed ranges. */
 export const saveSettings = (settings: AppSettings) => invoke<AppSettings>("save_settings", { settings });
 export const systemLocale = () => invoke<string | null>("system_locale");
+export type TemplatePane = {
+  target: SessionTarget;
+  title: string;
+  cwd?: string | null;
+  command?: string | null;
+};
+export type WorkspaceTemplate = {
+  id: string;
+  name: string;
+  layout: "split" | "focus";
+  col_sizes: number[];
+  row_sizes: number[];
+  panes: TemplatePane[];
+};
+/** Templates are kept on this device only. */
+export const workspaceTemplates = () => invoke<WorkspaceTemplate[]>("workspace_templates");
+export const saveWorkspaceTemplate = (template: WorkspaceTemplate) =>
+  invoke<WorkspaceTemplate>("save_workspace_template", { template });
+export const deleteWorkspaceTemplate = (id: string) => invoke<void>("delete_workspace_template", { id });
+/** Opens an http(s) link in the default browser; Rust checks it again. */
+export const openLink = (url: string) => invoke<void>("open_link", { url });
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
 
 export type SyncStatusView =

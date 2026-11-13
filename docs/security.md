@@ -14,6 +14,18 @@ form-action 'none'; frame-ancestors 'none'
 elements at run time for its colour theme and character sizes. A nonce cannot cover elements
 created after the page has loaded. Scripts stay limited to the app's own files.
 
+## Terminal output
+
+What a server prints may not reach beyond the terminal on its own:
+
+- **Clipboard (OSC 52):** a program may write text to the clipboard (at most 1 MiB, and only
+  while the setting is on), never read it. A read request gets no answer.
+- **Links:** only `http` and `https` links open, only on Ctrl+click, and Rust checks the link
+  again (`open_link`) before the system opens it. `file:`, `javascript:` and other schemes are
+  refused. The window has no opener permission of its own.
+- **Broadcast:** answers xterm.js gives to the server by itself (cursor position, device
+  attributes, focus) go only to their own session, never to the other panes.
+
 ## One instance
 
 Only one SSHCraft runs at a time. A second start brings the open window to the front and exits,

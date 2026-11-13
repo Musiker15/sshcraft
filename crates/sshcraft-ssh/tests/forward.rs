@@ -87,7 +87,7 @@ async fn env_vars_reach_server() {
         },
     )
     .await;
-    let _shell = session.open_shell(80, 24).await.unwrap();
+    let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while s.received_env().len() < 2 {
         assert!(tokio::time::Instant::now() < deadline);
@@ -113,7 +113,7 @@ async fn forwarded_agent_lists_keys() {
         },
     )
     .await;
-    let _shell = session.open_shell(80, 24).await.unwrap();
+    let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     assert_eq!(forwarded(&s).await, Some(1));
 }
 
@@ -121,7 +121,7 @@ async fn forwarded_agent_lists_keys() {
 async fn agent_channel_rejected_without_forwarding() {
     let s = server().await;
     let session = open(vec![hop("t", s.port)], SessionOptions::default()).await;
-    let _shell = session.open_shell(80, 24).await.unwrap();
+    let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     assert_eq!(forwarded(&s).await, None);
 }
 
@@ -137,7 +137,7 @@ async fn jump_host_cannot_open_agent_channel() {
         },
     )
     .await;
-    let _shell = session.open_shell(80, 24).await.unwrap();
+    let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     assert_eq!(forwarded(&jump).await, None);
     assert_eq!(forwarded(&target).await, Some(1));
 }

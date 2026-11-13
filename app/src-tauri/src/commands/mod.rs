@@ -10,5 +10,6 @@ pub mod sessions;
 pub mod shares;
 pub mod sshconfig;
 pub mod sync;
+pub mod workspaces;
 
 pub use crate::errors::{CommandError, CommandResult, ErrorCode};

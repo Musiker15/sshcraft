@@ -1,12 +1,14 @@
 pub mod commands;
 pub mod errors;
 pub mod hello;
+pub mod links;
 pub mod passcli;
 pub mod prompts;
 pub mod sessions;
 pub mod settings;
 pub mod state;
 pub mod sync;
+pub mod workspaces;
 
 use tauri::Manager;
 
@@ -16,16 +18,16 @@ pub fn run() {
     // A second start must not open the database and the vault a second time: it brings the
     // running window to the front and exits.
     #[cfg(desktop)]
-    let builder =
-        builder
-            .plugin(tauri_plugin_dialog::init())
-            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }));
+    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
     builder
         .setup(|app| {
             let state = state::AppState::init(app.handle())?;
@@ -46,6 +48,10 @@ pub fn run() {
             commands::data::delete_host,
             commands::data::forget_host_key,
             commands::data::get_settings,
+            commands::workspaces::workspace_templates,
+            commands::workspaces::save_workspace_template,
+            commands::workspaces::delete_workspace_template,
+            commands::workspaces::open_link,
             commands::data::save_settings,
             commands::data::system_locale,
             commands::data::list_recent,

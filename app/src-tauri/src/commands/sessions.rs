@@ -36,7 +36,7 @@ pub async fn session_open(
     // A local shell starts only when it is one this device offers (or the user's own): the
     // window cannot start any program it likes.
     #[cfg(desktop)]
-    if let SessionTarget::Local { shell } = &target {
+    if let SessionTarget::Local { shell, .. } = &target {
         let custom = state
             .store
             .lock()

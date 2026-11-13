@@ -1,4 +1,6 @@
-//! App settings of this device (language, look, terminal font). Stored as one JSON value.
+//! App settings of this device (language, look, terminal, shortcuts). Stored as one JSON value.
+
+use std::collections::BTreeMap;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -7,6 +9,81 @@ use sshcraft_core::store::{Store, StoreError};
 const KEY: &str = "app";
 const FONT_SIZES: std::ops::RangeInclusive<u16> = 8..=32;
 const MAX_FONT_FAMILY: usize = 200;
+
+/// Terminal types a session may ask for (`TERM`); the first is the default.
+pub const TERMINAL_TYPES: [&str; 7] = [
+    "xterm-256color",
+    "xterm",
+    "screen-256color",
+    "tmux-256color",
+    "linux",
+    "vt220",
+    "vt100",
+];
+
+/// Actions a shortcut can trigger; the same names as `ShortcutAction` in the UI.
+pub const SHORTCUT_ACTIONS: [&str; 11] = [
+    "palette",
+    "newTab",
+    "closeTab",
+    "nextTab",
+    "prevTab",
+    "splitPane",
+    "closePane",
+    "nextPane",
+    "prevPane",
+    "toggleLayout",
+    "toggleBroadcast",
+];
+const MAX_COMBOS: usize = 4;
+const MAX_COMBO_LEN: usize = 40;
+const MODIFIERS: [&str; 4] = ["Ctrl", "Alt", "Shift", "Meta"];
+
+/// Whether `combo` is a shortcut in SSHCraft's notation: modifiers in the order
+/// Ctrl, Alt, Shift, Meta, then one key; with Ctrl, Alt or Meta, or an F-key on its own.
+pub fn valid_combo(combo: &str) -> bool {
+    if combo.is_empty() || combo.len() > MAX_COMBO_LEN {
+        return false;
+    }
+    let parts: Vec<&str> = combo.split('+').collect();
+    let (key, modifiers) = parts.split_last().expect("split gives at least one part");
+    // Modifiers must come in the fixed order, each at most once.
+    let mut last = None;
+    for m in modifiers {
+        let Some(position) = MODIFIERS.iter().position(|x| x == m) else {
+            return false;
+        };
+        if last.is_some_and(|l| position <= l) {
+            return false;
+        }
+        last = Some(position);
+    }
+    if key.is_empty() || MODIFIERS.contains(key) {
+        return false;
+    }
+    // One character, or a named key from `KeyboardEvent.key` (letters and digits only).
+    let single = key.chars().count() == 1;
+    if !single && !key.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return false;
+    }
+    let function_key = key
+        .strip_prefix('F')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=24).contains(&n));
+    if key.starts_with('F') && key.len() > 1 && !function_key {
+        return false;
+    }
+    modifiers.iter().any(|m| *m != "Shift") || function_key
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Osc52 {
+    /// Programs on the server may write the clipboard (never read it).
+    #[default]
+    Write,
+    Off,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +120,11 @@ pub struct AppSettings {
     pub font_family: String,
     pub font_size: u16,
     pub host_view: HostView,
+    /// One of [`TERMINAL_TYPES`].
+    pub terminal_type: String,
+    pub clipboard_osc52: Osc52,
+    /// Shortcuts that differ from the defaults, by action; an empty list unbinds the action.
+    pub shortcuts: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for AppSettings {
@@ -54,6 +136,9 @@ impl Default for AppSettings {
             font_family: "Cascadia Mono, Consolas, monospace".into(),
             font_size: 14,
             host_view: HostView::Grid,
+            terminal_type: TERMINAL_TYPES[0].into(),
+            clipboard_osc52: Osc52::Write,
+            shortcuts: BTreeMap::new(),
         }
     }
 }
@@ -68,6 +153,21 @@ impl AppSettings {
         } else {
             family.to_owned()
         };
+        if !TERMINAL_TYPES.contains(&self.terminal_type.as_str()) {
+            self.terminal_type = TERMINAL_TYPES[0].into();
+        }
+        self.shortcuts = std::mem::take(&mut self.shortcuts)
+            .into_iter()
+            .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))
+            .map(|(action, combos)| {
+                let combos = combos
+                    .into_iter()
+                    .filter(|c| valid_combo(c))
+                    .take(MAX_COMBOS)
+                    .collect();
+                (action, combos)
+            })
+            .collect();
         self
     }
 }
@@ -98,6 +198,9 @@ pub fn load(store: &Store) -> AppSettings {
         font_family: field(&map, "font_family").unwrap_or(defaults.font_family),
         font_size: field(&map, "font_size").unwrap_or(defaults.font_size),
         host_view: field(&map, "host_view").unwrap_or(defaults.host_view),
+        terminal_type: field(&map, "terminal_type").unwrap_or(defaults.terminal_type),
+        clipboard_osc52: field(&map, "clipboard_osc52").unwrap_or(defaults.clipboard_osc52),
+        shortcuts: field(&map, "shortcuts").unwrap_or(defaults.shortcuts),
     }
     .sanitized()
 }
@@ -220,8 +323,106 @@ mod tests {
             font_family: "JetBrains Mono".into(),
             font_size: 15,
             host_view: HostView::List,
+            terminal_type: "vt100".into(),
+            clipboard_osc52: Osc52::Off,
+            shortcuts: BTreeMap::from([("newTab".to_owned(), vec!["Ctrl+Shift+N".to_owned()])]),
         };
         save(&store, wanted.clone()).unwrap();
         assert_eq!(load(&store), wanted);
+    }
+
+    #[test]
+    fn unknown_terminal_type_falls_back() {
+        let settings = load(&store_with(
+            r#"{"terminal_type":"evil
+"}"#,
+        ));
+        assert_eq!(settings.terminal_type, "xterm-256color");
+        let store = Store::open_in_memory().unwrap();
+        let saved = save(
+            &store,
+            AppSettings {
+                terminal_type: "ansi".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.terminal_type, "xterm-256color");
+    }
+
+    #[test]
+    fn terminal_type_kept_when_known() {
+        for term in TERMINAL_TYPES {
+            let json = format!(r#"{{"terminal_type":"{term}"}}"#);
+            assert_eq!(load(&store_with(&json)).terminal_type, term);
+        }
+    }
+
+    #[test]
+    fn osc52_off_is_kept() {
+        assert_eq!(AppSettings::default().clipboard_osc52, Osc52::Write);
+        let settings = load(&store_with(r#"{"clipboard_osc52":"off"}"#));
+        assert_eq!(settings.clipboard_osc52, Osc52::Off);
+    }
+
+    #[test]
+    fn shortcuts_drop_unknown_actions_and_invalid_combos() {
+        let settings = load(&store_with(
+            r#"{"shortcuts":{"palette":["Ctrl+Shift+P","P","Ctrl+"],"bogus":["Ctrl+Shift+Q"],"newTab":["Ctrl+1","Ctrl+2","Ctrl+3","Ctrl+4","Ctrl+5"]}}"#,
+        ));
+        assert_eq!(settings.shortcuts["palette"], vec!["Ctrl+Shift+P"]);
+        assert!(!settings.shortcuts.contains_key("bogus"));
+        assert_eq!(
+            settings.shortcuts["newTab"],
+            vec!["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4"]
+        );
+    }
+
+    #[test]
+    fn empty_shortcut_list_means_unbound() {
+        let settings = load(&store_with(r#"{"shortcuts":{"closeTab":[]}}"#));
+        assert_eq!(settings.shortcuts["closeTab"], Vec::<String>::new());
+    }
+
+    #[test]
+    fn old_settings_without_new_fields_load() {
+        let settings = load(&store_with(r#"{"language":"de"}"#));
+        assert_eq!(settings.terminal_type, "xterm-256color");
+        assert_eq!(settings.clipboard_osc52, Osc52::Write);
+        assert!(settings.shortcuts.is_empty());
+    }
+
+    #[test]
+    fn combos_are_checked() {
+        for good in [
+            "Ctrl+Shift+P",
+            "Alt+X",
+            "F5",
+            "Ctrl+Tab",
+            "Meta+K",
+            "Ctrl+Alt+Shift+Meta+PageDown",
+        ] {
+            assert!(valid_combo(good), "{good}");
+        }
+        let long = format!("Ctrl+{}", "X".repeat(36));
+        for bad in [
+            "P",
+            "Shift+P",
+            "Ctrl+",
+            "Shift+Ctrl+P",
+            "Ctrl+Shift+P+Q",
+            "Ctrl+Ctrl+P",
+            "F25",
+            "",
+            long.as_str(),
+        ] {
+            assert!(!valid_combo(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn every_action_is_known() {
+        assert_eq!(SHORTCUT_ACTIONS.len(), 11);
+        assert!(SHORTCUT_ACTIONS.contains(&"toggleBroadcast"));
     }
 }

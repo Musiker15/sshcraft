@@ -107,10 +107,29 @@ async fn connects_and_echoes() {
     )
     .await
     .unwrap();
-    let mut shell = session.open_shell(80, 24).await.unwrap();
+    let mut shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     shell.write(b"hi\n").await.unwrap();
     let (data, _) = collect_until(&mut shell, |b| b.windows(2).any(|w| w == b"hi")).await;
     assert!(data.windows(2).any(|w| w == b"hi"));
+}
+
+#[tokio::test]
+async fn shell_requests_the_given_terminal_type() {
+    let (server, k) = setup().await;
+    let session = connect(
+        params(server.port, k),
+        Verifier::new(true),
+        Arc::new(NoPrompter),
+    )
+    .await
+    .unwrap();
+    let _shell = session.open_shell(80, 24, "vt100").await.unwrap();
+    // The request is sent without waiting for a reply: give the server a moment.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while server.requested_terms().is_empty() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(server.requested_terms(), vec!["vt100".to_owned()]);
 }
 
 #[tokio::test]
@@ -164,7 +183,7 @@ async fn exit_yields_exited() {
     )
     .await
     .unwrap();
-    let mut shell = session.open_shell(80, 24).await.unwrap();
+    let mut shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     shell.write(b"exit\n").await.unwrap();
     let (_, end) = collect_until(&mut shell, |_| false).await;
     assert_eq!(end, Some(Disconnect::Exited(Some(0))));
@@ -180,7 +199,7 @@ async fn server_drop_yields_lost() {
     )
     .await
     .unwrap();
-    let mut shell = session.open_shell(80, 24).await.unwrap();
+    let mut shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     server.stop();
     let (_, end) =
         tokio::time::timeout(Duration::from_secs(5), collect_until(&mut shell, |_| false))
@@ -199,7 +218,7 @@ async fn large_output_arrives_complete_and_in_order() {
     )
     .await
     .unwrap();
-    let mut shell = session.open_shell(80, 24).await.unwrap();
+    let mut shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     let expected = flood_pattern();
     shell.write(b"flood\n").await.unwrap();
     let (data, _) = collect_until(&mut shell, |b| b.len() >= expected.len()).await;
