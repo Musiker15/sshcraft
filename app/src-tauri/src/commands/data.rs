@@ -128,6 +128,8 @@ pub fn delete_group(state: State<'_, AppState>, id: GroupId) -> CommandResult<()
         record_group_hosts(s, &id.0.to_string(), now_ms()).map_err(crate::sync::sync_error)?;
         Ok(s.delete_group(id)?)
     })?;
+    // The group's hosts are gone, and their rules stop.
+    state.forwards.reconcile();
     drop_orphans(&state, &passwords)
 }
 

@@ -547,9 +547,9 @@
   "workspaces.skipped": "{count} Bereich(e) der Vorlage fehlen, weil es ihren Host nicht mehr gibt.",
   "workspaces.title": "Workspaces",
   "errors.invalid_forward": "Die Weiterleitungsregel ist ungültig (Ports 1 bis 65535, Adresse ohne Leerzeichen, höchstens 50 Regeln je Host).",
-  "errors.port_in_use": "Der Port ist auf diesem Gerät schon belegt.",
+  "errors.port_in_use": "Der Port ist schon belegt.",
   "errors.bind_failed": "Auf dieser Adresse lässt sich nicht lauschen.",
-  "errors.forward_refused": "Der Server erlaubt diese entfernte Weiterleitung nicht.",
+  "errors.forward_refused": "Der Server hat die entfernte Weiterleitung abgelehnt: Sie ist dort nicht erlaubt, oder der Port ist auf dem Server belegt.",
   "forwarding.back": "Zurück",
   "forwarding.bindAddress": "Lauschen auf Adresse",
   "forwarding.bindPort": "Port",
@@ -589,5 +589,9 @@
   "forwarding.summary.local": "{bind} auf diesem Gerät erreicht {target} aus Sicht des Servers.",
   "forwarding.summary.remote": "{bind} auf dem Server erreicht {target} aus Sicht dieses Geräts.",
   "forwarding.targetHost": "Zielhost",
-  "forwarding.targetPort": "Zielport"
+  "forwarding.targetPort": "Zielport",
+  "forwarding.exposed": "auch von anderen Rechnern erreichbar",
+  "forwarding.orphan": "Eine Regel, die es nicht mehr gibt, läuft noch. Doppelklick stoppt sie.",
+  "forwarding.orphanGroup": "Ohne Regel",
+  "forwarding.refused": "Der Server hat {count} Verbindung(en) abgelehnt (Weiterleitung dort nicht erlaubt?)."
 }

@@ -211,3 +211,64 @@ async fn dropping_tunnel_frees_port_and_ends_connections() {
     }
     assert!(rebound.is_some(), "port {port} still taken");
 }
+
+#[tokio::test]
+async fn connections_the_server_refuses_are_counted() {
+    let (_server, session) = session_with(|a| TestAuth {
+        refuse_forwarding: true,
+        ..a
+    })
+    .await;
+    let tunnel = session
+        .forward_local("127.0.0.1", 0, "127.0.0.1", 9)
+        .await
+        .unwrap();
+    let mut client = TcpStream::connect(("127.0.0.1", tunnel.bound_port()))
+        .await
+        .unwrap();
+    let mut rest = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(10), client.read_to_end(&mut rest)).await;
+    for _ in 0..100 {
+        if tunnel.refused() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(tunnel.refused(), 1);
+    assert_eq!(tunnel.connections(), 0);
+}
+
+#[tokio::test]
+async fn localhost_listens_on_ipv4_loopback() {
+    let (_server, session) = session().await;
+    let target = echo_server().await;
+    let tunnel = session
+        .forward_local("localhost", 0, "localhost", target)
+        .await
+        .unwrap();
+    let mut client = TcpStream::connect(("127.0.0.1", tunnel.bound_port()))
+        .await
+        .unwrap();
+    assert_eq!(round_trip(&mut client, b"v4").await, b"v4");
+    // Where this machine has IPv6 loopback, the same port answers there too.
+    if TcpListener::bind("[::1]:0").await.is_ok() {
+        let mut client = TcpStream::connect(("::1", tunnel.bound_port()))
+            .await
+            .unwrap();
+        assert_eq!(round_trip(&mut client, b"v6").await, b"v6");
+    }
+}
+
+#[tokio::test]
+async fn bracketed_addresses_are_accepted() {
+    let (_server, session) = session().await;
+    let target = echo_server().await;
+    let tunnel = session
+        .forward_local("[127.0.0.1]", 0, "[127.0.0.1]", target)
+        .await
+        .unwrap();
+    let mut client = TcpStream::connect(("127.0.0.1", tunnel.bound_port()))
+        .await
+        .unwrap();
+    assert_eq!(round_trip(&mut client, b"brackets").await, b"brackets");
+}

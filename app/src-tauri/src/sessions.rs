@@ -1102,11 +1102,15 @@ pub(crate) async fn connect_session(
             .map(|v| (v.name.clone(), v.value.clone()))
             .collect(),
     };
+    // The host key question runs in russh's own task. When this connect is given up (its tab
+    // closed, its rule stopped), `alive` drops and the question is withdrawn.
+    let (_alive, abandoned) = tokio::sync::watch::channel(());
     let verifier = Arc::new(StoreVerifier {
         store: ctx.store.clone(),
         prompter: ctx.prompter.clone(),
         mismatch: Mutex::new(None),
         first: Mutex::new(Vec::new()),
+        abandoned,
     });
     let params = RouteParams {
         hops,
@@ -1231,6 +1235,8 @@ struct StoreVerifier {
     mismatch: Mutex<Option<String>>,
     /// Servers whose host key the user trusted during this connection.
     first: Mutex<Vec<(String, u16)>>,
+    /// Closes when whoever connects gives up: an open question is then withdrawn.
+    abandoned: tokio::sync::watch::Receiver<()>,
 }
 
 #[async_trait::async_trait]
@@ -1251,10 +1257,12 @@ impl HostKeyVerifier for StoreVerifier {
                 false
             }
             HostKeyStatus::Unknown => {
-                let accepted = self
-                    .prompter
-                    .ask(host_name, address, port, fingerprint)
-                    .await;
+                let mut abandoned = self.abandoned.clone();
+                let accepted = tokio::select! {
+                    accepted = self.prompter.ask(host_name, address, port, fingerprint) => accepted,
+                    // Nobody waits for the answer any more: drop the question, trust nothing.
+                    _ = abandoned.changed() => return false,
+                };
                 if accepted {
                     let store = self.store.lock().expect("store lock");
                     if store.set_known_host(address, port, fingerprint).is_err() {

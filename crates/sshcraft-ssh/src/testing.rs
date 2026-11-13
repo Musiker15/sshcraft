@@ -42,7 +42,7 @@ pub struct TestAuth {
     pub ca: Option<PublicKey>,
     /// Turns down `ssh-rsa` (SHA-1) for keys and certificates, as OpenSSH does since 8.8.
     pub refuse_sha1_rsa: bool,
-    /// Turns down `tcpip-forward` (remote forwarding), as `AllowTcpForwarding no` does.
+    /// Turns down `tcpip-forward` and `direct-tcpip`, as `AllowTcpForwarding no` does.
     pub refuse_forwarding: bool,
 }
 
@@ -473,6 +473,9 @@ impl server::Handler for Handler {
         let Ok(port) = u16::try_from(port_to_connect) else {
             return Ok(());
         };
+        if self.auth.refuse_forwarding {
+            return Ok(());
+        }
         let Ok(mut tcp) = tokio::net::TcpStream::connect((host_to_connect, port)).await else {
             return Ok(());
         };

@@ -26,7 +26,11 @@ listens beyond itself (`GatewayPorts` in OpenSSH).
 A running rule cannot be edited; stop it first. A rule removed from its host stops.
 
 Limits: ports 1 to 65535, addresses without spaces (at most 253 characters), names up to 100
-characters, 50 rules per host.
+characters, 50 rules per host. IPv6 addresses may be written with or without brackets
+(`[::1]`). `localhost` listens on IPv4 and IPv6 loopback on the same port.
+
+The page marks rules that are reachable from other machines, also those that came in through
+sync or a share.
 
 ## Starting and stopping
 
@@ -36,9 +40,15 @@ characters, 50 rules per host.
   jump hosts, proxy, keys, saved or asked passphrase, Windows Hello. A question (host key,
   password) shows up like for a terminal; stopping the rule takes it back.
 - After the connection is lost, the rule reconnects like a terminal (up to 5 attempts) and
-  listens again.
-- A local port that is already taken, an address that cannot be used, or a server that refuses
-  the remote forwarding (`AllowTcpForwarding no`) ends the rule with that error; it is not
-  tried again.
+  listens again. A remote rule whose port the server still holds from the lost connection is
+  retried the same way until the server lets go.
+- At the first start, a local port that is already taken, an address that cannot be used, or a
+  server that refuses the remote forwarding (`AllowTcpForwarding no`) ends the rule with that
+  error; it is not tried again. Cancelling a sign-in question stops the rule.
+- When the server refuses the connections of a local or dynamic rule, the rule keeps running
+  and its row says how many were refused.
+- A rule whose host is deleted (also with its group, through sync or a share that ended) or that
+  is taken off its host stops. Should one still run without its rule, it shows up under
+  "Without a rule" and stops with a double click.
 - A rule carries at most 256 connections at a time; more are closed right away.
 - Rules do not start by themselves when SSHCraft starts, and they stop when it ends.

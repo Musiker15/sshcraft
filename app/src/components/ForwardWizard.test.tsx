@@ -5,17 +5,19 @@ import en from "../i18n/en.json";
 import { I18nProvider } from "../i18n/i18n";
 import { ForwardWizard } from "./ForwardWizard";
 
-const calls = vi.hoisted(() => ({ saved: [] as Host[] }));
+const calls = vi.hoisted(() => ({ saved: [] as Host[], stored: null as Host[] | null }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (command: string, args?: { host: Host }) => {
     if (command === "save_host") calls.saved.push(args!.host);
+    if (command === "list_hosts") return calls.stored;
     return null;
   }),
 }));
 
 beforeEach(() => {
   calls.saved = [];
+  calls.stored = null;
 });
 afterEach(cleanup);
 
@@ -31,11 +33,11 @@ const hosts: Host[] = [
   },
 ];
 
-function show() {
+function show(editing?: { hostId: string; rule: NonNullable<Host["forwards"]>[number] }) {
   const done = vi.fn();
   render(
     <I18nProvider language="en">
-      <ForwardWizard hosts={hosts} onDone={done} onCancel={() => {}} />
+      <ForwardWizard hosts={hosts} editing={editing} onDone={done} onCancel={() => {}} />
     </I18nProvider>,
   );
   return done;
@@ -83,4 +85,25 @@ test("an invalid port keeps the wizard on its step", () => {
   field(en["forwarding.targetPort"], "5432");
   expect(screen.getByText(en["forwarding.error.bindPort"])).toBeTruthy();
   expect((screen.getByRole("button", { name: en["forwarding.next"] }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+test("saving starts from the host as stored now, not as shown", async () => {
+  calls.stored = [{ ...hosts[0], name: "renamed elsewhere" }];
+  const done = show();
+  toDetails("dynamic");
+  next();
+  fireEvent.click(screen.getByRole("button", { name: en["common.save"] }));
+  await vi.waitFor(() => expect(done).toHaveBeenCalled());
+  expect(calls.saved[0].name).toBe("renamed elsewhere");
+});
+
+test("editing a rule that was removed meanwhile says so instead of saving", async () => {
+  calls.stored = [{ ...hosts[0], forwards: [] }];
+  const rule = { id: "r9", name: "", kind: "dynamic" as const, bind_address: "127.0.0.1", bind_port: 1080, target_host: "", target_port: 0 };
+  const done = show({ hostId: "h1", rule });
+  next();
+  fireEvent.click(screen.getByRole("button", { name: en["common.save"] }));
+  expect(await screen.findByText(en["errors.not_found"])).toBeTruthy();
+  expect(done).not.toHaveBeenCalled();
+  expect(calls.saved).toHaveLength(0);
 });

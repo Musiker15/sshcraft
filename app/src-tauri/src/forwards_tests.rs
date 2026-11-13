@@ -135,7 +135,7 @@ async fn local_rule_runs_and_stops() {
     sink.wait_for(|s| running_count(s) == 1).await;
     assert!(matches!(sink.states()[0], ForwardState::Starting));
     assert!(echoes(port).await);
-    forwards.stop(rule);
+    forwards.stop(f.host_id, rule);
     sink.wait_for(|s| matches!(s.last(), Some(ForwardState::Stopped)))
         .await;
     assert!(port_free(port).await);
@@ -207,7 +207,7 @@ async fn stop_while_signing_in_withdraws_the_question() {
     let forwards = ForwardManager::new(manager.context(), sink.clone());
     forwards.start(host, rule).unwrap();
     let prompt = first_auth_question(&registry).await;
-    forwards.stop(rule);
+    forwards.stop(host, rule);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while !registry
         .emitter()
@@ -287,4 +287,221 @@ async fn a_rule_removed_from_its_host_stops() {
     assert!(port_free(port_a).await);
     assert!(echoes(port_b).await);
     assert_eq!(forwards.statuses().len(), 1);
+}
+
+/// A manager whose host key and sign-in questions both go through `registry`.
+fn asking_manager(
+    w: &PasswordWorld,
+    registry: &Arc<PromptRegistry<FakeEmitter>>,
+) -> SessionManager {
+    SessionManager::with_delay_scale(
+        w.store.clone(),
+        Some(w.vault.clone()),
+        registry.clone(),
+        registry.clone(),
+        Arc::new(TestAgents {
+            keys: Vec::new(),
+            reachable: false,
+        }),
+        verified(),
+        0.01,
+    )
+}
+
+async fn wait_withdrawn(registry: &PromptRegistry<FakeEmitter>, prompt_id: u64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !registry
+        .emitter()
+        .withdrawn
+        .lock()
+        .unwrap()
+        .contains(&prompt_id)
+    {
+        assert!(tokio::time::Instant::now() < deadline, "not withdrawn");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn stop_while_asking_for_the_host_key_withdraws_it() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = asking_manager(&w, &registry);
+    let rule = add_rule(&w.store, host, local_rule(free_port().await, 9));
+    let forwards = ForwardManager::new(manager.context(), Arc::new(Recorder::default()));
+    forwards.start(host, rule).unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let asked = loop {
+        if let Some(id) = registry.emitter().asked.lock().unwrap().first() {
+            break *id;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no host key question"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    forwards.stop(host, rule);
+    wait_withdrawn(&registry, asked).await;
+    // Nothing was trusted for the stopped rule.
+    assert!(
+        w.store
+            .lock()
+            .unwrap()
+            .known_host("127.0.0.1", server.port)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn cancelled_sign_in_ends_as_stopped() {
+    let server = kbd_server("42").await;
+    let w = PasswordWorld::new();
+    let host = w.host(server.port, None, Vec::new());
+    let registry = Arc::new(PromptRegistry::new(FakeEmitter::default()));
+    let manager = w.manager(
+        Some(w.vault.clone()),
+        trusting(),
+        registry.clone(),
+        verified(),
+    );
+    let rule = add_rule(&w.store, host, local_rule(free_port().await, 9));
+    let sink = Arc::new(Recorder::default());
+    let forwards = ForwardManager::new(manager.context(), sink.clone());
+    forwards.start(host, rule).unwrap();
+    let prompt = first_auth_question(&registry).await;
+    registry.answer_auth(prompt.prompt_id, None);
+    sink.wait_for(|s| matches!(s.last(), Some(ForwardState::Stopped)))
+        .await;
+    assert!(
+        !sink
+            .states()
+            .iter()
+            .any(|s| matches!(s, ForwardState::Failed { .. }))
+    );
+    assert!(forwards.statuses().is_empty());
+}
+
+#[test]
+fn a_refused_tunnel_is_retried_once_the_rule_ran() {
+    use crate::forwards::tunnel_failure;
+    use crate::sessions::Failure;
+    for error in [SshError::ForwardRefused, SshError::PortInUse] {
+        let first = tunnel_failure(clone_error(&error), false);
+        assert!(
+            matches!(first, Failure::End(..)),
+            "{error:?} at the first start"
+        );
+        let later = tunnel_failure(error, true);
+        assert!(matches!(later, Failure::Lost(..)), "after it ran");
+    }
+}
+
+fn clone_error(e: &SshError) -> SshError {
+    match e {
+        SshError::ForwardRefused => SshError::ForwardRefused,
+        _ => SshError::PortInUse,
+    }
+}
+
+#[tokio::test]
+async fn remote_rule_comes_back_after_the_server_restarts() {
+    let mut f = fixture(true).await;
+    let port = free_port().await;
+    let rule = ForwardRule {
+        kind: ForwardKind::Remote,
+        ..local_rule(port, echo_server().await)
+    };
+    let rule = add_rule(&f.store, f.host_id, rule);
+    let sink = Arc::new(Recorder::default());
+    let forwards = ForwardManager::new(f.manager.context(), sink.clone());
+    forwards.start(f.host_id, rule).unwrap();
+    sink.wait_for(|s| running_count(s) == 1).await;
+    assert!(echoes(port).await);
+    f.server.restart(false).await;
+    sink.wait_for(|s| running_count(s) == 2).await;
+    assert!(echoes(port).await);
+}
+
+#[tokio::test]
+async fn reconcile_stops_rules_whose_host_or_rule_is_gone() {
+    let f = fixture(true).await;
+    let target = echo_server().await;
+    let (port_a, port_b) = (free_port().await, free_port().await);
+    let a = add_rule(&f.store, f.host_id, local_rule(port_a, target));
+    let b = add_rule(&f.store, f.host_id, local_rule(port_b, target));
+    let sink = Arc::new(Recorder::default());
+    let forwards = ForwardManager::new(f.manager.context(), sink.clone());
+    forwards.start(f.host_id, a).unwrap();
+    forwards.start(f.host_id, b).unwrap();
+    sink.wait_for(|s| running_count(s) == 2).await;
+    // Rule a goes (as by sync), then the whole host (as by deleting its group).
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().remove(0);
+        host.forwards.retain(|r| r.id != a);
+        store.upsert_host(&host).unwrap();
+    }
+    forwards.reconcile();
+    assert!(port_free(port_a).await);
+    assert!(echoes(port_b).await);
+    f.store.lock().unwrap().delete_host(f.host_id).unwrap();
+    forwards.reconcile();
+    assert!(port_free(port_b).await);
+    assert!(forwards.statuses().is_empty());
+}
+
+#[tokio::test]
+async fn same_rule_id_on_two_hosts_runs_twice() {
+    let f = fixture(true).await;
+    let target = echo_server().await;
+    let rule = local_rule(free_port().await, target);
+    let shared_id = add_rule(&f.store, f.host_id, rule.clone());
+    let other = {
+        let store = f.store.lock().unwrap();
+        let mut copy = store.list_hosts().unwrap().remove(0);
+        copy.id = HostId::new();
+        copy.name = "copy".into();
+        copy.forwards = vec![ForwardRule {
+            bind_port: free_port_blocking(),
+            ..rule
+        }];
+        store.upsert_host(&copy).unwrap();
+        copy.id
+    };
+    let sink = Arc::new(Recorder::default());
+    let forwards = ForwardManager::new(f.manager.context(), sink.clone());
+    forwards.start(f.host_id, shared_id).unwrap();
+    forwards.start(other, shared_id).unwrap();
+    sink.wait_for(|s| running_count(s) == 2).await;
+    assert_eq!(forwards.statuses().len(), 2);
+    forwards.stop(other, shared_id);
+    assert_eq!(forwards.statuses().len(), 1);
+}
+
+fn free_port_blocking() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[tokio::test]
+async fn stopping_a_failed_rule_reports_stopped() {
+    let f = fixture(true).await;
+    let taken = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = taken.local_addr().unwrap().port();
+    let rule = add_rule(&f.store, f.host_id, local_rule(port, 9));
+    let sink = Arc::new(Recorder::default());
+    let forwards = ForwardManager::new(f.manager.context(), sink.clone());
+    forwards.start(f.host_id, rule).unwrap();
+    sink.wait_for(|s| matches!(s.last(), Some(ForwardState::Failed { .. })))
+        .await;
+    forwards.stop(f.host_id, rule);
+    assert!(matches!(sink.states().last(), Some(ForwardState::Stopped)));
+    assert!(forwards.statuses().is_empty());
 }

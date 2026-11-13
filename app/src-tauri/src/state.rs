@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use sshcraft_core::store::Store;
 use sshcraft_core::vault::{KeyringMasterKey, Vault};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::forwards::{ForwardManager, ForwardSink, ForwardStatus};
 use crate::hello::WindowsHello;
@@ -172,6 +172,10 @@ impl SyncObserver for TauriSyncObserver {
     }
 
     fn data_changed(&self, server: ServerId) {
+        // A host or rule that sync removed (or a share that ended) stops forwarding.
+        if let Some(state) = self.0.try_state::<AppState>() {
+            state.forwards.reconcile();
+        }
         let _ = self
             .0
             .emit("data-changed", ServerEvent { server_id: server });

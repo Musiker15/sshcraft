@@ -20,6 +20,8 @@ use crate::{ClientHandler, SshError, protocol, socks};
 pub const MAX_TUNNEL_CONNECTIONS: usize = 256;
 const SOCKS_TIMEOUT: Duration = Duration::from_secs(10);
 const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
+/// The pause after a failed accept, so a persistent error does not spin.
+const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
 type Handle = Arc<client::Handle<ClientHandler>>;
 type Jumps = Arc<Vec<client::Handle<ClientHandler>>>;
@@ -38,9 +40,11 @@ pub(crate) struct RemoteTarget {
 pub struct Tunnel {
     bound_port: u16,
     count: Arc<AtomicUsize>,
+    /// Connections the server would not carry.
+    refused: Arc<AtomicUsize>,
     /// Dropped with the tunnel: every connection task sees it and ends.
     _stop: watch::Sender<()>,
-    accept: Option<JoinHandle<()>>,
+    accept: Vec<JoinHandle<()>>,
     remote: Option<RemoteRegistration>,
 }
 
@@ -60,11 +64,16 @@ impl Tunnel {
     pub fn connections(&self) -> usize {
         self.count.load(Ordering::SeqCst)
     }
+
+    /// Connections the server would not carry so far (for example `AllowTcpForwarding no`).
+    pub fn refused(&self) -> usize {
+        self.refused.load(Ordering::SeqCst)
+    }
 }
 
 impl Drop for Tunnel {
     fn drop(&mut self) {
-        if let Some(accept) = self.accept.take() {
+        for accept in self.accept.drain(..) {
             accept.abort();
         }
         if let Some(remote) = self.remote.take() {
@@ -102,14 +111,53 @@ impl Drop for Slot {
     }
 }
 
-async fn bind(address: &str, port: u16) -> Result<TcpListener, SshError> {
-    TcpListener::bind((address, port)).await.map_err(|e| {
-        if e.kind() == std::io::ErrorKind::AddrInUse {
-            SshError::PortInUse
-        } else {
-            SshError::Bind(e.to_string())
+/// `[::1]` as ssh writes it, `::1` as the system wants it.
+pub(crate) fn unbracket(address: &str) -> &str {
+    address
+        .strip_prefix('[')
+        .and_then(|a| a.strip_suffix(']'))
+        .unwrap_or(address)
+}
+
+fn bind_error(e: std::io::Error) -> SshError {
+    if e.kind() == std::io::ErrorKind::AddrInUse {
+        SshError::PortInUse
+    } else {
+        SshError::Bind(e.to_string())
+    }
+}
+
+/// The listeners for `address:port`. `localhost` listens on IPv4 and, where there is one, IPv6
+/// loopback on the same port, so clients reach it whichever they resolve it to.
+async fn bind(address: &str, port: u16) -> Result<Vec<TcpListener>, SshError> {
+    let address = unbracket(address);
+    if !address.eq_ignore_ascii_case("localhost") {
+        return Ok(vec![
+            TcpListener::bind((address, port))
+                .await
+                .map_err(bind_error)?,
+        ]);
+    }
+    let first = TcpListener::bind(("127.0.0.1", port))
+        .await
+        .map_err(bind_error)?;
+    let port = first.local_addr().map_err(bind_error)?.port();
+    let mut listeners = vec![first];
+    if let Ok(second) = TcpListener::bind(("::1", port)).await {
+        listeners.push(second);
+    }
+    Ok(listeners)
+}
+
+/// Accepts until the tunnel stops. A failed accept (a client that reset before it was taken,
+/// too many open files) does not end the listener.
+async fn accept_loop(listener: TcpListener, on_connection: impl Fn(TcpStream, SocketAddr)) {
+    loop {
+        match listener.accept().await {
+            Ok((stream, peer)) => on_connection(stream, peer),
+            Err(_) => tokio::time::sleep(ACCEPT_RETRY).await,
         }
-    })
+    }
 }
 
 /// Runs `work` until it ends or the tunnel goes away.
@@ -129,30 +177,47 @@ pub(crate) async fn listen(
     bind_port: u16,
     target: Option<(String, u16)>,
 ) -> Result<Tunnel, SshError> {
-    let listener = bind(bind_address, bind_port).await?;
-    let bound_port = listener
+    let listeners = bind(bind_address, bind_port).await?;
+    let bound_port = listeners[0]
         .local_addr()
         .map_err(|e| SshError::Bind(e.to_string()))?
         .port();
+    let target = target.map(|(host, port)| (unbracket(&host).to_owned(), port));
     let (stop_tx, stop) = watch::channel(());
     let count = Arc::new(AtomicUsize::new(0));
-    let counter = count.clone();
-    let accept = tokio::spawn(async move {
-        // The jump hosts' connections stay open while the tunnel listens.
-        let _jumps = jumps;
-        while let Ok((stream, peer)) = listener.accept().await {
-            let Some(slot) = Slot::take(&counter) else {
-                continue;
-            };
-            let work = connection(handle.clone(), stream, peer, target.clone(), slot);
-            tokio::spawn(until_stopped(work, stop.clone()));
-        }
-    });
+    let refused = Arc::new(AtomicUsize::new(0));
+    let accept = listeners
+        .into_iter()
+        .map(|listener| {
+            let (handle, jumps, target) = (handle.clone(), jumps.clone(), target.clone());
+            let (count, refused, stop) = (count.clone(), refused.clone(), stop.clone());
+            tokio::spawn(async move {
+                // The jump hosts' connections stay open while the tunnel listens.
+                let _jumps = jumps;
+                accept_loop(listener, |stream, peer| {
+                    let Some(slot) = Slot::take(&count) else {
+                        return;
+                    };
+                    let work = connection(
+                        handle.clone(),
+                        stream,
+                        peer,
+                        target.clone(),
+                        slot,
+                        refused.clone(),
+                    );
+                    tokio::spawn(until_stopped(work, stop.clone()));
+                })
+                .await;
+            })
+        })
+        .collect();
     Ok(Tunnel {
         bound_port,
         count,
+        refused,
         _stop: stop_tx,
-        accept: Some(accept),
+        accept,
         remote: None,
     })
 }
@@ -163,6 +228,7 @@ async fn connection(
     peer: SocketAddr,
     target: Option<(String, u16)>,
     _slot: Slot,
+    refused: Arc<AtomicUsize>,
 ) {
     let socks = target.is_none();
     let (host, port) = match target {
@@ -183,6 +249,7 @@ async fn connection(
     )
     .await;
     let Ok(Ok(channel)) = opened else {
+        refused.fetch_add(1, Ordering::SeqCst);
         if socks {
             let _ = socks::reply_failure(&mut stream, socks::HOST_UNREACHABLE).await;
         }
@@ -210,6 +277,8 @@ pub(crate) async fn remote(
     target_host: &str,
     target_port: u16,
 ) -> Result<Tunnel, SshError> {
+    let bind_address = unbracket(bind_address);
+    let target_host = unbracket(target_host);
     let (stop_tx, stop) = watch::channel(());
     let count = Arc::new(AtomicUsize::new(0));
     let entry = RemoteTarget {
@@ -251,8 +320,9 @@ pub(crate) async fn remote(
     Ok(Tunnel {
         bound_port: u16::try_from(key.1).unwrap_or(bind_port),
         count,
+        refused: Arc::new(AtomicUsize::new(0)),
         _stop: stop_tx,
-        accept: Some(accept),
+        accept: vec![accept],
         remote: Some(RemoteRegistration {
             handle,
             remotes,
@@ -301,5 +371,18 @@ pub(crate) fn serve_remote(
 impl RemoteTarget {
     pub(crate) fn count(&self) -> Arc<AtomicUsize> {
         self.count.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unbracket;
+
+    #[test]
+    fn brackets_come_off() {
+        assert_eq!(unbracket("[::1]"), "::1");
+        assert_eq!(unbracket("::1"), "::1");
+        assert_eq!(unbracket("127.0.0.1"), "127.0.0.1");
+        assert_eq!(unbracket("[x"), "[x");
     }
 }

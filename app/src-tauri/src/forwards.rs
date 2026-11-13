@@ -3,6 +3,7 @@
 //! after the connection is lost.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,7 +15,9 @@ use sshcraft_ssh::{SshError, Tunnel};
 use tokio::task::JoinHandle;
 
 use crate::errors::ErrorCode;
-use crate::sessions::{Context, Failure, OpenedKeys, connect_session, failure_code};
+use crate::sessions::{
+    Context, EndReason, Failure, OpenedKeys, connect_session, end_error, failure_code,
+};
 
 /// How often a running rule reports a changed number of connections.
 const COUNT_INTERVAL: Duration = Duration::from_secs(1);
@@ -26,6 +29,10 @@ pub enum ForwardState {
     Running {
         bound_port: u16,
         connections: usize,
+        /// Connections the server would not carry (for example `AllowTcpForwarding no`).
+        refused: usize,
+        /// Something worth knowing about the connection, such as an expired certificate.
+        notice: Option<ErrorCode>,
     },
     Reconnecting {
         attempt: u32,
@@ -50,40 +57,68 @@ pub trait ForwardSink: Send + Sync {
     fn status(&self, status: ForwardStatus);
 }
 
-/// Passes every status on and keeps the last one per rule for [`ForwardManager::statuses`].
+/// A rule is known by its host and its id: ids are only unique within a host.
+type RuleKey = (HostId, ForwardId);
+
+struct Running {
+    /// Which start of the rule this is; reports from an older one are dropped.
+    generation: u64,
+    task: JoinHandle<()>,
+}
+
+/// The running rules and their last status, under one lock: a status is only passed on while
+/// its run is the current one, so a run that was just stopped cannot report after "stopped".
+#[derive(Default)]
+struct Table {
+    running: HashMap<RuleKey, Running>,
+    last: HashMap<RuleKey, ForwardStatus>,
+}
+
 struct Reporter {
     sink: Arc<dyn ForwardSink>,
-    last: Mutex<HashMap<ForwardId, ForwardStatus>>,
+    table: Mutex<Table>,
 }
 
 impl Reporter {
-    fn report(&self, host_id: HostId, rule_id: ForwardId, state: ForwardState) {
-        let status = ForwardStatus {
-            rule_id,
-            host_id,
+    fn status(key: RuleKey, state: ForwardState) -> ForwardStatus {
+        ForwardStatus {
+            host_id: key.0,
+            rule_id: key.1,
             state,
-        };
-        {
-            let mut last = self.last.lock().expect("last lock");
-            if status.state == ForwardState::Stopped {
-                last.remove(&rule_id);
-            } else {
-                last.insert(rule_id, status.clone());
-            }
         }
+    }
+
+    /// From a run: passed on only while `generation` is the rule's current run.
+    fn report(&self, key: RuleKey, generation: u64, state: ForwardState) {
+        let mut table = self.table.lock().expect("table lock");
+        if table.running.get(&key).map(|r| r.generation) != Some(generation) {
+            return;
+        }
+        let status = Self::status(key, state);
+        if status.state == ForwardState::Stopped {
+            table.last.remove(&key);
+        } else {
+            table.last.insert(key, status.clone());
+        }
+        // Sent under the lock, so statuses reach the window in order.
         self.sink.status(status);
     }
-}
 
-struct Running {
-    host_id: HostId,
-    task: JoinHandle<()>,
+    /// Ends the rule's run (if any) and reports it stopped.
+    fn stop(&self, key: RuleKey) {
+        let mut table = self.table.lock().expect("table lock");
+        if let Some(running) = table.running.remove(&key) {
+            running.task.abort();
+        }
+        table.last.remove(&key);
+        self.sink.status(Self::status(key, ForwardState::Stopped));
+    }
 }
 
 pub struct ForwardManager {
     ctx: Arc<Context>,
     reporter: Arc<Reporter>,
-    running: Mutex<HashMap<ForwardId, Running>>,
+    generations: AtomicU64,
 }
 
 impl ForwardManager {
@@ -92,9 +127,9 @@ impl ForwardManager {
             ctx,
             reporter: Arc::new(Reporter {
                 sink,
-                last: Mutex::new(HashMap::new()),
+                table: Mutex::new(Table::default()),
             }),
-            running: Mutex::new(HashMap::new()),
+            generations: AtomicU64::new(0),
         }
     }
 
@@ -110,31 +145,32 @@ impl ForwardManager {
                 .and_then(|h| h.forwards.into_iter().find(|r| r.id == rule_id))
                 .ok_or(ErrorCode::NotFound)?
         };
-        let mut running = self.running.lock().expect("running lock");
-        if running.get(&rule_id).is_some_and(|r| !r.task.is_finished()) {
+        let key = (host_id, rule_id);
+        let mut table = self.reporter.table.lock().expect("table lock");
+        if table
+            .running
+            .get(&key)
+            .is_some_and(|r| !r.task.is_finished())
+        {
             return Ok(());
         }
-        let task = tokio::spawn(run(self.ctx.clone(), self.reporter.clone(), host_id, rule));
-        running.insert(rule_id, Running { host_id, task });
+        let generation = self.generations.fetch_add(1, Ordering::SeqCst);
+        let task = tokio::spawn(run(
+            self.ctx.clone(),
+            self.reporter.clone(),
+            key,
+            generation,
+            rule,
+        ));
+        table.running.insert(key, Running { generation, task });
         Ok(())
     }
 
     /// Stops the rule: closes its port (or the server's), its connections and its SSH
-    /// connection. A question it was waiting for (host key, password) is withdrawn.
-    pub fn stop(&self, rule_id: ForwardId) {
-        let stopped = self.running.lock().expect("running lock").remove(&rule_id);
-        if let Some(running) = stopped {
-            running.task.abort();
-            self.reporter
-                .report(running.host_id, rule_id, ForwardState::Stopped);
-        } else {
-            // A rule that failed on its own: forget its error.
-            self.reporter
-                .last
-                .lock()
-                .expect("last lock")
-                .remove(&rule_id);
-        }
+    /// connection. A question it was waiting for (host key, password) is withdrawn. A rule that
+    /// had failed loses its error.
+    pub fn stop(&self, host_id: HostId, rule_id: ForwardId) {
+        self.reporter.stop((host_id, rule_id));
     }
 
     /// Stops every rule of a host (the host is deleted).
@@ -144,25 +180,48 @@ impl ForwardManager {
 
     /// Stops the host's rules that are not in `keep` (they were removed from the host).
     pub fn keep_only(&self, host_id: HostId, keep: &[ForwardId]) {
-        let rules: Vec<ForwardId> = self
-            .running
-            .lock()
-            .expect("running lock")
-            .iter()
-            .filter(|(id, r)| r.host_id == host_id && !keep.contains(id))
-            .map(|(id, _)| *id)
-            .collect();
-        for rule in rules {
-            self.stop(rule);
+        for key in self.known() {
+            if key.0 == host_id && !keep.contains(&key.1) {
+                self.reporter.stop(key);
+            }
         }
+    }
+
+    /// Stops every rule whose host or rule is no longer in the store (a deleted group, a sync,
+    /// a share that was left).
+    pub fn reconcile(&self) {
+        let present: Vec<RuleKey> = {
+            let store = self.ctx.store.lock().expect("store lock");
+            let Ok(hosts) = store.list_hosts() else {
+                return;
+            };
+            hosts
+                .iter()
+                .flat_map(|h| h.forwards.iter().map(move |r| (h.id, r.id)))
+                .collect()
+        };
+        for key in self.known() {
+            if !present.contains(&key) {
+                self.reporter.stop(key);
+            }
+        }
+    }
+
+    /// Rules that run or have a status.
+    fn known(&self) -> Vec<RuleKey> {
+        let table = self.reporter.table.lock().expect("table lock");
+        let mut keys: Vec<RuleKey> = table.running.keys().copied().collect();
+        keys.extend(table.last.keys().filter(|k| !table.running.contains_key(k)));
+        keys
     }
 
     /// The last status of every rule that runs or failed.
     pub fn statuses(&self) -> Vec<ForwardStatus> {
         self.reporter
-            .last
+            .table
             .lock()
-            .expect("last lock")
+            .expect("table lock")
+            .last
             .values()
             .cloned()
             .collect()
@@ -171,7 +230,14 @@ impl ForwardManager {
 
 impl Drop for ForwardManager {
     fn drop(&mut self) {
-        for (_, running) in self.running.lock().expect("running lock").drain() {
+        for (_, running) in self
+            .reporter
+            .table
+            .lock()
+            .expect("table lock")
+            .running
+            .drain()
+        {
             running.task.abort();
         }
     }
@@ -208,39 +274,55 @@ async fn open(session: &sshcraft_ssh::Session, rule: &ForwardRule) -> Result<Tun
     }
 }
 
-/// A tunnel that cannot open is not tried again; anything else is the network.
-fn tunnel_failure(e: SshError) -> Failure {
+/// A tunnel that cannot open at the first start is not tried again. Once the rule ran, a taken
+/// port or a refused forwarding is most likely the old connection the other side has not let go
+/// of yet (a remote rule after a network change): then it is retried like a lost connection.
+pub(crate) fn tunnel_failure(e: SshError, ever_running: bool) -> Failure {
     match e {
-        SshError::PortInUse => crate::sessions::end_error(ErrorCode::PortInUse, None),
-        SshError::Bind(detail) => crate::sessions::end_error(ErrorCode::BindFailed, Some(detail)),
-        SshError::ForwardRefused => crate::sessions::end_error(ErrorCode::ForwardRefused, None),
+        SshError::PortInUse | SshError::ForwardRefused if ever_running => {
+            Failure::Lost(ErrorCode::Network, e.to_string())
+        }
+        SshError::PortInUse => end_error(ErrorCode::PortInUse, None),
+        SshError::Bind(detail) => end_error(ErrorCode::BindFailed, Some(detail)),
+        SshError::ForwardRefused => end_error(ErrorCode::ForwardRefused, None),
         other => Failure::Lost(ErrorCode::Network, other.to_string()),
     }
 }
 
 /// The life of one running rule: connect, forward, reconnect after a drop, end.
-async fn run(ctx: Arc<Context>, reporter: Arc<Reporter>, host_id: HostId, rule: ForwardRule) {
-    let report = |state| reporter.report(host_id, rule.id, state);
+async fn run(
+    ctx: Arc<Context>,
+    reporter: Arc<Reporter>,
+    key: RuleKey,
+    generation: u64,
+    rule: ForwardRule,
+) {
+    let report = |state| reporter.report(key, generation, state);
     let opened = OpenedKeys::default();
     let mut attempt = 0u32;
     let mut ever_running = false;
     loop {
         report(ForwardState::Starting);
         let started = async {
-            let (session, _notice) = connect_session(&ctx, host_id, &opened).await?;
-            let tunnel = open(&session, &rule).await.map_err(tunnel_failure)?;
-            Ok::<_, Failure>((session, tunnel))
+            let (session, notice) = connect_session(&ctx, key.0, &opened).await?;
+            let tunnel = open(&session, &rule)
+                .await
+                .map_err(|e| tunnel_failure(e, ever_running))?;
+            Ok::<_, Failure>((session, tunnel, notice))
         }
         .await;
         match started {
-            Ok((session, tunnel)) => {
+            Ok((session, tunnel, notice)) => {
                 ever_running = true;
                 attempt = 0;
-                let mut shown = tunnel.connections();
-                report(ForwardState::Running {
+                let running = |tunnel: &Tunnel| ForwardState::Running {
                     bound_port: tunnel.bound_port(),
-                    connections: shown,
-                });
+                    connections: tunnel.connections(),
+                    refused: tunnel.refused(),
+                    notice,
+                };
+                let mut shown = running(&tunnel);
+                report(shown.clone());
                 let closed = session.closed();
                 tokio::pin!(closed);
                 let mut tick = tokio::time::interval(COUNT_INTERVAL);
@@ -248,21 +330,27 @@ async fn run(ctx: Arc<Context>, reporter: Arc<Reporter>, host_id: HostId, rule: 
                     tokio::select! {
                         () = &mut closed => break,
                         _ = tick.tick() => {
-                            let now = tunnel.connections();
+                            let now = running(&tunnel);
                             if now != shown {
                                 shown = now;
-                                report(ForwardState::Running {
-                                    bound_port: tunnel.bound_port(),
-                                    connections: now,
-                                });
+                                report(shown.clone());
                             }
                         }
                     }
                 }
                 drop(tunnel);
             }
+            // The user cancelled a sign-in question: that is a stop, not an error.
+            Err(Failure::End(EndReason::AuthCancelled, ..)) => {
+                report(ForwardState::Stopped);
+                return;
+            }
             Err(failure @ Failure::End(..)) => {
                 let (code, detail) = failure_code(failure);
+                if code == ErrorCode::SignInCancelled {
+                    report(ForwardState::Stopped);
+                    return;
+                }
                 report(ForwardState::Failed {
                     code: Some(code),
                     detail,

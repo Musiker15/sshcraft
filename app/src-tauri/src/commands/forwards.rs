@@ -21,8 +21,12 @@ pub async fn forward_start(
 }
 
 #[tauri::command]
-pub async fn forward_stop(state: State<'_, AppState>, rule_id: ForwardId) -> CommandResult<()> {
-    state.forwards.stop(rule_id);
+pub async fn forward_stop(
+    state: State<'_, AppState>,
+    host_id: HostId,
+    rule_id: ForwardId,
+) -> CommandResult<()> {
+    state.forwards.stop(host_id, rule_id);
     Ok(())
 }
 

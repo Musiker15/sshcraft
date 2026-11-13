@@ -547,9 +547,9 @@
   "workspaces.skipped": "{count} pane(s) of the template were left out because their host no longer exists.",
   "workspaces.title": "Workspaces",
   "errors.invalid_forward": "The forwarding rule is not valid (ports 1 to 65535, an address without spaces, at most 50 rules per host).",
-  "errors.port_in_use": "The port is already in use on this device.",
+  "errors.port_in_use": "The port is already in use.",
   "errors.bind_failed": "The address could not be used for listening.",
-  "errors.forward_refused": "The server does not allow this remote forwarding.",
+  "errors.forward_refused": "The server refused the remote forwarding: it is not allowed there, or the port is taken on the server.",
   "forwarding.back": "Back",
   "forwarding.bindAddress": "Listen on address",
   "forwarding.bindPort": "Port",
@@ -589,5 +589,9 @@
   "forwarding.summary.local": "{bind} on this device reaches {target} as seen from the server.",
   "forwarding.summary.remote": "{bind} on the server reaches {target} as seen from this device.",
   "forwarding.targetHost": "Target host",
-  "forwarding.targetPort": "Target port"
+  "forwarding.targetPort": "Target port",
+  "forwarding.exposed": "reachable from other machines",
+  "forwarding.orphan": "A rule that no longer exists is still running. Double click stops it.",
+  "forwarding.orphanGroup": "Without a rule",
+  "forwarding.refused": "The server refused {count} connection(s) (forwarding not allowed there?)."
 }

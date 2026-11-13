@@ -317,13 +317,13 @@ export const deleteWorkspaceTemplate = (id: string) => invoke<void>("delete_work
 export const openLink = (url: string) => invoke<void>("open_link", { url });
 export type ForwardState =
   | { state: "starting" }
-  | { state: "running"; bound_port: number; connections: number }
+  | { state: "running"; bound_port: number; connections: number; refused: number; notice: string | null }
   | { state: "reconnecting"; attempt: number; delay_secs: number }
   | { state: "stopped" }
   | { state: "failed"; code: string | null; detail: string | null };
 export type ForwardStatus = { rule_id: string; host_id: string } & ForwardState;
 export const forwardStart = (hostId: string, ruleId: string) => invoke<void>("forward_start", { hostId, ruleId });
-export const forwardStop = (ruleId: string) => invoke<void>("forward_stop", { ruleId });
+export const forwardStop = (hostId: string, ruleId: string) => invoke<void>("forward_stop", { hostId, ruleId });
 export const forwardStatuses = () => invoke<ForwardStatus[]>("forward_statuses");
 export const listRecent = (limit: number) => invoke<string[]>("list_recent", { limit });
 

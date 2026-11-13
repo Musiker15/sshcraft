@@ -99,16 +99,6 @@ pub fn validate_all(rules: &[ForwardRule]) -> Result<(), ForwardError> {
     Ok(())
 }
 
-/// Whether `address` only listens on this machine (or, for a remote rule, on the server).
-pub fn is_loopback(address: &str) -> bool {
-    if address.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
-    let bare = address.trim_start_matches('[').trim_end_matches(']');
-    bare.parse::<std::net::IpAddr>()
-        .is_ok_and(|ip| ip.is_loopback())
-}
-
 /// Reads rules one by one and keeps the valid ones: a broken rule (from an older or newer
 /// version, or from another device) never takes its host with it.
 pub fn lenient_rules<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<ForwardRule>, D::Error> {
@@ -216,23 +206,6 @@ mod tests {
             validate_all(&broken),
             Err(ForwardError::Invalid(_))
         ));
-    }
-
-    #[test]
-    fn loopback_addresses() {
-        for yes in [
-            "127.0.0.1",
-            "127.1.2.3",
-            "::1",
-            "[::1]",
-            "localhost",
-            "LOCALHOST",
-        ] {
-            assert!(is_loopback(yes), "{yes}");
-        }
-        for no in ["0.0.0.0", "192.168.1.5", "*", "", "::", "example.com"] {
-            assert!(!is_loopback(no), "{no}");
-        }
     }
 
     #[test]

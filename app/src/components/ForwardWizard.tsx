@@ -1,7 +1,7 @@
 // "New forwarding rule": kind, host, addresses and ports, summary. Editing starts at the details.
 import { ArrowLeftRight, ArrowRightLeft, Globe } from "lucide-react";
 import { useState } from "react";
-import { saveHost, type ForwardKind, type ForwardRule, type Host } from "../api";
+import { listHosts, saveHost, type ForwardKind, type ForwardRule, type Host } from "../api";
 import { emptyDraft, fromRule, isExposed, sshEquivalent, toRule, validateDraft, type ForwardDraft } from "../forms/forwardForm";
 import { useLanguage, useT } from "../i18n/i18n";
 import { sortByName } from "../pages/hostsView";
@@ -35,11 +35,17 @@ export function ForwardWizard({ hosts, editing, onDone, onCancel }: Props) {
   const set = (patch: Partial<ForwardDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
   async function save() {
-    const host = hosts.find((h) => h.id === hostId);
-    if (!host) return;
-    const others = (host.forwards ?? []).filter((r) => r.id !== rule.id);
     try {
-      await saveHost({ ...host, forwards: editing ? (host.forwards ?? []).map((r) => (r.id === rule.id ? rule : r)) : [...others, rule] });
+      // The host as stored now: a change from sync since the page loaded must not be undone.
+      const stored = (await listHosts()) ?? hosts;
+      const host = stored.find((h) => h.id === hostId);
+      const rules = host?.forwards ?? [];
+      if (!host || (editing && !rules.some((r) => r.id === rule.id))) {
+        setProblem({ code: "not_found", detail: null });
+        return;
+      }
+      const forwards = editing ? rules.map((r) => (r.id === rule.id ? rule : r)) : [...rules, rule];
+      await saveHost({ ...host, forwards });
       onDone();
     } catch (e) {
       setProblem(e);
