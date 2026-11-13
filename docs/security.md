@@ -82,7 +82,7 @@ switched on is refused. See [connections.md](connections.md).
 - A session log holds what the terminal showed, never the typed keys; a password a program
   prints on the screen is in it. Recording is off until switched on (setting, host or group).
 - Every part and header is sealed with the vault, bound to its log and position. Plain in the
-  database: ids, host id, times, sizes, place.
+  database: ids, host id, start and end, size and storing time of each part, place.
 - Log sync is a switch of its own per server and goes into the personal area only. The server
   learns how many log records there are and their sizes. Details in
   [session-logs.md](session-logs.md).

@@ -32,7 +32,9 @@ export function LogsPage({ hosts }: Props) {
   const [servers, setServers] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<HostFilter>(null);
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<LogHit[] | null>(null);
+  /** Hits with the query they belong to: older ones are never shown for a newer query. */
+  const [hits, setHits] = useState<{ q: string; hits: LogHit[] } | null>(null);
+  const [searched, setSearched] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<string[] | null>(null);
   const [open, setOpen] = useState<{ log: LogSummary; query: string } | null>(null);
@@ -56,19 +58,25 @@ export function LogsPage({ hosts }: Props) {
     let current = true;
     const timer = window.setTimeout(() => {
       logsSearch(q).then((found) => {
-        if (current) setHits(found ?? []);
+        if (current) setHits({ q, hits: found ?? [] });
       }, setProblem);
     }, 300);
     return () => {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [q]);
-  const shownHits = q.length >= MIN_QUERY ? hits : null;
+  }, [q, searched]);
+  const searching = q.length >= MIN_QUERY;
+  const shownHits = searching ? (hits?.q === q ? hits.hits : []) : null;
 
   const hostName = useMemo(() => new Map(hosts.map((h) => [h.id, h.name])), [hosts]);
   const byId = useMemo(() => new Map(logs.map((l) => [l.id, l])), [logs]);
   const shown = logs.filter((l) => filter === null || (filter === "" ? l.host_id === null : l.host_id === filter));
+  /** What "delete all shown" takes: the logs of the hits while searching, else the list. */
+  const shownIds =
+    shownHits !== null
+      ? [...new Set(shownHits.map((h) => h.log_id))].filter((id) => byId.get(id)?.ended_at !== null)
+      : shown.filter((l) => l.ended_at !== null).map((l) => l.id);
   const logHosts = [...new Set(logs.map((l) => l.host_id).filter((h): h is string => h !== null))];
 
   const toggle = (id: string) => {
@@ -106,7 +114,7 @@ export function LogsPage({ hosts }: Props) {
           <button className="danger" disabled={selected.size === 0} onClick={() => setConfirm([...selected])}>
             {t("logs.deleteSelected", { count: selected.size })}
           </button>
-          <button className="danger" disabled={shown.length === 0} onClick={() => setConfirm(shown.map((l) => l.id))}>
+          <button className="danger" disabled={shownIds.length === 0} onClick={() => setConfirm(shownIds)}>
             {t("logs.deleteShown")}
           </button>
         </div>
@@ -165,6 +173,8 @@ export function LogsPage({ hosts }: Props) {
               <input
                 type="checkbox"
                 aria-label={t("logs.select", { name: l.title })}
+                disabled={l.ended_at === null}
+                title={l.ended_at === null ? t("logs.runningNoDelete") : undefined}
                 checked={selected.has(l.id)}
                 onChange={() => toggle(l.id)}
               />
@@ -195,7 +205,10 @@ export function LogsPage({ hosts }: Props) {
             const ids = confirm;
             setConfirm(null);
             setSelected(new Set());
-            void logsDelete(ids).then(load, setProblem);
+            void logsDelete(ids).then(() => {
+              load();
+              setSearched((n) => n + 1);
+            }, setProblem);
           }}
           onCancel={() => setConfirm(null)}
         />

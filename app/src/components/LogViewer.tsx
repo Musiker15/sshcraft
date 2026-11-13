@@ -1,12 +1,20 @@
 // One session log, played into a read-only terminal, with its bookmarks and comments beside it,
 // a search and the export.
-import { save } from "@tauri-apps/plugin-dialog";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { ArrowLeft, Bookmark, ChevronDown, ChevronUp, Download, MessageSquare, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { logExport, logRead, logSaveMarks, type LogExportFormat, type LogMark, type LogMeta, type MarkKind } from "../api";
+import {
+  logAddMark,
+  logExport,
+  logRead,
+  logRemoveMark,
+  type LogExportFormat,
+  type LogMark,
+  type LogMeta,
+  type MarkKind,
+} from "../api";
 import { useLanguage, useT } from "../i18n/i18n";
 import { lineForOffset, offsetForLine, pieces, type LineAt } from "../sessionlog/marks";
 import { useSettings } from "../settings/SettingsProvider";
@@ -22,6 +30,8 @@ type Props = {
 };
 
 const MAX_BOOKMARK = 100;
+/** Lines the viewer keeps; a longer log loses its beginning here (the export has all of it). */
+export const SCROLLBACK = 100_000;
 const MAX_COMMENT = 2000;
 
 /** Writes `bytes` in pieces and notes the cursor line after each. */
@@ -46,6 +56,10 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
   const search = useRef<SearchAddon | null>(null);
   const [table, setTable] = useState<LineAt[]>([]);
   const [loaded, setLoaded] = useState(false);
+  /** Bytes of the log, for placing marks of a log that is still being recorded. */
+  const [size, setSize] = useState(log.size);
+  /** The beginning fell out of the terminal: lines no longer match positions. */
+  const [trimmed, setTrimmed] = useState(false);
   const [marks, setMarks] = useState<LogMark[]>(log.marks);
   const [find, setFind] = useState(query);
   const [draft, setDraft] = useState<{ kind: MarkKind; text: string } | null>(null);
@@ -60,7 +74,7 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
       fontFamily: settings.font_family,
       fontSize: settings.font_size,
       theme: terminalTheme(settings.terminal_theme).colors,
-      scrollback: 200_000,
+      scrollback: SCROLLBACK,
     });
     const finder = new SearchAddon();
     terminal.loadAddon(finder);
@@ -80,6 +94,8 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
         const written = await writeAll(terminal, bytes, cuts);
         if (gone) return;
         setTable(written);
+        setSize(bytes.length);
+        setTrimmed((terminal.buffer.active.length ?? 0) >= SCROLLBACK);
         setLoaded(true);
         if (query.trim() !== "") finder.findNext(query, { caseSensitive: false });
       })
@@ -96,8 +112,8 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
 
   const sorted = [...marks].sort((a, b) => a.offset - b.offset || a.created_at - b.created_at);
 
-  function persist(next: LogMark[]) {
-    logSaveMarks(log.id, next).then((meta) => {
+  function apply(change: Promise<LogMeta>) {
+    change.then((meta) => {
       setMarks(meta.marks);
       onChanged(meta);
     }, setProblem);
@@ -107,21 +123,19 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
     if (!draft || !term.current) return;
     const text = draft.text.trim();
     if (draft.kind === "comment" && text === "") return;
-    const offset = Math.min(offsetForLine(table, term.current.buffer.active.viewportY), log.size);
+    const offset = Math.min(offsetForLine(table, term.current.buffer.active.viewportY), size);
     const mark: LogMark = { id: crypto.randomUUID(), offset, kind: draft.kind, text, created_at: Date.now() };
     setDraft(null);
-    persist([...marks, mark]);
+    apply(logAddMark(log.id, mark));
   }
 
   function jump(mark: LogMark) {
-    term.current?.scrollToLine(lineForOffset(table, mark.offset));
+    if (!trimmed) term.current?.scrollToLine(lineForOffset(table, mark.offset));
   }
 
   async function exportAs(format: LogExportFormat) {
     setExporting(false);
-    const name = `${log.title}-${new Date(log.started_at).toISOString().slice(0, 10)}.${format === "text" ? "txt" : "log"}`;
-    const path = await save({ defaultPath: name.replace(/[\\/:*?"<>|]/g, "_") });
-    if (path) await logExport(log.id, path, format).catch(setProblem);
+    await logExport(log.id, format).catch(setProblem);
   }
 
   const findNext = (back = false) => {
@@ -155,10 +169,10 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
           <button className="icon" aria-label={t("logs.findNext")} title={t("logs.findNext")} onClick={() => findNext()}>
             <ChevronDown size={16} />
           </button>
-          <button disabled={!loaded} onClick={() => setDraft({ kind: "bookmark", text: "" })}>
+          <button disabled={!loaded || trimmed} onClick={() => setDraft({ kind: "bookmark", text: "" })}>
             <Bookmark size={14} /> {t("logs.addBookmark")}
           </button>
-          <button disabled={!loaded} onClick={() => setDraft({ kind: "comment", text: "" })}>
+          <button disabled={!loaded || trimmed} onClick={() => setDraft({ kind: "comment", text: "" })}>
             <MessageSquare size={14} /> {t("logs.addComment")}
           </button>
           <div className="menu-anchor">
@@ -180,6 +194,7 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
       </header>
       {problem !== null && <ErrorMessage error={problem} />}
       {log.truncated && <p className="notice">{t("logs.truncated")}</p>}
+      {trimmed && <p className="notice">{t("logs.tooLong", { lines: SCROLLBACK.toLocaleString(lang) })}</p>}
       <div className="log-viewer-layout">
         <div className="log-terminal" ref={host} data-testid="log-terminal" />
         <aside className="log-marks" aria-label={t("logs.marks")}>
@@ -223,7 +238,7 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
           <ul>
             {sorted.map((m) => (
               <li key={m.id} className={`mark mark-${m.kind}`}>
-                <button className="link mark-jump" onClick={() => jump(m)}>
+                <button className="link mark-jump" disabled={trimmed} onClick={() => jump(m)}>
                   {m.kind === "bookmark" ? <Bookmark size={12} /> : <MessageSquare size={12} />}
                   <span>{m.text || t("logs.bookmark")}</span>
                 </button>
@@ -232,7 +247,7 @@ export function LogViewer({ log, query = "", onClose, onChanged }: Props) {
                   className="icon"
                   aria-label={t("logs.removeMark")}
                   title={t("logs.removeMark")}
-                  onClick={() => persist(marks.filter((x) => x.id !== m.id))}
+                  onClick={() => apply(logRemoveMark(log.id, m.id))}
                 >
                   <Trash2 size={12} />
                 </button>

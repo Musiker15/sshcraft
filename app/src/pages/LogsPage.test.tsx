@@ -146,3 +146,44 @@ test("sizes read naturally", () => {
   expect(formatSize(1536, "en")).toBe("1.5 KB");
   expect(formatSize(64 * 1024 * 1024, "en")).toBe("64 MB");
 });
+
+test("while searching, deleting all shown takes only the logs of the hits", async () => {
+  await show();
+  vi.useFakeTimers();
+  state.hits = [
+    { log_id: "2", line: 1, snippet: "error a" },
+    { log_id: "2", line: 5, snippet: "error b" },
+  ];
+  fireEvent.change(screen.getByLabelText(en["logs.search"]), { target: { value: "error" } });
+  await act(async () => {
+    vi.advanceTimersByTime(400);
+  });
+  vi.useRealTimers();
+  await screen.findByText("error a");
+  fireEvent.click(screen.getByRole("button", { name: en["logs.deleteShown"] }));
+  fireEvent.click(screen.getByRole("button", { name: en["common.delete"] }));
+  await vi.waitFor(() => {
+    expect(state.calls.find((c) => c.command === "logs_delete")?.args).toEqual({ ids: ["2"] });
+  });
+});
+
+test("hits of an earlier query are not shown for a new one", async () => {
+  await show();
+  vi.useFakeTimers();
+  state.hits = [{ log_id: "1", line: 0, snippet: "old match" }];
+  fireEvent.change(screen.getByLabelText(en["logs.search"]), { target: { value: "old" } });
+  await act(async () => {
+    vi.advanceTimersByTime(400);
+  });
+  expect(screen.getByText("old match")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(en["logs.search"]), { target: { value: "new" } });
+  expect(screen.queryByText("old match")).toBeNull();
+  vi.useRealTimers();
+});
+
+test("a log being recorded cannot be selected or deleted", async () => {
+  await show();
+  expect((screen.getByLabelText("Select PowerShell") as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText(en["logs.filterHost"]), { target: { value: "" } });
+  expect(screen.getByRole("button", { name: en["logs.deleteShown"] }).hasAttribute("disabled")).toBe(true);
+});

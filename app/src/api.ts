@@ -554,11 +554,13 @@ export type LogExportFormat = "text" | "raw";
 export const logsList = () => invoke<LogSummary[]>("logs_list");
 /** The recorded bytes. */
 export const logRead = async (id: string) => new Uint8Array(await invoke<ArrayBuffer>("log_read", { id }));
-export const logSaveMarks = (id: string, marks: LogMark[]) => invoke<LogMeta>("log_save_marks", { id, marks });
+/** Adds a mark to what the log has now (marks set meanwhile, e.g. from the terminal, stay). */
+export const logAddMark = (id: string, mark: LogMark) => invoke<LogMeta>("log_add_mark", { id, mark });
+export const logRemoveMark = (id: string, mark: string) => invoke<LogMeta>("log_remove_mark", { id, mark });
 export const logsDelete = (ids: string[]) => invoke<void>("logs_delete", { ids });
 export const logsSearch = (query: string) => invoke<LogHit[]>("logs_search", { query });
-export const logExport = (id: string, path: string, format: LogExportFormat) =>
-  invoke<void>("log_export", { id, path, format });
+/** Asks for the file in a dialog of the app; false when it was cancelled. */
+export const logExport = (id: string, format: LogExportFormat) => invoke<boolean>("log_export", { id, format });
 export const sessionBookmark = (id: string, text: string) => invoke<LogMark>("session_bookmark", { id, text });
 export const sessionRecording = (id: string) => invoke<boolean>("session_recording", { id });
 export const setServerLogs = (id: string, on: boolean) => invoke<void>("set_server_logs", { id, on });

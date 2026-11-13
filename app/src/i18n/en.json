@@ -699,5 +699,7 @@
   "settings.logRetentionDays.other": "{count} days",
   "settings.logRetentionHint": "Older logs are deleted at start and then every hour, also on your other devices if they sync.",
   "sync.syncLogs": "Sync session logs",
-  "sync.syncLogsHint": "Logs go encrypted into your personal area, never into shares. Every device needs SSHCraft with session logs for this."
+  "sync.syncLogsHint": "Logs go encrypted into your personal area, never into shares. Every device needs SSHCraft with session logs for this.",
+  "logs.tooLong": "This log is longer than {lines} lines: its beginning is missing here and marks are off. The export has all of it.",
+  "logs.runningNoDelete": "Still being recorded"
 }

@@ -699,5 +699,7 @@
   "settings.logRetentionDays.other": "{count} Tage",
   "settings.logRetentionHint": "Ältere Protokolle werden beim Start und dann stündlich gelöscht, auch auf deinen anderen Geräten, wenn sie synchronisiert sind.",
   "sync.syncLogs": "Protokolle synchronisieren",
-  "sync.syncLogsHint": "Protokolle gehen verschlüsselt in deinen persönlichen Bereich, nie in Freigaben. Alle Geräte brauchen dafür eine SSHCraft-Version mit Sitzungsprotokollen."
+  "sync.syncLogsHint": "Protokolle gehen verschlüsselt in deinen persönlichen Bereich, nie in Freigaben. Alle Geräte brauchen dafür eine SSHCraft-Version mit Sitzungsprotokollen.",
+  "logs.tooLong": "Das Protokoll ist länger als {lines} Zeilen: der Anfang fehlt hier, Lesezeichen sind abgeschaltet. Der Export enthält alles.",
+  "logs.runningNoDelete": "Wird noch aufgezeichnet"
 }

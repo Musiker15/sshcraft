@@ -135,6 +135,15 @@ export function TerminalView({
   // Whether Rust records this session into a session log, and a short note after a bookmark.
   const [recording, setRecording] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Recording can stop on its own (size limit, storage failure): ask again now and then.
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => {
+      const id = sessionId.current;
+      if (id) sessionRecording(id).then(setRecording, () => {});
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
   const noteTimer = useRef<number | undefined>(undefined);
   const showNote = (text: string) => {
     window.clearTimeout(noteTimer.current);
