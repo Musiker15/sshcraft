@@ -1331,3 +1331,94 @@ button.link[aria-current="page"] {
 textarea.mono {
   font-family: var(--mono, monospace);
 }
+
+/* Terminal sidebar and suggestions */
+.workspace.with-sidebar {
+  right: 280px;
+}
+
+.terminal-sidebar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow: auto;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sidebar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-entry {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-entry:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-entry.mono {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+}
+
+.ws-pane {
+  position: relative;
+}
+
+.completion {
+  position: absolute;
+  z-index: 5;
+  min-width: 220px;
+  max-width: 480px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 6px 20px var(--overlay);
+  pointer-events: none;
+}
+
+.completion-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+}
+
+.completion-item.active {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.completion-source {
+  color: var(--text-muted);
+  font-family: inherit;
+}

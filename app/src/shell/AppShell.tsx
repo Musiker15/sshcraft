@@ -54,6 +54,8 @@ import { TemplateDialog } from "../components/TemplateDialog";
 import { RunSnippetDialog, type OpenPane, type RunPlan } from "../components/RunSnippetDialog";
 import { planNewTabs, snippetInput } from "../forms/snippetRun";
 import { SnippetsPage } from "../pages/SnippetsPage";
+import { TerminalSidebar } from "../components/TerminalSidebar";
+import { historyScope } from "../terminal/features";
 import { errorText } from "../i18n/errors";
 import { useT } from "../i18n/i18n";
 import { HostsPage } from "../pages/HostsPage";
@@ -120,6 +122,7 @@ export function AppShell() {
   /** The snippet whose run dialog is open. */
   const [running, setRunning] = useState<Snippet | null>(null);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
   const [templateFor, setTemplateFor] = useState<SessionTab | null>(null);
   /** Panes of the last opened template left out because their host is gone. */
@@ -282,6 +285,11 @@ export function AppShell() {
     (tab): tab is SessionTab => tab.id === tabs.activeId && tab.kind === "session",
   );
 
+  const focusedPane = (() => {
+    const pane = activeSession?.panes.find((p) => p.id === activeSession.focusedId);
+    return pane && !isPicker(pane) ? pane : undefined;
+  })();
+
   /** Typed input goes to its own session, with broadcast on to every session of the tab. */
   const sendInput = useCallback((paneId: string, data: string, report: boolean) => {
     const tab = tabsRef.current.tabs.find(
@@ -341,6 +349,9 @@ export function AppShell() {
           break;
         case "toggleBroadcast":
           if (activeSession) dispatch({ type: "toggleBroadcast", tabId: activeSession.id });
+          break;
+        case "toggleSidebar":
+          setSidebarOpen((open) => !open);
           break;
       }
     },
@@ -423,6 +434,8 @@ export function AppShell() {
         onNewTab={() => runAction("newTab")}
         onSplit={() => runAction("splitPane")}
         onSaveTemplate={setTemplateFor}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((open) => !open)}
       />
       {vault && (
         <div className="banner">
@@ -533,7 +546,15 @@ export function AppShell() {
           />
         )}
         {/* Panes stay mounted while hidden, so switching tabs never drops a connection. */}
+        {sidebarOpen && activeSession && focusedPane && (
+          <TerminalSidebar
+            scope={historyScope(focusedPane.target)}
+            onInsert={(text) => sendInput(focusedPane.id, text, false)}
+            onRun={(text) => sendInput(focusedPane.id, text, false)}
+          />
+        )}
         <WorkspaceView
+          sidebar={sidebarOpen && activeSession !== undefined}
           state={tabs}
           dispatch={dispatch}
           onInput={sendInput}

@@ -22,7 +22,7 @@ pub const TERMINAL_TYPES: [&str; 7] = [
 ];
 
 /// Actions a shortcut can trigger; the same names as `ShortcutAction` in the UI.
-pub const SHORTCUT_ACTIONS: [&str; 11] = [
+pub const SHORTCUT_ACTIONS: [&str; 12] = [
     "palette",
     "newTab",
     "closeTab",
@@ -34,6 +34,7 @@ pub const SHORTCUT_ACTIONS: [&str; 11] = [
     "prevPane",
     "toggleLayout",
     "toggleBroadcast",
+    "toggleSidebar",
 ];
 const MAX_COMBOS: usize = 4;
 const MAX_COMBO_LEN: usize = 40;
@@ -432,7 +433,8 @@ mod tests {
 
     #[test]
     fn every_action_is_known() {
-        assert_eq!(SHORTCUT_ACTIONS.len(), 11);
+        assert_eq!(SHORTCUT_ACTIONS.len(), 12);
+        assert!(SHORTCUT_ACTIONS.contains(&"toggleSidebar"));
         assert!(SHORTCUT_ACTIONS.contains(&"toggleBroadcast"));
     }
 

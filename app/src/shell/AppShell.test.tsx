@@ -27,6 +27,7 @@ vi.mock("@tauri-apps/api/core", () => {
     list_keys: [],
     list_recent: [],
     local_shells: [],
+    history_list: [],
     snippets_list: [{ id: "sn", name: "Uptime", package: "", content: "uptime", default_targets: ["h1"] }],
     workspace_templates: [
       {
@@ -306,4 +307,14 @@ test("a snippet on new connections opens a tab that types it after connecting", 
   expect(await screen.findByRole("tab", { name: /Snippet: Uptime/ })).toBeTruthy();
   const opened = Object.values(state.views).find((v) => v.pane.startup?.raw);
   expect(opened?.pane.startup?.raw).toBe("uptime\r");
+});
+
+test("Ctrl+Shift+S shows the terminal sidebar beside a session", async () => {
+  fireEvent.doubleClick(await renderShell());
+  await screen.findByRole("tab", { name: /web/ });
+  expect(screen.queryByRole("complementary", { name: en["sidebar.title"] })).toBeNull();
+  press("S");
+  expect(await screen.findByRole("complementary", { name: en["sidebar.title"] })).toBeTruthy();
+  press("S");
+  expect(screen.queryByRole("complementary", { name: en["sidebar.title"] })).toBeNull();
 });

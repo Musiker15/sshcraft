@@ -1,4 +1,4 @@
-import { Columns2, PanelLeft, Plus, Radio, Save, X } from "lucide-react";
+import { Columns2, PanelLeft, PanelRight, Plus, Radio, Save, X } from "lucide-react";
 import type { Dispatch } from "react";
 import logo from "../assets/logo.svg";
 import { dotClass } from "../components/WorkspaceView";
@@ -32,10 +32,12 @@ type Props = {
   onNewTab: () => void;
   onSplit: () => void;
   onSaveTemplate: (tab: SessionTab) => void;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 /** The strip at the top: start page, one entry per tab, "+" for a new tab, workspace tools. */
-export function TabStrip({ state, dispatch, onNewTab, onSplit, onSaveTemplate }: Props) {
+export function TabStrip({ state, dispatch, onNewTab, onSplit, onSaveTemplate, sidebarOpen = false, onToggleSidebar }: Props) {
   const t = useT();
   const active = state.tabs.find((tab): tab is SessionTab => tab.id === state.activeId && tab.kind === "session");
   return (
@@ -138,6 +140,17 @@ export function TabStrip({ state, dispatch, onNewTab, onSplit, onSaveTemplate }:
           >
             <Save size={15} />
           </button>
+          {onToggleSidebar && (
+            <button
+              className={sidebarOpen ? "icon on" : "icon"}
+              aria-label={t("sidebar.toggle")}
+              aria-pressed={sidebarOpen}
+              title={t("sidebar.toggle")}
+              onClick={onToggleSidebar}
+            >
+              <PanelRight size={15} />
+            </button>
+          )}
         </div>
       )}
     </div>

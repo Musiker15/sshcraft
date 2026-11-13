@@ -5,7 +5,7 @@ import en from "../i18n/en.json";
 import { SettingsProvider } from "../settings/SettingsProvider";
 import { SettingsPage } from "./SettingsPage";
 
-const calls = vi.hoisted(() => ({ saved: [] as Array<Record<string, unknown>> }));
+const calls = vi.hoisted(() => ({ saved: [] as Array<Record<string, unknown>>, cleared: [] as unknown[] }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (command: string, args?: { settings: Record<string, unknown> }) => {
@@ -21,7 +21,12 @@ vi.mock("@tauri-apps/api/core", () => ({
           terminal_type: "xterm-256color",
           clipboard_osc52: "write",
           shortcuts: {},
+          history: true,
+          autocomplete: true,
         };
+      case "history_clear":
+        calls.cleared.push(args);
+        return null;
       case "system_locale":
         return "de-DE";
       case "save_settings": {
@@ -76,4 +81,15 @@ test("typing a font size saves the whole number once", async () => {
   await vi.waitFor(() => expect(calls.saved[calls.saved.length - 1]?.font_size).toBe(16));
   expect(calls.saved).toHaveLength(1);
   expect(size.value).toBe("16");
+});
+
+test("history and suggestions can be switched off, and the history cleared", async () => {
+  await renderPage();
+  fireEvent.click(screen.getByRole("checkbox", { name: de["settings.history"] }));
+  await vi.waitFor(() => expect(calls.saved[calls.saved.length - 1]?.history).toBe(false));
+  fireEvent.click(screen.getByRole("checkbox", { name: de["settings.autocomplete"] }));
+  await vi.waitFor(() => expect(calls.saved[calls.saved.length - 1]?.autocomplete).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: de["settings.historyClear"] }));
+  await vi.waitFor(() => expect(calls.cleared).toEqual([{ scope: null }]));
+  expect(await screen.findByText(de["settings.historyCleared"])).toBeTruthy();
 });

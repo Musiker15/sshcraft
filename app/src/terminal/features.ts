@@ -122,3 +122,15 @@ export function startupInput(target: SessionTarget, startup: Startup | undefined
   );
   return parts.length === 0 ? null : `${parts.join(" && ")}\r`;
 }
+
+/** Where a pane's commands are kept: per host, per local shell; a serial line keeps none. */
+export function historyScope(target: SessionTarget): string | null {
+  switch (target.kind) {
+    case "host":
+      return `host:${target.host_id}`;
+    case "local":
+      return `local:${target.shell.label}`;
+    case "serial":
+      return null;
+  }
+}
