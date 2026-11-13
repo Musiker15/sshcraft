@@ -45,24 +45,55 @@ pub struct HostView {
     pub tags: Vec<String>,
 }
 
-/// A host to create (no `id`) or change.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// For a field of a change: missing keeps the stored value, `null` clears it.
+fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+/// A host to create (no `id`) or change. On a change only the fields that are there change:
+/// a missing field keeps its value, `null` clears it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostInput {
     #[serde(default)]
     pub id: Option<Uuid>,
-    pub name: String,
-    #[serde(default)]
-    pub group: Option<Uuid>,
-    #[serde(default)]
-    pub address: Option<String>,
-    #[serde(default)]
-    pub port: Option<u16>,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub key: Option<Uuid>,
-    #[serde(default)]
-    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group: Option<Option<Uuid>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub address: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub port: Option<Option<u16>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub username: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub key: Option<Option<Uuid>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,6 +198,11 @@ pub enum Action {
         #[serde(default)]
         passphrase: Option<String>,
     },
+    /// Not an action: drops the request with id `request` on this connection (its question
+    /// goes away; what already runs on a server is not stopped).
+    Cancel {
+        request: u64,
+    },
 }
 
 impl Action {
@@ -189,6 +225,7 @@ impl Action {
             Self::DeleteKey { .. } => "delete_key",
             Self::GenerateKey { .. } => "generate_key",
             Self::ImportKey { .. } => "import_key",
+            Self::Cancel { .. } => "cancel",
         }
     }
 }
@@ -260,12 +297,17 @@ impl Response {
     }
 }
 
+/// Characters that reorder text on screen (Trojan source); never allowed in names.
+pub fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
 /// Whether `name` may name an agent: 1 to [`MAX_AGENT_NAME`] characters, none of them control
 /// characters.
 pub fn valid_agent_name(name: &str) -> bool {
     let len = name.chars().count();
     (1..=MAX_AGENT_NAME).contains(&len)
-        && !name.chars().any(char::is_control)
+        && !name.chars().any(|c| c.is_control() || is_bidi_control(c))
         && !name.trim().is_empty()
 }
 
@@ -299,16 +341,16 @@ mod tests {
             },
             Action::SaveHost {
                 host: HostInput {
-                    id: None,
-                    name: "db".into(),
-                    group: None,
-                    address: Some("10.0.0.5".into()),
-                    port: Some(22),
-                    username: Some("root".into()),
-                    key: None,
-                    tags: vec!["prod".into()],
+                    name: Some("db".into()),
+                    address: Some(Some("10.0.0.5".into())),
+                    port: Some(Some(22)),
+                    username: Some(Some("root".into())),
+                    key: Some(None),
+                    tags: Some(vec!["prod".into()]),
+                    ..HostInput::default()
                 },
             },
+            Action::Cancel { request: 4 },
             Action::SaveGroup {
                 group: GroupInput {
                     id: None,
@@ -346,7 +388,18 @@ mod tests {
     }
 
     #[test]
+    fn missing_fields_keep_null_clears() {
+        let input: HostInput = serde_json::from_str(r#"{"name": "x", "key": null}"#).unwrap();
+        assert_eq!(input.key, Some(None));
+        assert_eq!(input.address, None);
+        let input: HostInput = serde_json::from_str(r#"{"address": "1.2.3.4"}"#).unwrap();
+        assert_eq!(input.address, Some(Some("1.2.3.4".into())));
+        assert_eq!(input.name, None);
+    }
+
+    #[test]
     fn agent_names_are_checked() {
+        assert!(!valid_agent_name("claude\u{202E}edoc"));
         assert!(valid_agent_name("claude-code"));
         assert!(!valid_agent_name(""));
         assert!(!valid_agent_name("   "));

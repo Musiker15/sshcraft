@@ -397,7 +397,7 @@ async fn run_on(
     let mut channel = handle.channel_open_session().await.map_err(protocol)?;
     channel.exec(true, command).await.map_err(protocol)?;
     let mut result = RunOutput::default();
-    let mut take = |data: &[u8], result: &mut RunOutput| {
+    let take = |data: &[u8], result: &mut RunOutput| {
         let room = limit.saturating_sub(result.output.len());
         if data.len() > room {
             result.truncated = true;

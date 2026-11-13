@@ -81,6 +81,45 @@ impl AgentPolicy {
             .unwrap_or_else(|| category.default_level())
     }
 
+    /// The stored policy, or an error when it is there but cannot be read: then agents get
+    /// nothing (hidden hosts must not show because the list broke).
+    pub fn load_checked(store: &Store) -> Result<Self, String> {
+        let text = match store.get_setting(POLICY_KEY) {
+            Ok(Some(text)) => text,
+            Ok(None) => return Ok(Self::default()),
+            Err(e) => return Err(e.to_string()),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        if let Some(hidden) = value.get("hidden") {
+            serde_json::from_value::<BTreeSet<Uuid>>(hidden.clone()).map_err(|e| e.to_string())?;
+        }
+        Ok(Self::load(store))
+    }
+
+    /// Hides `id` from agents or shows it again, on the stored policy.
+    pub fn set_hidden(store: &Store, id: Uuid, hidden: bool) -> Result<Self, StoreError> {
+        let mut policy = Self::load(store);
+        if hidden {
+            policy.hidden.insert(id);
+        } else {
+            policy.hidden.remove(&id);
+        }
+        policy.save(store)?;
+        Ok(policy)
+    }
+
+    /// Sets the level of one kind of action on the stored policy.
+    pub fn set_level(
+        store: &Store,
+        category: AgentCategory,
+        level: AgentLevel,
+    ) -> Result<Self, StoreError> {
+        let mut policy = Self::load(store);
+        policy.levels.insert(category, level);
+        policy.save(store)?;
+        Ok(policy)
+    }
+
     /// The stored policy; a damaged one or unknown categories in it fall back to the defaults.
     pub fn load(store: &Store) -> Self {
         let Ok(Some(text)) = store.get_setting(POLICY_KEY) else {
@@ -156,6 +195,8 @@ pub enum AgentOutcome {
     Hidden,
     /// Allowed, but it failed.
     Failed,
+    /// The agent went away while the question was open.
+    Cancelled,
 }
 
 pub const MAX_LOG: usize = 1000;

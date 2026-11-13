@@ -157,3 +157,27 @@ fn log_entries_are_sealed_and_cut() {
     assert_eq!(list[0].detail.chars().count(), MAX_DETAIL);
     assert_eq!(list[1].detail, "mysql -psecret123");
 }
+
+#[test]
+fn a_damaged_hidden_list_is_an_error_not_an_empty_list() {
+    let (store, _) = setup();
+    assert!(AgentPolicy::load_checked(&store).is_ok());
+    store
+        .put_setting(POLICY_KEY, r#"{"hidden": ["not-a-uuid"]}"#)
+        .unwrap();
+    assert!(AgentPolicy::load_checked(&store).is_err());
+    store.put_setting(POLICY_KEY, "{").unwrap();
+    assert!(AgentPolicy::load_checked(&store).is_err());
+}
+
+#[test]
+fn hiding_and_levels_change_one_thing_at_a_time() {
+    let (store, _) = setup();
+    let id = Uuid::new_v4();
+    AgentPolicy::set_level(&store, AgentCategory::Delete, AgentLevel::Ask).unwrap();
+    let policy = AgentPolicy::set_hidden(&store, id, true).unwrap();
+    assert!(policy.hidden.contains(&id));
+    assert_eq!(policy.level(AgentCategory::Delete), AgentLevel::Ask);
+    let policy = AgentPolicy::set_hidden(&store, id, false).unwrap();
+    assert!(policy.hidden.is_empty());
+}

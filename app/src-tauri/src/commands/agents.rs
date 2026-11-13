@@ -12,14 +12,32 @@ pub fn agent_policy_get(state: State<'_, AppState>) -> AgentPolicy {
     AgentPolicy::load(&state.store.lock().expect("store lock"))
 }
 
+/// Hides a host or group from agents, or shows it again (one change on the stored policy, so a
+/// window that has not loaded the policy yet cannot overwrite it).
 #[tauri::command]
-pub fn agent_policy_set(
+pub fn agent_set_hidden(
     state: State<'_, AppState>,
-    policy: AgentPolicy,
+    id: uuid::Uuid,
+    hidden: bool,
 ) -> CommandResult<AgentPolicy> {
-    let store = state.store.lock().expect("store lock");
-    policy.save(&store)?;
-    Ok(AgentPolicy::load(&store))
+    Ok(AgentPolicy::set_hidden(
+        &state.store.lock().expect("store lock"),
+        id,
+        hidden,
+    )?)
+}
+
+#[tauri::command]
+pub fn agent_set_level(
+    state: State<'_, AppState>,
+    category: sshcraft_core::agent::AgentCategory,
+    level: sshcraft_core::agent::AgentLevel,
+) -> CommandResult<AgentPolicy> {
+    Ok(AgentPolicy::set_level(
+        &state.store.lock().expect("store lock"),
+        category,
+        level,
+    )?)
 }
 
 #[tauri::command]

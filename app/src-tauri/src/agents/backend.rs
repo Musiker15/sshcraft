@@ -10,12 +10,14 @@ use sshcraft_core::model::{Group, GroupId, Host, HostId, KeyId};
 
 #[async_trait::async_trait]
 pub trait AgentBackend: Send + Sync + 'static {
-    fn policy(&self) -> AgentPolicy;
+    /// The policy, or an error when it cannot be read (then agents get nothing).
+    fn policy(&self) -> Result<AgentPolicy, AgentError>;
     fn hosts(&self) -> Result<Vec<Host>, AgentError>;
     fn groups(&self) -> Result<Vec<Group>, AgentError>;
     /// Stored keys by name, type and fingerprint only.
     fn keys(&self) -> Result<Vec<KeyView>, AgentError>;
-    fn log(&self, entry: AgentLogEntry);
+    /// Writes a log entry; an action whose entry cannot be written does not run.
+    fn log(&self, entry: AgentLogEntry) -> Result<(), AgentError>;
 
     async fn exec(
         &self,
@@ -24,8 +26,6 @@ pub trait AgentBackend: Send + Sync + 'static {
         timeout: Duration,
     ) -> Result<ExecResult, AgentError>;
     fn session_open(&self, host: HostId) -> Result<String, AgentError>;
-    /// Whether `session` is one an agent opened.
-    fn session_owned(&self, session: &str) -> bool;
     fn session_write(&self, session: &str, data: &[u8]) -> Result<(), AgentError>;
     async fn session_read(
         &self,

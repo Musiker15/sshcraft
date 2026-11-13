@@ -61,8 +61,13 @@ impl TauriBackend {
 
 #[async_trait::async_trait]
 impl AgentBackend for TauriBackend {
-    fn policy(&self) -> AgentPolicy {
-        AgentPolicy::load(&self.state().store.lock().expect("store lock"))
+    fn policy(&self) -> Result<AgentPolicy, AgentError> {
+        AgentPolicy::load_checked(&self.state().store.lock().expect("store lock")).map_err(|e| {
+            AgentError::new(
+                ErrorKind::Failed,
+                format!("the agent settings cannot be read: {e}"),
+            )
+        })
     }
 
     fn hosts(&self) -> Result<Vec<Host>, AgentError> {
@@ -89,12 +94,16 @@ impl AgentBackend for TauriBackend {
         Ok(keys.into_iter().map(key_view).collect())
     }
 
-    fn log(&self, entry: AgentLogEntry) {
+    fn log(&self, entry: AgentLogEntry) -> Result<(), AgentError> {
         let state = self.state();
-        if let Ok(vault) = &state.vault {
-            let _ = log_append(vault, &state.store.lock().expect("store lock"), &entry);
-            let _ = self.app.emit("agent-log", ());
-        }
+        let vault = state
+            .vault
+            .as_ref()
+            .map_err(|_| AgentError::new(ErrorKind::Failed, "the vault is locked"))?;
+        log_append(vault, &state.store.lock().expect("store lock"), &entry)
+            .map_err(store_failed)?;
+        let _ = self.app.emit("agent-log", ());
+        Ok(())
     }
 
     async fn exec(
@@ -117,10 +126,6 @@ impl AgentBackend for TauriBackend {
     fn session_open(&self, host: HostId) -> Result<String, AgentError> {
         let state = self.state();
         Ok(state.agent_sessions.open(&state.sessions, host).to_string())
-    }
-
-    fn session_owned(&self, session: &str) -> bool {
-        session_id(session).is_some_and(|id| self.state().agent_sessions.owns(id))
     }
 
     fn session_write(&self, session: &str, data: &[u8]) -> Result<(), AgentError> {
@@ -292,7 +297,8 @@ impl Confirmer for TauriConfirmer {
             pending: self.pending.clone(),
             app: self.app.clone(),
         };
-        if let Some(window) = self.app.get_webview_window("main") {
+        let first = self.pending.lock().expect("agent prompts").len() == 1;
+        if first && let Some(window) = self.app.get_webview_window("main") {
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
