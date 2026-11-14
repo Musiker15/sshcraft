@@ -68,7 +68,13 @@ impl Prefilter {
                 }
             },
             State::Osc | State::OscEscape if self.osc.len() >= MAX_OSC_BYTES => {
+                let after_escape = self.state == State::OscEscape;
                 self.osc = Vec::new();
+                if after_escape {
+                    // The `ESC` already held is the start of the string's end or of a new sequence.
+                    self.state = State::DiscardEscape;
+                    return self.step(byte, out);
+                }
                 Self::dropping(byte)
             }
             State::Osc => {
@@ -91,10 +97,15 @@ impl Prefilter {
                 self.step(byte, out)
             }
             State::Discard => Self::dropping(byte),
-            State::DiscardEscape => match byte {
-                b'\\' => State::Ground,
-                _ => Self::dropping(byte),
-            },
+            State::DiscardEscape => {
+                if byte == b'\\' {
+                    return State::Ground;
+                }
+                // Like the parser, any other byte after `ESC` ends the string and starts a new
+                // sequence, which is passed on.
+                self.state = State::Escape;
+                self.step(byte, out)
+            }
         }
     }
 
@@ -137,6 +148,19 @@ mod tests {
     fn ordinary_output_passes_unchanged() {
         let input: &[u8] = b"a\x1b[31mb\x1b]0;title\x07c\x1b]8;;x\x1b\\d\x1b\x1b[0m\x1b]0;t\x1b[1me";
         assert_eq!(run(&[input]), input);
+    }
+
+    #[test]
+    fn an_overlong_osc_ended_by_a_new_sequence_lets_output_through() {
+        let body = vec![b'A'; MAX_OSC_BYTES + 10];
+        assert_eq!(run(&[b"\x1b]52;c;", &body, b"\x1b[31mok\r\nmore"]), b"\x1b[31mok\r\nmore");
+    }
+
+    #[test]
+    fn an_osc_whose_terminator_lands_on_the_limit_ends_cleanly() {
+        // `ESC ]` plus the body plus `ESC` reach the limit exactly; `\` completes the terminator.
+        let body = vec![b'A'; MAX_OSC_BYTES - 3];
+        assert_eq!(run(&[b"\x1b]", &body, b"\x1b\\visible"]), b"visible");
     }
 
     #[test]

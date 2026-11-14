@@ -6,7 +6,9 @@
 //! passed to [`Terminal::feed`] is hostile: a size is clamped, the scrollback is bounded by
 //! [`limits::MAX_CELLS`], and the queue of answers and notices has a limit.
 
+mod extras;
 mod filter;
+mod guard;
 pub mod input;
 pub mod limits;
 mod listener;
@@ -131,6 +133,8 @@ pub struct Terminal {
     config: TermConfig,
     /// The last match and the query it belongs to, where "next" goes on from.
     last_match: Option<(u64, SearchMatch)>,
+    /// Changes that may have added per-cell extras since the budget was last checked.
+    extras_changes: usize,
 }
 
 impl Terminal {
@@ -147,17 +151,27 @@ impl Terminal {
             size,
             config: config.clone(),
             last_match: None,
+            extras_changes: 0,
         }
     }
 
     /// Output from the session.
     pub fn feed(&mut self, bytes: &[u8]) {
-        self.filtered.clear();
-        self.prefilter.filter(bytes, &mut self.filtered);
-        self.parser.advance(&mut self.term, &self.filtered);
+        let mut filtered = std::mem::take(&mut self.filtered);
+        filtered.clear();
+        self.prefilter.filter(bytes, &mut filtered);
+        // In slices, so the extras budget is checked while a large feed is under way.
+        for slice in filtered.chunks(64 * 1024) {
+            let mut guard = guard::Guard { term: &mut self.term, extras: &mut self.extras_changes };
+            self.parser.advance(&mut guard, slice);
+            if self.extras_changes >= extras::CHECK_EVERY {
+                self.extras_changes = 0;
+                self.enforce_extras_budget();
+            }
+        }
         // A large feed must not keep its buffer for the life of the terminal.
-        if self.filtered.capacity() > 1 << 20 {
-            self.filtered = Vec::new();
+        if filtered.capacity() <= 1 << 20 {
+            self.filtered = filtered;
         }
     }
 
@@ -193,12 +207,7 @@ impl Terminal {
 
     /// The visible rows as text, one line each, for screen readers.
     pub fn visible_text(&self) -> String {
-        let s = self.screen();
-        s.cells
-            .chunks(usize::from(s.cols).max(1))
-            .map(|row| row.iter().map(|c| c.text.as_str()).collect::<String>().trim_end().to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+        self.screen().text()
     }
 
     /// Answers and notices since the last call.

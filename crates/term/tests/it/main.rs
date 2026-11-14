@@ -2,6 +2,7 @@
 
 mod fuzz;
 mod history;
+mod hostile;
 mod input;
 mod rules;
 mod screen;

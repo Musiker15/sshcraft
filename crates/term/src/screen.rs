@@ -25,6 +25,17 @@ pub struct Screen {
     pub links: Vec<String>,
 }
 
+impl Screen {
+    /// The rows as text, one line each, without trailing blanks: for screen readers.
+    pub fn text(&self) -> String {
+        self.cells
+            .chunks(usize::from(self.cols).max(1))
+            .map(|row| row.iter().map(|c| c.text.as_str()).collect::<String>().trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 /// One cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellView {
@@ -174,7 +185,27 @@ pub(crate) fn modes(m: TermMode) -> TermModes {
     MAP.iter().filter(|(a, _)| m.contains(*a)).fold(TermModes::empty(), |acc, (_, b)| acc | *b)
 }
 
-fn cell_view(cell: &Cell, links: &mut Vec<String>) -> CellView {
+/// The link targets of a screen, each once; looked up by target, so a screen full of different
+/// links costs one lookup per cell.
+#[derive(Default)]
+struct Links {
+    list: Vec<String>,
+    index: std::collections::HashMap<String, u32>,
+}
+
+impl Links {
+    fn index(&mut self, uri: &str) -> Option<u32> {
+        if let Some(i) = self.index.get(uri) {
+            return Some(*i);
+        }
+        let i = u32::try_from(self.list.len()).ok()?;
+        self.list.push(uri.to_string());
+        self.index.insert(uri.to_string(), i);
+        Some(i)
+    }
+}
+
+fn cell_view(cell: &Cell, links: &mut Links) -> CellView {
     let f = flags(cell.flags);
     let text = if f.contains(CellFlags::WIDE_SPACER) {
         String::new()
@@ -185,17 +216,7 @@ fn cell_view(cell: &Cell, links: &mut Vec<String>) -> CellView {
         }
         text
     };
-    let link = cell.hyperlink().filter(|h| h.uri().len() <= MAX_LINK_BYTES).and_then(|h| {
-        let uri = h.uri();
-        let index = match links.iter().position(|l| l == uri) {
-            Some(i) => i,
-            None => {
-                links.push(uri.to_string());
-                links.len() - 1
-            }
-        };
-        u32::try_from(index).ok()
-    });
+    let link = cell.hyperlink().filter(|h| h.uri().len() <= MAX_LINK_BYTES).and_then(|h| links.index(h.uri()));
     CellView { text, fg: color(cell.fg), bg: color(cell.bg), flags: f, link }
 }
 
@@ -205,7 +226,7 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
     let rows = term.screen_lines();
     let offset = i32::try_from(content.display_offset).unwrap_or(i32::MAX);
     let mut cells = vec![CellView::default(); cols.saturating_mul(rows)];
-    let mut links = Vec::new();
+    let mut links = Links::default();
     let range = content.selection;
     for indexed in content.display_iter {
         let Ok(row) = usize::try_from(indexed.point.line.0.saturating_add(offset)) else { continue };
@@ -255,6 +276,6 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
         display_offset: content.display_offset,
         selection,
         modes: modes(content.mode),
-        links,
+        links: links.list,
     }
 }

@@ -4,7 +4,8 @@
 
 use egui::{Event, FontId, ImeEvent, Pos2, Rect, Response, Sense, Ui, pos2, vec2};
 use sshcraft_term::input::{Key as TermKey, Mods, MouseAction, MouseButton, encode_focus, encode_key, encode_mouse, encode_paste};
-use sshcraft_term::{SelectionKind, TermModes, TermSize, Terminal};
+use sshcraft_term::limits::{MIN_COLS, MIN_ROWS};
+use sshcraft_term::{Screen, SelectionKind, TermModes, TermSize, Terminal};
 
 use super::keys::map_key;
 use super::{CellMetrics, TermPalette, layout, paint};
@@ -37,6 +38,8 @@ struct State {
     ime_generation: u64,
     /// Wheel movement not yet a whole line.
     wheel: f32,
+    /// An Alt+key was sent as `ESC key`; the text event egui-winit sends for it is skipped.
+    skip_alt_text: bool,
 }
 
 const MOUSE_ANY: TermModes = TermModes::MOUSE_REPORT.union(TermModes::MOUSE_DRAG).union(TermModes::MOUSE_MOTION);
@@ -121,10 +124,19 @@ fn mouse(ui: &Ui, response: &Response, frame: &Frame, term: &mut Terminal, out: 
     let (col, row) = frame.cell_at(pos);
     if frame.report_mouse {
         report_buttons(ui, frame, col, row, &mut out.input);
-        let moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
+        let (moved, held) = ui.input(|i| {
+            let held = if i.pointer.button_down(egui::PointerButton::Secondary) {
+                MouseButton::Right
+            } else if i.pointer.button_down(egui::PointerButton::Middle) {
+                MouseButton::Middle
+            } else {
+                MouseButton::Left
+            };
+            (i.pointer.delta() != egui::Vec2::ZERO, held)
+        });
         if response.dragged()
             && moved
-            && let Some(bytes) = encode_mouse(MouseButton::Left, MouseAction::Drag, col, row, term_mods(frame.modifiers), frame.modes)
+            && let Some(bytes) = encode_mouse(held, MouseAction::Drag, col, row, term_mods(frame.modifiers), frame.modes)
         {
             out.input.extend(bytes);
         }
@@ -181,11 +193,19 @@ fn wheel(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out: &m
 /// Keys, clipboard and IME while the terminal has the focus.
 fn keyboard(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out: &mut TerminalResponse) {
     let events = ui.input(|i| i.events.clone());
+    let typed_from = out.input.len();
+    // egui-winit sends Alt+letter as a Key and a Text event: the Key already became `ESC letter`.
     for event in events {
         match event {
+            Event::Text(_) if state.skip_alt_text => state.skip_alt_text = false,
             Event::Text(text) => out.input.extend(text.into_bytes()),
             Event::Key { key, pressed: true, modifiers, .. } => {
-                if let Some(bytes) = map_key(key, modifiers).and_then(|(k, m)| encode_key(k, m, frame.modes)) {
+                // A key that is not Alt+letter: its own text event is typed as usual.
+                state.skip_alt_text = false;
+                if let Some((k, m)) = map_key(key, modifiers)
+                    && let Some(bytes) = encode_key(k, m, frame.modes)
+                {
+                    state.skip_alt_text = matches!(k, TermKey::Char(_)) && modifiers.alt && !modifiers.ctrl;
                     out.input.extend(bytes);
                 }
             }
@@ -203,13 +223,15 @@ fn keyboard(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out:
             _ => {}
         }
     }
-    if !out.input.is_empty() {
+    // Typing goes back to the newest output; focus and mouse reports do not.
+    if out.input.len() > typed_from {
         term.scroll_to_bottom();
     }
 }
 
 /// Draws the screen, the IME's text being composed, and tells the IME where the cursor is.
-fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Terminal, palette: &TermPalette, font: &FontId) {
+/// Returns the screen it drew, for the screen reader's text.
+fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Terminal, palette: &TermPalette, font: &FontId) -> Screen {
     let (rect, metrics, focused) = (frame.rect, frame.metrics, frame.focused);
     let screen = term.screen();
     let painter = ui.painter_at(rect);
@@ -220,7 +242,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
         vec2(2.0, metrics.height),
     );
     if !focused {
-        return;
+        return screen;
     }
     if !state.preedit.is_empty() {
         let galley = painter.layout_no_wrap(state.preedit.clone(), font.clone(), palette.fg);
@@ -231,6 +253,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
     }
     let ime = egui::output::IMEOutput::new(response.id, state.ime_generation, egui::IMEPurpose::Terminal, rect, cursor);
     ui.output_mut(|o| o.ime = Some(ime));
+    screen
 }
 
 impl TerminalView<'_> {
@@ -244,8 +267,10 @@ impl TerminalView<'_> {
         let mut state: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
         let mut out = TerminalResponse { response: response.clone(), input: Vec::new(), resize: None, open_link: None, copy: None };
 
-        // Fit the terminal to the space.
-        let size = TermSize::clamped((rect.width() / metrics.width) as u16, (rect.height() / metrics.height) as u16);
+        // Fit the terminal to the space. A collapsed area (a hidden split, a tab being laid out)
+        // keeps the size: shrinking to 2x1 would reflow the history away and tell the server.
+        let fits = rect.width() >= f32::from(MIN_COLS) * metrics.width && rect.height() >= f32::from(MIN_ROWS) * metrics.height;
+        let size = if fits { TermSize::clamped((rect.width() / metrics.width) as u16, (rect.height() / metrics.height) as u16) } else { term.size() };
         if size != term.size() {
             term.resize(size);
             out.resize = Some(size);
@@ -279,10 +304,10 @@ impl TerminalView<'_> {
         if focused {
             keyboard(ui, &frame, &mut state, term, &mut out);
         }
-        draw(ui, &response, &frame, &state, term, palette, &font);
+        let screen = draw(ui, &response, &frame, &state, term, palette, &font);
 
         // Screen readers read the screen as text.
-        let text = term.visible_text();
+        let text = screen.text();
         response.widget_info(|| {
             let mut info = egui::WidgetInfo::labeled(egui::Role::Terminal, true, "Terminal");
             info.current_text_value = Some(text.clone());

@@ -28,3 +28,8 @@ pub const MAX_TITLE_CHARS: usize = 256;
 pub const MAX_LINK_BYTES: usize = 2048;
 /// Longest search pattern.
 pub const MAX_SEARCH_PATTERN: usize = 1024;
+/// Joining characters (accents, emoji joiners) kept on one cell; more are dropped.
+pub const MAX_ZEROWIDTH: usize = 16;
+/// Memory for what cells carry besides their character (joining characters, links, underline
+/// colours). Together with the grid (`MAX_CELLS` cells) it stays under `SESSION_MEMORY_BUDGET`.
+pub const EXTRAS_BUDGET: usize = 32 * 1024 * 1024;

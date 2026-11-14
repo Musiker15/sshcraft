@@ -5573,7 +5573,9 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "bitflags 2.13.2",
+ "cursor-icon",
  "memory-stats",
+ "unicode-width",
 ]
 
 [[package]]

@@ -69,7 +69,10 @@ reads `config.toml`.
   SSHCraft's own types (`Screen`, `CellView`, `Notice`, `Key`), so the emulator can change
   inside the crate. A size is clamped (2 to 1000 columns, 1 to 500 rows); screen and
   scrollback together hold at most 4 million cells, so a session's grid stays under 128 MiB.
-  A prefilter holds an OSC sequence back until it ends and drops one longer than 1.5 MiB.
+  A prefilter holds an OSC sequence back until it ends and drops one longer than 1.5 MiB. A
+  guard between the parser and the emulator keeps at most 16 joining characters per cell, drops
+  link targets over 2048 bytes, and holds the cells' extras (joining characters, links,
+  underline colours) to 32 MiB by clearing them from the oldest lines first.
 - **Drawing** (`ui-egui/src/terminal/`). `layout` turns a screen into rectangles, text and
   lines and is tested without egui; `paint` draws them. Narrow cells of one look become one
   text run, so a font with ligatures joins them; a wide character or a cluster (accents,

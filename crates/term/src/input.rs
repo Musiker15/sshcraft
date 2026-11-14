@@ -148,13 +148,10 @@ pub fn encode_key(key: Key, mods: Mods, modes: TermModes) -> Option<Vec<u8>> {
 }
 
 /// Pasted text as it is sent: line breaks become `CR`, and in bracketed paste mode the text is
-/// wrapped in the brackets. The bracket sequences are removed from the text in every mode, again
-/// and again until none is left, so pasted text can never end the bracket and run what follows.
+/// wrapped in the brackets. Every `ESC` is removed from the text, in one pass and in every mode:
+/// pasted text can then neither end the bracket nor type an escape sequence of its own.
 pub fn encode_paste(text: &str, modes: TermModes) -> Vec<u8> {
-    let mut clean = text.replace("\r\n", "\r").replace('\n', "\r");
-    while clean.contains(PASTE_START) || clean.contains(PASTE_END) {
-        clean = clean.replace(PASTE_START, "").replace(PASTE_END, "");
-    }
+    let clean: String = text.replace("\r\n", "\r").chars().filter(|c| *c != '\x1b').map(|c| if c == '\n' { '\r' } else { c }).collect();
     if modes.contains(TermModes::BRACKETED_PASTE) { format!("{PASTE_START}{clean}{PASTE_END}").into_bytes() } else { clean.into_bytes() }
 }
 

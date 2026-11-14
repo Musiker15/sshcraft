@@ -113,3 +113,21 @@ fn scrollback_memory_stays_in_budget() {
     assert!(grown <= SESSION_MEMORY_BUDGET, "grew {grown} bytes");
     assert!(MAX_CELLS * cell_size() <= SESSION_MEMORY_BUDGET);
 }
+
+#[test]
+fn an_underline_colour_per_cell_stays_in_the_extras_budget() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut term = Terminal::new(TermSize::clamped(400, 50), &TermConfig::default());
+    let mut line = String::new();
+    for i in 0..400u32 {
+        line.push_str(&format!("\x1b[58;2;{};{};{}mx", i % 256, (i / 256) % 256, i % 7));
+    }
+    line.push_str("\r\n");
+    let before = in_use();
+    for _ in 0..3_000 {
+        term.feed(line.as_bytes());
+    }
+    assert!(term.extras_bytes() <= sshcraft_term::limits::EXTRAS_BUDGET, "{} bytes", term.extras_bytes());
+    let grown = in_use().saturating_sub(before);
+    assert!(grown <= SESSION_MEMORY_BUDGET, "grew {grown} bytes");
+}

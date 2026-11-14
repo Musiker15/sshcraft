@@ -42,7 +42,9 @@ impl Terminal {
 
     /// Scrolls `lines` towards the history (negative: towards the newest output).
     pub fn scroll(&mut self, lines: i32) {
-        self.term.scroll_display(Scroll::Delta(lines));
+        // The emulator adds this to its offset as i32: keep it within what can be scrolled.
+        let most = i32::try_from(self.term.grid().history_size().saturating_add(self.term.grid().screen_lines())).unwrap_or(i32::MAX);
+        self.term.scroll_display(Scroll::Delta(lines.clamp(-most, most)));
     }
 
     pub fn scroll_to_bottom(&mut self) {

@@ -51,11 +51,14 @@ What a server prints may not reach beyond the terminal on its own:
   type a title it chose.
 - **Long sequences:** an OSC sequence (title, clipboard, link) is held back until it ends; one
   longer than 1.5 MiB is dropped whole, so neither memory nor a cut-off clipboard follows from a
-  sequence that never ends.
+  sequence that never ends, and the output after it shows as usual.
+- **Memory:** a cell keeps at most 16 joining characters, and what cells carry besides their
+  character (joining characters, links, underline colours) has a budget of 32 MiB per session;
+  past it the oldest lines lose links and decorations, never their text.
 - **File transfer** over the terminal (ZMODEM, trzsz) never starts: the terminal does not speak
   either protocol.
-- **Paste:** pasted text cannot end the bracketed paste early: the bracket sequences are removed
-  from it, again and again, before it is sent.
+- **Paste:** every `ESC` is removed from pasted text before it is sent, so it can neither end the
+  bracketed paste early nor type an escape sequence of its own.
 - **Broadcast:** answers the terminal gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
 
