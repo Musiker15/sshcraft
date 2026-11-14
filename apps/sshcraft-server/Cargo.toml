@@ -1,0 +1,22 @@
+[package]
+name = "sshcraft-server"
+description = "Self-hosted sync server for SSHCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sshcraft-server"
+path = "src/main.rs"
+
+[dependencies]
+sshcraft-server-lib = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

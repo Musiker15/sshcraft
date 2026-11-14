@@ -20,7 +20,7 @@ async fn serve(env: &mut TestEnv) -> String {
     env.state.ws_recheck = Duration::from_millis(200);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = sshcraft_server::app(env.state.clone());
+    let app = sshcraft_server_lib::app(env.state.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     format!("ws://{addr}/v1/events")
 }
@@ -266,7 +266,7 @@ async fn too_many_connections_per_device_are_refused() {
     env.register_ok(&a).await;
     let token = env.token(&a, 0).await;
     let mut open = Vec::new();
-    for _ in 0..sshcraft_server::hub::MAX_PER_DEVICE {
+    for _ in 0..sshcraft_server_lib::hub::MAX_PER_DEVICE {
         open.push(connect(&url, Some(&token)).await.unwrap());
     }
     match connect(&url, Some(&token)).await {

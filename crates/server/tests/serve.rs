@@ -1,4 +1,4 @@
-use sshcraft_server::config::ServeConfig;
+use sshcraft_server_lib::config::ServeConfig;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -15,7 +15,7 @@ async fn serve_starts_answers_and_shuts_down() {
         ..ServeConfig::default()
     };
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(sshcraft_server::serve_on(listener, config, async {
+    let server = tokio::spawn(sshcraft_server_lib::serve_on(listener, config, async {
         let _ = stopped.await;
     }));
 
@@ -43,7 +43,7 @@ async fn serve_refuses_a_missing_origin() {
     let config = ServeConfig::default();
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        sshcraft_server::serve_on(listener, config, std::future::pending()),
+        sshcraft_server_lib::serve_on(listener, config, std::future::pending()),
     )
     .await
     .expect("returns at once");
@@ -61,16 +61,16 @@ async fn health_check_reports_a_running_server() {
         public_origin: "https://sync.example.org".into(),
         ..ServeConfig::default()
     };
-    tokio::spawn(sshcraft_server::serve_on(
+    tokio::spawn(sshcraft_server_lib::serve_on(
         listener,
         config,
         std::future::pending(),
     ));
-    assert!(sshcraft_server::health(addr).await.is_ok());
+    assert!(sshcraft_server_lib::health(addr).await.is_ok());
     let closed = TcpListener::bind("127.0.0.1:0")
         .await
         .unwrap()
         .local_addr()
         .unwrap();
-    assert!(sshcraft_server::health(closed).await.is_err());
+    assert!(sshcraft_server_lib::health(closed).await.is_err());
 }

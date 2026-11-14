@@ -80,7 +80,7 @@ async fn writer_takes_over_when_the_owner_is_deleted() {
     let server = TestServer::start().await;
     let (_a, b, c, area, _) = setup(&server).await;
     let store = server.store().await;
-    sshcraft_server::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
+    sshcraft_server_lib::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
         .await
         .unwrap();
     sync(&b).await;
@@ -156,7 +156,7 @@ async fn the_heirs_other_devices_follow() {
     sync(&b2).await;
     assert_eq!(b2.hosts().len(), 1);
     let store = server.store().await;
-    sshcraft_server::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
+    sshcraft_server_lib::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
         .await
         .unwrap();
     sync(&b).await;
@@ -231,7 +231,7 @@ async fn the_heirs_own_keys_stay_out_of_the_share() {
         store.upsert_host(&host).unwrap();
     }
     let store = server.store().await;
-    sshcraft_server::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
+    sshcraft_server_lib::admin::users_delete(&*store, "a@example.org", true, &mut Vec::new())
         .await
         .unwrap();
     sync(&b).await;

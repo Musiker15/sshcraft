@@ -1,8 +1,8 @@
 //! `sshcraft-server`: the sync server and its operator commands.
 
 use clap::{Parser, Subcommand};
-use sshcraft_server::admin;
-use sshcraft_server::config::ServeConfig;
+use sshcraft_server_lib::admin;
+use sshcraft_server_lib::config::ServeConfig;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use uuid::Uuid;
@@ -124,7 +124,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             public_origin,
             ..ServeConfig::default()
         };
-        sshcraft_server::serve(config, shutdown_signal()).await?;
+        sshcraft_server_lib::serve(config, shutdown_signal()).await?;
         return Ok(());
     }
     if let Command::Health { mut listen } = cli.command {
@@ -132,10 +132,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         if listen.ip().is_unspecified() {
             listen.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
         }
-        sshcraft_server::health(listen).await?;
+        sshcraft_server_lib::health(listen).await?;
         return Ok(());
     }
-    let store = sshcraft_server::store::open(&cli.database_url).await?;
+    let store = sshcraft_server_lib::store::open(&cli.database_url).await?;
     let store = store.as_ref();
     let out = &mut std::io::stdout().lock();
     match cli.command {
@@ -184,4 +184,33 @@ async fn shutdown_signal() {
         () = term => {}
     }
     tracing::info!("shutting down");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Command};
+    use clap::Parser;
+
+    /// Operators and the Docker image rely on these defaults; moving the program must not
+    /// change them.
+    #[test]
+    fn cli_defaults_are_unchanged() {
+        let cli = Cli::try_parse_from(["sshcraft-server", "serve", "--public-origin", "https://x"])
+            .unwrap();
+        assert_eq!(cli.database_url, "sqlite://sshcraft.db");
+        let Command::Serve {
+            listen,
+            public_origin,
+        } = cli.command
+        else {
+            panic!("serve expected");
+        };
+        assert_eq!(listen.to_string(), "127.0.0.1:8470");
+        assert_eq!(public_origin, "https://x");
+        let cli = Cli::try_parse_from(["sshcraft-server", "health"]).unwrap();
+        let Command::Health { listen } = cli.command else {
+            panic!("health expected");
+        };
+        assert_eq!(listen.to_string(), "127.0.0.1:8470");
+    }
 }

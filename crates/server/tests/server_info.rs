@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::{Method, StatusCode};
 use common::TestEnv;
-use sshcraft_server::config::ServeConfig;
+use sshcraft_server_lib::config::ServeConfig;
 
 #[tokio::test]
 async fn server_info_needs_no_login_and_names_the_origin() {
@@ -50,7 +50,7 @@ async fn a_database_url_never_shows_up_in_errors() {
         "sshcraft:secretpw@localhost/db",
         "mysql://sshcraft:secretpw@localhost/db",
     ] {
-        let Err(err) = sshcraft_server::store::open(url).await else {
+        let Err(err) = sshcraft_server_lib::store::open(url).await else {
             panic!("{url} must not open");
         };
         assert!(!err.to_string().contains("secretpw"), "{err}");

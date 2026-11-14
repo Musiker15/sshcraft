@@ -260,7 +260,7 @@ async fn log_is_capped() {
     let token = env.token(&a, 0).await;
     // Fill the log to 999 entries straight in the store; the server would verify each append.
     let entries: Vec<_> = (0..998).map(|_| a.add_device().1).collect();
-    let changes = sshcraft_server::store::DeviceChanges {
+    let changes = sshcraft_server_lib::store::DeviceChanges {
         added: a.devices[1..].iter().map(|d| d.cert.clone()).collect(),
         revoked: vec![],
     };

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -20,7 +20,7 @@ sshcraft-ssh = { path = "crates/ssh" }
 sshcraft-local = { path = "crates/local" }
 sshcraft-sync = { path = "crates/sync" }
 sshcraft-fido = { path = "crates/fido" }
-sshcraft-server = { path = "crates/sshcraft-server" }
+sshcraft-server-lib = { path = "crates/server" }
 
 # foundation
 serde = { version = "1.0.229", features = ["derive"] }

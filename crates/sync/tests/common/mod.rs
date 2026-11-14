@@ -2,7 +2,7 @@
 
 use sshcraft_proto::devicelog::DeviceLog;
 use sshcraft_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys};
-use sshcraft_server::config::ServeConfig;
+use sshcraft_server_lib::config::ServeConfig;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -38,7 +38,7 @@ impl TestServer {
             _dir: dir,
         };
         server.run(listener).await;
-        let store = sshcraft_server::store::open(&server.database_url)
+        let store = sshcraft_server_lib::store::open(&server.database_url)
             .await
             .unwrap();
         server.api_key = store.api_key().await.unwrap().0;
@@ -54,7 +54,7 @@ impl TestServer {
         };
         let (stop, stopped) = oneshot::channel::<()>();
         let task = tokio::spawn(async move {
-            let _ = sshcraft_server::serve_on(listener, config, async {
+            let _ = sshcraft_server_lib::serve_on(listener, config, async {
                 let _ = stopped.await;
             })
             .await;
@@ -63,7 +63,7 @@ impl TestServer {
         self.task = Some(task);
         // serve_on opens the store before it accepts; wait until it answers.
         for _ in 0..50 {
-            if sshcraft_server::health(self.addr).await.is_ok() {
+            if sshcraft_server_lib::health(self.addr).await.is_ok() {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -101,8 +101,8 @@ impl TestServer {
     }
 
     /// The server's own store, for tests that tamper with what it serves.
-    pub async fn store(&self) -> std::sync::Arc<dyn sshcraft_server::store::Store> {
-        sshcraft_server::store::open(&self.database_url)
+    pub async fn store(&self) -> std::sync::Arc<dyn sshcraft_server_lib::store::Store> {
+        sshcraft_server_lib::store::open(&self.database_url)
             .await
             .unwrap()
     }

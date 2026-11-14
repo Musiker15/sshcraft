@@ -7,7 +7,7 @@ use common::Person;
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role, seal_area_key};
 use sshcraft_proto::identity::AccountKey;
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
-use sshcraft_server::store::{AreaOutcome, DeviceChanges, Store, StoreError};
+use sshcraft_server_lib::store::{AreaOutcome, DeviceChanges, Store, StoreError};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -86,7 +86,7 @@ async fn fresh_postgres() -> Option<Fresh> {
         None => (url.as_str(), String::new()),
     };
     let (server, _) = base.rsplit_once('/').expect("database in url");
-    let store = sshcraft_server::store::open(&format!("{server}/{name}{query}"))
+    let store = sshcraft_server_lib::store::open(&format!("{server}/{name}{query}"))
         .await
         .expect("open postgres store");
     Some(Fresh {

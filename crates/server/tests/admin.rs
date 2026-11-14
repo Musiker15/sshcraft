@@ -2,8 +2,8 @@ mod common;
 
 use common::{Person, fresh_sqlite};
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role};
-use sshcraft_server::admin::{self, AdminError};
-use sshcraft_server::store::Store;
+use sshcraft_server_lib::admin::{self, AdminError};
+use sshcraft_server_lib::store::Store;
 use uuid::Uuid;
 
 async fn area(store: &dyn Store, owner: &Person, members: Vec<Member>) -> AreaId {

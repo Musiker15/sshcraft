@@ -1,6 +1,6 @@
 [package]
-name = "sshcraft-server"
-description = "Self-hosted sync server for SSHCraft"
+name = "sshcraft-server-lib"
+description = "Library of the SSHCraft sync server: routes, state, storage, operator commands"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -24,8 +24,6 @@ deadpool-postgres = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
 hmac = { workspace = true }
-clap = { workspace = true }
-tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

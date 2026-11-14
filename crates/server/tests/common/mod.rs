@@ -6,8 +6,8 @@ use data_encoding::BASE64URL_NOPAD;
 use http_body_util::BodyExt;
 use sshcraft_proto::devicelog::{DeviceLog, LogEntry};
 use sshcraft_proto::identity::{AccountKey, AccountPublic, DeviceCertificate, DeviceKeys};
-use sshcraft_server::store::{AccountRow, Store};
-use sshcraft_server::{AppState, app};
+use sshcraft_server_lib::store::{AccountRow, Store};
+use sshcraft_server_lib::{AppState, app};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
@@ -202,7 +202,7 @@ impl TestEnv {
 pub async fn fresh_sqlite() -> (Arc<dyn Store>, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite://{}", dir.path().join("test.db").display());
-    let store = sshcraft_server::store::open(&url)
+    let store = sshcraft_server_lib::store::open(&url)
         .await
         .expect("open sqlite");
     (store, dir)

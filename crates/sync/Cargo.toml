@@ -25,7 +25,7 @@ futures = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
-sshcraft-server = { workspace = true }
+sshcraft-server-lib = { workspace = true }
 tempfile = { workspace = true }
 rusqlite = { workspace = true }
 sshcraft-store = { workspace = true, features = ["testing"] }

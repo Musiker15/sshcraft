@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Build from the repository root:
-#   docker build -f crates/sshcraft-server/Dockerfile -t sshcraft-server .
+#   docker build -f packaging/docker/Dockerfile -t sshcraft-server .
 # The versions are pinned for reproducible builds; raise them when newer ones are out.
 ARG RUST_VERSION=1.99.1
 ARG DEBIAN_VERSION=13.7
