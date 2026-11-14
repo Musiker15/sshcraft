@@ -2,6 +2,12 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod legacy;
+mod lock;
+
+pub use legacy::{current_user_sid, is_legacy_pipe_name, is_own_legacy_pipe, legacy_in_pipes, legacy_instance_running, parse_whoami_sid};
+pub use lock::{DataLock, lock_data_dir};
+
 use std::path::PathBuf;
 
 /// Why a platform folder could not be found.
@@ -10,6 +16,12 @@ pub enum PlatformError {
     /// The operating system reports no home folder for this user.
     #[error("no home folder for this user")]
     NoHome,
+    /// Another process (or another engine in this one) holds the data folder.
+    #[error("the data folder {0} is in use by another SSHCraft")]
+    DataInUse(PathBuf),
+    /// The file system refused.
+    #[error("{0}")]
+    Io(String),
 }
 
 /// The folder that holds `sshcraft.db`. It is the folder the Tauri version used, so a rebuilt
