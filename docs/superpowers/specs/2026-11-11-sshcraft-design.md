@@ -6,6 +6,11 @@ Entscheidungen von Moritz stehen ohne Zusatz. Was ich (Claude) entschieden habe,
 offen blieb, ist mit **[Claudes Entscheidung]** markiert und darf beim Lesen widersprochen
 werden.
 
+> **Seit 14.11.2026:** Abschnitt 3 (Technik) und der Transport in Abschnitt 10 sind ersetzt
+> durch [2026-11-14-sshcraft-craft-neuaufbau-design.md](2026-11-14-sshcraft-craft-neuaufbau-design.md)
+> (Rust und egui nach den Konventionen der Craft-Apps). SFTP und weitere Funktionen aus dem
+> [Marktvergleich](2026-11-14-sshcraft-marktvergleich.md) stehen dort in Abschnitt 16.
+
 ## 1. Worum es geht und warum
 
 SSHCraft ist ein SSH-Client für den Desktop (Windows, macOS, Linux, FreeBSD) und für
