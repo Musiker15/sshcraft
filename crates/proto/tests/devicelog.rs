@@ -17,12 +17,7 @@ fn device(account: &AccountKey, log: &mut DeviceLog, name: &str) -> Device {
 }
 
 fn active_ids(log: &DeviceLog, account: &AccountKey) -> Vec<Uuid> {
-    let mut ids: Vec<_> = log
-        .verify(&account.public())
-        .unwrap()
-        .active()
-        .map(|c| c.device_id)
-        .collect();
+    let mut ids: Vec<_> = log.verify(&account.public()).unwrap().active().map(|c| c.device_id).collect();
     ids.sort();
     ids
 }
@@ -148,12 +143,7 @@ fn shorter_log_than_known_is_a_rollback() {
     let known = log.verify(&account.public()).unwrap().head().unwrap();
     let mut shorter = log.clone();
     shorter.entries.truncate(2);
-    assert_eq!(
-        shorter
-            .verify_extends(&account.public(), Some(&known))
-            .err(),
-        Some(ProtoError::Rollback)
-    );
+    assert_eq!(shorter.verify_extends(&account.public(), Some(&known)).err(), Some(ProtoError::Rollback));
 }
 
 #[test]
@@ -166,10 +156,7 @@ fn different_entry_at_known_seq_is_a_fork() {
     let known: LogHead = ours.verify(&account.public()).unwrap().head().unwrap();
     let mut theirs = base;
     device(&account, &mut theirs, "c");
-    assert_eq!(
-        theirs.verify_extends(&account.public(), Some(&known)).err(),
-        Some(ProtoError::Fork)
-    );
+    assert_eq!(theirs.verify_extends(&account.public(), Some(&known)).err(), Some(ProtoError::Fork));
 }
 
 #[test]
@@ -243,10 +230,7 @@ fn verify_extends_with_empty_log_and_known_head_is_rejected() {
     device(&account, &mut seen, "a");
     let known = seen.verify(&account.public()).unwrap().head().unwrap();
     let empty = DeviceLog::default();
-    assert_eq!(
-        empty.verify_extends(&account.public(), Some(&known)).err(),
-        Some(ProtoError::Rollback)
-    );
+    assert_eq!(empty.verify_extends(&account.public(), Some(&known)).err(), Some(ProtoError::Rollback));
 }
 
 #[test]

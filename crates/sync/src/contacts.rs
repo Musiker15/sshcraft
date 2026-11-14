@@ -41,18 +41,11 @@ pub fn normalize_email(email: &str) -> String {
 }
 
 fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default()
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()
 }
 
 /// Looks an account up by e-mail and compares it with what this device knows.
-pub async fn find(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    email: &str,
-) -> Result<Recipient, SyncError> {
+pub async fn find(engine: &Engine, store: &Mutex<Store>, email: &str) -> Result<Recipient, SyncError> {
     let email = normalize_email(email);
     let lookup = engine.client().lookup(&email).await;
     let (account, name) = engine.revoked_check(store, lookup)?;
@@ -64,61 +57,28 @@ pub async fn find(
         None => {
             guard.put_contact(
                 engine.server,
-                &Contact {
-                    email: email.clone(),
-                    account: account.0,
-                    name: name.clone(),
-                    first_seen: now_secs(),
-                    confirmed: false,
-                },
+                &Contact { email: email.clone(), account: account.0, name: name.clone(), first_seen: now_secs(), confirmed: false },
             )?;
             KnownState::New
         }
         Some(contact) if contact.account == account.0 => {
-            guard.put_contact(
-                engine.server,
-                &Contact {
-                    name: name.clone(),
-                    ..contact.clone()
-                },
-            )?;
-            if contact.confirmed {
-                KnownState::Confirmed
-            } else {
-                KnownState::Unconfirmed
-            }
+            guard.put_contact(engine.server, &Contact { name: name.clone(), ..contact.clone() })?;
+            if contact.confirmed { KnownState::Confirmed } else { KnownState::Unconfirmed }
         }
         // Kept as it is: only the user's confirmation replaces a known key.
-        Some(contact) => KnownState::Changed {
-            previous_safety_number: safety_number(&AccountPublic(contact.account)),
-        },
+        Some(contact) => KnownState::Changed { previous_safety_number: safety_number(&AccountPublic(contact.account)) },
     };
-    Ok(Recipient {
-        safety_number: safety_number(&account),
-        account,
-        name,
-        email,
-        known,
-    })
+    Ok(Recipient { safety_number: safety_number(&account), account, name, email, known })
 }
 
 /// The user compared the safety number of `account` (for a changed key: accepted the new one).
-pub fn confirm(
-    store: &Mutex<Store>,
-    server: ServerId,
-    email: &str,
-    account: &AccountPublic,
-) -> Result<(), SyncError> {
+pub fn confirm(store: &Mutex<Store>, server: ServerId, email: &str, account: &AccountPublic) -> Result<(), SyncError> {
     lock(store)?.confirm_contact(server, &normalize_email(email), &account.0)?;
     Ok(())
 }
 
 /// Sharing with `account` needs a confirmed contact with exactly this key.
-pub fn require_confirmed(
-    store: &Mutex<Store>,
-    server: ServerId,
-    account: &AccountPublic,
-) -> Result<(), SyncError> {
+pub fn require_confirmed(store: &Mutex<Store>, server: ServerId, account: &AccountPublic) -> Result<(), SyncError> {
     match lock(store)?.contact_by_account(server, &account.0)? {
         Some(contact) if contact.confirmed => Ok(()),
         _ => Err(SyncError::ContactUnconfirmed),

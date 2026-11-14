@@ -11,10 +11,7 @@ struct Holder {
 
 #[test]
 fn b64_roundtrip_in_json() {
-    let value = Holder {
-        bytes: vec![0, 255, 7, 8, 9],
-        fixed: [1, 2, 3, 4],
-    };
+    let value = Holder { bytes: vec![0, 255, 7, 8, 9], fixed: [1, 2, 3, 4] };
     let json = serde_json::to_string(&value).unwrap();
     assert!(!json.contains('='), "{json}");
     assert_eq!(serde_json::from_str::<Holder>(&json).unwrap(), value);

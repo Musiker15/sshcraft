@@ -25,23 +25,12 @@ impl Person {
             .map(|i| {
                 let keys = DeviceKeys::generate();
                 let id = Uuid::new_v4();
-                let cert = DeviceCertificate::issue(
-                    &account,
-                    id,
-                    keys.public(),
-                    &format!("d{i}"),
-                    "windows",
-                    1,
-                );
+                let cert = DeviceCertificate::issue(&account, id, keys.public(), &format!("d{i}"), "windows", 1);
                 log.append_add(&account, cert, 1);
                 Device { id, keys }
             })
             .collect();
-        Self {
-            account,
-            log,
-            devices,
-        }
+        Self { account, log, devices }
     }
 
     pub fn public(&self) -> AccountPublic {
@@ -83,28 +72,11 @@ impl World {
             1,
             &key,
             owner.public(),
-            vec![
-                Member {
-                    account: writer.public(),
-                    role: Role::Write,
-                },
-                Member {
-                    account: reader.public(),
-                    role: Role::Read,
-                },
-            ],
+            vec![Member { account: writer.public(), role: Role::Write }, Member { account: reader.public(), role: Role::Read }],
             owner.devices[0].id,
             &owner.devices[0].keys,
         );
-        Self {
-            owner,
-            writer,
-            reader,
-            stranger,
-            area,
-            key,
-            manifest,
-        }
+        Self { owner, writer, reader, stranger, area, key, manifest }
     }
 
     pub fn header(&self, by: &Person, device: usize, version: u64) -> RecordHeader {
@@ -119,11 +91,6 @@ impl World {
     }
 
     pub fn seal(&self, by: &Person, device: usize, body: &[u8]) -> SealedRecord {
-        SealedRecord::seal(
-            self.header(by, device, 1),
-            body,
-            &self.key,
-            &by.devices[device].keys,
-        )
+        SealedRecord::seal(self.header(by, device, 1), body, &self.key, &by.devices[device].keys)
     }
 }

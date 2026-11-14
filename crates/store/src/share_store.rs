@@ -132,25 +132,13 @@ pub struct Contact {
 /// so each of them can tell which copy belongs to which original.
 pub fn copy_id(area: Uuid, original: Uuid) -> Uuid {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::new()
-        .chain_update(b"sshcraft-copy")
-        .chain_update(area.as_bytes())
-        .chain_update(original.as_bytes())
-        .finalize();
+    let digest = Sha256::new().chain_update(b"sshcraft-copy").chain_update(area.as_bytes()).chain_update(original.as_bytes()).finalize();
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     uuid::Builder::from_random_bytes(bytes).into_uuid()
 }
 
-type RawShare = (
-    String,
-    String,
-    Option<String>,
-    bool,
-    bool,
-    Option<String>,
-    Vec<u8>,
-);
+type RawShare = (String, String, Option<String>, bool, bool, Option<String>, Vec<u8>);
 
 fn to_share(raw: RawShare) -> Result<ShareRow, StoreError> {
     let (area, kind, group_id, with_keys, owned, role, owner) = raw;
@@ -161,39 +149,21 @@ fn to_share(raw: RawShare) -> Result<ShareRow, StoreError> {
         with_keys,
         owned,
         role: role.as_deref().map(ShareRole::parse).transpose()?,
-        owner: owner
-            .try_into()
-            .map_err(|_| StoreError::Malformed("owner key length".into()))?,
+        owner: owner.try_into().map_err(|_| StoreError::Malformed("owner key length".into()))?,
     })
 }
 
 const SHARE_COLUMNS: &str = "area_id, kind, group_id, with_keys, owned, role, owner";
 
 fn share_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawShare> {
-    Ok((
-        r.get(0)?,
-        r.get(1)?,
-        r.get(2)?,
-        r.get(3)?,
-        r.get(4)?,
-        r.get(5)?,
-        r.get(6)?,
-    ))
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
 }
 
 type RawContact = (String, Vec<u8>, String, i64, bool);
 
 fn to_contact(raw: RawContact) -> Result<Contact, StoreError> {
     let (email, account, name, first_seen, confirmed) = raw;
-    Ok(Contact {
-        email,
-        account: account
-            .try_into()
-            .map_err(|_| StoreError::Malformed("account key length".into()))?,
-        name,
-        first_seen,
-        confirmed,
-    })
+    Ok(Contact { email, account: account.try_into().map_err(|_| StoreError::Malformed("account key length".into()))?, name, first_seen, confirmed })
 }
 
 fn contact_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawContact> {
@@ -202,32 +172,16 @@ fn contact_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawContact> {
 
 impl Store {
     /// Puts an item into an area of `server` (a share); without a row it is in the personal area.
-    pub fn set_item_area(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-        area: Uuid,
-    ) -> Result<(), StoreError> {
+    pub fn set_item_area(&self, server: ServerId, kind: ItemKind, item_id: &str, area: Uuid) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO sync_item_area (server_id, kind, item_id, area_id) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(server_id, kind, item_id) DO UPDATE SET area_id = excluded.area_id",
-            params![
-                server.0.to_string(),
-                kind.as_str(),
-                item_id,
-                area.to_string()
-            ],
+            params![server.0.to_string(), kind.as_str(), item_id, area.to_string()],
         )?;
         Ok(())
     }
 
-    pub fn clear_item_area(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<(), StoreError> {
+    pub fn clear_item_area(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "DELETE FROM sync_item_area WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3",
             params![server.0.to_string(), kind.as_str(), item_id],
@@ -236,12 +190,7 @@ impl Store {
     }
 
     /// The area set for this item itself, if any.
-    pub fn item_area(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<Option<Uuid>, StoreError> {
+    pub fn item_area(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<Option<Uuid>, StoreError> {
         let raw: Option<String> = self
             .conn
             .query_row(
@@ -254,32 +203,19 @@ impl Store {
     }
 
     /// The area an item is in, if it is not the personal one: its own, or a host's group's.
-    pub fn effective_area(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<Option<Uuid>, StoreError> {
+    pub fn effective_area(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<Option<Uuid>, StoreError> {
         if let Some(area) = self.item_area(server, kind, item_id)? {
             return Ok(Some(area));
         }
         let above = |sql: &str, id: &str| -> Result<Option<String>, StoreError> {
-            Ok(self
-                .conn
-                .query_row(sql, [id], |r| r.get::<_, Option<String>>(0))
-                .optional()?
-                .flatten())
+            Ok(self.conn.query_row(sql, [id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten())
         };
         const PARENT: &str = "SELECT parent_id FROM groups WHERE id = ?1";
         // A host follows its group, a group its parent, at any depth.
         let mut next = match kind {
             ItemKind::Host => above("SELECT group_id FROM hosts WHERE id = ?1", item_id)?,
             ItemKind::Group => above(PARENT, item_id)?,
-            ItemKind::Key
-            | ItemKind::Identity
-            | ItemKind::Password
-            | ItemKind::Log
-            | ItemKind::LogChunk => None,
+            ItemKind::Key | ItemKind::Identity | ItemKind::Password | ItemKind::Log | ItemKind::LogChunk => None,
         };
         for _ in 0..sshcraft_model::model::MAX_GROUP_DEPTH {
             let Some(group) = next else {
@@ -294,36 +230,20 @@ impl Store {
     }
 
     /// The area an item goes to on `server`: [`Store::effective_area`], else `personal`.
-    pub fn area_for(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-        personal: Uuid,
-    ) -> Result<Uuid, StoreError> {
-        Ok(self
-            .effective_area(server, kind, item_id)?
-            .unwrap_or(personal))
+    pub fn area_for(&self, server: ServerId, kind: ItemKind, item_id: &str, personal: Uuid) -> Result<Uuid, StoreError> {
+        Ok(self.effective_area(server, kind, item_id)?.unwrap_or(personal))
     }
 
     /// Every item with its own area row in `area`.
-    pub fn items_in_area(
-        &self,
-        server: ServerId,
-        area: Uuid,
-    ) -> Result<Vec<(ItemKind, String)>, StoreError> {
+    pub fn items_in_area(&self, server: ServerId, area: Uuid) -> Result<Vec<(ItemKind, String)>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT kind, item_id FROM sync_item_area WHERE server_id = ?1 AND area_id = ?2
              ORDER BY kind, item_id",
         )?;
         let rows = stmt
-            .query_map(params![server.0.to_string(), area.to_string()], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })?
+            .query_map(params![server.0.to_string(), area.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item)))
-            .collect()
+        rows.into_iter().map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item))).collect()
     }
 
     pub fn contact(&self, server: ServerId, email: &str) -> Result<Option<Contact>, StoreError> {
@@ -339,11 +259,7 @@ impl Store {
             .transpose()
     }
 
-    pub fn contact_by_account(
-        &self,
-        server: ServerId,
-        account: &[u8; 32],
-    ) -> Result<Option<Contact>, StoreError> {
+    pub fn contact_by_account(&self, server: ServerId, account: &[u8; 32]) -> Result<Option<Contact>, StoreError> {
         self.conn
             .query_row(
                 "SELECT email_norm, account, name, first_seen, confirmed FROM sync_contacts
@@ -366,25 +282,13 @@ impl Store {
                  confirmed = CASE WHEN sync_contacts.account = excluded.account
                      THEN sync_contacts.confirmed ELSE 0 END,
                  account = excluded.account",
-            params![
-                server.0.to_string(),
-                contact.email,
-                contact.account.to_vec(),
-                contact.name,
-                contact.first_seen,
-                contact.confirmed
-            ],
+            params![server.0.to_string(), contact.email, contact.account.to_vec(), contact.name, contact.first_seen, contact.confirmed],
         )?;
         Ok(())
     }
 
     /// The user compared the safety number of `account` for this e-mail.
-    pub fn confirm_contact(
-        &self,
-        server: ServerId,
-        email: &str,
-        account: &[u8; 32],
-    ) -> Result<(), StoreError> {
+    pub fn confirm_contact(&self, server: ServerId, email: &str, account: &[u8; 32]) -> Result<(), StoreError> {
         let changed = self.conn.execute(
             "UPDATE sync_contacts SET account = ?3, confirmed = 1
              WHERE server_id = ?1 AND email_norm = ?2",
@@ -419,21 +323,15 @@ impl Store {
     }
 
     pub fn shares(&self, server: ServerId) -> Result<Vec<ShareRow>, StoreError> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {SHARE_COLUMNS} FROM sync_shares WHERE server_id = ?1 ORDER BY area_id"
-        ))?;
-        let rows = stmt
-            .query_map([server.0.to_string()], share_row)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = self.conn.prepare(&format!("SELECT {SHARE_COLUMNS} FROM sync_shares WHERE server_id = ?1 ORDER BY area_id"))?;
+        let rows = stmt.query_map([server.0.to_string()], share_row)?.collect::<Result<Vec<_>, _>>()?;
         rows.into_iter().map(to_share).collect()
     }
 
     pub fn share(&self, server: ServerId, area: Uuid) -> Result<Option<ShareRow>, StoreError> {
         self.conn
             .query_row(
-                &format!(
-                    "SELECT {SHARE_COLUMNS} FROM sync_shares WHERE server_id = ?1 AND area_id = ?2"
-                ),
+                &format!("SELECT {SHARE_COLUMNS} FROM sync_shares WHERE server_id = ?1 AND area_id = ?2"),
                 params![server.0.to_string(), area.to_string()],
                 share_row,
             )
@@ -447,10 +345,7 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         let (s, a) = (server.0.to_string(), area.to_string());
         for table in ["sync_shares", "sync_share_copies", "sync_item_area"] {
-            tx.execute(
-                &format!("DELETE FROM {table} WHERE server_id = ?1 AND area_id = ?2"),
-                params![s, a],
-            )?;
+            tx.execute(&format!("DELETE FROM {table} WHERE server_id = ?1 AND area_id = ?2"), params![s, a])?;
         }
         tx.commit()?;
         Ok(())
@@ -461,46 +356,22 @@ impl Store {
     pub fn forget_area(&self, server: ServerId, area: Uuid) -> Result<(), StoreError> {
         self.remove_share(server, area)?;
         let (s, a) = (server.0.to_string(), area.to_string());
-        self.conn.execute(
-            "DELETE FROM sync_records WHERE server_id = ?1 AND area_id = ?2",
-            params![s, a],
-        )?;
-        self.conn.execute(
-            "DELETE FROM sync_areas WHERE server_id = ?1 AND area_id = ?2",
-            params![s, a],
-        )?;
+        self.conn.execute("DELETE FROM sync_records WHERE server_id = ?1 AND area_id = ?2", params![s, a])?;
+        self.conn.execute("DELETE FROM sync_areas WHERE server_id = ?1 AND area_id = ?2", params![s, a])?;
         Ok(())
     }
 
-    pub fn put_copy(
-        &self,
-        server: ServerId,
-        area: Uuid,
-        kind: ItemKind,
-        original_id: &str,
-        copy_id: &str,
-    ) -> Result<(), StoreError> {
+    pub fn put_copy(&self, server: ServerId, area: Uuid, kind: ItemKind, original_id: &str, copy_id: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO sync_share_copies (server_id, area_id, kind, original_id, copy_id)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(server_id, area_id, kind, original_id) DO UPDATE SET copy_id = excluded.copy_id",
-            params![
-                server.0.to_string(),
-                area.to_string(),
-                kind.as_str(),
-                original_id,
-                copy_id
-            ],
+            params![server.0.to_string(), area.to_string(), kind.as_str(), original_id, copy_id],
         )?;
         Ok(())
     }
 
-    pub fn remove_copy(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        copy_id: &str,
-    ) -> Result<(), StoreError> {
+    pub fn remove_copy(&self, server: ServerId, kind: ItemKind, copy_id: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "DELETE FROM sync_share_copies WHERE server_id = ?1 AND kind = ?2 AND copy_id = ?3",
             params![server.0.to_string(), kind.as_str(), copy_id],
@@ -509,33 +380,18 @@ impl Store {
     }
 
     /// The copies of an original: share area and copy id.
-    pub fn copies_of(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        original_id: &str,
-    ) -> Result<Vec<(Uuid, String)>, StoreError> {
+    pub fn copies_of(&self, server: ServerId, kind: ItemKind, original_id: &str) -> Result<Vec<(Uuid, String)>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT area_id, copy_id FROM sync_share_copies
              WHERE server_id = ?1 AND kind = ?2 AND original_id = ?3 ORDER BY area_id",
         )?;
         let rows = stmt
-            .query_map(
-                params![server.0.to_string(), kind.as_str(), original_id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-            )?
+            .query_map(params![server.0.to_string(), kind.as_str(), original_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|(area, copy)| Ok((parse_uuid(&area)?, copy)))
-            .collect()
+        rows.into_iter().map(|(area, copy)| Ok((parse_uuid(&area)?, copy))).collect()
     }
 
-    pub fn original_of(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        copy_id: &str,
-    ) -> Result<Option<String>, StoreError> {
+    pub fn original_of(&self, server: ServerId, kind: ItemKind, copy_id: &str) -> Result<Option<String>, StoreError> {
         Ok(self
             .conn
             .query_row(
@@ -548,12 +404,7 @@ impl Store {
     }
 
     /// The share area and original of a copy.
-    pub fn copy_entry(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        copy_id: &str,
-    ) -> Result<Option<(Uuid, String)>, StoreError> {
+    pub fn copy_entry(&self, server: ServerId, kind: ItemKind, copy_id: &str) -> Result<Option<(Uuid, String)>, StoreError> {
         let raw: Option<(String, String)> = self
             .conn
             .query_row(
@@ -563,41 +414,25 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        raw.map(|(area, original)| Ok((parse_uuid(&area)?, original)))
-            .transpose()
+        raw.map(|(area, original)| Ok((parse_uuid(&area)?, original))).transpose()
     }
 
     /// The copies in one share: kind, original and copy id.
-    pub fn copies_in(
-        &self,
-        server: ServerId,
-        area: Uuid,
-    ) -> Result<Vec<(ItemKind, String, String)>, StoreError> {
+    pub fn copies_in(&self, server: ServerId, area: Uuid) -> Result<Vec<(ItemKind, String, String)>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT kind, original_id, copy_id FROM sync_share_copies
              WHERE server_id = ?1 AND area_id = ?2 ORDER BY kind, original_id",
         )?;
         let rows = stmt
             .query_map(params![server.0.to_string(), area.to_string()], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|(kind, original, copy)| Ok((ItemKind::parse(&kind)?, original, copy)))
-            .collect()
+        rows.into_iter().map(|(kind, original, copy)| Ok((ItemKind::parse(&kind)?, original, copy))).collect()
     }
 
     /// The received share an item is in, if any.
-    pub fn received_share_of(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<Option<ShareRow>, StoreError> {
+    pub fn received_share_of(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<Option<ShareRow>, StoreError> {
         let Some(area) = self.effective_area(server, kind, item_id)? else {
             return Ok(None);
         };
@@ -605,15 +440,8 @@ impl Store {
     }
 
     /// Whether this account may only read the item (it came in a share with role `read`).
-    pub fn read_only(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<bool, StoreError> {
-        Ok(self
-            .received_share_of(server, kind, item_id)?
-            .is_some_and(|share| share.role == Some(ShareRole::Read)))
+    pub fn read_only(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<bool, StoreError> {
+        Ok(self.received_share_of(server, kind, item_id)?.is_some_and(|share| share.role == Some(ShareRole::Read)))
     }
 }
 

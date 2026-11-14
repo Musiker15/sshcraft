@@ -130,9 +130,7 @@ fn valid_env_name(name: &str) -> bool {
     let Some(first) = chars.next() else {
         return false;
     };
-    name.len() <= MAX_ENV_NAME
-        && (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    name.len() <= MAX_ENV_NAME && (first.is_ascii_alphabetic() || first == '_') && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Environment variables as they are stored: invalid names and too long values dropped, a name
@@ -217,13 +215,9 @@ pub fn normalize_tags(tags: &[String]) -> Vec<String> {
 /// Whether sessions to `host` are recorded by its own or its groups' choice, nearest first;
 /// `None` when no level decides (the app setting applies).
 pub fn session_log_for(host: &Host, groups: &[Group]) -> Option<bool> {
-    host.settings.session_log.or_else(|| {
-        host.group_id
-            .map(|g| group_chain(groups, g))
-            .unwrap_or_default()
-            .iter()
-            .find_map(|g| g.defaults.session_log)
-    })
+    host.settings
+        .session_log
+        .or_else(|| host.group_id.map(|g| group_chain(groups, g)).unwrap_or_default().iter().find_map(|g| g.defaults.session_log))
 }
 
 /// A group and the groups above it, nearest first. Stops at a missing group, at a cycle and
@@ -320,10 +314,7 @@ pub enum ResolveError {
     #[error("a jump host does not exist")]
     JumpMissing,
     #[error("a jump host cannot be resolved: {error}")]
-    Jump {
-        host_id: HostId,
-        error: Box<ResolveError>,
-    },
+    Jump { host_id: HostId, error: Box<ResolveError> },
 }
 
 pub const DEFAULT_PORT: u16 = 22;
@@ -353,60 +344,24 @@ struct Level<'a> {
 /// a value set on the host wins, then the nearest group that sets it; empty strings count as
 /// unset. On each level, the level's identity fills username, key and password where the level
 /// does not set them itself. An identity that does not exist is ignored.
-pub fn resolve(
-    host: &Host,
-    chain: &[&Group],
-    identities: &[Identity],
-) -> Result<ResolvedHost, ResolveError> {
+pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result<ResolvedHost, ResolveError> {
     check_chain(host, chain)?;
     let (address, port) = endpoint(host, chain)?;
-    let identity = |settings: &ConnectionSettings| {
-        settings
-            .identity
-            .and_then(|id| identities.iter().find(|i| i.id == id))
-    };
+    let identity = |settings: &ConnectionSettings| settings.identity.and_then(|id| identities.iter().find(|i| i.id == id));
     let levels: Vec<Level> = std::iter::once(&host.settings)
         .chain(chain.iter().map(|g| &g.defaults))
-        .map(|settings| Level {
-            settings,
-            identity: identity(settings),
-        })
+        .map(|settings| Level { settings, identity: identity(settings) })
         .collect();
     let username = levels
         .iter()
-        .find_map(|l| {
-            non_empty(&l.settings.username)
-                .or_else(|| l.identity.and_then(|i| non_empty(&i.username)))
-        })
+        .find_map(|l| non_empty(&l.settings.username).or_else(|| l.identity.and_then(|i| non_empty(&i.username))))
         .ok_or(ResolveError::MissingUsername)?;
-    let key = levels.iter().find_map(|l| {
-        l.settings
-            .key
-            .clone()
-            .or_else(|| l.identity.and_then(|i| i.key.clone()))
-    });
-    let password = levels.iter().find_map(|l| {
-        l.settings
-            .password
-            .or_else(|| l.identity.and_then(|i| i.password))
-    });
-    let proxy = levels
-        .iter()
-        .find_map(|l| l.settings.proxy.clone())
-        .filter(|p| *p != Proxy::Direct);
-    let agent_forwarding = levels
-        .iter()
-        .find_map(|l| l.settings.agent_forwarding)
-        .unwrap_or(false);
-    let jump_hosts = levels
-        .iter()
-        .find_map(|l| l.settings.jump_hosts.clone())
-        .unwrap_or_default();
-    let env: Vec<EnvVar> = levels
-        .iter()
-        .rev()
-        .flat_map(|l| l.settings.env.iter().cloned())
-        .collect();
+    let key = levels.iter().find_map(|l| l.settings.key.clone().or_else(|| l.identity.and_then(|i| i.key.clone())));
+    let password = levels.iter().find_map(|l| l.settings.password.or_else(|| l.identity.and_then(|i| i.password)));
+    let proxy = levels.iter().find_map(|l| l.settings.proxy.clone()).filter(|p| *p != Proxy::Direct);
+    let agent_forwarding = levels.iter().find_map(|l| l.settings.agent_forwarding).unwrap_or(false);
+    let jump_hosts = levels.iter().find_map(|l| l.settings.jump_hosts.clone()).unwrap_or_default();
+    let env: Vec<EnvVar> = levels.iter().rev().flat_map(|l| l.settings.env.iter().cloned()).collect();
     Ok(ResolvedHost {
         host_id: host.id,
         name: host.name.clone(),
@@ -427,41 +382,15 @@ pub fn resolve(
 /// of every other field, environment variables merged. Unset stays unset. Copies in a share use
 /// it, so a member needs neither the identity nor the groups the copy was cut from.
 pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> ConnectionSettings {
-    let identity = |settings: &ConnectionSettings| {
-        settings
-            .identity
-            .and_then(|id| identities.iter().find(|i| i.id == id))
-    };
-    let levels: Vec<Level> = levels
-        .iter()
-        .map(|settings| Level {
-            settings,
-            identity: identity(settings),
-        })
-        .collect();
-    let env: Vec<EnvVar> = levels
-        .iter()
-        .rev()
-        .flat_map(|l| l.settings.env.iter().cloned())
-        .collect();
+    let identity = |settings: &ConnectionSettings| settings.identity.and_then(|id| identities.iter().find(|i| i.id == id));
+    let levels: Vec<Level> = levels.iter().map(|settings| Level { settings, identity: identity(settings) }).collect();
+    let env: Vec<EnvVar> = levels.iter().rev().flat_map(|l| l.settings.env.iter().cloned()).collect();
     ConnectionSettings {
         address: levels.iter().find_map(|l| non_empty(&l.settings.address)),
         port: levels.iter().find_map(|l| l.settings.port),
-        username: levels.iter().find_map(|l| {
-            non_empty(&l.settings.username)
-                .or_else(|| l.identity.and_then(|i| non_empty(&i.username)))
-        }),
-        key: levels.iter().find_map(|l| {
-            l.settings
-                .key
-                .clone()
-                .or_else(|| l.identity.and_then(|i| i.key.clone()))
-        }),
-        password: levels.iter().find_map(|l| {
-            l.settings
-                .password
-                .or_else(|| l.identity.and_then(|i| i.password))
-        }),
+        username: levels.iter().find_map(|l| non_empty(&l.settings.username).or_else(|| l.identity.and_then(|i| non_empty(&i.username)))),
+        key: levels.iter().find_map(|l| l.settings.key.clone().or_else(|| l.identity.and_then(|i| i.key.clone()))),
+        password: levels.iter().find_map(|l| l.settings.password.or_else(|| l.identity.and_then(|i| i.password))),
         identity: None,
         jump_hosts: levels.iter().find_map(|l| l.settings.jump_hosts.clone()),
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
@@ -473,11 +402,7 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
 
 /// Resolves one host of the directory with its groups.
 fn resolve_in(dir: &Directory, host_id: HostId) -> Result<ResolvedHost, ResolveError> {
-    let host = dir
-        .hosts
-        .iter()
-        .find(|h| h.id == host_id)
-        .ok_or(ResolveError::NotFound)?;
+    let host = dir.hosts.iter().find(|h| h.id == host_id).ok_or(ResolveError::NotFound)?;
     let chain = match host.group_id {
         Some(gid) => group_chain(dir.groups, gid),
         None => Vec::new(),
@@ -505,10 +430,7 @@ pub fn resolve_route(dir: &Directory, host_id: HostId) -> Result<Route, ResolveE
             Ok(hop) => hop,
             Err(ResolveError::NotFound) => return Err(ResolveError::JumpMissing),
             Err(error) => {
-                return Err(ResolveError::Jump {
-                    host_id: jump,
-                    error: Box::new(error),
-                });
+                return Err(ResolveError::Jump { host_id: jump, error: Box::new(error) });
             }
         };
         hop.jump_hosts.clear();
@@ -529,20 +451,12 @@ fn endpoint(host: &Host, chain: &[&Group]) -> Result<(String, u16), ResolveError
     let address = non_empty(&host.settings.address)
         .or_else(|| chain.iter().find_map(|g| non_empty(&g.defaults.address)))
         .ok_or(ResolveError::MissingAddress)?;
-    let port = host
-        .settings
-        .port
-        .or_else(|| chain.iter().find_map(|g| g.defaults.port))
-        .unwrap_or(DEFAULT_PORT);
+    let port = host.settings.port.or_else(|| chain.iter().find_map(|g| g.defaults.port)).unwrap_or(DEFAULT_PORT);
     Ok((address, port))
 }
 
 fn non_empty(value: &Option<String>) -> Option<String> {
-    value
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned)
+    value.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -554,14 +468,7 @@ mod tests {
     }
 
     fn group(settings: ConnectionSettings) -> Group {
-        Group {
-            location: None,
-            id: GroupId::new(),
-            name: "srv".into(),
-            defaults: settings,
-            parent_id: None,
-            tags: Vec::new(),
-        }
+        Group { location: None, id: GroupId::new(), name: "srv".into(), defaults: settings, parent_id: None, tags: Vec::new() }
     }
 
     fn host_in(group: &Group, settings: ConnectionSettings) -> Host {
@@ -603,38 +510,21 @@ mod tests {
     #[test]
     fn host_overrides_group() {
         let g = full_group(&key());
-        let h = host_in(
-            &g,
-            ConnectionSettings {
-                username: Some("deploy".into()),
-                ..Default::default()
-            },
-        );
+        let h = host_in(&g, ConnectionSettings { username: Some("deploy".into()), ..Default::default() });
         assert_eq!(resolve(&h, &[&g], &[]).unwrap().username, "deploy");
     }
 
     #[test]
     fn empty_string_counts_as_unset() {
         let g = full_group(&key());
-        let h = host_in(
-            &g,
-            ConnectionSettings {
-                username: Some("  ".into()),
-                ..Default::default()
-            },
-        );
+        let h = host_in(&g, ConnectionSettings { username: Some("  ".into()), ..Default::default() });
         assert_eq!(resolve(&h, &[&g], &[]).unwrap().username, "root");
     }
 
     #[test]
     fn port_defaults_to_22() {
-        let g = group(ConnectionSettings {
-            address: Some("a".into()),
-            username: Some("u".into()),
-            key: Some(key()),
-            port: None,
-            ..Default::default()
-        });
+        let g =
+            group(ConnectionSettings { address: Some("a".into()), username: Some("u".into()), key: Some(key()), port: None, ..Default::default() });
         let h = host_in(&g, ConnectionSettings::default());
         assert_eq!(resolve(&h, &[&g], &[]).unwrap().port, 22);
     }
@@ -647,11 +537,7 @@ mod tests {
             id: HostId::new(),
             name: "h".into(),
             group_id: None,
-            settings: ConnectionSettings {
-                username: Some("u".into()),
-                key: Some(key()),
-                ..Default::default()
-            },
+            settings: ConnectionSettings { username: Some("u".into()), key: Some(key()), ..Default::default() },
             tags: Vec::new(),
             os: None,
         };
@@ -676,9 +562,7 @@ mod tests {
 
     #[test]
     fn agent_key_ref_roundtrips_json() {
-        let r = KeyRef::Agent {
-            fingerprint: "SHA256:x".into(),
-        };
+        let r = KeyRef::Agent { fingerprint: "SHA256:x".into() };
         let json = serde_json::to_string(&r).unwrap();
         assert_eq!(json, r#"{"kind":"agent","fingerprint":"SHA256:x"}"#);
         assert_eq!(serde_json::from_str::<KeyRef>(&json).unwrap(), r);
@@ -686,9 +570,7 @@ mod tests {
 
     #[test]
     fn host_inherits_agent_key_from_group() {
-        let agent = KeyRef::Agent {
-            fingerprint: "SHA256:y".into(),
-        };
+        let agent = KeyRef::Agent { fingerprint: "SHA256:y".into() };
         let g = full_group(&agent);
         let h = host_in(&g, ConnectionSettings::default());
         assert_eq!(resolve(&h, &[&g], &[]).unwrap().key, Some(agent));
@@ -696,37 +578,19 @@ mod tests {
 
     #[test]
     fn effective_endpoint_inherits_address_and_port() {
-        let g = group(ConnectionSettings {
-            address: Some("10.0.0.5".into()),
-            port: Some(2222),
-            ..Default::default()
-        });
+        let g = group(ConnectionSettings { address: Some("10.0.0.5".into()), port: Some(2222), ..Default::default() });
         let h = host_in(&g, ConnectionSettings::default());
-        assert_eq!(
-            effective_endpoint(&h, &[&g]).unwrap(),
-            ("10.0.0.5".to_owned(), 2222)
-        );
+        assert_eq!(effective_endpoint(&h, &[&g]).unwrap(), ("10.0.0.5".to_owned(), 2222));
     }
 
     #[test]
     fn effective_endpoint_needs_no_username_or_key() {
-        let mut h = host_in(
-            &group(ConnectionSettings::default()),
-            ConnectionSettings {
-                address: Some(" example.org ".into()),
-                ..Default::default()
-            },
-        );
+        let mut h =
+            host_in(&group(ConnectionSettings::default()), ConnectionSettings { address: Some(" example.org ".into()), ..Default::default() });
         h.group_id = None;
-        assert_eq!(
-            effective_endpoint(&h, &[]).unwrap(),
-            ("example.org".to_owned(), 22)
-        );
+        assert_eq!(effective_endpoint(&h, &[]).unwrap(), ("example.org".to_owned(), 22));
         h.settings.address = Some("  ".into());
-        assert_eq!(
-            effective_endpoint(&h, &[]),
-            Err(ResolveError::MissingAddress)
-        );
+        assert_eq!(effective_endpoint(&h, &[]), Err(ResolveError::MissingAddress));
     }
 }
 

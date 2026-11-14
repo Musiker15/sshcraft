@@ -6,9 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use sshcraft_model::model::{
-    ConnectionSettings, Group, GroupId, Host, HostId, HostOs, ServerId, group_chain,
-};
+use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, HostOs, ServerId, group_chain};
 use sshcraft_store::store::{Store, StoreError};
 
 /// Longest name kept from an import file, in characters.
@@ -90,13 +88,7 @@ pub struct ImportOutcome {
 
 /// A name from an import file: control characters removed, trimmed, at most [`MAX_NAME`].
 pub fn clean(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control())
-        .collect::<String>()
-        .trim()
-        .chars()
-        .take(MAX_NAME)
-        .collect()
+    text.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(MAX_NAME).collect()
 }
 
 /// A port from an import file; anything but 1 to 65535 is dropped with a warning (an empty
@@ -135,14 +127,9 @@ fn group_for(
             // A group that came in someone else's share is only written into where that share
             // allows adding (write, all hosts).
             match location {
-                Some(server) => match store.received_share_of(
-                    server,
-                    sshcraft_store::store::ItemKind::Group,
-                    &g.id.0.to_string(),
-                ) {
+                Some(server) => match store.received_share_of(server, sshcraft_store::store::ItemKind::Group, &g.id.0.to_string()) {
                     Ok(Some(share)) => {
-                        share.role == Some(sshcraft_store::store::ShareRole::Write)
-                            && share.kind == sshcraft_store::store::ShareKind::GroupAll
+                        share.role == Some(sshcraft_store::store::ShareRole::Write) && share.kind == sshcraft_store::store::ShareKind::GroupAll
                     }
                     Ok(None) => true,
                     Err(_) => false,
@@ -150,23 +137,14 @@ fn group_for(
                 None => true,
             }
         };
-        let found = groups.iter().find(|g| {
-            g.name == name
-                && g.parent_id == parent
-                && (parent.is_some() || g.location == location)
-                && writable(g)
-        });
+        let found = groups.iter().find(|g| g.name == name && g.parent_id == parent && (parent.is_some() || g.location == location) && writable(g));
         let id = match found {
             Some(group) => group.id,
             None => {
                 let group = Group {
                     id: GroupId::new(),
                     name,
-                    defaults: if level + 1 == path.len() {
-                        innermost.clone()
-                    } else {
-                        ConnectionSettings::default()
-                    },
+                    defaults: if level + 1 == path.len() { innermost.clone() } else { ConnectionSettings::default() },
                     location,
                     parent_id: parent,
                     tags: Vec::new(),
@@ -187,11 +165,7 @@ fn group_for(
 /// paths, at `location` (`None`: this device only). A host that already exists in the same
 /// group with the same name, address, port and user is skipped; groups with the same name on
 /// the same level are reused.
-pub fn apply_import(
-    store: &Store,
-    candidates: &[ImportCandidate],
-    location: Option<ServerId>,
-) -> Result<ImportOutcome, StoreError> {
+pub fn apply_import(store: &Store, candidates: &[ImportCandidate], location: Option<ServerId>) -> Result<ImportOutcome, StoreError> {
     let mut groups = store.list_groups()?;
     let mut hosts = store.list_hosts()?;
     let before = hosts.len();
@@ -199,14 +173,7 @@ pub fn apply_import(
     let mut jumping: Vec<(HostId, &[String])> = Vec::new();
     let mut created_names: Vec<(String, HostId)> = Vec::new();
     for candidate in candidates {
-        let group_id = group_for(
-            store,
-            &mut groups,
-            &candidate.group_path,
-            &candidate.group_defaults,
-            location,
-            &mut outcome.groups,
-        )?;
+        let group_id = group_for(store, &mut groups, &candidate.group_path, &candidate.group_defaults, location, &mut outcome.groups)?;
         let host = Host {
             forwards: Vec::new(),
             id: HostId::new(),
@@ -218,22 +185,15 @@ pub fn apply_import(
             os: candidate.os,
         };
         let key = |h: &Host| {
-            let chain = h
-                .group_id
-                .map(|g| group_chain(&groups, g))
-                .unwrap_or_default();
+            let chain = h.group_id.map(|g| group_chain(&groups, g)).unwrap_or_default();
             let pick = |own: &Option<String>, get: fn(&ConnectionSettings) -> &Option<String>| {
-                own.clone()
-                    .or_else(|| chain.iter().find_map(|g| get(&g.defaults).clone()))
+                own.clone().or_else(|| chain.iter().find_map(|g| get(&g.defaults).clone()))
             };
             (
                 h.name.to_lowercase(),
                 h.location,
                 pick(&h.settings.address, |d| &d.address),
-                h.settings
-                    .port
-                    .or_else(|| chain.iter().find_map(|g| g.defaults.port))
-                    .unwrap_or(sshcraft_model::model::DEFAULT_PORT),
+                h.settings.port.or_else(|| chain.iter().find_map(|g| g.defaults.port)).unwrap_or(sshcraft_model::model::DEFAULT_PORT),
                 pick(&h.settings.username, |d| &d.username),
             )
         };
@@ -268,13 +228,7 @@ pub fn apply_import(
                     .iter()
                     .find(|(name, _)| name == alias)
                     .map(|(_, id)| *id)
-                    .or_else(|| {
-                        hosts
-                            .iter()
-                            .take(before)
-                            .find(|h| h.name == *alias && h.location == location)
-                            .map(|h| h.id)
-                    })
+                    .or_else(|| hosts.iter().take(before).find(|h| h.name == *alias && h.location == location).map(|h| h.id))
             })
             .collect();
         if let Some(jumps) = resolved

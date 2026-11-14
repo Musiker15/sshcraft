@@ -64,11 +64,7 @@ pub fn check_certificate(cert: &DeviceCertificate) -> Result<(), ApiError> {
 }
 
 /// `POST /v1/accounts`: a new account with its first device.
-pub async fn register(
-    State(state): State<AppState>,
-    _key: ApiKey,
-    ApiJson(body): ApiJson<Register>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
+pub async fn register(State(state): State<AppState>, _key: ApiKey, ApiJson(body): ApiJson<Register>) -> Result<(StatusCode, Json<Value>), ApiError> {
     let name = check_name(&body.name)?;
     let (email, email_norm) = check_email(&body.email)?;
     // The first device, and optionally the recovery device with it, so a client never ends up
@@ -86,40 +82,18 @@ pub async fn register(
         check_certificate(certificate)?;
         certificates.push((**certificate).clone());
     }
-    let row = AccountRow {
-        account: body.account,
-        name,
-        email,
-        created_at: state.now(),
-        locked: false,
-    };
-    state
-        .store
-        .create_account(&row, &email_norm, first, &certificates[0])
-        .await?;
+    let row = AccountRow { account: body.account, name, email, created_at: state.now(), locked: false };
+    state.store.create_account(&row, &email_norm, first, &certificates[0]).await?;
     if !rest.is_empty() {
-        let changes = crate::store::DeviceChanges {
-            added: certificates[1..].to_vec(),
-            revoked: vec![],
-        };
-        state
-            .store
-            .append_log(&body.account, 1, rest, &changes)
-            .await?;
+        let changes = crate::store::DeviceChanges { added: certificates[1..].to_vec(), revoked: vec![] };
+        state.store.append_log(&body.account, 1, rest, &changes).await?;
     }
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "account": body.account })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "account": body.account }))))
 }
 
 /// `GET /v1/accounts/me`
 pub async fn me(State(state): State<AppState>, session: Session) -> Result<Json<Value>, ApiError> {
-    let row = state
-        .store
-        .account(&session.account)
-        .await?
-        .ok_or(ApiError::NotFound)?;
+    let row = state.store.account(&session.account).await?.ok_or(ApiError::NotFound)?;
     Ok(Json(json!({
         "account": row.account,
         "name": row.name,
@@ -139,10 +113,7 @@ pub fn parse_account(text: &str) -> Result<AccountPublic, ApiError> {
 }
 
 /// `GET /v1/accounts/me/devices`: state per device; names and platforms are in the log.
-pub async fn my_devices(
-    State(state): State<AppState>,
-    session: Session,
-) -> Result<Json<Value>, ApiError> {
+pub async fn my_devices(State(state): State<AppState>, session: Session) -> Result<Json<Value>, ApiError> {
     let devices: Vec<Value> = state
         .store
         .devices_of(&session.account)
@@ -166,31 +137,15 @@ pub struct Lookup {
 }
 
 /// `GET /v1/accounts/lookup?email=...`: find someone to share with.
-pub async fn lookup(
-    State(state): State<AppState>,
-    _session: Session,
-    ApiQuery(query): ApiQuery<Lookup>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn lookup(State(state): State<AppState>, _session: Session, ApiQuery(query): ApiQuery<Lookup>) -> Result<Json<Value>, ApiError> {
     let (_, email_norm) = check_email(&query.email)?;
-    let row = state
-        .store
-        .account_by_email(&email_norm)
-        .await?
-        .ok_or(ApiError::NotFound)?;
+    let row = state.store.account_by_email(&email_norm).await?.ok_or(ApiError::NotFound)?;
     Ok(Json(json!({ "account": row.account, "name": row.name })))
 }
 
 /// `GET /v1/accounts/{account}`: public key and name, no email.
-pub async fn public_info(
-    State(state): State<AppState>,
-    _session: Session,
-    ApiPath(account): ApiPath<String>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn public_info(State(state): State<AppState>, _session: Session, ApiPath(account): ApiPath<String>) -> Result<Json<Value>, ApiError> {
     let account = parse_account(&account)?;
-    let row = state
-        .store
-        .account(&account)
-        .await?
-        .ok_or(ApiError::NotFound)?;
+    let row = state.store.account(&account).await?.ok_or(ApiError::NotFound)?;
     Ok(Json(json!({ "account": row.account, "name": row.name })))
 }

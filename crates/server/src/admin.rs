@@ -20,42 +20,21 @@ pub enum AdminError {
 
 async fn user(store: &dyn Store, email: &str) -> Result<AccountRow, AdminError> {
     let norm = email.trim().to_lowercase();
-    store
-        .account_by_email(&norm)
-        .await?
-        .ok_or_else(|| AdminError::UnknownUser(email.trim().to_owned()))
+    store.account_by_email(&norm).await?.ok_or_else(|| AdminError::UnknownUser(email.trim().to_owned()))
 }
 
 /// `users list`
 pub async fn users_list(store: &dyn Store, out: &mut impl Write) -> Result<(), AdminError> {
     writeln!(out, "EMAIL\tNAME\tCREATED\tACTIVE DEVICES\tLOCKED")?;
     for row in store.list_accounts().await? {
-        let active = store
-            .devices_of(&row.account)
-            .await?
-            .iter()
-            .filter(|d| d.active)
-            .count();
-        writeln!(
-            out,
-            "{}\t{}\t{}\t{}\t{}",
-            row.email,
-            row.name,
-            row.created_at,
-            active,
-            if row.locked { "locked" } else { "-" }
-        )?;
+        let active = store.devices_of(&row.account).await?.iter().filter(|d| d.active).count();
+        writeln!(out, "{}\t{}\t{}\t{}\t{}", row.email, row.name, row.created_at, active, if row.locked { "locked" } else { "-" })?;
     }
     Ok(())
 }
 
 /// `users lock <email>` and `users unlock <email>`. Locking ends the user's sessions.
-pub async fn users_lock(
-    store: &dyn Store,
-    email: &str,
-    locked: bool,
-    out: &mut impl Write,
-) -> Result<(), AdminError> {
+pub async fn users_lock(store: &dyn Store, email: &str, locked: bool, out: &mut impl Write) -> Result<(), AdminError> {
     let row = user(store, email).await?;
     store.set_locked(&row.account, locked).await?;
     let what = if locked { "locked" } else { "unlocked" };
@@ -63,42 +42,25 @@ pub async fn users_lock(
     Ok(())
 }
 
-async fn write_plan(
-    store: &dyn Store,
-    plan: &[AreaFate],
-    out: &mut impl Write,
-) -> Result<(), AdminError> {
+async fn write_plan(store: &dyn Store, plan: &[AreaFate], out: &mut impl Write) -> Result<(), AdminError> {
     if plan.is_empty() {
         writeln!(out, "the user owns no areas")?;
     }
     for fate in plan {
         let outcome = match &fate.outcome {
             AreaOutcome::TransferTo(heir) => {
-                let email = store
-                    .account(heir)
-                    .await?
-                    .map(|r| r.email)
-                    .unwrap_or_else(|| "an unknown account".into());
+                let email = store.account(heir).await?.map(|r| r.email).unwrap_or_else(|| "an unknown account".into());
                 format!("transfer to {email}")
             }
             AreaOutcome::Delete => "delete".to_owned(),
         };
-        writeln!(
-            out,
-            "area {}\tmembers {}\t{outcome}",
-            fate.area_id.0, fate.members
-        )?;
+        writeln!(out, "area {}\tmembers {}\t{outcome}", fate.area_id.0, fate.members)?;
     }
     Ok(())
 }
 
 /// `users delete <email> [--yes]`: without `yes` only shows what would happen to the user's areas.
-pub async fn users_delete(
-    store: &dyn Store,
-    email: &str,
-    yes: bool,
-    out: &mut impl Write,
-) -> Result<(), AdminError> {
+pub async fn users_delete(store: &dyn Store, email: &str, yes: bool, out: &mut impl Write) -> Result<(), AdminError> {
     let row = user(store, email).await?;
     if !yes {
         let plan = store.plan_account_deletion(&row.account).await?;
@@ -113,11 +75,7 @@ pub async fn users_delete(
 }
 
 /// `devices list <email>`
-pub async fn devices_list(
-    store: &dyn Store,
-    email: &str,
-    out: &mut impl Write,
-) -> Result<(), AdminError> {
+pub async fn devices_list(store: &dyn Store, email: &str, out: &mut impl Write) -> Result<(), AdminError> {
     let row = user(store, email).await?;
     writeln!(out, "DEVICE\tNAME\tPLATFORM\tSTATE\tLAST SEEN")?;
     for d in store.devices_of(&row.account).await? {
@@ -126,14 +84,8 @@ pub async fn devices_list(
             (true, true) => "blocked",
             (true, false) => "active",
         };
-        let seen = d
-            .last_seen
-            .map_or_else(|| "-".to_owned(), |t| t.to_string());
-        writeln!(
-            out,
-            "{}\t{}\t{}\t{state}\t{seen}",
-            d.device_id, d.cert.name, d.cert.platform
-        )?;
+        let seen = d.last_seen.map_or_else(|| "-".to_owned(), |t| t.to_string());
+        writeln!(out, "{}\t{}\t{}\t{state}\t{seen}", d.device_id, d.cert.name, d.cert.platform)?;
     }
     Ok(())
 }
@@ -141,18 +93,9 @@ pub async fn devices_list(
 /// `devices block <email> <device-id>` and `devices unblock ...`. A block lives on the server
 /// only: the server cannot sign a revocation, so the user's own revoke is still needed to rotate
 /// the keys the device could read.
-pub async fn devices_block(
-    store: &dyn Store,
-    email: &str,
-    device_id: Uuid,
-    blocked: bool,
-    out: &mut impl Write,
-) -> Result<(), AdminError> {
+pub async fn devices_block(store: &dyn Store, email: &str, device_id: Uuid, blocked: bool, out: &mut impl Write) -> Result<(), AdminError> {
     let row = user(store, email).await?;
-    let owns = store
-        .device(device_id)
-        .await?
-        .is_some_and(|d| d.account == row.account);
+    let owns = store.device(device_id).await?.is_some_and(|d| d.account == row.account);
     if !owns {
         return Err(AdminError::UnknownDevice(device_id));
     }

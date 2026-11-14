@@ -16,10 +16,7 @@ use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::ProtoError;
-use crate::encoding::{
-    DOMAIN_AUTH, DOMAIN_DEVICE_CERT, DOMAIN_RECOVERY_DEVICE, DOMAIN_RECOVERY_ID, DOMAIN_SAFETY,
-    b64, signing_bytes,
-};
+use crate::encoding::{DOMAIN_AUTH, DOMAIN_DEVICE_CERT, DOMAIN_RECOVERY_DEVICE, DOMAIN_RECOVERY_ID, DOMAIN_SAFETY, b64, signing_bytes};
 
 const EXPORT_PREFIX: &str = "sshcraft-account-1:";
 
@@ -34,14 +31,9 @@ fn random_32() -> Zeroizing<[u8; 32]> {
 }
 
 /// Verifies an Ed25519 signature made with the public key `public`.
-pub(crate) fn verify_ed25519(
-    public: &[u8; 32],
-    msg: &[u8],
-    sig: &[u8; 64],
-) -> Result<(), ProtoError> {
+pub(crate) fn verify_ed25519(public: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> Result<(), ProtoError> {
     let key = VerifyingKey::from_bytes(public).map_err(|_| ProtoError::BadSignature)?;
-    key.verify_strict(msg, &Signature::from_bytes(sig))
-        .map_err(|_| ProtoError::BadSignature)
+    key.verify_strict(msg, &Signature::from_bytes(sig)).map_err(|_| ProtoError::BadSignature)
 }
 
 /// The secret root key of an account.
@@ -57,9 +49,7 @@ impl std::fmt::Debug for AccountKey {
 
 impl AccountKey {
     pub fn generate() -> Self {
-        Self {
-            signing: SigningKey::from_bytes(&random_32()),
-        }
+        Self { signing: SigningKey::from_bytes(&random_32()) }
     }
 
     /// The recovery device of this account: an ordinary device whose keys follow from the
@@ -86,9 +76,7 @@ impl AccountKey {
         body.extend_from_slice(&seed[..]);
         body.extend_from_slice(&Sha256::digest(&seed[..])[..CHECKSUM_LEN]);
         // Sized up front, so no reallocation leaves a copy of the encoded seed behind.
-        let mut out = Zeroizing::new(String::with_capacity(
-            EXPORT_PREFIX.len() + BASE32_NOPAD.encode_len(body.len()),
-        ));
+        let mut out = Zeroizing::new(String::with_capacity(EXPORT_PREFIX.len() + BASE32_NOPAD.encode_len(body.len())));
         out.push_str(EXPORT_PREFIX);
         BASE32_NOPAD.encode_append(&body, &mut out);
         out
@@ -100,15 +88,9 @@ impl AccountKey {
         let mut compact = Zeroizing::new(String::with_capacity(text.len()));
         compact.extend(text.chars().filter(|c| !c.is_whitespace()));
         let lower = Zeroizing::new(compact.to_lowercase());
-        let body = lower
-            .strip_prefix(EXPORT_PREFIX)
-            .ok_or(ProtoError::BadAccountKeyFormat)?;
+        let body = lower.strip_prefix(EXPORT_PREFIX).ok_or(ProtoError::BadAccountKeyFormat)?;
         let upper = Zeroizing::new(body.to_uppercase());
-        let bytes = Zeroizing::new(
-            BASE32_NOPAD
-                .decode(upper.as_bytes())
-                .map_err(|_| ProtoError::BadAccountKeyFormat)?,
-        );
+        let bytes = Zeroizing::new(BASE32_NOPAD.decode(upper.as_bytes()).map_err(|_| ProtoError::BadAccountKeyFormat)?);
         if bytes.len() != 32 + CHECKSUM_LEN {
             return Err(ProtoError::BadAccountKeyFormat);
         }
@@ -116,13 +98,8 @@ impl AccountKey {
         if Sha256::digest(seed)[..CHECKSUM_LEN] != *checksum {
             return Err(ProtoError::BadChecksum);
         }
-        let seed: Zeroizing<[u8; 32]> = Zeroizing::new(
-            seed.try_into()
-                .map_err(|_| ProtoError::BadAccountKeyFormat)?,
-        );
-        Ok(Self {
-            signing: SigningKey::from_bytes(&seed),
-        })
+        let seed: Zeroizing<[u8; 32]> = Zeroizing::new(seed.try_into().map_err(|_| ProtoError::BadAccountKeyFormat)?);
+        Ok(Self { signing: SigningKey::from_bytes(&seed) })
     }
 
     pub(crate) fn sign(&self, msg: &[u8]) -> [u8; 64] {
@@ -172,19 +149,13 @@ impl DeviceKeys {
         let mut bytes = private.to_bytes();
         hpke.copy_from_slice(&bytes);
         bytes.as_mut_slice().zeroize();
-        Self {
-            signing: SigningKey::from_bytes(&random_32()),
-            hpke,
-        }
+        Self { signing: SigningKey::from_bytes(&random_32()), hpke }
     }
 
     pub fn public(&self) -> DevicePublic {
         let mut hpke = [0u8; 32];
         hpke.copy_from_slice(&X25519HkdfSha256::sk_to_pk(&self.hpke_private()).to_bytes());
-        DevicePublic {
-            signing: self.signing.verifying_key().to_bytes(),
-            hpke,
-        }
+        DevicePublic { signing: self.signing.verifying_key().to_bytes(), hpke }
     }
 
     /// Signing seed followed by the HPKE private key.
@@ -200,17 +171,12 @@ impl DeviceKeys {
         seed.copy_from_slice(&bytes[..32]);
         let mut hpke = Zeroizing::new([0u8; 32]);
         hpke.copy_from_slice(&bytes[32..]);
-        <X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(&hpke[..])
-            .map_err(|_| ProtoError::Malformed("device hpke key".into()))?;
-        Ok(Self {
-            signing: SigningKey::from_bytes(&seed),
-            hpke,
-        })
+        <X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(&hpke[..]).map_err(|_| ProtoError::Malformed("device hpke key".into()))?;
+        Ok(Self { signing: SigningKey::from_bytes(&seed), hpke })
     }
 
     pub(crate) fn hpke_private(&self) -> <X25519HkdfSha256 as Kem>::PrivateKey {
-        <X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(&self.hpke[..])
-            .expect("validated when the keys were created")
+        <X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(&self.hpke[..]).expect("validated when the keys were created")
     }
 
     pub(crate) fn sign(&self, msg: &[u8]) -> [u8; 64] {
@@ -219,17 +185,9 @@ impl DeviceKeys {
 
     /// Signature for logging in to a sync server with the challenge it sent. The server's
     /// origin is signed too, so a server cannot pass the signature on to another one.
-    pub fn sign_auth(
-        &self,
-        server_challenge: &[u8],
-        device_id: Uuid,
-        server_origin: &str,
-    ) -> [u8; 64] {
+    pub fn sign_auth(&self, server_challenge: &[u8], device_id: Uuid, server_origin: &str) -> [u8; 64] {
         let origin = normalize_origin(server_origin);
-        self.sign(&signing_bytes(
-            DOMAIN_AUTH,
-            &[server_challenge, device_id.as_bytes(), origin.as_bytes()],
-        ))
+        self.sign(&signing_bytes(DOMAIN_AUTH, &[server_challenge, device_id.as_bytes(), origin.as_bytes()]))
     }
 }
 
@@ -256,23 +214,9 @@ pub struct DeviceCertificate {
 }
 
 impl DeviceCertificate {
-    pub fn issue(
-        account: &AccountKey,
-        device_id: Uuid,
-        keys: DevicePublic,
-        name: &str,
-        platform: &str,
-        created_at: i64,
-    ) -> Self {
-        let mut cert = Self {
-            device_id,
-            account: account.public(),
-            keys,
-            name: name.to_owned(),
-            platform: platform.to_owned(),
-            created_at,
-            signature: [0; 64],
-        };
+    pub fn issue(account: &AccountKey, device_id: Uuid, keys: DevicePublic, name: &str, platform: &str, created_at: i64) -> Self {
+        let mut cert =
+            Self { device_id, account: account.public(), keys, name: name.to_owned(), platform: platform.to_owned(), created_at, signature: [0; 64] };
         cert.signature = account.sign(&cert.signed_bytes());
         cert
     }
@@ -301,25 +245,9 @@ impl DeviceCertificate {
     ///
     /// Precondition for a server: a valid signature only proves the key. The server must also
     /// check that the device is active in the account's verified [`DeviceLog`](crate::devicelog::DeviceLog).
-    pub fn verify_auth(
-        &self,
-        server_challenge: &[u8],
-        server_origin: &str,
-        signature: &[u8; 64],
-    ) -> Result<(), ProtoError> {
+    pub fn verify_auth(&self, server_challenge: &[u8], server_origin: &str, signature: &[u8; 64]) -> Result<(), ProtoError> {
         let origin = normalize_origin(server_origin);
-        verify_ed25519(
-            &self.keys.signing,
-            &signing_bytes(
-                DOMAIN_AUTH,
-                &[
-                    server_challenge,
-                    self.device_id.as_bytes(),
-                    origin.as_bytes(),
-                ],
-            ),
-            signature,
-        )
+        verify_ed25519(&self.keys.signing, &signing_bytes(DOMAIN_AUTH, &[server_challenge, self.device_id.as_bytes(), origin.as_bytes()]), signature)
     }
 
     /// Checks a signature made by this device's signing key.
@@ -347,11 +275,7 @@ pub fn normalize_origin(url: &str) -> String {
     // Drop a default port. In `[::1]:443` the port follows the bracket; a bare IPv6 address
     // has colons of its own and no port to drop.
     let host = match (default_port, authority.rsplit_once(':')) {
-        (Some(default), Some((host, port)))
-            if port == default && (!host.contains(':') || host.ends_with(']')) =>
-        {
-            host.to_owned()
-        }
+        (Some(default), Some((host, port))) if port == default && (!host.contains(':') || host.ends_with(']')) => host.to_owned(),
         _ => authority,
     };
     match scheme {

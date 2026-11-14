@@ -140,10 +140,7 @@ fn chunk_label(log: LogId, seq: u32) -> String {
 }
 
 fn text_ok(text: &str, max: usize, lines: bool) -> bool {
-    text.chars().count() <= max
-        && !text
-            .chars()
-            .any(|c| c.is_control() && !(lines && c == '\n'))
+    text.chars().count() <= max && !text.chars().any(|c| c.is_control() && !(lines && c == '\n'))
 }
 
 pub fn validate_marks(marks: &[LogMark], size: u64) -> Result<(), LogError> {
@@ -153,9 +150,7 @@ pub fn validate_marks(marks: &[LogMark], size: u64) -> Result<(), LogError> {
     for mark in marks {
         let text_valid = match mark.kind {
             MarkKind::Bookmark => text_ok(&mark.text, MAX_BOOKMARK, false),
-            MarkKind::Comment => {
-                !mark.text.trim().is_empty() && text_ok(&mark.text, MAX_COMMENT, true)
-            }
+            MarkKind::Comment => !mark.text.trim().is_empty() && text_ok(&mark.text, MAX_COMMENT, true),
         };
         if !text_valid || mark.offset > size {
             return Err(LogError::Invalid("mark"));
@@ -176,21 +171,13 @@ fn validate_meta(meta: &LogMeta, stored: u64) -> Result<(), LogError> {
 
 /// Bytes stored for `id` so far.
 pub fn stored_size(store: &Store, id: LogId) -> Result<u64, LogError> {
-    let size: i64 = store.conn.query_row(
-        "SELECT COALESCE(SUM(len), 0) FROM session_log_chunks WHERE log_id = ?1",
-        [id.0.to_string()],
-        |r| r.get(0),
-    )?;
+    let size: i64 =
+        store.conn.query_row("SELECT COALESCE(SUM(len), 0) FROM session_log_chunks WHERE log_id = ?1", [id.0.to_string()], |r| r.get(0))?;
     Ok(u64::try_from(size).unwrap_or(0))
 }
 
 /// Stores the header of a log at `location`, new or replacing the one there was.
-pub fn put_meta(
-    vault: &Vault,
-    store: &Store,
-    meta: &LogMeta,
-    location: Option<ServerId>,
-) -> Result<(), LogError> {
+pub fn put_meta(vault: &Vault, store: &Store, meta: &LogMeta, location: Option<ServerId>) -> Result<(), LogError> {
     validate_meta(meta, stored_size(store, meta.id)?)?;
     let json = serde_json::to_vec(meta).map_err(|e| StoreError::Malformed(e.to_string()))?;
     let sealed = vault.seal_secret(&meta_label(meta.id), &json)?;
@@ -251,24 +238,8 @@ pub fn put_chunk(
 }
 
 /// Appends the next part of a log that is being recorded here.
-pub fn append_chunk(
-    vault: &Vault,
-    store: &Store,
-    log: LogId,
-    seq: u32,
-    bytes: &[u8],
-    written_at: i64,
-) -> Result<(), LogError> {
-    put_chunk(
-        vault,
-        store,
-        Uuid::new_v4(),
-        log,
-        seq,
-        bytes,
-        written_at,
-        None,
-    )
+pub fn append_chunk(vault: &Vault, store: &Store, log: LogId, seq: u32, bytes: &[u8], written_at: i64) -> Result<(), LogError> {
+    put_chunk(vault, store, Uuid::new_v4(), log, seq, bytes, written_at, None)
 }
 
 /// One stored part of a log.
@@ -281,50 +252,29 @@ pub struct StoredChunk {
 }
 
 /// A part as stored, by its id.
-pub fn chunk(
-    vault: &Vault,
-    store: &Store,
-    chunk_id: &str,
-) -> Result<Option<StoredChunk>, LogError> {
+pub fn chunk(vault: &Vault, store: &Store, chunk_id: &str) -> Result<Option<StoredChunk>, LogError> {
     let row: Option<(String, u32, i64, Vec<u8>)> = store
         .conn
-        .query_row(
-            "SELECT log_id, seq, written_at, sealed FROM session_log_chunks WHERE id = ?1",
-            [chunk_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
+        .query_row("SELECT log_id, seq, written_at, sealed FROM session_log_chunks WHERE id = ?1", [chunk_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
         .optional()?;
     let Some((log, seq, written_at, sealed)) = row else {
         return Ok(None);
     };
     let log = LogId(Uuid::parse_str(&log).map_err(|_| LogError::Damaged)?);
-    let plain = vault
-        .open_secret(&chunk_label(log, seq), &sealed)
-        .map_err(|_| LogError::Damaged)?;
-    Ok(Some(StoredChunk {
-        log,
-        seq,
-        bytes: plain.to_vec(),
-        written_at,
-    }))
+    let plain = vault.open_secret(&chunk_label(log, seq), &sealed).map_err(|_| LogError::Damaged)?;
+    Ok(Some(StoredChunk { log, seq, bytes: plain.to_vec(), written_at }))
 }
 
 /// The header of a log, if it is here and opens.
 pub fn meta(vault: &Vault, store: &Store, id: LogId) -> Result<Option<LogMeta>, LogError> {
-    let sealed: Option<Vec<u8>> = store
-        .conn
-        .query_row(
-            "SELECT sealed FROM session_logs WHERE id = ?1",
-            [id.0.to_string()],
-            |r| r.get(0),
-        )
-        .optional()?;
+    let sealed: Option<Vec<u8>> =
+        store.conn.query_row("SELECT sealed FROM session_logs WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?;
     let Some(sealed) = sealed else {
         return Ok(None);
     };
-    let plain = vault
-        .open_secret(&meta_label(id), &sealed)
-        .map_err(|_| LogError::Damaged)?;
+    let plain = vault.open_secret(&meta_label(id), &sealed).map_err(|_| LogError::Damaged)?;
     let meta: LogMeta = serde_json::from_slice(&plain).map_err(|_| LogError::Damaged)?;
     if meta.id != id {
         return Err(LogError::Damaged);
@@ -334,26 +284,13 @@ pub fn meta(vault: &Vault, store: &Store, id: LogId) -> Result<Option<LogMeta>, 
 
 /// Where a log lives; `None` if it is not here.
 pub fn location(store: &Store, id: LogId) -> Result<Option<Option<ServerId>>, LogError> {
-    let row: Option<Option<String>> = store
-        .conn
-        .query_row(
-            "SELECT location FROM session_logs WHERE id = ?1",
-            [id.0.to_string()],
-            |r| r.get(0),
-        )
-        .optional()?;
+    let row: Option<Option<String>> =
+        store.conn.query_row("SELECT location FROM session_logs WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?;
     Ok(row.map(|loc| loc.and_then(|t| Uuid::parse_str(&t).ok()).map(ServerId)))
 }
 
 /// Ends a log: its final size, whether it was cut, when. Bookmarks and comments stay.
-pub fn finish(
-    vault: &Vault,
-    store: &Store,
-    id: LogId,
-    ended_at: i64,
-    size: u64,
-    truncated: bool,
-) -> Result<LogMeta, LogError> {
+pub fn finish(vault: &Vault, store: &Store, id: LogId, ended_at: i64, size: u64, truncated: bool) -> Result<LogMeta, LogError> {
     let mut meta = meta(vault, store, id)?.ok_or(LogError::NotFound)?;
     let location = location(store, id)?.flatten();
     meta.ended_at = Some(ended_at);
@@ -364,12 +301,7 @@ pub fn finish(
 }
 
 /// Replaces the bookmarks and comments of a log.
-pub fn save_marks(
-    vault: &Vault,
-    store: &Store,
-    id: LogId,
-    marks: Vec<LogMark>,
-) -> Result<LogMeta, LogError> {
+pub fn save_marks(vault: &Vault, store: &Store, id: LogId, marks: Vec<LogMark>) -> Result<LogMeta, LogError> {
     let mut meta = meta(vault, store, id)?.ok_or(LogError::NotFound)?;
     let location = location(store, id)?.flatten();
     meta.marks = marks;
@@ -378,12 +310,7 @@ pub fn save_marks(
 }
 
 /// Adds one bookmark or comment to what the log has now (others may have added theirs since).
-pub fn add_mark(
-    vault: &Vault,
-    store: &Store,
-    id: LogId,
-    mark: LogMark,
-) -> Result<LogMeta, LogError> {
+pub fn add_mark(vault: &Vault, store: &Store, id: LogId, mark: LogMark) -> Result<LogMeta, LogError> {
     let mut marks = meta(vault, store, id)?.ok_or(LogError::NotFound)?.marks;
     marks.retain(|m| m.id != mark.id);
     marks.push(mark);
@@ -391,12 +318,7 @@ pub fn add_mark(
 }
 
 /// Removes one bookmark or comment and keeps the others as they are now.
-pub fn remove_mark(
-    vault: &Vault,
-    store: &Store,
-    id: LogId,
-    mark: Uuid,
-) -> Result<LogMeta, LogError> {
+pub fn remove_mark(vault: &Vault, store: &Store, id: LogId, mark: Uuid) -> Result<LogMeta, LogError> {
     let mut marks = meta(vault, store, id)?.ok_or(LogError::NotFound)?.marks;
     marks.retain(|m| m.id != mark);
     save_marks(vault, store, id, marks)
@@ -404,22 +326,14 @@ pub fn remove_mark(
 
 /// Every log with a header that opens, newest first.
 pub fn list(vault: &Vault, store: &Store) -> Result<Vec<LogSummary>, LogError> {
-    let mut stmt = store
-        .conn
-        .prepare("SELECT id, location FROM session_logs ORDER BY started_at DESC, id")?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut stmt = store.conn.prepare("SELECT id, location FROM session_logs ORDER BY started_at DESC, id")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
     Ok(rows
         .into_iter()
         .filter_map(|(id, location)| {
             let id = LogId(Uuid::parse_str(&id).ok()?);
             let meta = meta(vault, store, id).ok()??;
-            let location = location
-                .and_then(|t| Uuid::parse_str(&t).ok())
-                .map(ServerId);
+            let location = location.and_then(|t| Uuid::parse_str(&t).ok()).map(ServerId);
             Some(LogSummary { meta, location })
         })
         .collect())
@@ -431,14 +345,8 @@ pub type SealedLog = (LogMeta, Vec<(u32, Vec<u8>)>);
 
 pub fn sealed_log(vault: &Vault, store: &Store, id: LogId) -> Result<SealedLog, LogError> {
     let meta = meta(vault, store, id)?.ok_or(LogError::NotFound)?;
-    let mut stmt = store
-        .conn
-        .prepare("SELECT seq, sealed FROM session_log_chunks WHERE log_id = ?1 ORDER BY seq")?;
-    let rows = stmt
-        .query_map([id.0.to_string()], |r| {
-            Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut stmt = store.conn.prepare("SELECT seq, sealed FROM session_log_chunks WHERE log_id = ?1 ORDER BY seq")?;
+    let rows = stmt.query_map([id.0.to_string()], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
     Ok((meta, rows))
 }
 
@@ -455,9 +363,7 @@ pub fn open_parts(vault: &Vault, (meta, rows): SealedLog) -> Result<Vec<u8>, Log
         if usize::try_from(seq).ok() != Some(expected) {
             return Err(LogError::Damaged);
         }
-        let plain = vault
-            .open_secret(&chunk_label(id, seq), &sealed)
-            .map_err(|_| LogError::Damaged)?;
+        let plain = vault.open_secret(&chunk_label(id, seq), &sealed).map_err(|_| LogError::Damaged)?;
         out.extend_from_slice(&plain);
     }
     if meta.ended_at.is_some() && u64::try_from(out.len()).ok() != Some(meta.size) {
@@ -469,27 +375,16 @@ pub fn open_parts(vault: &Vault, (meta, rows): SealedLog) -> Result<Vec<u8>, Log
 /// Removes a log and its parts. Parts that came without their header go too.
 pub fn delete(store: &Store, id: LogId) -> Result<(), LogError> {
     store.atomic(|| {
-        store.conn.execute(
-            "DELETE FROM session_log_chunks WHERE log_id = ?1",
-            [id.0.to_string()],
-        )?;
-        store
-            .conn
-            .execute("DELETE FROM session_logs WHERE id = ?1", [id.0.to_string()])?;
+        store.conn.execute("DELETE FROM session_log_chunks WHERE log_id = ?1", [id.0.to_string()])?;
+        store.conn.execute("DELETE FROM session_logs WHERE id = ?1", [id.0.to_string()])?;
         Ok(())
     })
 }
 
 /// Whether a log is still being recorded (has no end yet).
 pub fn running(store: &Store, id: LogId) -> Result<bool, LogError> {
-    let ended: Option<Option<i64>> = store
-        .conn
-        .query_row(
-            "SELECT ended_at FROM session_logs WHERE id = ?1",
-            [id.0.to_string()],
-            |r| r.get(0),
-        )
-        .optional()?;
+    let ended: Option<Option<i64>> =
+        store.conn.query_row("SELECT ended_at FROM session_logs WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?;
     Ok(matches!(ended, Some(None)))
 }
 
@@ -505,20 +400,14 @@ pub fn purge_orphans(store: &Store) -> Result<usize, LogError> {
 
 /// Removes one part (a deletion that came by sync).
 pub fn delete_chunk(store: &Store, chunk_id: &str) -> Result<(), LogError> {
-    store
-        .conn
-        .execute("DELETE FROM session_log_chunks WHERE id = ?1", [chunk_id])?;
+    store.conn.execute("DELETE FROM session_log_chunks WHERE id = ?1", [chunk_id])?;
     Ok(())
 }
 
 /// The ids of a log's parts, in order.
 pub fn chunk_ids(store: &Store, id: LogId) -> Result<Vec<String>, LogError> {
-    let mut stmt = store
-        .conn
-        .prepare("SELECT id FROM session_log_chunks WHERE log_id = ?1 ORDER BY seq")?;
-    let ids = stmt
-        .query_map([id.0.to_string()], |r| r.get(0))?
-        .collect::<Result<Vec<String>, _>>()?;
+    let mut stmt = store.conn.prepare("SELECT id FROM session_log_chunks WHERE log_id = ?1 ORDER BY seq")?;
+    let ids = stmt.query_map([id.0.to_string()], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
     Ok(ids)
 }
 
@@ -526,25 +415,15 @@ pub fn chunk_ids(store: &Store, id: LogId) -> Result<Vec<String>, LogError> {
 pub fn set_location(store: &Store, id: LogId, location: Option<ServerId>) -> Result<(), LogError> {
     let target = location.map(|s| s.0.to_string());
     store.atomic(|| {
-        store.conn.execute(
-            "UPDATE session_logs SET location = ?2 WHERE id = ?1",
-            params![id.0.to_string(), target],
-        )?;
-        store.conn.execute(
-            "UPDATE session_log_chunks SET location = ?2 WHERE log_id = ?1",
-            params![id.0.to_string(), target],
-        )?;
+        store.conn.execute("UPDATE session_logs SET location = ?2 WHERE id = ?1", params![id.0.to_string(), target])?;
+        store.conn.execute("UPDATE session_log_chunks SET location = ?2 WHERE log_id = ?1", params![id.0.to_string(), target])?;
         Ok(())
     })
 }
 
 /// The ended logs of a host.
 pub fn logs_of_host(store: &Store, host: HostId) -> Result<Vec<LogId>, LogError> {
-    ids(
-        store,
-        "SELECT id FROM session_logs WHERE host_id = ?1 AND ended_at IS NOT NULL",
-        params![host.0.to_string()],
-    )
+    ids(store, "SELECT id FROM session_logs WHERE host_id = ?1 AND ended_at IS NOT NULL", params![host.0.to_string()])
 }
 
 /// A log whose place differs from its host's: `(log, where it is, where its host is)`.
@@ -557,70 +436,39 @@ pub fn misplaced(store: &Store) -> Result<Vec<Misplaced>, LogError> {
          WHERE l.ended_at IS NOT NULL AND l.location IS NOT h.location",
     )?;
     let rows = stmt
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-            ))
-        })?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?)))?
         .collect::<Result<Vec<_>, _>>()?;
     let server = |t: Option<String>| t.and_then(|t| Uuid::parse_str(&t).ok()).map(ServerId);
-    Ok(rows
-        .into_iter()
-        .filter_map(|(id, at, host)| {
-            Some((LogId(Uuid::parse_str(&id).ok()?), server(at), server(host)))
-        })
-        .collect())
+    Ok(rows.into_iter().filter_map(|(id, at, host)| Some((LogId(Uuid::parse_str(&id).ok()?), server(at), server(host)))).collect())
 }
 
 /// Ended logs that live at `server`.
 pub fn logs_at(store: &Store, server: ServerId) -> Result<Vec<LogId>, LogError> {
-    ids(
-        store,
-        "SELECT id FROM session_logs WHERE location = ?1 AND ended_at IS NOT NULL",
-        params![server.0.to_string()],
-    )
+    ids(store, "SELECT id FROM session_logs WHERE location = ?1 AND ended_at IS NOT NULL", params![server.0.to_string()])
 }
 
 /// Ended logs that ended before `before_ms`.
 pub fn expired(store: &Store, before_ms: i64) -> Result<Vec<LogId>, LogError> {
-    ids(
-        store,
-        "SELECT id FROM session_logs WHERE ended_at IS NOT NULL AND ended_at < ?1",
-        params![before_ms],
-    )
+    ids(store, "SELECT id FROM session_logs WHERE ended_at IS NOT NULL AND ended_at < ?1", params![before_ms])
 }
 
 fn ids(store: &Store, sql: &str, params: impl rusqlite::Params) -> Result<Vec<LogId>, LogError> {
     let mut stmt = store.conn.prepare(sql)?;
-    let rows = stmt
-        .query_map(params, |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|id| Uuid::parse_str(&id).ok().map(LogId))
-        .collect())
+    let rows = stmt.query_map(params, |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(rows.into_iter().filter_map(|id| Uuid::parse_str(&id).ok().map(LogId)).collect())
 }
 
 /// Ends the logs whose recording never ended (the app stopped while recording), at the time of
 /// their last part. Call it only while nothing records.
 pub fn finish_abandoned(vault: &Vault, store: &Store) -> Result<Vec<LogId>, LogError> {
-    let open = ids(
-        store,
-        "SELECT id FROM session_logs WHERE ended_at IS NULL",
-        [],
-    )?;
+    let open = ids(store, "SELECT id FROM session_logs WHERE ended_at IS NULL", [])?;
     let mut done = Vec::new();
     for id in open {
         let Ok(Some(meta)) = meta(vault, store, id) else {
             continue;
         };
-        let last: Option<i64> = store.conn.query_row(
-            "SELECT MAX(written_at) FROM session_log_chunks WHERE log_id = ?1",
-            [id.0.to_string()],
-            |r| r.get(0),
-        )?;
+        let last: Option<i64> =
+            store.conn.query_row("SELECT MAX(written_at) FROM session_log_chunks WHERE log_id = ?1", [id.0.to_string()], |r| r.get(0))?;
         let size = stored_size(store, id)?;
         let ended = last.unwrap_or(meta.started_at).max(meta.started_at);
         finish(vault, store, id, ended, size, meta.truncated)?;
@@ -664,25 +512,15 @@ pub fn search_bytes(log: LogId, bytes: &[u8], query: &str, hits: &mut Vec<LogHit
         let Some(at) = lower.find(&needle) else {
             continue;
         };
-        hits.push(LogHit {
-            log_id: log,
-            line: u32::try_from(number).unwrap_or(u32::MAX),
-            snippet: snippet(line, lower[..at].chars().count()),
-        });
+        hits.push(LogHit { log_id: log, line: u32::try_from(number).unwrap_or(u32::MAX), snippet: snippet(line, lower[..at].chars().count()) });
     }
 }
 
 /// Up to [`MAX_SNIPPET`] characters of `line` around the character position `at`.
 fn snippet(line: &str, at: usize) -> String {
     let chars: Vec<char> = line.chars().collect();
-    let start = at
-        .saturating_sub(MAX_SNIPPET / 3)
-        .min(chars.len().saturating_sub(MAX_SNIPPET));
-    chars[start..chars.len().min(start + MAX_SNIPPET)]
-        .iter()
-        .collect::<String>()
-        .trim()
-        .to_owned()
+    let start = at.saturating_sub(MAX_SNIPPET / 3).min(chars.len().saturating_sub(MAX_SNIPPET));
+    chars[start..chars.len().min(start + MAX_SNIPPET)].iter().collect::<String>().trim().to_owned()
 }
 
 #[cfg(test)]

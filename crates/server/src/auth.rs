@@ -35,11 +35,7 @@ impl FromRequestParts<AppState> for ApiKey {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
-        if has_api_key(state, &parts.headers).await? {
-            Ok(Self)
-        } else {
-            Err(ApiError::BadApiKey)
-        }
+        if has_api_key(state, &parts.headers).await? { Ok(Self) } else { Err(ApiError::BadApiKey) }
     }
 }
 
@@ -55,25 +51,12 @@ impl Session {
     /// Checks a bearer token as it stands now; also used for open WebSockets.
     pub async fn check(state: &AppState, token: &[u8]) -> Result<Self, ApiError> {
         let now = state.now();
-        let session = state
-            .store
-            .session(token_hash(token))
-            .await?
-            .filter(|s| s.expires_at > now)
-            .ok_or(ApiError::Unauthorized)?;
-        let account = state
-            .store
-            .account(&session.account)
-            .await?
-            .ok_or(ApiError::Unauthorized)?;
+        let session = state.store.session(token_hash(token)).await?.filter(|s| s.expires_at > now).ok_or(ApiError::Unauthorized)?;
+        let account = state.store.account(&session.account).await?.ok_or(ApiError::Unauthorized)?;
         if account.locked {
             return Err(ApiError::AccountLocked);
         }
-        let device = state
-            .store
-            .device(session.device_id)
-            .await?
-            .ok_or(ApiError::Unauthorized)?;
+        let device = state.store.device(session.device_id).await?.ok_or(ApiError::Unauthorized)?;
         if !device.active || device.account != session.account {
             return Err(ApiError::DeviceInactive);
         }
@@ -82,31 +65,18 @@ impl Session {
         if device.admin_blocked {
             return Err(ApiError::DeviceBlocked);
         }
-        if device
-            .last_seen
-            .is_none_or(|seen| now - seen >= TOUCH_EVERY)
-        {
+        if device.last_seen.is_none_or(|seen| now - seen >= TOUCH_EVERY) {
             state.store.touch_device(device.device_id, now).await?;
         }
-        Ok(Self {
-            device_id: session.device_id,
-            account: session.account,
-        })
+        Ok(Self { device_id: session.device_id, account: session.account })
     }
 }
 
 /// The token bytes from `Authorization: Bearer <base64>`.
 pub fn bearer_token(headers: &HeaderMap) -> Result<Vec<u8>, ApiError> {
-    let value = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or(ApiError::Unauthorized)?;
-    let token = value
-        .strip_prefix("Bearer ")
-        .ok_or(ApiError::Unauthorized)?;
-    BASE64URL_NOPAD
-        .decode(token.trim().as_bytes())
-        .map_err(|_| ApiError::Unauthorized)
+    let value = headers.get(axum::http::header::AUTHORIZATION).and_then(|v| v.to_str().ok()).ok_or(ApiError::Unauthorized)?;
+    let token = value.strip_prefix("Bearer ").ok_or(ApiError::Unauthorized)?;
+    BASE64URL_NOPAD.decode(token.trim().as_bytes()).map_err(|_| ApiError::Unauthorized)
 }
 
 impl FromRequestParts<AppState> for Session {

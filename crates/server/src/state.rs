@@ -52,10 +52,7 @@ impl AppState {
 }
 
 fn system_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default()
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()
 }
 
 /// How long a login challenge stays valid, in seconds.
@@ -78,10 +75,7 @@ impl Default for Challenges {
     fn default() -> Self {
         let mut secret = [0u8; 32];
         rand::rng().fill(&mut secret[..]);
-        Self {
-            secret,
-            redeemed: Mutex::default(),
-        }
+        Self { secret, redeemed: Mutex::default() }
     }
 }
 
@@ -117,10 +111,7 @@ impl Challenges {
         if i64::from_be_bytes(expiry) < now {
             return false;
         }
-        self.redeemed
-            .lock()
-            .map(|used| !used.contains_key(challenge))
-            .unwrap_or(false)
+        self.redeemed.lock().map(|used| !used.contains_key(challenge)).unwrap_or(false)
     }
 
     /// Marks a challenge as used after a successful login; `false` if it already was, which

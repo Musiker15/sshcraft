@@ -30,11 +30,7 @@ pub enum LocalError {
 
 #[cfg(windows)]
 fn shell(program: &str, args: &[&str], label: &str) -> ShellCommand {
-    ShellCommand {
-        program: program.to_owned(),
-        args: args.iter().map(|a| (*a).to_owned()).collect(),
-        label: label.to_owned(),
-    }
+    ShellCommand { program: program.to_owned(), args: args.iter().map(|a| (*a).to_owned()).collect(), label: label.to_owned() }
 }
 
 /// The distributions `wsl.exe --list --quiet` names. It writes UTF-16LE, maybe with a byte order
@@ -43,12 +39,7 @@ pub fn parse_wsl_list(bytes: &[u8]) -> Vec<String> {
     if !bytes.len().is_multiple_of(2) {
         return Vec::new();
     }
-    let units: Vec<u16> = bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|c| u16::from_le_bytes(*c))
-        .collect();
+    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     let Ok(text) = String::from_utf16(&units) else {
         return Vec::new();
     };
@@ -62,8 +53,7 @@ pub fn parse_wsl_list(bytes: &[u8]) -> Vec<String> {
 
 #[cfg(windows)]
 fn in_path(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
+    std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
 #[cfg(windows)]
@@ -92,11 +82,7 @@ pub fn available_shells(custom: Option<ShellCommand>) -> Vec<ShellCommand> {
         }
         shells.push(shell("cmd.exe", &[], "Command Prompt"));
         for name in wsl_distributions() {
-            shells.push(ShellCommand {
-                program: "wsl.exe".into(),
-                args: vec!["-d".into(), name.clone()],
-                label: format!("WSL: {name}"),
-            });
+            shells.push(ShellCommand { program: "wsl.exe".into(), args: vec!["-d".into(), name.clone()], label: format!("WSL: {name}") });
         }
     }
     #[cfg(not(windows))]
@@ -104,17 +90,9 @@ pub fn available_shells(custom: Option<ShellCommand>) -> Vec<ShellCommand> {
         match std::env::var("SHELL").ok().filter(|s| !s.is_empty()) {
             Some(login) => {
                 let label = login.rsplit('/').next().unwrap_or(&login).to_owned();
-                shells.push(ShellCommand {
-                    program: login,
-                    args: vec!["-l".into()],
-                    label,
-                });
+                shells.push(ShellCommand { program: login, args: vec!["-l".into()], label });
             }
-            None => shells.push(ShellCommand {
-                program: "/bin/sh".into(),
-                args: Vec::new(),
-                label: "sh".into(),
-            }),
+            None => shells.push(ShellCommand { program: "/bin/sh".into(), args: Vec::new(), label: "sh".into() }),
         }
     }
     shells.extend(custom);
@@ -152,10 +130,7 @@ impl LocalWriter {
         let Some(writer) = slot.as_mut() else {
             return Err(LocalError::Io("the shell has ended".into()));
         };
-        let written = writer
-            .write_all(data)
-            .and_then(|()| writer.flush())
-            .map_err(|e| LocalError::Io(e.to_string()));
+        let written = writer.write_all(data).and_then(|()| writer.flush()).map_err(|e| LocalError::Io(e.to_string()));
         // The waiter could not take the writer while this write held it.
         if self.pty.ended.load(std::sync::atomic::Ordering::SeqCst) {
             slot.take();
@@ -170,14 +145,7 @@ impl LocalWriter {
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), LocalError> {
         match &*self.pty.master.lock().expect("master lock") {
-            Some(master) => master
-                .resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .map_err(|e| LocalError::Io(e.to_string())),
+            Some(master) => master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| LocalError::Io(e.to_string())),
             None => Ok(()),
         }
     }
@@ -192,9 +160,7 @@ fn usable_cwd(dir: &std::path::Path) -> bool {
 }
 
 fn home() -> Option<std::path::PathBuf> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.is_dir())
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from).filter(|p| p.is_dir())
 }
 
 /// Starts the shell in `cwd` when that is a directory, else in the user's home directory, with
@@ -207,35 +173,19 @@ pub fn spawn(
     term: &str,
     cwd: Option<&std::path::Path>,
 ) -> Result<(LocalWriter, mpsc::Receiver<ShellEvent>), LocalError> {
-    let pair = native_pty_system()
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| LocalError::Spawn(e.to_string()))?;
+    let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| LocalError::Spawn(e.to_string()))?;
     let mut builder = CommandBuilder::new(&cmd.program);
     builder.args(&cmd.args);
     builder.env("TERM", term);
-    let dir = cwd
-        .filter(|dir| usable_cwd(dir))
-        .map(std::path::Path::to_path_buf)
-        .or_else(home);
+    let dir = cwd.filter(|dir| usable_cwd(dir)).map(std::path::Path::to_path_buf).or_else(home);
     if let Some(dir) = dir {
         builder.cwd(dir);
     }
-    let mut child = pair
-        .slave
-        .spawn_command(builder)
-        .map_err(|e| LocalError::Spawn(e.to_string()))?;
+    let mut child = pair.slave.spawn_command(builder).map_err(|e| LocalError::Spawn(e.to_string()))?;
     // Only the child holds the other end now, so the reader sees the end when it exits.
     drop(pair.slave);
     let mut killer = child.clone_killer();
-    let handles = pair
-        .master
-        .try_clone_reader()
-        .and_then(|reader| Ok((reader, pair.master.take_writer()?)));
+    let handles = pair.master.try_clone_reader().and_then(|reader| Ok((reader, pair.master.take_writer()?)));
     let (mut reader, writer) = match handles {
         Ok(handles) => handles,
         Err(e) => {
@@ -274,10 +224,7 @@ pub fn spawn(
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if tx
-                        .blocking_send(ShellEvent::Data(buf[..n].to_vec()))
-                        .is_err()
-                    {
+                    if tx.blocking_send(ShellEvent::Data(buf[..n].to_vec())).is_err() {
                         return;
                     }
                 }
@@ -299,17 +246,7 @@ pub fn spawn(
         let _ = tx.blocking_send(ShellEvent::Ended(reason));
     });
 
-    Ok((
-        LocalWriter {
-            pty: Arc::new(Pty {
-                writer,
-                ended,
-                master,
-                killer: Mutex::new(killer),
-            }),
-        },
-        rx,
-    ))
+    Ok((LocalWriter { pty: Arc::new(Pty { writer, ended, master, killer: Mutex::new(killer) }) }, rx))
 }
 
 #[cfg(test)]
@@ -319,13 +256,7 @@ mod tests {
     #[test]
     fn only_local_absolute_directories_are_used() {
         assert!(usable_cwd(&std::env::temp_dir()));
-        for bad in [
-            r"\\attacker\share",
-            "//attacker/share",
-            r"\\?\UNC\attacker\share",
-            "relative/dir",
-            ".",
-        ] {
+        for bad in [r"\\attacker\share", "//attacker/share", r"\\?\UNC\attacker\share", "relative/dir", "."] {
             assert!(!usable_cwd(std::path::Path::new(bad)), "{bad}");
         }
     }
@@ -343,18 +274,12 @@ mod tests {
 
     #[test]
     fn parse_wsl_list_utf16_with_bom() {
-        assert_eq!(
-            parse_wsl_list(&utf16("Ubuntu\r\n\r\nDebian\r\n", true)),
-            vec!["Ubuntu".to_owned(), "Debian".to_owned()]
-        );
+        assert_eq!(parse_wsl_list(&utf16("Ubuntu\r\n\r\nDebian\r\n", true)), vec!["Ubuntu".to_owned(), "Debian".to_owned()]);
     }
 
     #[test]
     fn parse_wsl_list_without_bom() {
-        assert_eq!(
-            parse_wsl_list(&utf16("Ubuntu-24.04\r\n", false)),
-            vec!["Ubuntu-24.04".to_owned()]
-        );
+        assert_eq!(parse_wsl_list(&utf16("Ubuntu-24.04\r\n", false)), vec!["Ubuntu-24.04".to_owned()]);
     }
 
     #[test]

@@ -55,10 +55,7 @@ async fn pull_rejects_a_rollback() {
     assert_eq!(b.hosts()[0].name, "new");
 
     // The server hands out the old version again, under a later change number.
-    let path = server
-        .database_url
-        .trim_start_matches("sqlite://")
-        .to_owned();
+    let path = server.database_url.trim_start_matches("sqlite://").to_owned();
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute(
         "UPDATE records SET record = ?1, version = 1, seq = 100 WHERE record_id = ?2",
@@ -111,26 +108,15 @@ async fn a_record_that_cannot_apply_yet_is_tried_again() {
     let (a, b) = (Dev::new(), Dev::new());
     let export = create(&server, &a, "a@example.org").await;
     join(&server, &b, &export).await;
-    let group = Group {
-        id: GroupId::new(),
-        name: "srv".into(),
-        defaults: ConnectionSettings::default(),
-        location: None,
-        parent_id: None,
-        tags: Vec::new(),
-    };
+    let group =
+        Group { id: GroupId::new(), name: "srv".into(), defaults: ConnectionSettings::default(), location: None, parent_id: None, tags: Vec::new() };
     let mut host = sample_host("web");
     host.group_id = Some(group.id);
     // The host's record comes before its group's (as after a key rotation re-sealed them).
     write_host(&server, &a, &host, Uuid::new_v4(), 1, 100).await;
     let (manifest, key) = a.area();
     let row = a.row();
-    let item = SyncItem {
-        modified_at: 100,
-        body: ItemBody::Group {
-            group: group.clone(),
-        },
-    };
+    let item = SyncItem { modified_at: 100, body: ItemBody::Group { group: group.clone() } };
     let header = RecordHeader {
         record_id: Uuid::new_v4(),
         area_id: manifest.area_id,
@@ -160,10 +146,7 @@ async fn an_operator_block_is_not_a_revocation() {
     on_server.set_admin_blocked(device, true).await.unwrap();
     let err = Engine::load(&b.store, &b.vault, b.row().id).await.err();
     assert_eq!(err, Some(SyncError::Blocked));
-    assert!(
-        !b.row().revoked,
-        "a block can be lifted, it is not stored as revoked"
-    );
+    assert!(!b.row().revoked, "a block can be lifted, it is not stored as revoked");
     on_server.set_admin_blocked(device, false).await.unwrap();
     assert!(pull(&b).await.is_ok());
 }

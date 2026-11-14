@@ -61,9 +61,7 @@ pub enum ForwardError {
 }
 
 fn address_ok(address: &str) -> bool {
-    !address.is_empty()
-        && address.chars().count() <= MAX_ADDRESS
-        && !address.chars().any(|c| c.is_whitespace() || c.is_control())
+    !address.is_empty() && address.chars().count() <= MAX_ADDRESS && !address.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 pub fn validate(rule: &ForwardRule) -> Result<(), ForwardError> {
@@ -74,13 +72,9 @@ pub fn validate(rule: &ForwardRule) -> Result<(), ForwardError> {
         return Err(ForwardError::Invalid("bind"));
     }
     match rule.kind {
-        ForwardKind::Dynamic if !rule.target_host.is_empty() || rule.target_port != 0 => {
-            Err(ForwardError::Invalid("target"))
-        }
+        ForwardKind::Dynamic if !rule.target_host.is_empty() || rule.target_port != 0 => Err(ForwardError::Invalid("target")),
         ForwardKind::Dynamic => Ok(()),
-        _ if !address_ok(&rule.target_host) || rule.target_port == 0 => {
-            Err(ForwardError::Invalid("target"))
-        }
+        _ if !address_ok(&rule.target_host) || rule.target_port == 0 => Err(ForwardError::Invalid("target")),
         _ => Ok(()),
     }
 }
@@ -113,10 +107,7 @@ pub fn parse_rules(values: Vec<serde_json::Value>) -> Vec<ForwardRule> {
         let Ok(rule) = serde_json::from_value::<ForwardRule>(value) else {
             continue;
         };
-        if validate(&rule).is_ok()
-            && rules.len() < MAX_FORWARDS_PER_HOST
-            && !rules.iter().any(|r| r.id == rule.id)
-        {
+        if validate(&rule).is_ok() && rules.len() < MAX_FORWARDS_PER_HOST && !rules.iter().any(|r| r.id == rule.id) {
             rules.push(rule);
         }
     }
@@ -149,11 +140,7 @@ mod tests {
 
     #[test]
     fn valid_rules_of_every_kind() {
-        for kind in [
-            ForwardKind::Local,
-            ForwardKind::Remote,
-            ForwardKind::Dynamic,
-        ] {
+        for kind in [ForwardKind::Local, ForwardKind::Remote, ForwardKind::Dynamic] {
             assert_eq!(validate(&rule(kind)), Ok(()), "{kind:?}");
         }
     }
@@ -203,10 +190,7 @@ mod tests {
         assert_eq!(validate_all(&same), Err(ForwardError::DuplicateId));
         let mut broken = twice;
         broken[1].bind_port = 0;
-        assert!(matches!(
-            validate_all(&broken),
-            Err(ForwardError::Invalid(_))
-        ));
+        assert!(matches!(validate_all(&broken), Err(ForwardError::Invalid(_))));
     }
 
     #[test]
@@ -216,12 +200,7 @@ mod tests {
         bad["bind_port"] = serde_json::json!(70000);
         let mut zero = serde_json::to_value(rule(ForwardKind::Remote)).unwrap();
         zero["bind_port"] = serde_json::json!(0);
-        let values = vec![
-            serde_json::to_value(&good).unwrap(),
-            bad,
-            zero,
-            serde_json::json!("x"),
-        ];
+        let values = vec![serde_json::to_value(&good).unwrap(), bad, zero, serde_json::json!("x")];
         assert_eq!(parse_rules(values), vec![good]);
     }
 }

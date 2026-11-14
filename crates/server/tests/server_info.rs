@@ -23,14 +23,8 @@ async fn unknown_route_answers_in_the_error_format() {
 
 #[test]
 fn config_accepts_only_http_origins() {
-    let cfg = |o: &str| ServeConfig {
-        public_origin: o.into(),
-        ..ServeConfig::default()
-    };
-    assert_eq!(
-        cfg("HTTPS://Sync.Example.org:443/x").validate().unwrap(),
-        "https://sync.example.org"
-    );
+    let cfg = |o: &str| ServeConfig { public_origin: o.into(), ..ServeConfig::default() };
+    assert_eq!(cfg("HTTPS://Sync.Example.org:443/x").validate().unwrap(), "https://sync.example.org");
     assert!(cfg("sync.example.org").validate().is_err());
     assert!(cfg("ftp://sync.example.org").validate().is_err());
     assert!(cfg("https://").validate().is_err());
@@ -46,10 +40,7 @@ async fn wrong_method_answers_in_the_error_format() {
 
 #[tokio::test]
 async fn a_database_url_never_shows_up_in_errors() {
-    for url in [
-        "sshcraft:secretpw@localhost/db",
-        "mysql://sshcraft:secretpw@localhost/db",
-    ] {
+    for url in ["sshcraft:secretpw@localhost/db", "mysql://sshcraft:secretpw@localhost/db"] {
         let Err(err) = sshcraft_server_lib::store::open(url).await else {
             panic!("{url} must not open");
         };

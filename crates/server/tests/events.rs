@@ -12,8 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
-type Ws =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Starts the router on a free local port; returns the `ws://` address of `/v1/events`.
 async fn serve(env: &mut TestEnv) -> String {
@@ -25,19 +24,12 @@ async fn serve(env: &mut TestEnv) -> String {
     format!("ws://{addr}/v1/events")
 }
 
-async fn connect(
-    url: &str,
-    token: Option<&str>,
-) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
+async fn connect(url: &str, token: Option<&str>) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
     let mut request = url.into_client_request().unwrap();
     if let Some(token) = token {
-        request
-            .headers_mut()
-            .insert("authorization", format!("Bearer {token}").parse().unwrap());
+        request.headers_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
     }
-    tokio_tungstenite::connect_async(request)
-        .await
-        .map(|(ws, _)| ws)
+    tokio_tungstenite::connect_async(request).await.map(|(ws, _)| ws)
 }
 
 /// The next event as JSON; `None` when the connection closed. Pings are skipped.
@@ -72,55 +64,18 @@ async fn silent(ws: &mut Ws, wait: Duration) {
 
 const WAIT: Duration = Duration::from_secs(5);
 
-async fn put_manifest(
-    env: &TestEnv,
-    token: &str,
-    owner: &Person,
-    area: AreaId,
-    version: u64,
-    key: &AreaKey,
-    members: Vec<Member>,
-) {
-    let m = AreaManifest::sign(
-        area,
-        version,
-        1,
-        key,
-        owner.public(),
-        members,
-        owner.devices[0].id,
-        &owner.devices[0].keys,
-    );
-    let (status, body) = env
-        .authed(
-            token,
-            Method::PUT,
-            &format!("/v1/areas/{}/manifest", area.0),
-            Some(json!(m)),
-        )
-        .await;
+async fn put_manifest(env: &TestEnv, token: &str, owner: &Person, area: AreaId, version: u64, key: &AreaKey, members: Vec<Member>) {
+    let m = AreaManifest::sign(area, version, 1, key, owner.public(), members, owner.devices[0].id, &owner.devices[0].keys);
+    let (status, body) = env.authed(token, Method::PUT, &format!("/v1/areas/{}/manifest", area.0), Some(json!(m))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 async fn put_record(env: &TestEnv, token: &str, by: &Person, area: AreaId, key: &AreaKey) -> Uuid {
     let id = Uuid::new_v4();
-    let header = RecordHeader {
-        record_id: id,
-        area_id: area,
-        version: 1,
-        key_version: 1,
-        author_account: by.public(),
-        author_device: by.devices[0].id,
-    };
+    let header =
+        RecordHeader { record_id: id, area_id: area, version: 1, key_version: 1, author_account: by.public(), author_device: by.devices[0].id };
     let record = SealedRecord::seal(header, b"x", key, &by.devices[0].keys);
-    let (status, body) = env
-        .authed(
-            token,
-            Method::PUT,
-            &format!("/v1/areas/{}/records/{id}", area.0),
-            Some(json!(record)),
-        )
-        .await;
+    let (status, body) = env.authed(token, Method::PUT, &format!("/v1/areas/{}/records/{id}", area.0), Some(json!(record))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     id
 }
@@ -129,41 +84,18 @@ async fn put_record(env: &TestEnv, token: &str, by: &Person, area: AreaId, key: 
 async fn member_gets_record_events_stranger_does_not() {
     let mut env = TestEnv::new().await;
     let url = serve(&mut env).await;
-    let (a, b, c) = (
-        Person::new("alice"),
-        Person::new("bob"),
-        Person::new("carol"),
-    );
+    let (a, b, c) = (Person::new("alice"), Person::new("bob"), Person::new("carol"));
     for p in [&a, &b, &c] {
         env.register_ok(p).await;
     }
-    let (ta, tb, tc) = (
-        env.token(&a, 0).await,
-        env.token(&b, 0).await,
-        env.token(&c, 0).await,
-    );
+    let (ta, tb, tc) = (env.token(&a, 0).await, env.token(&b, 0).await, env.token(&c, 0).await);
     let (area, key) = (AreaId(Uuid::new_v4()), AreaKey::generate());
-    put_manifest(
-        &env,
-        &ta,
-        &a,
-        area,
-        1,
-        &key,
-        vec![Member {
-            account: b.public(),
-            role: Role::Read,
-        }],
-    )
-    .await;
+    put_manifest(&env, &ta, &a, area, 1, &key, vec![Member { account: b.public(), role: Role::Read }]).await;
     let mut ws_b = connect(&url, Some(&tb)).await.unwrap();
     let mut ws_c = connect(&url, Some(&tc)).await.unwrap();
     let id = put_record(&env, &ta, &a, area, &key).await;
     let event = next_event(&mut ws_b, WAIT).await.expect("event");
-    assert_eq!(
-        event,
-        json!({ "type": "record", "area_id": area.0, "record_id": id, "version": 1, "seq": 1 })
-    );
+    assert_eq!(event, json!({ "type": "record", "area_id": area.0, "record_id": id, "version": 1, "seq": 1 }));
     silent(&mut ws_c, Duration::from_millis(500)).await;
 }
 
@@ -177,10 +109,7 @@ async fn revoked_device_is_disconnected() {
     let (t0, t1) = (env.token(&a, 0).await, env.token(&a, second).await);
     let mut ws = connect(&url, Some(&t1)).await.unwrap();
     let revoke = a.revoke_by_device(0, second);
-    assert_eq!(
-        env.append(&a, &[revoke], Auth::Token(&t0)).await.0,
-        StatusCode::OK
-    );
+    assert_eq!(env.append(&a, &[revoke], Auth::Token(&t0)).await.0, StatusCode::OK);
     let mut ended = false;
     while let Some(event) = next_event(&mut ws, WAIT).await {
         if event["type"] == "session_ended" {
@@ -189,10 +118,7 @@ async fn revoked_device_is_disconnected() {
         }
     }
     assert!(ended, "SessionEnded must arrive");
-    assert!(
-        next_event(&mut ws, WAIT).await.is_none(),
-        "the connection closes"
-    );
+    assert!(next_event(&mut ws, WAIT).await.is_none(), "the connection closes");
 }
 
 #[tokio::test]
@@ -203,10 +129,7 @@ async fn admin_block_disconnects_within_the_recheck() {
     env.register_ok(&a).await;
     let token = env.token(&a, 0).await;
     let mut ws = connect(&url, Some(&token)).await.unwrap();
-    env.store()
-        .set_admin_blocked(a.devices[0].id, true)
-        .await
-        .unwrap();
+    env.store().set_admin_blocked(a.devices[0].id, true).await.unwrap();
     let event = next_event(&mut ws, WAIT).await.expect("event");
     assert_eq!(event, json!({ "type": "session_ended" }));
     assert!(next_event(&mut ws, WAIT).await.is_none());
@@ -234,26 +157,11 @@ async fn removed_member_hears_about_it() {
     env.register_ok(&b).await;
     let (ta, tb) = (env.token(&a, 0).await, env.token(&b, 0).await);
     let (area, key) = (AreaId(Uuid::new_v4()), AreaKey::generate());
-    put_manifest(
-        &env,
-        &ta,
-        &a,
-        area,
-        1,
-        &key,
-        vec![Member {
-            account: b.public(),
-            role: Role::Read,
-        }],
-    )
-    .await;
+    put_manifest(&env, &ta, &a, area, 1, &key, vec![Member { account: b.public(), role: Role::Read }]).await;
     let mut ws = connect(&url, Some(&tb)).await.unwrap();
     put_manifest(&env, &ta, &a, area, 2, &key, vec![]).await;
     let event = next_event(&mut ws, WAIT).await.expect("event");
-    assert_eq!(
-        event,
-        json!({ "type": "manifest", "area_id": area.0, "version": 2 })
-    );
+    assert_eq!(event, json!({ "type": "manifest", "area_id": area.0, "version": 2 }));
     put_record(&env, &ta, &a, area, &key).await;
     silent(&mut ws, Duration::from_millis(500)).await;
 }
@@ -287,13 +195,8 @@ async fn oversized_client_message_closes_the_connection() {
     env.register_ok(&a).await;
     let token = env.token(&a, 0).await;
     let mut ws = connect(&url, Some(&token)).await.unwrap();
-    ws.send(Message::Text("x".repeat(64 * 1024).into()))
-        .await
-        .unwrap();
-    assert!(
-        next_event(&mut ws, WAIT).await.is_none(),
-        "the server closes the connection"
-    );
+    ws.send(Message::Text("x".repeat(64 * 1024).into())).await.unwrap();
+    assert!(next_event(&mut ws, WAIT).await.is_none(), "the server closes the connection");
 }
 
 #[tokio::test]

@@ -6,9 +6,7 @@ use crate::SyncError;
 use crate::engine::{Engine, PAGE, from_json, lock, to_json};
 use crate::items::{encode, local_item};
 use serde::{Deserialize, Serialize};
-use sshcraft_proto::area::{
-    AreaId, AreaKey, AreaManifest, KeyEnvelope, Member, key_commitment, seal_area_key,
-};
+use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, KeyEnvelope, Member, key_commitment, seal_area_key};
 use sshcraft_proto::devicelog::{DeviceSet, LogAction};
 use sshcraft_proto::identity::{AccountPublic, DeviceCertificate};
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
@@ -33,41 +31,22 @@ fn sealed_setting(engine: &Engine, area: AreaId) -> String {
     format!("sync.sealed.{}.{}", engine.server.0, area.0)
 }
 
-pub(crate) fn load_sealed(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    area: AreaId,
-) -> Result<SealedSet, SyncError> {
+pub(crate) fn load_sealed(engine: &Engine, store: &Mutex<Store>, area: AreaId) -> Result<SealedSet, SyncError> {
     match lock(store)?.get_setting(&sealed_setting(engine, area))? {
         Some(text) if !text.is_empty() => from_json(&text),
         _ => Ok(SealedSet::default()),
     }
 }
 
-fn save_sealed(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    area: AreaId,
-    sealed: &SealedSet,
-) -> Result<(), SyncError> {
+fn save_sealed(engine: &Engine, store: &Mutex<Store>, area: AreaId, sealed: &SealedSet) -> Result<(), SyncError> {
     lock(store)?.put_setting(&sealed_setting(engine, area), &to_json(sealed)?)?;
     Ok(())
 }
 
 /// Every active device that may read an area of this account: its own (with the recovery
 /// device) and every member's.
-pub(crate) async fn readers(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    members: &[Member],
-) -> Result<Vec<DeviceCertificate>, SyncError> {
-    let mut certs: Vec<DeviceCertificate> = engine
-        .own_devices(store)
-        .await?
-        .0
-        .active()
-        .cloned()
-        .collect();
+pub(crate) async fn readers(engine: &Engine, store: &Mutex<Store>, members: &[Member]) -> Result<Vec<DeviceCertificate>, SyncError> {
+    let mut certs: Vec<DeviceCertificate> = engine.own_devices(store).await?.0.active().cloned().collect();
     for member in members {
         match engine.account_devices(store, &member.account).await {
             Ok(devices) => certs.extend(devices.active().cloned()),
@@ -85,12 +64,7 @@ pub(crate) async fn readers(
 /// into the member's log, or when it had sealed to that device itself, so it is noticed even if
 /// another device of this account did the last key change. Problems with one member or one area
 /// are returned, not raised, so they do not stop the rest.
-pub async fn check_member_devices(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    now: i64,
-) -> Result<Vec<String>, SyncError> {
+pub async fn check_member_devices(engine: &Engine, store: &Mutex<Store>, vault: &Vault, now: i64) -> Result<Vec<String>, SyncError> {
     let mut problems = Vec::new();
     let areas = engine.owned_areas(store)?;
     let mut revoked_since: HashMap<AccountPublic, bool> = HashMap::new();
@@ -101,11 +75,8 @@ pub async fn check_member_devices(
             }
             let before = engine.known_head(store, &member.account)?;
             let revoked = match engine.account_log(store, &member.account).await {
-                Ok((_, log)) => before.is_some_and(|before| {
-                    log.entries.iter().any(|entry| {
-                        entry.seq > before.seq && matches!(entry.action, LogAction::Revoke { .. })
-                    })
-                }),
+                Ok((_, log)) => before
+                    .is_some_and(|before| log.entries.iter().any(|entry| entry.seq > before.seq && matches!(entry.action, LogAction::Revoke { .. }))),
                 Err(SyncError::Server { status: 404, .. }) => false,
                 Err(err) if fatal(&err) => return Err(err),
                 Err(err) => {
@@ -123,28 +94,12 @@ pub async fn check_member_devices(
         let area = manifest.area_id;
         let outcome = async {
             let sealed = load_sealed(engine, store, area)?;
-            let active: HashSet<Uuid> = readers(engine, store, &manifest.members)
-                .await?
-                .iter()
-                .map(|cert| cert.device_id)
-                .collect();
-            let gone = (sealed.key_version == manifest.key_version
-                && sealed.devices.iter().any(|d| !active.contains(d)))
-                || manifest
-                    .members
-                    .iter()
-                    .any(|m| revoked_since.get(&m.account).copied().unwrap_or(false));
+            let active: HashSet<Uuid> = readers(engine, store, &manifest.members).await?.iter().map(|cert| cert.device_id).collect();
+            let gone = (sealed.key_version == manifest.key_version && sealed.devices.iter().any(|d| !active.contains(d)))
+                || manifest.members.iter().any(|m| revoked_since.get(&m.account).copied().unwrap_or(false));
             if gone {
                 let members = manifest.members.clone();
-                rotate(
-                    engine,
-                    store,
-                    vault,
-                    vec![(manifest, key, members)],
-                    None,
-                    now,
-                )
-                .await
+                rotate(engine, store, vault, vec![(manifest, key, members)], None, now).await
             } else {
                 reseal_envelopes(engine, store, area).await.map(|_| ())
             }
@@ -161,30 +116,14 @@ pub async fn check_member_devices(
 
 /// Errors that end a sync pass instead of being reported per area.
 fn fatal(err: &SyncError) -> bool {
-    matches!(
-        err,
-        SyncError::Network(_) | SyncError::Revoked | SyncError::Blocked
-    )
+    matches!(err, SyncError::Network(_) | SyncError::Revoked | SyncError::Blocked)
 }
 
-fn seal_all(
-    key: &AreaKey,
-    area: AreaId,
-    key_version: u32,
-    readers: &[&DeviceCertificate],
-) -> Result<Vec<KeyEnvelope>, SyncError> {
-    Ok(readers
-        .iter()
-        .map(|cert| seal_area_key(key, area, key_version, cert))
-        .collect::<Result<Vec<_>, _>>()?)
+fn seal_all(key: &AreaKey, area: AreaId, key_version: u32, readers: &[&DeviceCertificate]) -> Result<Vec<KeyEnvelope>, SyncError> {
+    Ok(readers.iter().map(|cert| seal_area_key(key, area, key_version, cert)).collect::<Result<Vec<_>, _>>()?)
 }
 
-async fn upload(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    area: AreaId,
-    envelopes: &[KeyEnvelope],
-) -> Result<(), SyncError> {
+async fn upload(engine: &Engine, store: &Mutex<Store>, area: AreaId, envelopes: &[KeyEnvelope]) -> Result<(), SyncError> {
     for chunk in envelopes.chunks(ENVELOPES_PER_REQUEST) {
         let put = engine.client().put_envelopes(area, chunk).await;
         engine.revoked_check(store, put)?;
@@ -193,53 +132,24 @@ async fn upload(
 }
 
 /// Stores a manifest this device signed, with its own envelope, and which devices have one.
-fn remember(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    manifest: &AreaManifest,
-    envelopes: &[KeyEnvelope],
-) -> Result<(), SyncError> {
-    let own = envelopes
-        .iter()
-        .find(|e| e.device_id == engine.device_id())
-        .ok_or(SyncError::NotSetUp)?;
-    lock(store)?.put_area(
-        engine.server,
-        manifest.area_id.0,
-        &to_json(manifest)?,
-        &to_json(own)?,
-    )?;
+fn remember(engine: &Engine, store: &Mutex<Store>, manifest: &AreaManifest, envelopes: &[KeyEnvelope]) -> Result<(), SyncError> {
+    let own = envelopes.iter().find(|e| e.device_id == engine.device_id()).ok_or(SyncError::NotSetUp)?;
+    lock(store)?.put_area(engine.server, manifest.area_id.0, &to_json(manifest)?, &to_json(own)?)?;
     save_sealed(
         engine,
         store,
         manifest.area_id,
-        &SealedSet {
-            key_version: manifest.key_version,
-            devices: envelopes.iter().map(|e| e.device_id).collect(),
-        },
+        &SealedSet { key_version: manifest.key_version, devices: envelopes.iter().map(|e| e.device_id).collect() },
     )
 }
 
 /// A new area owned by this account, with envelopes for its devices and every member's.
-pub async fn create_area(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    members: Vec<Member>,
-) -> Result<(AreaManifest, AreaKey), SyncError> {
+pub async fn create_area(engine: &Engine, store: &Mutex<Store>, members: Vec<Member>) -> Result<(AreaManifest, AreaKey), SyncError> {
     let area = AreaId(Uuid::new_v4());
     let key = AreaKey::generate();
     // The readers first: a member whose log does not verify stops it before anything is sent.
     let readers = readers(engine, store, &members).await?;
-    let manifest = AreaManifest::sign(
-        area,
-        1,
-        1,
-        &key,
-        engine.account,
-        members,
-        engine.device_id(),
-        &engine.keys,
-    );
+    let manifest = AreaManifest::sign(area, 1, 1, &key, engine.account, members, engine.device_id(), &engine.keys);
     let put = engine.client().put_manifest(&manifest).await;
     engine.revoked_check(store, put)?;
     let envelopes = seal_all(&key, area, 1, &readers.iter().collect::<Vec<_>>())?;
@@ -250,25 +160,15 @@ pub async fn create_area(
 
 /// Seals the area key for every device of the owner and the members that has none yet;
 /// returns how many envelopes were added.
-pub async fn reseal_envelopes(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    area: AreaId,
-) -> Result<usize, SyncError> {
+pub async fn reseal_envelopes(engine: &Engine, store: &Mutex<Store>, area: AreaId) -> Result<usize, SyncError> {
     let (manifest, key) = engine.stored_area(store, area.0)?;
     let readers = readers(engine, store, &manifest.members).await?;
     let mut sealed = load_sealed(engine, store, area)?;
     if sealed.key_version != manifest.key_version {
-        sealed = SealedSet {
-            key_version: manifest.key_version,
-            devices: vec![],
-        };
+        sealed = SealedSet { key_version: manifest.key_version, devices: vec![] };
     }
     let known: HashSet<Uuid> = sealed.devices.iter().copied().collect();
-    let new: Vec<&DeviceCertificate> = readers
-        .iter()
-        .filter(|cert| !known.contains(&cert.device_id))
-        .collect();
+    let new: Vec<&DeviceCertificate> = readers.iter().filter(|cert| !known.contains(&cert.device_id)).collect();
     if new.is_empty() {
         return Ok(0);
     }
@@ -294,31 +194,14 @@ pub async fn set_members(
     if old.owner != engine.account {
         return Err(SyncError::NotAllowed);
     }
-    let removed = old
-        .members
-        .iter()
-        .any(|m| !members.iter().any(|n| n.account == m.account));
+    let removed = old.members.iter().any(|m| !members.iter().any(|n| n.account == m.account));
     if removed {
         return rotate(engine, store, vault, vec![(old, key, members)], None, now).await;
     }
-    let manifest = AreaManifest::sign(
-        area,
-        old.version + 1,
-        old.key_version,
-        &key,
-        engine.account,
-        members,
-        engine.device_id(),
-        &engine.keys,
-    );
+    let manifest = AreaManifest::sign(area, old.version + 1, old.key_version, &key, engine.account, members, engine.device_id(), &engine.keys);
     let put = engine.client().put_manifest(&manifest).await;
     engine.revoked_check(store, put)?;
-    let envelope = lock(store)?
-        .areas(engine.server)?
-        .into_iter()
-        .find(|a| a.area_id == area.0)
-        .ok_or(SyncError::NotSetUp)?
-        .envelope;
+    let envelope = lock(store)?.areas(engine.server)?.into_iter().find(|a| a.area_id == area.0).ok_or(SyncError::NotSetUp)?.envelope;
     lock(store)?.put_area(engine.server, area.0, &to_json(&manifest)?, &envelope)?;
     reseal_envelopes(engine, store, area).await?;
     Ok(())
@@ -354,50 +237,31 @@ fn seal_label(engine: &Engine) -> String {
 }
 
 fn area_key(bytes: &[u8]) -> Result<AreaKey, SyncError> {
-    let array: &[u8; 32] = bytes
-        .try_into()
-        .map_err(|_| SyncError::Store("area key length".into()))?;
+    let array: &[u8; 32] = bytes.try_into().map_err(|_| SyncError::Store("area key length".into()))?;
     Ok(AreaKey::from_bytes(array))
 }
 
-fn save_pending(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    pending: &PendingRotation,
-) -> Result<(), SyncError> {
+fn save_pending(engine: &Engine, store: &Mutex<Store>, vault: &Vault, pending: &PendingRotation) -> Result<(), SyncError> {
     if pending.revoke.is_none() && pending.areas.is_empty() {
         lock(store)?.put_setting(&setting_key(engine), "")?;
         return Ok(());
     }
-    let json =
-        Zeroizing::new(serde_json::to_vec(pending).map_err(|e| SyncError::Store(e.to_string()))?);
+    let json = Zeroizing::new(serde_json::to_vec(pending).map_err(|e| SyncError::Store(e.to_string()))?);
     let sealed = vault.seal_secret(&seal_label(engine), &json)?;
-    lock(store)?.put_setting(
-        &setting_key(engine),
-        &data_encoding::BASE64URL_NOPAD.encode(&sealed),
-    )?;
+    lock(store)?.put_setting(&setting_key(engine), &data_encoding::BASE64URL_NOPAD.encode(&sealed))?;
     Ok(())
 }
 
-fn load_pending(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-) -> Result<Option<PendingRotation>, SyncError> {
+fn load_pending(engine: &Engine, store: &Mutex<Store>, vault: &Vault) -> Result<Option<PendingRotation>, SyncError> {
     let Some(text) = lock(store)?.get_setting(&setting_key(engine))? else {
         return Ok(None);
     };
     if text.is_empty() {
         return Ok(None);
     }
-    let sealed = data_encoding::BASE64URL_NOPAD
-        .decode(text.as_bytes())
-        .map_err(|e| SyncError::Store(e.to_string()))?;
+    let sealed = data_encoding::BASE64URL_NOPAD.decode(text.as_bytes()).map_err(|e| SyncError::Store(e.to_string()))?;
     let json = vault.open_secret(&seal_label(engine), &sealed)?;
-    Ok(Some(
-        serde_json::from_slice(&json).map_err(|e| SyncError::Store(e.to_string()))?,
-    ))
+    Ok(Some(serde_json::from_slice(&json).map_err(|e| SyncError::Store(e.to_string()))?))
 }
 
 /// Rotates the given areas (old manifest, old key, members afterwards): new key, new key
@@ -429,34 +293,20 @@ pub(crate) async fn rotate(
 }
 
 /// Finishes a stored, unfinished rotation; does nothing if there is none.
-pub async fn resume_rotation(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    now: i64,
-) -> Result<(), SyncError> {
+pub async fn resume_rotation(engine: &Engine, store: &Mutex<Store>, vault: &Vault, now: i64) -> Result<(), SyncError> {
     match load_pending(engine, store, vault)? {
         Some(pending) => finish(engine, store, vault, pending, now).await,
         None => Ok(()),
     }
 }
 
-async fn finish(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    mut pending: PendingRotation,
-    now: i64,
-) -> Result<(), SyncError> {
+async fn finish(engine: &Engine, store: &Mutex<Store>, vault: &Vault, mut pending: PendingRotation, now: i64) -> Result<(), SyncError> {
     if let Some(target) = pending.revoke {
         let (set, mut log) = engine.own_devices(store).await?;
         if set.get_active(target).is_some() {
             log.append_revoke_by_device(engine.device_id(), &engine.keys, target, now);
             let entry = log.entries.last().cloned().expect("just appended");
-            let appended = engine
-                .client()
-                .append_log(&engine.account, &[entry], false)
-                .await;
+            let appended = engine.client().append_log(&engine.account, &[entry], false).await;
             engine.revoked_check(store, appended)?;
         }
         pending.revoke = None;
@@ -470,12 +320,7 @@ async fn finish(
     Ok(())
 }
 
-async fn finish_area(
-    engine: &Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    pending: &PendingArea,
-) -> Result<(), SyncError> {
+async fn finish_area(engine: &Engine, store: &Mutex<Store>, vault: &Vault, pending: &PendingArea) -> Result<(), SyncError> {
     let old = &pending.old_manifest;
     let area = old.area_id;
     let old_key = area_key(&pending.old_key)?;
@@ -490,10 +335,7 @@ async fn finish_area(
     };
     let current = current.manifest;
     let committed = key_commitment(area, new_version, &new_key);
-    let manifest = if current.key_version == new_version
-        && current.key_commitment == committed
-        && current.owner == engine.account
-    {
+    let manifest = if current.key_version == new_version && current.key_commitment == committed && current.owner == engine.account {
         current
     } else if current.key_version == old.key_version {
         let rotated = AreaManifest::sign(
@@ -517,21 +359,13 @@ async fn finish_area(
     // 2. Envelopes for every device that may still read (the upload replaces, so repeating
     // is fine).
     let readers = readers(engine, store, &pending.members).await?;
-    let envelopes = seal_all(
-        &new_key,
-        area,
-        new_version,
-        &readers.iter().collect::<Vec<_>>(),
-    )?;
+    let envelopes = seal_all(&new_key, area, new_version, &readers.iter().collect::<Vec<_>>())?;
     upload(engine, store, area, &envelopes).await?;
     remember(engine, store, &manifest, &envelopes)?;
 
     // 3. Every record still under the old key, sealed again under the new one.
     let own = engine.own_devices(store).await?.0;
-    let personal = engine
-        .personal_area(store)
-        .map(|(m, _)| m.area_id.0)
-        .unwrap_or_default();
+    let personal = engine.personal_area(store).map(|(m, _)| m.area_id.0).unwrap_or_default();
     let mut authors: HashMap<AccountPublic, Option<DeviceSet>> = HashMap::new();
     let mut since = 0;
     loop {
@@ -548,17 +382,11 @@ async fn finish_area(
                 let devices = engine.account_devices(store, &author).await.ok();
                 authors.insert(author, devices);
             }
-            let devices = if author == engine.account {
-                Some(&own)
-            } else {
-                authors.get(&author).and_then(Option::as_ref)
-            };
+            let devices = if author == engine.account { Some(&own) } else { authors.get(&author).and_then(Option::as_ref) };
             let known = {
                 let guard = lock(store)?;
                 match guard.item_for_record(engine.server, record.header.record_id)? {
-                    Some((kind, item)) => guard
-                        .record_entry(engine.server, kind, &item)?
-                        .map(|entry| (kind, item, entry)),
+                    Some((kind, item)) => guard.record_entry(engine.server, kind, &item)?.map(|entry| (kind, item, entry)),
                     None => None,
                 }
             };
@@ -570,33 +398,18 @@ async fn finish_area(
                 (None, Some((kind, item, entry))) => {
                     let guard = lock(store)?;
                     let mut local = match guard.copy_entry(engine.server, *kind, item)? {
-                        Some((copy_area, original)) => crate::shares::copy_item(
-                            &guard,
-                            vault,
-                            engine.server,
-                            copy_area,
-                            *kind,
-                            &original,
-                            entry.modified_at,
-                        )?,
+                        Some((copy_area, original)) => {
+                            crate::shares::copy_item(&guard, vault, engine.server, copy_area, *kind, &original, entry.modified_at)?
+                        }
                         None => local_item(&guard, vault, *kind, item, entry.modified_at)?,
                     };
-                    crate::engine::strip_unsynced_credentials(
-                        &guard,
-                        engine.server,
-                        &mut local,
-                        area.0,
-                        personal,
-                    )?;
+                    crate::engine::strip_unsynced_credentials(&guard, engine.server, &mut local, area.0, personal)?;
                     encode(&local)?
                 }
                 (None, None) => continue,
             };
             // An older version than this device saw is a rollback: do not sign it again.
-            if known
-                .as_ref()
-                .is_some_and(|(_, _, entry)| record.header.version < entry.version)
-            {
+            if known.as_ref().is_some_and(|(_, _, entry)| record.header.version < entry.version) {
                 continue;
             }
             let header = RecordHeader {
@@ -615,15 +428,7 @@ async fn finish_area(
                 Err(err) => return engine.revoked_check(store, Err(err)),
             }
             if let Some((kind, item, entry)) = known {
-                lock(store)?.put_record_entry(
-                    engine.server,
-                    &RecordEntry {
-                        version: header.version,
-                        ..entry
-                    },
-                    kind,
-                    &item,
-                )?;
+                lock(store)?.put_record_entry(engine.server, &RecordEntry { version: header.version, ..entry }, kind, &item)?;
             }
         }
         if !more {

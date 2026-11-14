@@ -8,20 +8,10 @@ use std::process::ExitCode;
 use uuid::Uuid;
 
 #[derive(Parser)]
-#[command(
-    name = "sshcraft-server",
-    version,
-    about = "Self-hosted sync server for SSHCraft"
-)]
+#[command(name = "sshcraft-server", version, about = "Self-hosted sync server for SSHCraft")]
 struct Cli {
     /// Database: sqlite://<path> or postgres://user:password@host/database
-    #[arg(
-        long,
-        env = "SSHCRAFT_DATABASE_URL",
-        hide_env_values = true,
-        default_value = "sqlite://sshcraft.db",
-        global = true
-    )]
+    #[arg(long, env = "SSHCRAFT_DATABASE_URL", hide_env_values = true, default_value = "sqlite://sshcraft.db", global = true)]
     database_url: String,
     #[command(subcommand)]
     command: Command,
@@ -107,23 +97,11 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    if let Command::Serve {
-        listen,
-        public_origin,
-    } = cli.command
-    {
+    if let Command::Serve { listen, public_origin } = cli.command {
         tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
+            .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
             .init();
-        let config = ServeConfig {
-            listen,
-            database_url: cli.database_url,
-            public_origin,
-            ..ServeConfig::default()
-        };
+        let config = ServeConfig { listen, database_url: cli.database_url, public_origin, ..ServeConfig::default() };
         sshcraft_server_lib::serve(config, shutdown_signal()).await?;
         return Ok(());
     }
@@ -147,12 +125,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::Devices { action } => match action {
             Devices::List { email } => admin::devices_list(store, &email, out).await?,
-            Devices::Block { email, device_id } => {
-                admin::devices_block(store, &email, device_id, true, out).await?
-            }
-            Devices::Unblock { email, device_id } => {
-                admin::devices_block(store, &email, device_id, false, out).await?
-            }
+            Devices::Block { email, device_id } => admin::devices_block(store, &email, device_id, true, out).await?,
+            Devices::Unblock { email, device_id } => admin::devices_block(store, &email, device_id, false, out).await?,
         },
         Command::Serve { .. } | Command::Health { .. } => unreachable!("handled above"),
         Command::ApiKey { action } => match action {
@@ -195,14 +169,9 @@ mod tests {
     /// change them.
     #[test]
     fn cli_defaults_are_unchanged() {
-        let cli = Cli::try_parse_from(["sshcraft-server", "serve", "--public-origin", "https://x"])
-            .unwrap();
+        let cli = Cli::try_parse_from(["sshcraft-server", "serve", "--public-origin", "https://x"]).unwrap();
         assert_eq!(cli.database_url, "sqlite://sshcraft.db");
-        let Command::Serve {
-            listen,
-            public_origin,
-        } = cli.command
-        else {
+        let Command::Serve { listen, public_origin } = cli.command else {
             panic!("serve expected");
         };
         assert_eq!(listen.to_string(), "127.0.0.1:8470");

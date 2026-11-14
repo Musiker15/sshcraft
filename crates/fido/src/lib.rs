@@ -85,12 +85,7 @@ pub enum FidoError {
 pub trait Authenticator: Send + Sync {
     /// Creates a credential for `application`. `client_data` is hashed (SHA-256) by the
     /// authenticator side, as WebAuthn does.
-    async fn make_credential(
-        &self,
-        application: &str,
-        options: &CreateOptions,
-        client_data: &[u8],
-    ) -> Result<Attestation, FidoError>;
+    async fn make_credential(&self, application: &str, options: &CreateOptions, client_data: &[u8]) -> Result<Attestation, FidoError>;
 
     /// Signs `authenticator data || SHA-256(client_data)` with the credential.
     async fn get_assertion(
@@ -104,39 +99,20 @@ pub trait Authenticator: Send + Sync {
 }
 
 /// Creates a new `sk-` key on the authenticator.
-pub async fn create_key(
-    auth: &dyn Authenticator,
-    options: &CreateOptions,
-    comment: &str,
-) -> Result<PrivateKey, FidoError> {
+pub async fn create_key(auth: &dyn Authenticator, options: &CreateOptions, comment: &str) -> Result<PrivateKey, FidoError> {
     let challenge = random_challenge();
-    let attestation = auth
-        .make_credential(SSH_APPLICATION, options, &challenge)
-        .await?;
-    let public = cose::attested_public_key(
-        &attestation.authenticator_data,
-        SSH_APPLICATION,
-        options.algorithm,
-    )?;
-    let flags = FLAG_USER_PRESENCE
-        | if options.verify_user {
-            FLAG_USER_VERIFICATION
-        } else {
-            0
-        };
+    let attestation = auth.make_credential(SSH_APPLICATION, options, &challenge).await?;
+    let public = cose::attested_public_key(&attestation.authenticator_data, SSH_APPLICATION, options.algorithm)?;
+    let flags = FLAG_USER_PRESENCE | if options.verify_user { FLAG_USER_VERIFICATION } else { 0 };
     let bad = |e: russh::keys::ssh_key::Error| FidoError::BadResponse(e.to_string());
     let handle = attestation.credential_id;
     let data = match public {
         cose::CosePublic::EcdsaP256 { sec1 } => {
-            let EcdsaPublicKey::NistP256(point) =
-                EcdsaPublicKey::from_sec1_bytes(&sec1).map_err(bad)?
-            else {
+            let EcdsaPublicKey::NistP256(point) = EcdsaPublicKey::from_sec1_bytes(&sec1).map_err(bad)? else {
                 return Err(FidoError::BadResponse("not a P-256 point".into()));
             };
             let public = public::SkEcdsaSha2NistP256::new(point, SSH_APPLICATION);
-            KeypairData::SkEcdsaSha2NistP256(
-                private::SkEcdsaSha2NistP256::new(public, flags, handle).map_err(bad)?,
-            )
+            KeypairData::SkEcdsaSha2NistP256(private::SkEcdsaSha2NistP256::new(public, flags, handle).map_err(bad)?)
         }
         cose::CosePublic::Ed25519 { public } => {
             let public = public::SkEd25519::new(Ed25519PublicKey(public), SSH_APPLICATION);
@@ -148,10 +124,7 @@ pub async fn create_key(
 
 /// Whether `key` is a FIDO2 / Windows Hello key (signs through an authenticator).
 pub fn is_security_key(key: &PrivateKey) -> bool {
-    matches!(
-        key.algorithm(),
-        Algorithm::SkEcdsaSha2NistP256 | Algorithm::SkEd25519
-    )
+    matches!(key.algorithm(), Algorithm::SkEcdsaSha2NistP256 | Algorithm::SkEd25519)
 }
 
 /// Signs SSH sign-in requests through an authenticator.
@@ -165,56 +138,29 @@ pub struct SkSigner {
 }
 
 impl SkSigner {
-    pub fn new(
-        auth: Arc<dyn Authenticator>,
-        key: &PrivateKey,
-        attachment: Attachment,
-    ) -> Result<Self, FidoError> {
+    pub fn new(auth: Arc<dyn Authenticator>, key: &PrivateKey, attachment: Attachment) -> Result<Self, FidoError> {
         let (algorithm, application, flags, handle) = match key.key_data() {
-            KeypairData::SkEcdsaSha2NistP256(sk) => (
-                SkAlgorithm::EcdsaP256,
-                sk.public().application().to_owned(),
-                sk.flags(),
-                sk.key_handle().to_vec(),
-            ),
-            KeypairData::SkEd25519(sk) => (
-                SkAlgorithm::Ed25519,
-                sk.public().application().to_owned(),
-                sk.flags(),
-                sk.key_handle().to_vec(),
-            ),
+            KeypairData::SkEcdsaSha2NistP256(sk) => {
+                (SkAlgorithm::EcdsaP256, sk.public().application().to_owned(), sk.flags(), sk.key_handle().to_vec())
+            }
+            KeypairData::SkEd25519(sk) => (SkAlgorithm::Ed25519, sk.public().application().to_owned(), sk.flags(), sk.key_handle().to_vec()),
             _ => return Err(FidoError::NotSupported),
         };
-        Ok(Self {
-            auth,
-            algorithm,
-            application,
-            flags,
-            handle,
-            attachment,
-        })
+        Ok(Self { auth, algorithm, application, flags, handle, attachment })
     }
 }
 
 #[async_trait::async_trait]
 impl KeySigner for SkSigner {
     async fn sign(&mut self, data: &[u8]) -> Result<Vec<u8>, SshError> {
-        let assertion = self
-            .auth
-            .get_assertion(
-                &self.application,
-                &self.handle,
-                data,
-                self.flags & FLAG_USER_VERIFICATION != 0,
-                self.attachment,
-            )
-            .await
-            .map_err(|e| match e {
-                FidoError::Cancelled => SshError::SignerCancelled,
-                other => SshError::SignerFailed(other.to_string()),
-            })?;
-        signature::ssh_signature(self.algorithm, &self.application, &assertion)
-            .map_err(|e| SshError::SignerFailed(e.to_string()))
+        let assertion =
+            self.auth.get_assertion(&self.application, &self.handle, data, self.flags & FLAG_USER_VERIFICATION != 0, self.attachment).await.map_err(
+                |e| match e {
+                    FidoError::Cancelled => SshError::SignerCancelled,
+                    other => SshError::SignerFailed(other.to_string()),
+                },
+            )?;
+        signature::ssh_signature(self.algorithm, &self.application, &assertion).map_err(|e| SshError::SignerFailed(e.to_string()))
     }
 }
 

@@ -32,11 +32,7 @@ pub struct KeyFile {
 }
 
 fn skipped_name(name: &str) -> bool {
-    name.ends_with(".pub")
-        || name.starts_with("known_hosts")
-        || name == "config"
-        || name == "authorized_keys"
-        || name == "authorized_keys2"
+    name.ends_with(".pub") || name.starts_with("known_hosts") || name == "config" || name == "authorized_keys" || name == "authorized_keys2"
 }
 
 fn read_small(path: &Path) -> Option<Zeroizing<String>> {
@@ -62,12 +58,7 @@ fn format_of(text: &str) -> Option<KeyFormat> {
 
 fn describe(path: PathBuf, name: String, text: &str) -> Option<KeyFile> {
     let format = format_of(text)?;
-    let public = |key: &PrivateKey| {
-        (
-            Some(key.algorithm().to_string()),
-            Some(key.public_key().fingerprint(HashAlg::Sha256).to_string()),
-        )
-    };
+    let public = |key: &PrivateKey| (Some(key.algorithm().to_string()), Some(key.public_key().fingerprint(HashAlg::Sha256).to_string()));
     let (encrypted, (algorithm, fingerprint)) = match format {
         KeyFormat::OpenSsh => {
             let key = PrivateKey::from_openssh(text.trim()).ok()?;
@@ -77,21 +68,12 @@ fn describe(path: PathBuf, name: String, text: &str) -> Option<KeyFile> {
             match russh::keys::decode_secret_key(text, None) {
                 Ok(key) => (false, public(&key)),
                 // Only an encrypted key fails here; anything else is not a key.
-                Err(_) if text.contains("ENCRYPTED") || text.contains("Encryption: aes") => {
-                    (true, (None, None))
-                }
+                Err(_) if text.contains("ENCRYPTED") || text.contains("Encryption: aes") => (true, (None, None)),
                 Err(_) => return None,
             }
         }
     };
-    Some(KeyFile {
-        path,
-        name,
-        format,
-        encrypted,
-        algorithm,
-        fingerprint,
-    })
+    Some(KeyFile { path, name, format, encrypted, algorithm, fingerprint })
 }
 
 /// The private key files directly in `dir`, sorted by name; public keys, `known_hosts`,
@@ -117,44 +99,27 @@ pub fn scan(dir: &Path) -> Vec<KeyFile> {
 }
 
 /// Imports one key file into the vault, named after the file.
-pub fn import(
-    vault: &Vault,
-    store: &Store,
-    path: &Path,
-    passphrase: Option<&str>,
-) -> Result<KeyInfo, VaultError> {
+pub fn import(vault: &Vault, store: &Store, path: &Path, passphrase: Option<&str>) -> Result<KeyInfo, VaultError> {
     let text = read_small(path).ok_or_else(|| VaultError::InvalidKey("unreadable".into()))?;
     let key = parse_private_key(&text, passphrase)?;
     let fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
-    if let Some(known) = store
-        .list_key_records()
-        .map_err(|e| VaultError::InvalidKey(e.to_string()))?
-        .into_iter()
-        .find(|r| r.fingerprint == fingerprint)
+    if let Some(known) =
+        store.list_key_records().map_err(|e| VaultError::InvalidKey(e.to_string()))?.into_iter().find(|r| r.fingerprint == fingerprint)
     {
         let id = known.id;
         if known.certificate.is_none() {
-            return Ok(attach_sibling_certificate(vault, store, path, id)
-                .unwrap_or_else(|| KeyInfo::from(known)));
+            return Ok(attach_sibling_certificate(vault, store, path, id).unwrap_or_else(|| KeyInfo::from(known)));
         }
         return Ok(KeyInfo::from(known));
     }
-    let name = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "key".into());
+    let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "key".into());
     let info = vault.store_key(store, &name, &key)?;
     Ok(attach_sibling_certificate(vault, store, path, info.id).unwrap_or(info))
 }
 
 /// Attaches `<key file>-cert.pub` if it lies next to the key and fits it, as OpenSSH would use
 /// it. A certificate that does not fit is left out; the key itself is imported anyway.
-fn attach_sibling_certificate(
-    vault: &Vault,
-    store: &Store,
-    path: &Path,
-    id: sshcraft_model::model::KeyId,
-) -> Option<KeyInfo> {
+fn attach_sibling_certificate(vault: &Vault, store: &Store, path: &Path, id: sshcraft_model::model::KeyId) -> Option<KeyInfo> {
     let mut sibling = path.as_os_str().to_owned();
     sibling.push("-cert.pub");
     let text = read_small(Path::new(&sibling))?;

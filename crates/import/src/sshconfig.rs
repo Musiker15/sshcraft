@@ -44,11 +44,7 @@ struct Block {
 pub fn parse(text: &str) -> ParsedConfig {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     // Lines before the first `Host` apply to every host.
-    let mut blocks = vec![Block {
-        patterns: vec!["*".to_owned()],
-        skip: false,
-        entries: Vec::new(),
-    }];
+    let mut blocks = vec![Block { patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }];
     let mut skipped = Vec::new();
 
     for raw in text.lines() {
@@ -61,18 +57,10 @@ pub fn parse(text: &str) -> ParsedConfig {
             continue;
         }
         match keyword.as_str() {
-            "host" => blocks.push(Block {
-                patterns: split_args(value),
-                skip: false,
-                entries: Vec::new(),
-            }),
+            "host" => blocks.push(Block { patterns: split_args(value), skip: false, entries: Vec::new() }),
             "match" => {
                 skipped.push(line.to_owned());
-                blocks.push(Block {
-                    patterns: Vec::new(),
-                    skip: true,
-                    entries: Vec::new(),
-                });
+                blocks.push(Block { patterns: Vec::new(), skip: true, entries: Vec::new() });
             }
             "include" => skipped.push(line.to_owned()),
             _ => {
@@ -94,10 +82,7 @@ pub fn parse(text: &str) -> ParsedConfig {
         }
     }
 
-    let hosts = aliases
-        .into_iter()
-        .map(|alias| collect(&blocks, alias))
-        .collect();
+    let hosts = aliases.into_iter().map(|alias| collect(&blocks, alias)).collect();
     ParsedConfig { hosts, skipped }
 }
 
@@ -135,12 +120,7 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
                     // `none` switches the proxy off, so there is nothing to warn about.
                     if !value.eq_ignore_ascii_case("none") {
                         let name = if keyword == "proxyjump" {
-                            host.jump = value
-                                .split(',')
-                                .map(str::trim)
-                                .filter(|hop| !hop.is_empty())
-                                .map(str::to_owned)
-                                .collect();
+                            host.jump = value.split(',').map(str::trim).filter(|hop| !hop.is_empty()).map(str::to_owned).collect();
                             "ProxyJump"
                         } else {
                             "ProxyCommand"
@@ -207,9 +187,7 @@ fn glob(pattern: &str, text: &str) -> bool {
 
 /// Splits `Keyword value`, `Keyword=value` and `Keyword = value`; the keyword is lowercased.
 fn split_keyword(line: &str) -> (String, &str) {
-    let end = line
-        .find(|c: char| c.is_whitespace() || c == '=')
-        .unwrap_or(line.len());
+    let end = line.find(|c: char| c.is_whitespace() || c == '=').unwrap_or(line.len());
     let keyword = line[..end].to_lowercase();
     let rest = line[end..].trim_start();
     let rest = rest.strip_prefix('=').unwrap_or(rest).trim();
@@ -262,9 +240,7 @@ fn expand_tokens(hostname: &str, alias: &str) -> (String, Vec<ImportWarning>) {
                 out.push('%');
                 out.push(other);
                 let token = format!("%{other}");
-                if !warnings.contains(&ImportWarning::UnsupportedToken {
-                    token: token.clone(),
-                }) {
+                if !warnings.contains(&ImportWarning::UnsupportedToken { token: token.clone() }) {
                     warnings.push(ImportWarning::UnsupportedToken { token });
                 }
             }
@@ -305,10 +281,7 @@ fn parse_set_env(value: &str) -> Vec<EnvVar> {
         .into_iter()
         .filter_map(|w| {
             let (name, value) = w.split_once('=')?;
-            Some(EnvVar {
-                name: name.to_owned(),
-                value: value.to_owned(),
-            })
+            Some(EnvVar { name: name.to_owned(), value: value.to_owned() })
         })
         .collect();
     sshcraft_model::model::normalize_env(&vars)
@@ -336,16 +309,13 @@ pub fn plan_import(
             let (address, mut warnings) = address(h);
             // A ProxyJump through hosts of this same file becomes jump hosts; anything else
             // (user@host:port, a host not in the file, ProxyCommand) stays a warning.
-            let jumps_known =
-                !h.jump.is_empty() && h.jump.iter().all(|hop| aliases.contains(&hop.as_str()));
+            let jumps_known = !h.jump.is_empty() && h.jump.iter().all(|hop| aliases.contains(&hop.as_str()));
             warnings.splice(
                 0..0,
                 h.proxies
                     .iter()
                     .filter(|directive| !(jumps_known && directive.starts_with("ProxyJump ")))
-                    .map(|directive| ImportWarning::ProxyIgnored {
-                        directive: directive.clone(),
-                    }),
+                    .map(|directive| ImportWarning::ProxyIgnored { directive: directive.clone() }),
             );
             let grouped = per_address[&address] >= 2;
             let key = h
@@ -363,10 +333,7 @@ pub fn plan_import(
             ImportCandidate {
                 name: h.alias.clone(),
                 group_path: grouped.then(|| address.clone()).into_iter().collect(),
-                group_defaults: ConnectionSettings {
-                    address: grouped.then(|| address.clone()),
-                    ..Default::default()
-                },
+                group_defaults: ConnectionSettings { address: grouped.then(|| address.clone()), ..Default::default() },
                 settings: ConnectionSettings {
                     address: (!grouped).then_some(address),
                     port: h.port,
@@ -376,11 +343,7 @@ pub fn plan_import(
                     env: h.set_env.clone(),
                     ..Default::default()
                 },
-                jump_aliases: if jumps_known {
-                    h.jump.clone()
-                } else {
-                    Vec::new()
-                },
+                jump_aliases: if jumps_known { h.jump.clone() } else { Vec::new() },
                 key_note,
                 warnings,
                 ..ImportCandidate::default()

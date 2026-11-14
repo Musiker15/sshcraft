@@ -27,12 +27,7 @@ pub struct Session {
 fn decode(bytes: &[u8]) -> String {
     match bytes {
         [0xff, 0xfe, rest @ ..] => {
-            let units: Vec<u16> = rest
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|c| u16::from_le_bytes(*c))
-                .collect();
+            let units: Vec<u16> = rest.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
             String::from_utf16_lossy(&units)
         }
         [0xef, 0xbb, 0xbf, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
@@ -47,11 +42,7 @@ pub fn decode_name(name: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         // Only `%` followed by two ASCII hex digits is an escape; anything else stays.
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && bytes[i + 1].is_ascii_hexdigit()
-            && bytes[i + 2].is_ascii_hexdigit()
-        {
+        if bytes[i] == b'%' && i + 2 < bytes.len() && bytes[i + 1].is_ascii_hexdigit() && bytes[i + 2].is_ascii_hexdigit() {
             let hex = |b: u8| (b as char).to_digit(16).unwrap_or(0) as u8;
             out.push(hex(bytes[i + 1]) * 16 + hex(bytes[i + 2]));
             i += 3;
@@ -93,10 +84,7 @@ pub fn parse_reg(bytes: &[u8]) -> Vec<Session> {
                 .strip_prefix(&prefix)
                 .and_then(|rest| rest.strip_suffix(']'))
                 .filter(|name| !name.is_empty() && !name.contains('\\'))
-                .map(|name| Session {
-                    name: decode_name(name),
-                    values: BTreeMap::new(),
-                });
+                .map(|name| Session { name: decode_name(name), values: BTreeMap::new() });
             continue;
         }
         let Some(session) = current.as_mut() else {
@@ -141,8 +129,7 @@ pub fn candidates(sessions: &[Session]) -> ImportPlan {
         }
         let protocol = text(session, "Protocol");
         if !protocol.is_empty() && protocol != "ssh" {
-            plan.skipped
-                .push(format!("{}: not SSH", clean(&session.name)));
+            plan.skipped.push(format!("{}: not SSH", clean(&session.name)));
             continue;
         }
         let host = text(session, "HostName").trim();
@@ -152,8 +139,7 @@ pub fn candidates(sessions: &[Session]) -> ImportPlan {
         };
         let address = clean(&address);
         if address.is_empty() {
-            plan.skipped
-                .push(format!("{}: no host name", clean(&session.name)));
+            plan.skipped.push(format!("{}: no host name", clean(&session.name)));
             continue;
         }
         let mut warnings = Vec::new();
@@ -162,9 +148,7 @@ pub fn candidates(sessions: &[Session]) -> ImportPlan {
             Some(PuttyValue::Text(t)) => port_from(t, &mut warnings),
             None => None,
         };
-        let username = Some(clean(text(session, "UserName")))
-            .filter(|u| !u.is_empty())
-            .or(user_in_host.map(|u| clean(&u)).filter(|u| !u.is_empty()));
+        let username = Some(clean(text(session, "UserName"))).filter(|u| !u.is_empty()).or(user_in_host.map(|u| clean(&u)).filter(|u| !u.is_empty()));
         let key_file = text(session, "PublicKeyFile").trim();
         plan.candidates.push(ImportCandidate {
             name: clean(&session.name),
@@ -175,13 +159,7 @@ pub fn candidates(sessions: &[Session]) -> ImportPlan {
                 key: None,
                 ..Default::default()
             },
-            key_note: Some(if key_file.is_empty() {
-                KeyNote::NoIdentityFile
-            } else {
-                KeyNote::File {
-                    path: key_file.to_owned(),
-                }
-            }),
+            key_note: Some(if key_file.is_empty() { KeyNote::NoIdentityFile } else { KeyNote::File { path: key_file.to_owned() } }),
             warnings,
             ..ImportCandidate::default()
         });

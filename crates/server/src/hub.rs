@@ -18,27 +18,11 @@ pub const MAX_PER_DEVICE: usize = 4;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    DeviceLog {
-        account: AccountPublic,
-        len: u64,
-    },
-    Manifest {
-        area_id: AreaId,
-        version: u64,
-    },
-    Envelopes {
-        area_id: AreaId,
-        key_version: u32,
-    },
-    Record {
-        area_id: AreaId,
-        record_id: Uuid,
-        version: u64,
-        seq: u64,
-    },
-    AreaDeleted {
-        area_id: AreaId,
-    },
+    DeviceLog { account: AccountPublic, len: u64 },
+    Manifest { area_id: AreaId, version: u64 },
+    Envelopes { area_id: AreaId, key_version: u32 },
+    Record { area_id: AreaId, record_id: Uuid, version: u64, seq: u64 },
+    AreaDeleted { area_id: AreaId },
     SessionEnded,
 }
 
@@ -56,11 +40,7 @@ pub struct Hub {
 
 impl Hub {
     /// A new subscription, or `None` when the device already has [`MAX_PER_DEVICE`].
-    pub fn subscribe(
-        &self,
-        device_id: Uuid,
-        account: AccountPublic,
-    ) -> Option<(u64, mpsc::Receiver<Event>)> {
+    pub fn subscribe(&self, device_id: Uuid, account: AccountPublic) -> Option<(u64, mpsc::Receiver<Event>)> {
         let (tx, rx) = mpsc::channel(QUEUE);
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let mut map = self.by_device.lock().ok()?;
@@ -74,10 +54,7 @@ impl Hub {
 
     /// Open connections of a device.
     pub fn connections(&self, device_id: Uuid) -> usize {
-        self.by_device
-            .lock()
-            .map(|map| map.get(&device_id).map_or(0, Vec::len))
-            .unwrap_or(0)
+        self.by_device.lock().map(|map| map.get(&device_id).map_or(0, Vec::len)).unwrap_or(0)
     }
 
     pub fn unsubscribe(&self, device_id: Uuid, subscription: u64) {

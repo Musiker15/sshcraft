@@ -37,10 +37,7 @@ impl ServeConfig {
     pub fn validate(&self) -> Result<String, ConfigError> {
         let bad = || ConfigError::BadOrigin(self.public_origin.clone());
         let origin = normalize_origin(&self.public_origin);
-        let host = origin
-            .strip_prefix("https://")
-            .or_else(|| origin.strip_prefix("http://"))
-            .ok_or_else(bad)?;
+        let host = origin.strip_prefix("https://").or_else(|| origin.strip_prefix("http://")).ok_or_else(bad)?;
         if host.is_empty() || host.contains(['/', '@', ' ']) {
             return Err(bad());
         }

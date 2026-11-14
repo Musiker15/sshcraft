@@ -47,21 +47,10 @@ pub struct TestAuth {
 }
 
 /// A user certificate for `key`, signed by `ca`, for `principal`, valid in the given window.
-pub fn user_certificate(
-    key: &PublicKey,
-    ca: &PrivateKey,
-    principal: &str,
-    valid_after: u64,
-    valid_before: u64,
-) -> Certificate {
+pub fn user_certificate(key: &PublicKey, ca: &PrivateKey, principal: &str, valid_after: u64, valid_before: u64) -> Certificate {
     use russh::keys::ssh_key::certificate::{Builder, CertType};
-    let mut builder = Builder::new_with_random_nonce(
-        &mut rand::rng(),
-        key.key_data().clone(),
-        valid_after,
-        valid_before,
-    )
-    .expect("certificate builder");
+    let mut builder =
+        Builder::new_with_random_nonce(&mut rand::rng(), key.key_data().clone(), valid_after, valid_before).expect("certificate builder");
     builder.cert_type(CertType::User).expect("cert type");
     builder.key_id("test").expect("key id");
     builder.valid_principal(principal).expect("principal");
@@ -104,23 +93,13 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn start(authorized: PublicKey) -> TestServer {
-        Self::start_with(TestAuth {
-            key: Some(authorized),
-            ..Default::default()
-        })
-        .await
+        Self::start_with(TestAuth { key: Some(authorized), ..Default::default() }).await
     }
 
     pub async fn start_with(auth: TestAuth) -> TestServer {
         let host_key = random_host_key();
-        let mut server = TestServer {
-            port: 0,
-            host_fingerprint: fingerprint(&host_key),
-            auth,
-            records: Arc::new(Records::default()),
-            host_key,
-            running: None,
-        };
+        let mut server =
+            TestServer { port: 0, host_fingerprint: fingerprint(&host_key), auth, records: Arc::new(Records::default()), host_key, running: None };
         server.listen().await;
         server
     }
@@ -198,9 +177,7 @@ impl TestServer {
     }
 
     async fn listen(&mut self) {
-        let socket = TcpListener::bind(("127.0.0.1", self.port))
-            .await
-            .expect("bind test server");
+        let socket = TcpListener::bind(("127.0.0.1", self.port)).await.expect("bind test server");
         self.port = socket.local_addr().expect("local addr").port();
         let mut methods: Vec<MethodKind> = Vec::new();
         if self.auth.key.is_some() {
@@ -294,89 +271,47 @@ impl Drop for Handler {
 impl Handler {
     fn kbd_question(&self) -> Auth {
         let round = &self.auth.kbd[self.kbd_round];
-        let prompts: Vec<(Cow<'static, str>, bool)> = round
-            .iter()
-            .map(|(q, echo, _)| (Cow::Owned(q.clone()), *echo))
-            .collect();
-        Auth::Partial {
-            name: Cow::Borrowed(""),
-            instructions: Cow::Borrowed(""),
-            prompts: Cow::Owned(prompts),
-        }
+        let prompts: Vec<(Cow<'static, str>, bool)> = round.iter().map(|(q, echo, _)| (Cow::Owned(q.clone()), *echo)).collect();
+        Auth::Partial { name: Cow::Borrowed(""), instructions: Cow::Borrowed(""), prompts: Cow::Owned(prompts) }
     }
 }
 
 impl server::Handler for Handler {
     type Error = russh::Error;
 
-    async fn auth_publickey(
-        &mut self,
-        _user: &str,
-        key: VerifiedPublicKey<'_>,
-    ) -> Result<Auth, Self::Error> {
-        let matches = self
-            .auth
-            .key
-            .as_ref()
-            .is_some_and(|k| key.public_key.key_data() == k.key_data());
+    async fn auth_publickey(&mut self, _user: &str, key: VerifiedPublicKey<'_>) -> Result<Auth, Self::Error> {
+        let matches = self.auth.key.as_ref().is_some_and(|k| key.public_key.key_data() == k.key_data());
         if !matches {
             return Ok(Auth::reject());
         }
         if self.auth.key_then_kbd {
             self.key_ok = true;
-            return Ok(Auth::Reject {
-                proceed_with_methods: Some(MethodSet::from(&[MethodKind::KeyboardInteractive][..])),
-                partial_success: true,
-            });
+            return Ok(Auth::Reject { proceed_with_methods: Some(MethodSet::from(&[MethodKind::KeyboardInteractive][..])), partial_success: true });
         }
         Ok(Auth::Accept)
     }
 
-    async fn auth_publickey_offered(
-        &mut self,
-        _user: &str,
-        offer: server::PublicKeyOffer<'_>,
-    ) -> Result<Auth, Self::Error> {
+    async fn auth_publickey_offered(&mut self, _user: &str, offer: server::PublicKeyOffer<'_>) -> Result<Auth, Self::Error> {
         if self.auth.refuse_sha1_rsa && *offer.algorithm == (Algorithm::Rsa { hash: None }) {
             return Ok(Auth::reject());
         }
         Ok(Auth::Accept)
     }
 
-    async fn auth_openssh_certificate(
-        &mut self,
-        user: &str,
-        certificate: &Certificate,
-    ) -> Result<Auth, Self::Error> {
+    async fn auth_openssh_certificate(&mut self, user: &str, certificate: &Certificate) -> Result<Auth, Self::Error> {
         *self.records.certificates.lock().unwrap() += 1;
-        let trusted = self
-            .auth
-            .ca
-            .as_ref()
-            .is_some_and(|ca| certificate.signature_key() == ca.key_data());
+        let trusted = self.auth.ca.as_ref().is_some_and(|ca| certificate.signature_key() == ca.key_data());
         let for_user = certificate.valid_principals().iter().any(|p| p == user);
-        Ok(
-            if trusted && for_user && crate::certificate_valid_now(certificate) {
-                Auth::Accept
-            } else {
-                Auth::reject()
-            },
-        )
+        Ok(if trusted && for_user && crate::certificate_valid_now(certificate) { Auth::Accept } else { Auth::reject() })
     }
 
     async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
-        self.records
-            .passwords
-            .lock()
-            .unwrap()
-            .push(password.to_owned());
+        self.records.passwords.lock().unwrap().push(password.to_owned());
         if self.auth.password.as_deref() == Some(password) {
             if self.auth.password_then_kbd {
                 self.key_ok = true;
                 return Ok(Auth::Reject {
-                    proceed_with_methods: Some(MethodSet::from(
-                        &[MethodKind::KeyboardInteractive][..],
-                    )),
+                    proceed_with_methods: Some(MethodSet::from(&[MethodKind::KeyboardInteractive][..])),
                     partial_success: true,
                 });
             }
@@ -400,28 +335,15 @@ impl server::Handler for Handler {
             self.kbd_round = 0;
             return Ok(self.kbd_question());
         };
-        let answers: Vec<String> = response
-            .map(|a| String::from_utf8_lossy(&a).into_owned())
-            .collect();
-        self.records
-            .passwords
-            .lock()
-            .unwrap()
-            .extend(answers.iter().cloned());
-        let expected: Vec<&String> = self.auth.kbd[self.kbd_round]
-            .iter()
-            .map(|(_, _, a)| a)
-            .collect();
+        let answers: Vec<String> = response.map(|a| String::from_utf8_lossy(&a).into_owned()).collect();
+        self.records.passwords.lock().unwrap().extend(answers.iter().cloned());
+        let expected: Vec<&String> = self.auth.kbd[self.kbd_round].iter().map(|(_, _, a)| a).collect();
         if answers.iter().collect::<Vec<_>>() != expected {
             self.kbd_round = 0;
             return Ok(Auth::reject());
         }
         self.kbd_round += 1;
-        if self.kbd_round == self.auth.kbd.len() {
-            Ok(Auth::Accept)
-        } else {
-            Ok(self.kbd_question())
-        }
+        if self.kbd_round == self.auth.kbd.len() { Ok(Auth::Accept) } else { Ok(self.kbd_question()) }
     }
 
     /// After every sign-in the server tries to use a forwarded agent, asked for or not, and
@@ -436,13 +358,8 @@ impl server::Handler for Handler {
             let result = match handle.channel_open_agent().await {
                 Err(_) => None,
                 Ok(channel) => {
-                    let mut agent =
-                        russh::keys::agent::client::AgentClient::connect(channel.into_stream());
-                    let listed = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        agent.request_identities(),
-                    )
-                    .await;
+                    let mut agent = russh::keys::agent::client::AgentClient::connect(channel.into_stream());
+                    let listed = tokio::time::timeout(std::time::Duration::from_secs(5), agent.request_identities()).await;
                     Some(match listed {
                         Ok(Ok(keys)) => keys.len(),
                         _ => 0,
@@ -457,26 +374,12 @@ impl server::Handler for Handler {
         Ok(())
     }
 
-    async fn env_request(
-        &mut self,
-        _channel: ChannelId,
-        name: &str,
-        value: &str,
-        _session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        self.records
-            .env
-            .lock()
-            .unwrap()
-            .push((name.to_owned(), value.to_owned()));
+    async fn env_request(&mut self, _channel: ChannelId, name: &str, value: &str, _session: &mut Session) -> Result<(), Self::Error> {
+        self.records.env.lock().unwrap().push((name.to_owned(), value.to_owned()));
         Ok(())
     }
 
-    async fn agent_request(
-        &mut self,
-        _channel: ChannelId,
-        _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    async fn agent_request(&mut self, _channel: ChannelId, _session: &mut Session) -> Result<bool, Self::Error> {
         Ok(true)
     }
 
@@ -520,12 +423,7 @@ impl server::Handler for Handler {
     }
 
     /// Remote forwarding: listens like sshd and opens a `forwarded-tcpip` channel per connection.
-    async fn tcpip_forward(
-        &mut self,
-        address: &str,
-        port: &mut u32,
-        session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    async fn tcpip_forward(&mut self, address: &str, port: &mut u32, session: &mut Session) -> Result<bool, Self::Error> {
         if self.auth.refuse_forwarding {
             return Ok(false);
         }
@@ -544,14 +442,7 @@ impl server::Handler for Handler {
                 let handle = handle.clone();
                 let connected = connected.clone();
                 tokio::spawn(async move {
-                    let Ok(channel) = handle
-                        .channel_open_forwarded_tcpip(
-                            connected,
-                            bound,
-                            peer.ip().to_string(),
-                            u32::from(peer.port()),
-                        )
-                        .await
+                    let Ok(channel) = handle.channel_open_forwarded_tcpip(connected, bound, peer.ip().to_string(), u32::from(peer.port())).await
                     else {
                         return;
                     };
@@ -564,12 +455,7 @@ impl server::Handler for Handler {
         Ok(true)
     }
 
-    async fn cancel_tcpip_forward(
-        &mut self,
-        address: &str,
-        port: u32,
-        _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    async fn cancel_tcpip_forward(&mut self, address: &str, port: u32, _session: &mut Session) -> Result<bool, Self::Error> {
         let before = self.listeners.len();
         self.listeners.retain(|(a, p, task)| {
             let hit = a == address && *p == port;
@@ -596,36 +482,17 @@ impl server::Handler for Handler {
         session.channel_success(channel)
     }
 
-    async fn shell_request(
-        &mut self,
-        channel: ChannelId,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
+    async fn shell_request(&mut self, channel: ChannelId, session: &mut Session) -> Result<(), Self::Error> {
         session.channel_success(channel)
     }
 
-    async fn exec_request(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
+    async fn exec_request(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
         // A command's input is recorded, not echoed like a shell's.
         self.sessions.remove(&channel);
         self.execs.insert(channel);
-        self.records
-            .commands
-            .lock()
-            .unwrap()
-            .push(String::from_utf8_lossy(data).into_owned());
-        let output = self
-            .records
-            .exec_output
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap_or_else(|| TEST_EXEC_OUTPUT.to_owned());
+        self.records.commands.lock().unwrap().push(String::from_utf8_lossy(data).into_owned());
+        let output = self.records.exec_output.lock().unwrap().clone().unwrap_or_else(|| TEST_EXEC_OUTPUT.to_owned());
         let stderr = self.records.exec_stderr.lock().unwrap().clone();
         let status = *self.records.exec_status.lock().unwrap();
         let delay = *self.records.exec_delay.lock().unwrap();
@@ -634,9 +501,7 @@ impl server::Handler for Handler {
             tokio::time::sleep(delay).await;
             let _ = handle.data(channel, Bytes::from(output.into_bytes())).await;
             if !stderr.is_empty() {
-                let _ = handle
-                    .extended_data(channel, 1, Bytes::from(stderr.into_bytes()))
-                    .await;
+                let _ = handle.extended_data(channel, 1, Bytes::from(stderr.into_bytes())).await;
             }
             let _ = handle.exit_status_request(channel, status).await;
             let _ = handle.eof(channel).await;
@@ -657,18 +522,9 @@ impl server::Handler for Handler {
         Ok(())
     }
 
-    async fn data(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
+    async fn data(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
         if self.execs.contains(&channel) {
-            self.records
-                .exec_input
-                .lock()
-                .unwrap()
-                .extend_from_slice(data);
+            self.records.exec_input.lock().unwrap().extend_from_slice(data);
             return Ok(());
         }
         if !self.sessions.contains(&channel) {
@@ -686,11 +542,7 @@ impl server::Handler for Handler {
             b"flood\n" => {
                 tokio::spawn(async move {
                     for chunk in flood_pattern().chunks(FLOOD_CHUNK) {
-                        if handle
-                            .data(channel, Bytes::from(chunk.to_vec()))
-                            .await
-                            .is_err()
-                        {
+                        if handle.data(channel, Bytes::from(chunk.to_vec())).await.is_err() {
                             return;
                         }
                     }
@@ -708,11 +560,7 @@ pub async fn spawn_agent(keys: &[PrivateKey], confirm: bool) -> crate::DynAgent 
 
     let (client_side, server_side) = tokio::io::duplex(64 * 1024);
     let listener = futures::stream::iter(vec![Ok::<_, std::io::Error>(server_side)]);
-    let mode = if confirm {
-        AgentMode::Normal
-    } else {
-        AgentMode::RefuseSign
-    };
+    let mode = if confirm { AgentMode::Normal } else { AgentMode::RefuseSign };
     tokio::spawn(async move {
         let _ = russh::keys::agent::server::serve(listener, TestAgent { mode }).await;
     });
@@ -731,9 +579,7 @@ pub async fn spawn_stalled_agent(keys: &[PrivateKey]) -> crate::DynAgent {
     let (client_side, server_side) = tokio::io::duplex(64 * 1024);
     let listener = futures::stream::iter(vec![Ok::<_, std::io::Error>(server_side)]);
     tokio::spawn(async move {
-        let agent = TestAgent {
-            mode: AgentMode::Stall,
-        };
+        let agent = TestAgent { mode: AgentMode::Stall };
         let _ = russh::keys::agent::server::serve(listener, agent).await;
     });
     let mut client = AgentClient::connect(client_side).dynamic();
@@ -756,10 +602,7 @@ struct TestAgent {
 }
 
 impl russh::keys::agent::server::Agent for TestAgent {
-    fn confirm_request(
-        &self,
-        msg: russh::keys::agent::server::MessageType,
-    ) -> impl std::future::Future<Output = bool> + Send {
+    fn confirm_request(&self, msg: russh::keys::agent::server::MessageType) -> impl std::future::Future<Output = bool> + Send {
         use russh::keys::agent::server::MessageType;
         let mode = self.mode;
         async move {
@@ -816,12 +659,7 @@ where
             });
         }
     });
-    TestProxy {
-        port,
-        connects,
-        targets,
-        task,
-    }
+    TestProxy { port, connects, targets, task }
 }
 
 /// An HTTP proxy that understands `CONNECT`; with credentials it wants Basic auth.
@@ -839,26 +677,17 @@ pub async fn spawn_http_proxy(credentials: Option<(String, String)>) -> TestProx
                 head.push(socket.read_u8().await?);
             }
             let head = String::from_utf8_lossy(&head).to_string();
-            let target = head
-                .lines()
-                .next()
-                .and_then(|l| l.strip_prefix("CONNECT "))
-                .and_then(|l| l.split_whitespace().next())
-                .unwrap_or_default()
-                .to_owned();
+            let target =
+                head.lines().next().and_then(|l| l.strip_prefix("CONNECT ")).and_then(|l| l.split_whitespace().next()).unwrap_or_default().to_owned();
             if let Some(wanted) = wanted
                 && !head.to_lowercase().lines().any(|l| l == wanted)
             {
-                socket
-                    .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
-                    .await?;
+                socket.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n").await?;
                 return Ok(());
             }
             targets.lock().unwrap().push(target.clone());
             let mut upstream = tokio::net::TcpStream::connect(target.as_str()).await?;
-            socket
-                .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
-                .await?;
+            socket.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n").await?;
             tokio::io::copy_bidirectional(&mut socket, &mut upstream).await?;
             Ok(())
         }
@@ -927,9 +756,7 @@ pub async fn spawn_socks5_proxy(credentials: Option<(String, String)>) -> TestPr
 
 /// An agent holding `keys`, opened afresh for each forwarded channel.
 pub fn agent_opener(keys: &[PrivateKey]) -> Arc<dyn crate::AgentOpener> {
-    Arc::new(TestAgentOpener {
-        keys: keys.to_vec(),
-    })
+    Arc::new(TestAgentOpener { keys: keys.to_vec() })
 }
 
 struct TestAgentOpener {
@@ -943,22 +770,14 @@ impl crate::AgentOpener for TestAgentOpener {
         // One agent, two connections: the first loads the keys, the second is forwarded.
         let (load, load_server) = tokio::io::duplex(64 * 1024);
         let (forward, forward_server) = tokio::io::duplex(64 * 1024);
-        let listener = futures::stream::iter(vec![
-            Ok::<_, std::io::Error>(load_server),
-            Ok(forward_server),
-        ]);
+        let listener = futures::stream::iter(vec![Ok::<_, std::io::Error>(load_server), Ok(forward_server)]);
         tokio::spawn(async move {
-            let agent = TestAgent {
-                mode: AgentMode::Normal,
-            };
+            let agent = TestAgent { mode: AgentMode::Normal };
             let _ = russh::keys::agent::server::serve(listener, agent).await;
         });
         let mut client = AgentClient::connect(load);
         for key in &self.keys {
-            client
-                .add_identity(key, &[])
-                .await
-                .map_err(|e| crate::SshError::AgentUnavailable(e.to_string()))?;
+            client.add_identity(key, &[]).await.map_err(|e| crate::SshError::AgentUnavailable(e.to_string()))?;
         }
         Ok(Box::new(forward))
     }

@@ -25,10 +25,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/accounts/me/devices", get(accounts::my_devices))
         .route("/v1/accounts/lookup", get(accounts::lookup))
         .route("/v1/accounts/{account}", get(accounts::public_info))
-        .route(
-            "/v1/accounts/{account}/log",
-            get(devicelog::read).post(devicelog::append),
-        )
+        .route("/v1/accounts/{account}/log", get(devicelog::read).post(devicelog::append))
         .route("/v1/areas", get(areas::list))
         .route("/v1/areas/{area}", delete(areas::delete))
         .route("/v1/areas/{area}/manifest", put(areas::put_manifest))

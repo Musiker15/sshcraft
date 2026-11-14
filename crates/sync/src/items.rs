@@ -6,9 +6,7 @@ use crate::SyncError;
 use crate::creds::{CredentialRefs, drop_unreferenced, keep_local, same_proxy_endpoint};
 use serde::{Deserialize, Serialize};
 use sshcraft_model::keytypes::KeyKind;
-use sshcraft_model::model::{
-    Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, LogId, PasswordId, ServerId,
-};
+use sshcraft_model::model::{Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, LogId, PasswordId, ServerId};
 use sshcraft_proto::ProtoError;
 use sshcraft_store::session_log::{self, LogError, LogMeta};
 use sshcraft_store::store::{ItemKind, Store};
@@ -84,14 +82,11 @@ impl SyncItem {
 }
 
 pub fn encode(item: &SyncItem) -> Result<Zeroizing<Vec<u8>>, SyncError> {
-    serde_json::to_vec(item)
-        .map(Zeroizing::new)
-        .map_err(|e| SyncError::Proto(ProtoError::Malformed(e.to_string())))
+    serde_json::to_vec(item).map(Zeroizing::new).map_err(|e| SyncError::Proto(ProtoError::Malformed(e.to_string())))
 }
 
 pub fn decode(bytes: &[u8]) -> Result<SyncItem, SyncError> {
-    serde_json::from_slice(bytes)
-        .map_err(|e| SyncError::Proto(ProtoError::Malformed(e.to_string())))
+    serde_json::from_slice(bytes).map_err(|e| SyncError::Proto(ProtoError::Malformed(e.to_string())))
 }
 
 fn parse_id(id: &str) -> Result<Uuid, SyncError> {
@@ -99,18 +94,9 @@ fn parse_id(id: &str) -> Result<Uuid, SyncError> {
 }
 
 /// The current local state of an item, ready to seal; `Deleted` if it no longer exists here.
-pub fn local_item(
-    store: &Store,
-    vault: &Vault,
-    kind: ItemKind,
-    id: &str,
-    now_ms: i64,
-) -> Result<SyncItem, SyncError> {
+pub fn local_item(store: &Store, vault: &Vault, kind: ItemKind, id: &str, now_ms: i64) -> Result<SyncItem, SyncError> {
     let uuid = parse_id(id)?;
-    let deleted = || ItemBody::Deleted {
-        item_kind: kind,
-        item_id: id.to_owned(),
-    };
+    let deleted = || ItemBody::Deleted { item_kind: kind, item_id: id.to_owned() };
     let body = match kind {
         ItemKind::Group => store
             .list_groups()?
@@ -133,12 +119,9 @@ pub fn local_item(
         // The stored text goes as it is: a key whose passphrase is not saved stays encrypted
         // with it. A key bound to this device never leaves it.
         ItemKind::Key => match store.key_record(KeyId(uuid))? {
-            Some(record) if record.kind != KeyKind::Device => ItemBody::Key {
-                id: record.id,
-                name: record.name,
-                openssh: vault.stored_openssh(store, record.id)?,
-                certificate: record.certificate,
-            },
+            Some(record) if record.kind != KeyKind::Device => {
+                ItemBody::Key { id: record.id, name: record.name, openssh: vault.stored_openssh(store, record.id)?, certificate: record.certificate }
+            }
             _ => deleted(),
         },
         ItemKind::Identity => store
@@ -153,10 +136,7 @@ pub fn local_item(
         ItemKind::Password => {
             let id = PasswordId(uuid);
             match store.password_record(id)? {
-                Some(_) => ItemBody::Password {
-                    id,
-                    secret: vault.password(store, id)?,
-                },
+                Some(_) => ItemBody::Password { id, secret: vault.password(store, id)? },
                 None => deleted(),
             }
         }
@@ -166,29 +146,15 @@ pub fn local_item(
             _ => deleted(),
         },
         ItemKind::LogChunk => match session_log::chunk(vault, store, id).map_err(log_error)? {
-            Some(chunk) => ItemBody::LogChunk {
-                id: uuid,
-                log_id: chunk.log,
-                seq: chunk.seq,
-                data: chunk.bytes,
-                written_at: chunk.written_at,
-            },
+            Some(chunk) => ItemBody::LogChunk { id: uuid, log_id: chunk.log, seq: chunk.seq, data: chunk.bytes, written_at: chunk.written_at },
             None => deleted(),
         },
     };
-    Ok(SyncItem {
-        modified_at: now_ms,
-        body,
-    })
+    Ok(SyncItem { modified_at: now_ms, body })
 }
 
 /// Writes an item that came from `server` into the local store, at that server's location.
-pub fn apply(
-    store: &Store,
-    vault: &Vault,
-    server: ServerId,
-    item: &SyncItem,
-) -> Result<(), SyncError> {
+pub fn apply(store: &Store, vault: &Vault, server: ServerId, item: &SyncItem) -> Result<(), SyncError> {
     apply_in(store, vault, server, item, None, None)
 }
 
@@ -203,15 +169,7 @@ pub fn apply_in(
     personal: Option<Uuid>,
 ) -> Result<(), SyncError> {
     let keep = |local: Option<CredentialRefs>, incoming: &mut CredentialRefs, same_proxy: bool| {
-        keep_local(
-            store,
-            server,
-            &local.unwrap_or_default(),
-            incoming,
-            area,
-            personal,
-            same_proxy,
-        )
+        keep_local(store, server, &local.unwrap_or_default(), incoming, area, personal, same_proxy)
     };
     match &item.body {
         ItemBody::Group { group } => {
@@ -219,18 +177,14 @@ pub fn apply_in(
             group.location = Some(server);
             let mut refs = CredentialRefs::of_settings(&group.defaults);
             let before = store.list_groups()?.into_iter().find(|g| g.id == group.id);
-            let same = before
-                .as_ref()
-                .is_some_and(|b| same_proxy_endpoint(&b.defaults.proxy, &group.defaults.proxy));
+            let same = before.as_ref().is_some_and(|b| same_proxy_endpoint(&b.defaults.proxy, &group.defaults.proxy));
             let before_refs = before.map(|g| CredentialRefs::of_settings(&g.defaults));
             keep(before_refs.clone(), &mut refs, same)?;
             refs.apply_to_settings(&mut group.defaults);
             store.upsert_group(&group)?;
             dropped_proxy(store, before_refs, &refs)?;
             // A subgroup takes its parent's location by itself.
-            if group.parent_id.is_none()
-                && store.location_of(ItemKind::Group, &group.id.0.to_string())? != Some(server)
-            {
+            if group.parent_id.is_none() && store.location_of(ItemKind::Group, &group.id.0.to_string())? != Some(server) {
                 store.set_location(ItemKind::Group, &group.id.0.to_string(), Some(server))?;
             }
         }
@@ -239,9 +193,7 @@ pub fn apply_in(
             host.location = Some(server);
             let mut refs = CredentialRefs::of_settings(&host.settings);
             let before = store.list_hosts()?.into_iter().find(|h| h.id == host.id);
-            let same = before
-                .as_ref()
-                .is_some_and(|b| same_proxy_endpoint(&b.settings.proxy, &host.settings.proxy));
+            let same = before.as_ref().is_some_and(|b| same_proxy_endpoint(&b.settings.proxy, &host.settings.proxy));
             let before_refs = before.map(|h| CredentialRefs::of_settings(&h.settings));
             keep(before_refs.clone(), &mut refs, same)?;
             refs.apply_to_settings(&mut host.settings);
@@ -252,27 +204,12 @@ pub fn apply_in(
                 store.set_location(ItemKind::Host, &id, Some(server))?;
             }
         }
-        ItemBody::Key {
-            id,
-            name,
-            openssh,
-            certificate,
-        } => {
+        ItemBody::Key { id, name, openssh, certificate } => {
             // A key bound to this device is never replaced from outside.
-            if store
-                .key_record(*id)?
-                .is_some_and(|r| r.kind == KeyKind::Device)
-            {
+            if store.key_record(*id)?.is_some_and(|r| r.kind == KeyKind::Device) {
                 return Ok(());
             }
-            vault.store_openssh_with_id(
-                store,
-                *id,
-                name,
-                openssh,
-                certificate.as_deref(),
-                Some(server),
-            )?;
+            vault.store_openssh_with_id(store, *id, name, openssh, certificate.as_deref(), Some(server))?;
             if store.location_of(ItemKind::Key, &id.0.to_string())? != Some(server) {
                 store.set_location(ItemKind::Key, &id.0.to_string(), Some(server))?;
             }
@@ -280,21 +217,13 @@ pub fn apply_in(
         ItemBody::Identity { identity } => {
             let mut identity = identity.clone();
             identity.location = Some(server);
-            let mut refs = CredentialRefs {
-                key: identity.key.clone(),
-                password: identity.password,
-                ..Default::default()
-            };
+            let mut refs = CredentialRefs { key: identity.key.clone(), password: identity.password, ..Default::default() };
             keep(
-                store
-                    .list_identities()?
-                    .into_iter()
-                    .find(|i| i.id == identity.id)
-                    .map(|i| CredentialRefs {
-                        key: i.key,
-                        password: i.password,
-                        ..Default::default()
-                    }),
+                store.list_identities()?.into_iter().find(|i| i.id == identity.id).map(|i| CredentialRefs {
+                    key: i.key,
+                    password: i.password,
+                    ..Default::default()
+                }),
                 &mut refs,
                 true,
             )?;
@@ -312,24 +241,8 @@ pub fn apply_in(
         ItemBody::Log { meta } => {
             session_log::put_meta(vault, store, meta, Some(server)).map_err(log_error)?;
         }
-        ItemBody::LogChunk {
-            id,
-            log_id,
-            seq,
-            data,
-            written_at,
-        } => {
-            session_log::put_chunk(
-                vault,
-                store,
-                *id,
-                *log_id,
-                *seq,
-                data,
-                *written_at,
-                Some(server),
-            )
-            .map_err(log_error)?;
+        ItemBody::LogChunk { id, log_id, seq, data, written_at } => {
+            session_log::put_chunk(vault, store, *id, *log_id, *seq, data, *written_at, Some(server)).map_err(log_error)?;
         }
         ItemBody::Deleted { item_kind, item_id } => {
             let uuid = parse_id(item_id)?;
@@ -338,19 +251,14 @@ pub fn apply_in(
                 ItemKind::Host => store.delete_host(HostId(uuid))?,
                 // A key bound to this device was never sent; no record may remove it.
                 ItemKind::Key => {
-                    if !store
-                        .key_record(KeyId(uuid))?
-                        .is_some_and(|r| r.kind == KeyKind::Device)
-                    {
+                    if !store.key_record(KeyId(uuid))?.is_some_and(|r| r.kind == KeyKind::Device) {
                         store.delete_key_record(KeyId(uuid))?;
                     }
                 }
                 ItemKind::Identity => store.delete_identity(IdentityId(uuid))?,
                 ItemKind::Password => store.delete_password(PasswordId(uuid))?,
                 ItemKind::Log => session_log::delete(store, LogId(uuid)).map_err(log_error)?,
-                ItemKind::LogChunk => {
-                    session_log::delete_chunk(store, item_id).map_err(log_error)?
-                }
+                ItemKind::LogChunk => session_log::delete_chunk(store, item_id).map_err(log_error)?,
             }
         }
     }
@@ -368,11 +276,7 @@ pub(crate) fn log_error(e: LogError) -> SyncError {
 
 /// A proxy password this device had before a record came in and that is now gone (the proxy was
 /// pointed elsewhere or removed) is deleted, unless something else still uses it.
-fn dropped_proxy(
-    store: &Store,
-    before: Option<CredentialRefs>,
-    after: &CredentialRefs,
-) -> Result<(), SyncError> {
+fn dropped_proxy(store: &Store, before: Option<CredentialRefs>, after: &CredentialRefs) -> Result<(), SyncError> {
     match before.and_then(|b| b.proxy_password) {
         Some(old) if after.proxy_password != Some(old) => drop_unreferenced(store, &[old]),
         _ => Ok(()),

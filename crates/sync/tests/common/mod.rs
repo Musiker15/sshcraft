@@ -28,19 +28,9 @@ impl TestServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let origin = format!("http://127.0.0.1:{}", addr.port());
-        let mut server = Self {
-            origin,
-            api_key: String::new(),
-            addr,
-            database_url,
-            stop: None,
-            task: None,
-            _dir: dir,
-        };
+        let mut server = Self { origin, api_key: String::new(), addr, database_url, stop: None, task: None, _dir: dir };
         server.run(listener).await;
-        let store = sshcraft_server_lib::store::open(&server.database_url)
-            .await
-            .unwrap();
+        let store = sshcraft_server_lib::store::open(&server.database_url).await.unwrap();
         server.api_key = store.api_key().await.unwrap().0;
         server
     }
@@ -78,10 +68,7 @@ impl TestServer {
         }
         if let Some(mut task) = self.task.take() {
             // Graceful first, so open WebSockets close as on a real shutdown.
-            if tokio::time::timeout(Duration::from_secs(5), &mut task)
-                .await
-                .is_err()
-            {
+            if tokio::time::timeout(Duration::from_secs(5), &mut task).await.is_err() {
                 task.abort();
                 let _ = task.await;
             }
@@ -102,9 +89,7 @@ impl TestServer {
 
     /// The server's own store, for tests that tamper with what it serves.
     pub async fn store(&self) -> std::sync::Arc<dyn sshcraft_server_lib::store::Store> {
-        sshcraft_server_lib::store::open(&self.database_url)
-            .await
-            .unwrap()
+        sshcraft_server_lib::store::open(&self.database_url).await.unwrap()
     }
 }
 
@@ -132,12 +117,7 @@ impl RawAccount {
         let cert = DeviceCertificate::issue(&key, device_id, keys.public(), "test", "linux", 1);
         let mut log = DeviceLog::default();
         log.append_add(&key, cert, 1);
-        Self {
-            key,
-            device_id,
-            keys,
-            log,
-        }
+        Self { key, device_id, keys, log }
     }
 }
 
@@ -161,10 +141,7 @@ impl Dev {
     pub fn new() -> Self {
         let store = Store::open_in_memory().unwrap();
         let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
-        Self {
-            store: Mutex::new(store),
-            vault,
-        }
+        Self { store: Mutex::new(store), vault }
     }
 
     pub fn row(&self) -> ServerRow {
@@ -182,14 +159,7 @@ impl Dev {
     /// The personal area's verified manifest and key, from what this device stored.
     pub fn area(&self) -> (AreaManifest, AreaKey) {
         let row = self.row();
-        let area = self
-            .store
-            .lock()
-            .unwrap()
-            .areas(row.id)
-            .unwrap()
-            .pop()
-            .unwrap();
+        let area = self.store.lock().unwrap().areas(row.id).unwrap().pop().unwrap();
         let manifest: AreaManifest = serde_json::from_str(&area.manifest).unwrap();
         let envelope: KeyEnvelope = serde_json::from_str(&area.envelope).unwrap();
         let key = open_area_key(&envelope, row.device_id, &self.keys(), &manifest).unwrap();
@@ -215,11 +185,7 @@ pub async fn create(server: &TestServer, dev: &Dev, email: &str) -> String {
         device_name: "first".into(),
         platform: "windows".into(),
     };
-    create_account(&dev.store, &dev.vault, input, 1)
-        .await
-        .unwrap()
-        .1
-        .to_string()
+    create_account(&dev.store, &dev.vault, input, 1).await.unwrap().1.to_string()
 }
 
 pub async fn join(server: &TestServer, dev: &Dev, export: &str) {
@@ -231,26 +197,14 @@ pub async fn join(server: &TestServer, dev: &Dev, export: &str) {
         device_name: "next".into(),
         platform: "linux".into(),
     };
-    join_account(&dev.store, &dev.vault, input, 2)
-        .await
-        .unwrap();
+    join_account(&dev.store, &dev.vault, input, 2).await.unwrap();
 }
 
 /// Seals a host as a record written by `dev` and uploads it; returns the record.
-pub async fn write_host(
-    server: &TestServer,
-    dev: &Dev,
-    host: &Host,
-    record_id: Uuid,
-    version: u64,
-    modified_at: i64,
-) -> SealedRecord {
+pub async fn write_host(server: &TestServer, dev: &Dev, host: &Host, record_id: Uuid, version: u64, modified_at: i64) -> SealedRecord {
     let row = dev.row();
     let (manifest, key) = dev.area();
-    let item = SyncItem {
-        modified_at,
-        body: ItemBody::Host { host: host.clone() },
-    };
+    let item = SyncItem { modified_at, body: ItemBody::Host { host: host.clone() } };
     let header = RecordHeader {
         record_id,
         area_id: manifest.area_id,
@@ -269,9 +223,7 @@ pub async fn revoke_raw(server: &TestServer, by: &Dev, target: Uuid) {
     let row = by.row();
     let client = by.client(server).await;
     let account = sshcraft_proto::identity::AccountPublic(row.account);
-    let mut log = DeviceLog {
-        entries: client.log(&account, 0).await.unwrap(),
-    };
+    let mut log = DeviceLog { entries: client.log(&account, 0).await.unwrap() };
     log.append_revoke_by_device(row.device_id, &by.keys(), target, 3);
     let entry = log.entries.last().cloned().unwrap();
     client.append_log(&account, &[entry], false).await.unwrap();
@@ -301,9 +253,7 @@ pub fn account(dev: &Dev) -> sshcraft_proto::identity::AccountPublic {
 }
 
 pub async fn engine(dev: &Dev) -> sshcraft_sync::engine::Engine {
-    sshcraft_sync::engine::Engine::load(&dev.store, &dev.vault, dev.row().id)
-        .await
-        .unwrap()
+    sshcraft_sync::engine::Engine::load(&dev.store, &dev.vault, dev.row().id).await.unwrap()
 }
 
 /// Pull, then push.
@@ -316,15 +266,7 @@ pub async fn sync(dev: &Dev) {
 /// The stored manifest and key of one area on `dev`.
 pub fn stored_area(dev: &Dev, area: Uuid) -> (AreaManifest, AreaKey) {
     let row = dev.row();
-    let state = dev
-        .store
-        .lock()
-        .unwrap()
-        .areas(row.id)
-        .unwrap()
-        .into_iter()
-        .find(|a| a.area_id == area)
-        .expect("area stored");
+    let state = dev.store.lock().unwrap().areas(row.id).unwrap().into_iter().find(|a| a.area_id == area).expect("area stored");
     let manifest: AreaManifest = serde_json::from_str(&state.manifest).unwrap();
     let envelope: KeyEnvelope = serde_json::from_str(&state.envelope).unwrap();
     let key = open_area_key(&envelope, row.device_id, &dev.keys(), &manifest).unwrap();
@@ -339,14 +281,7 @@ pub fn server_sql(server: &TestServer, sql: &str, params: impl rusqlite::Params)
 }
 
 /// Seals an item as a record written by `dev` in `area` (with the key `dev` stored for it).
-pub fn seal_in(
-    dev: &Dev,
-    area: Uuid,
-    body: ItemBody,
-    record_id: Uuid,
-    version: u64,
-    modified_at: i64,
-) -> SealedRecord {
+pub fn seal_in(dev: &Dev, area: Uuid, body: ItemBody, record_id: Uuid, version: u64, modified_at: i64) -> SealedRecord {
     let row = dev.row();
     let (manifest, key) = stored_area(dev, area);
     let item = SyncItem { modified_at, body };
@@ -377,8 +312,5 @@ pub fn inject_record(server: &TestServer, record: &SealedRecord) {
 }
 
 pub fn member(dev: &Dev, role: sshcraft_proto::area::Role) -> sshcraft_proto::area::Member {
-    sshcraft_proto::area::Member {
-        account: account(dev),
-        role,
-    }
+    sshcraft_proto::area::Member { account: account(dev), role }
 }

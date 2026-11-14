@@ -12,12 +12,7 @@ use crate::{Io, ProxyConfig, ProxyTarget, SshError};
 /// The longest answer to `CONNECT` read before giving up.
 const MAX_HTTP_RESPONSE: usize = 8 * 1024;
 
-pub(crate) async fn open(
-    proxy: Option<&ProxyConfig>,
-    address: &str,
-    port: u16,
-    timeout: Duration,
-) -> Result<Box<dyn Io>, SshError> {
+pub(crate) async fn open(proxy: Option<&ProxyConfig>, address: &str, port: u16, timeout: Duration) -> Result<Box<dyn Io>, SshError> {
     match proxy {
         None => {
             let tcp = tokio::time::timeout(timeout, TcpStream::connect((address, port)))
@@ -28,24 +23,16 @@ pub(crate) async fn open(
             Ok(Box::new(tcp))
         }
         Some(ProxyConfig::Http(target)) => {
-            tokio::time::timeout(timeout, http(target, address, port))
-                .await
-                .map_err(|_| SshError::Proxy("timed out".into()))?
+            tokio::time::timeout(timeout, http(target, address, port)).await.map_err(|_| SshError::Proxy("timed out".into()))?
         }
         Some(ProxyConfig::Socks5(target)) => {
-            tokio::time::timeout(timeout, socks5(target, address, port))
-                .await
-                .map_err(|_| SshError::Proxy("timed out".into()))?
+            tokio::time::timeout(timeout, socks5(target, address, port)).await.map_err(|_| SshError::Proxy("timed out".into()))?
         }
     }
 }
 
 fn authority(address: &str, port: u16) -> String {
-    if address.contains(':') {
-        format!("[{address}]:{port}")
-    } else {
-        format!("{address}:{port}")
-    }
+    if address.contains(':') { format!("[{address}]:{port}") } else { format!("{address}:{port}") }
 }
 
 /// Text that goes into the proxy request: no control characters (no header can be smuggled in
@@ -69,9 +56,7 @@ async fn http(proxy: &ProxyTarget, address: &str, port: u16) -> Result<Box<dyn I
     if let Some(password) = &proxy.password {
         clean(password, "proxy password")?;
     }
-    let mut tcp = TcpStream::connect((proxy.address.as_str(), proxy.port))
-        .await
-        .map_err(|e| SshError::Proxy(e.to_string()))?;
+    let mut tcp = TcpStream::connect((proxy.address.as_str(), proxy.port)).await.map_err(|e| SshError::Proxy(e.to_string()))?;
     let _ = tcp.set_nodelay(true);
     let target = authority(address, port);
     let mut request = Zeroizing::new(format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n"));
@@ -84,26 +69,18 @@ async fn http(proxy: &ProxyTarget, address: &str, port: u16) -> Result<Box<dyn I
         request.push_str("\r\n");
     }
     request.push_str("\r\n");
-    tcp.write_all(request.as_bytes())
-        .await
-        .map_err(|e| SshError::Proxy(e.to_string()))?;
+    tcp.write_all(request.as_bytes()).await.map_err(|e| SshError::Proxy(e.to_string()))?;
     // Byte by byte, so nothing of the SSH stream behind the answer is read away.
     let mut answer = Vec::new();
     while !answer.ends_with(b"\r\n\r\n") {
         if answer.len() >= MAX_HTTP_RESPONSE {
             return Err(SshError::Proxy("answer too long".into()));
         }
-        let byte = tcp
-            .read_u8()
-            .await
-            .map_err(|e| SshError::Proxy(e.to_string()))?;
+        let byte = tcp.read_u8().await.map_err(|e| SshError::Proxy(e.to_string()))?;
         answer.push(byte);
     }
-    let status = String::from_utf8_lossy(&answer)
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1).map(str::to_owned))
-        .unwrap_or_default();
+    let status =
+        String::from_utf8_lossy(&answer).lines().next().and_then(|line| line.split_whitespace().nth(1).map(str::to_owned)).unwrap_or_default();
     match status.as_str() {
         "200" => Ok(Box::new(tcp)),
         "407" => Err(SshError::ProxyAuthFailed),

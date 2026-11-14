@@ -71,15 +71,10 @@ impl ApiError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::BadApiKey | Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::Forbidden | Self::AccountLocked | Self::DeviceInactive | Self::DeviceBlocked => {
-                StatusCode::FORBIDDEN
-            }
+            Self::Forbidden | Self::AccountLocked | Self::DeviceInactive | Self::DeviceBlocked => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-            Self::Conflict { .. }
-            | Self::EmailTaken
-            | Self::AccountExists
-            | Self::DeviceIdTaken => StatusCode::CONFLICT,
+            Self::Conflict { .. } | Self::EmailTaken | Self::AccountExists | Self::DeviceIdTaken => StatusCode::CONFLICT,
             Self::Invalid(_) => StatusCode::BAD_REQUEST,
             Self::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Busy => StatusCode::SERVICE_UNAVAILABLE,
@@ -115,9 +110,7 @@ impl From<StoreError> for ApiError {
             StoreError::DeviceIdTaken => Self::DeviceIdTaken,
             StoreError::NotFound => Self::NotFound,
             StoreError::NotAllowed => Self::Forbidden,
-            StoreError::WrongKeyVersion { current } => {
-                Self::Invalid(format!("the area is at key version {current}"))
-            }
+            StoreError::WrongKeyVersion { current } => Self::Invalid(format!("the area is at key version {current}")),
             StoreError::Backend(cause) => Self::internal(cause),
         }
     }
@@ -144,11 +137,7 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for ApiJson<T> {
 }
 
 fn json_rejection(rejection: JsonRejection) -> ApiError {
-    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
-        ApiError::TooLarge
-    } else {
-        ApiError::Invalid(rejection.body_text())
-    }
+    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE { ApiError::TooLarge } else { ApiError::Invalid(rejection.body_text()) }
 }
 
 /// `axum::extract::Path` whose rejections answer `invalid`.

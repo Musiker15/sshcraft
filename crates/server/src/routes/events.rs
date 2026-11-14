@@ -25,10 +25,7 @@ pub async fn events(
     if state.hub.connections(session.device_id) >= MAX_PER_DEVICE {
         return Err(ApiError::Busy);
     }
-    Ok(upgrade
-        .max_message_size(MAX_CLIENT_MESSAGE)
-        .max_frame_size(MAX_CLIENT_MESSAGE)
-        .on_upgrade(move |socket| run(state, socket, session, token)))
+    Ok(upgrade.max_message_size(MAX_CLIENT_MESSAGE).max_frame_size(MAX_CLIENT_MESSAGE).on_upgrade(move |socket| run(state, socket, session, token)))
 }
 
 /// Forwards events, pings every `ws_recheck` and checks the session again at each ping, so a
@@ -37,8 +34,7 @@ pub async fn events(
 async fn run(state: AppState, mut socket: WebSocket, session: Session, token: Vec<u8>) {
     // Before anything else: a shutdown that comes while this connection starts must not be missed.
     let mut shutdown = state.shutdown.subscribe();
-    let Some((subscription, mut events)) = state.hub.subscribe(session.device_id, session.account)
-    else {
+    let Some((subscription, mut events)) = state.hub.subscribe(session.device_id, session.account) else {
         let _ = socket.send(Message::Close(None)).await;
         return;
     };

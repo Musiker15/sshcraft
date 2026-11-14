@@ -2,18 +2,12 @@ use super::*;
 use sshcraft_model::model::KeyRef;
 
 fn host<'a>(parsed: &'a ParsedConfig, alias: &str) -> &'a ConfigHost {
-    parsed
-        .hosts
-        .iter()
-        .find(|h| h.alias == alias)
-        .unwrap_or_else(|| panic!("no host {alias}"))
+    parsed.hosts.iter().find(|h| h.alias == alias).unwrap_or_else(|| panic!("no host {alias}"))
 }
 
 #[test]
 fn parses_basic_host_block() {
-    let parsed = parse(
-        "Host web\n  HostName example.org\n  Port 2222\n  User deploy\n  IdentityFile ~/.ssh/web\n",
-    );
+    let parsed = parse("Host web\n  HostName example.org\n  Port 2222\n  User deploy\n  IdentityFile ~/.ssh/web\n");
     let h = host(&parsed, "web");
     assert_eq!(h.hostname.as_deref(), Some("example.org"));
     assert_eq!(h.port, Some(2222));
@@ -28,11 +22,7 @@ fn first_value_wins_and_star_block_fills_gaps() {
     let a = host(&parsed, "a");
     assert_eq!(a.user.as_deref(), Some("root"));
     assert_eq!(a.port, Some(2222));
-    assert_eq!(
-        parsed.hosts.len(),
-        1,
-        "the * block is not a host of its own"
-    );
+    assert_eq!(parsed.hosts.len(), 1, "the * block is not a host of its own");
 }
 
 #[test]
@@ -42,10 +32,7 @@ fn equals_sign_quotes_bom_and_crlf() {
     let q = host(&parsed, "q");
     assert_eq!(q.hostname.as_deref(), Some("example.org"));
     assert_eq!(q.user.as_deref(), Some("admin"));
-    assert_eq!(
-        q.identity_files,
-        vec!["C:\\Users\\Max Mustermann\\.ssh\\id key.pub".to_owned()]
-    );
+    assert_eq!(q.identity_files, vec!["C:\\Users\\Max Mustermann\\.ssh\\id key.pub".to_owned()]);
 }
 
 #[test]
@@ -59,10 +46,7 @@ fn wildcard_and_negated_aliases_are_not_imported() {
 fn pattern_blocks_apply_to_matching_aliases_only() {
     let text = "Host app.example.org other\nHost *.example.org !skip.example.org\n  User team\nHost skip.example.org\n";
     let parsed = parse(text);
-    assert_eq!(
-        host(&parsed, "app.example.org").user.as_deref(),
-        Some("team")
-    );
+    assert_eq!(host(&parsed, "app.example.org").user.as_deref(), Some("team"));
     assert_eq!(host(&parsed, "other").user, None);
     assert_eq!(host(&parsed, "skip.example.org").user, None);
 }
@@ -101,31 +85,16 @@ fn fingerprints(path: &str) -> Option<String> {
 
 #[test]
 fn identity_file_with_pub_maps_to_agent_key() {
-    let parsed = parse(
-        "Host srv\n  HostName example.org\n  IdentityFile ~/.ssh/proton.pub\n  IdentitiesOnly yes\n",
-    );
-    let plan = plan_import(
-        &parsed.hosts,
-        &fingerprints,
-        Some(&["SHA256:proton".to_owned()]),
-    );
-    assert_eq!(
-        plan[0].settings.key,
-        Some(KeyRef::Agent {
-            fingerprint: "SHA256:proton".into()
-        })
-    );
+    let parsed = parse("Host srv\n  HostName example.org\n  IdentityFile ~/.ssh/proton.pub\n  IdentitiesOnly yes\n");
+    let plan = plan_import(&parsed.hosts, &fingerprints, Some(&["SHA256:proton".to_owned()]));
+    assert_eq!(plan[0].settings.key, Some(KeyRef::Agent { fingerprint: "SHA256:proton".into() }));
     assert_eq!(plan[0].key_note, None);
 }
 
 #[test]
 fn unknown_key_gets_a_note() {
     let parsed = parse("Host srv\n  HostName example.org\n  IdentityFile ~/.ssh/local\n");
-    let plan = plan_import(
-        &parsed.hosts,
-        &fingerprints,
-        Some(&["SHA256:proton".to_owned()]),
-    );
+    let plan = plan_import(&parsed.hosts, &fingerprints, Some(&["SHA256:proton".to_owned()]));
     assert_eq!(plan[0].settings.key, None);
     assert_eq!(plan[0].key_note, Some(KeyNote::NotInAgent));
 }
@@ -145,11 +114,7 @@ fn same_hostname_becomes_one_group() {
 
 #[test]
 fn alias_without_hostname_uses_alias_as_address() {
-    let plan = plan_import(
-        &parse("Host example.net\n  User u\n").hosts,
-        &fingerprints,
-        Some(&[]),
-    );
+    let plan = plan_import(&parse("Host example.net\n  User u\n").hosts, &fingerprints, Some(&[]));
     assert_eq!(plan[0].settings.address.as_deref(), Some("example.net"));
 }
 
@@ -157,23 +122,13 @@ fn candidate(alias: &str, group: Option<&str>, address: Option<&str>) -> ImportC
     ImportCandidate {
         name: alias.into(),
         group_path: group.map(Into::into).into_iter().collect(),
-        group_defaults: sshcraft_model::model::ConnectionSettings {
-            address: group.map(Into::into),
-            ..Default::default()
-        },
-        settings: sshcraft_model::model::ConnectionSettings {
-            address: address.map(Into::into),
-            username: Some("u".into()),
-            ..Default::default()
-        },
+        group_defaults: sshcraft_model::model::ConnectionSettings { address: group.map(Into::into), ..Default::default() },
+        settings: sshcraft_model::model::ConnectionSettings { address: address.map(Into::into), username: Some("u".into()), ..Default::default() },
         ..ImportCandidate::default()
     }
 }
 
-fn apply_import(
-    store: &sshcraft_store::store::Store,
-    candidates: &[ImportCandidate],
-) -> Result<usize, sshcraft_store::store::StoreError> {
+fn apply_import(store: &sshcraft_store::store::Store, candidates: &[ImportCandidate]) -> Result<usize, sshcraft_store::store::StoreError> {
     crate::import::apply_import(store, candidates, None).map(|o| o.created)
 }
 
@@ -182,11 +137,7 @@ fn apply_import_creates_exactly_the_given_candidates() {
     let store = sshcraft_store::store::Store::open_in_memory().unwrap();
     let created = apply_import(
         &store,
-        &[
-            candidate("a", Some("example.org"), None),
-            candidate("b", Some("example.org"), None),
-            candidate("c", None, Some("other.org")),
-        ],
+        &[candidate("a", Some("example.org"), None), candidate("b", Some("example.org"), None), candidate("c", None, Some("other.org"))],
     )
     .unwrap();
     assert_eq!(created, 3);
@@ -204,14 +155,7 @@ fn apply_import_creates_exactly_the_given_candidates() {
 fn apply_import_skips_existing_hosts_and_reuses_groups() {
     let store = sshcraft_store::store::Store::open_in_memory().unwrap();
     apply_import(&store, &[candidate("a", Some("example.org"), None)]).unwrap();
-    let created = apply_import(
-        &store,
-        &[
-            candidate("a", Some("example.org"), None),
-            candidate("d", Some("example.org"), None),
-        ],
-    )
-    .unwrap();
+    let created = apply_import(&store, &[candidate("a", Some("example.org"), None), candidate("d", Some("example.org"), None)]).unwrap();
     assert_eq!(created, 1);
     assert_eq!(store.list_groups().unwrap().len(), 1);
     assert_eq!(store.list_hosts().unwrap().len(), 2);
@@ -246,18 +190,8 @@ Host c
 ",
     );
     let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
-    assert_eq!(
-        plan[0].warnings,
-        vec![ImportWarning::ProxyIgnored {
-            directive: "ProxyJump bastion".into()
-        }]
-    );
-    assert_eq!(
-        plan[1].warnings,
-        vec![ImportWarning::ProxyIgnored {
-            directive: "ProxyCommand ssh -W %h:%p gw".into()
-        }]
-    );
+    assert_eq!(plan[0].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyJump bastion".into() }]);
+    assert_eq!(plan[1].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyCommand ssh -W %h:%p gw".into() }]);
     assert!(plan[2].warnings.is_empty());
 }
 
@@ -285,10 +219,7 @@ fn other_tokens_are_warned() {
     );
     let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
     assert_eq!(plan[0].settings.address.as_deref(), Some("%r.x"));
-    assert_eq!(
-        plan[0].warnings,
-        vec![ImportWarning::UnsupportedToken { token: "%r".into() }]
-    );
+    assert_eq!(plan[0].warnings, vec![ImportWarning::UnsupportedToken { token: "%r".into() }]);
 }
 
 #[test]
@@ -301,9 +232,7 @@ fn candidate_without_warnings_field_still_deserializes() {
 
 #[test]
 fn proxy_none_is_not_a_proxy() {
-    let parsed = parse(
-        "Host a\n  HostName a.org\n  ProxyCommand none\nHost b\n  HostName b.org\n  ProxyJump NONE\nHost *\n  ProxyJump bastion\n",
-    );
+    let parsed = parse("Host a\n  HostName a.org\n  ProxyCommand none\nHost b\n  HostName b.org\n  ProxyJump NONE\nHost *\n  ProxyJump bastion\n");
     let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
     assert!(plan[0].warnings.is_empty(), "{:?}", plan[0].warnings);
     assert!(plan[1].warnings.is_empty(), "{:?}", plan[1].warnings);
@@ -317,10 +246,7 @@ fn imported(text: &str) -> sshcraft_store::store::Store {
     store
 }
 
-fn stored<'a>(
-    hosts: &'a [sshcraft_model::model::Host],
-    name: &str,
-) -> &'a sshcraft_model::model::Host {
+fn stored<'a>(hosts: &'a [sshcraft_model::model::Host], name: &str) -> &'a sshcraft_model::model::Host {
     hosts.iter().find(|h| h.name == name).unwrap()
 }
 
@@ -333,10 +259,7 @@ fn proxyjump_to_imported_alias_sets_jump_hosts() {
     let store = imported(text);
     let hosts = store.list_hosts().unwrap();
     let bastion = stored(&hosts, "bastion");
-    assert_eq!(
-        stored(&hosts, "inner").settings.jump_hosts,
-        Some(vec![bastion.id])
-    );
+    assert_eq!(stored(&hosts, "inner").settings.jump_hosts, Some(vec![bastion.id]));
     assert_eq!(bastion.settings.jump_hosts, None);
 }
 
@@ -345,22 +268,14 @@ fn proxyjump_chain_keeps_its_order() {
     let text = "Host a\n  HostName a.org\nHost b\n  HostName b.org\nHost t\n  HostName t.org\n  ProxyJump b,a\n";
     let store = imported(text);
     let hosts = store.list_hosts().unwrap();
-    assert_eq!(
-        stored(&hosts, "t").settings.jump_hosts,
-        Some(vec![stored(&hosts, "b").id, stored(&hosts, "a").id])
-    );
+    assert_eq!(stored(&hosts, "t").settings.jump_hosts, Some(vec![stored(&hosts, "b").id, stored(&hosts, "a").id]));
 }
 
 #[test]
 fn proxyjump_to_unknown_keeps_warning() {
     let text = "Host inner\n  HostName 10.0.0.5\n  ProxyJump admin@gw.example.org:2222\n";
     let plan = plan_import(&parse(text).hosts, &|_| None, Some(&[]));
-    assert_eq!(
-        plan[0].warnings,
-        vec![ImportWarning::ProxyIgnored {
-            directive: "ProxyJump admin@gw.example.org:2222".into()
-        }]
-    );
+    assert_eq!(plan[0].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyJump admin@gw.example.org:2222".into() }]);
     let store = imported(text);
     assert_eq!(store.list_hosts().unwrap()[0].settings.jump_hosts, None);
 }
@@ -372,18 +287,7 @@ fn forwardagent_and_setenv_imported() {
     let hosts = store.list_hosts().unwrap();
     let web = stored(&hosts, "web");
     assert_eq!(web.settings.agent_forwarding, Some(true));
-    let env: Vec<(String, String)> = web
-        .settings
-        .env
-        .iter()
-        .map(|v| (v.name.clone(), v.value.clone()))
-        .collect();
-    assert_eq!(
-        env,
-        vec![
-            ("LANG".to_owned(), "de_DE.UTF-8".to_owned()),
-            ("MOTTO".to_owned(), "hallo welt".to_owned()),
-        ]
-    );
+    let env: Vec<(String, String)> = web.settings.env.iter().map(|v| (v.name.clone(), v.value.clone())).collect();
+    assert_eq!(env, vec![("LANG".to_owned(), "de_DE.UTF-8".to_owned()), ("MOTTO".to_owned(), "hallo welt".to_owned()),]);
     assert_eq!(stored(&hosts, "db").settings.agent_forwarding, Some(false));
 }

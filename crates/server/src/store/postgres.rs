@@ -5,8 +5,7 @@
 //! The connection uses no TLS: the database is expected on the same host (see docs/server.md).
 
 use super::{
-    AccountRow, AreaFate, AreaOutcome, AreaRow, DeviceChanges, DeviceRow, SessionRow, Store,
-    StoreError, StoredRecord, area_fate, backend, role_name,
+    AccountRow, AreaFate, AreaOutcome, AreaRow, DeviceChanges, DeviceRow, SessionRow, Store, StoreError, StoredRecord, area_fate, backend, role_name,
 };
 use data_encoding::BASE64URL_NOPAD;
 use deadpool_postgres::{GenericClient, Manager, ManagerConfig, Pool, RecyclingMethod};
@@ -99,17 +98,8 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub async fn connect(url: &str) -> Result<Self, StoreError> {
         let config: tokio_postgres::Config = url.parse().map_err(backend)?;
-        let manager = Manager::from_config(
-            config,
-            NoTls,
-            ManagerConfig {
-                recycling_method: RecyclingMethod::Fast,
-            },
-        );
-        let pool = Pool::builder(manager)
-            .max_size(16)
-            .build()
-            .map_err(backend)?;
+        let manager = Manager::from_config(config, NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
+        let pool = Pool::builder(manager).max_size(16).build().map_err(backend)?;
         let store = Self { pool };
         store.migrate().await?;
         Ok(store)
@@ -123,23 +113,14 @@ impl PostgresStore {
         let mut client = self.client().await?;
         let tx = client.transaction().await.map_err(pg)?;
         tx.batch_execute(SCHEMA).await.map_err(pg)?;
-        let version: Option<i64> = tx
-            .query_opt("SELECT version FROM schema_version", &[])
-            .await
-            .map_err(pg)?
-            .map(|r| r.get(0));
+        let version: Option<i64> = tx.query_opt("SELECT version FROM schema_version", &[]).await.map_err(pg)?.map(|r| r.get(0));
         match version {
             Some(v) if v > SCHEMA_VERSION => {
                 return Err(StoreError::Backend("newer schema".into()));
             }
             Some(_) => {}
             None => {
-                tx.execute(
-                    "INSERT INTO schema_version (version) VALUES ($1)",
-                    &[&SCHEMA_VERSION],
-                )
-                .await
-                .map_err(pg)?;
+                tx.execute("INSERT INTO schema_version (version) VALUES ($1)", &[&SCHEMA_VERSION]).await.map_err(pg)?;
             }
         }
         tx.commit().await.map_err(pg)
@@ -148,11 +129,7 @@ impl PostgresStore {
 
 fn pg(err: tokio_postgres::Error) -> StoreError {
     if err.code() == Some(&SqlState::UNIQUE_VIOLATION) {
-        let constraint = err
-            .as_db_error()
-            .and_then(|e| e.constraint())
-            .unwrap_or_default()
-            .to_owned();
+        let constraint = err.as_db_error().and_then(|e| e.constraint()).unwrap_or_default().to_owned();
         return match constraint.as_str() {
             "accounts_email_norm_key" => StoreError::EmailTaken,
             "accounts_pkey" => StoreError::AccountExists,
@@ -172,9 +149,7 @@ fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, StoreError> {
 }
 
 fn account_from(bytes: Vec<u8>) -> Result<AccountPublic, StoreError> {
-    let array: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| StoreError::Backend("account key length".into()))?;
+    let array: [u8; 32] = bytes.try_into().map_err(|_| StoreError::Backend("account key length".into()))?;
     Ok(AccountPublic(array))
 }
 
@@ -187,17 +162,10 @@ fn random_key() -> String {
 const ACCOUNT_COLUMNS: &str = "account, name, email, created_at, locked";
 
 fn to_account(r: &Row) -> Result<AccountRow, StoreError> {
-    Ok(AccountRow {
-        account: account_from(r.get(0))?,
-        name: r.get(1),
-        email: r.get(2),
-        created_at: r.get(3),
-        locked: r.get(4),
-    })
+    Ok(AccountRow { account: account_from(r.get(0))?, name: r.get(1), email: r.get(2), created_at: r.get(3), locked: r.get(4) })
 }
 
-const DEVICE_COLUMNS: &str =
-    "device_id, account, cert, active, admin_blocked, has_logged_in, last_seen";
+const DEVICE_COLUMNS: &str = "device_id, account, cert, active, admin_blocked, has_logged_in, last_seen";
 
 fn to_device(r: &Row) -> Result<DeviceRow, StoreError> {
     Ok(DeviceRow {
@@ -212,28 +180,15 @@ fn to_device(r: &Row) -> Result<DeviceRow, StoreError> {
 }
 
 fn to_area(r: &Row) -> Result<AreaRow, StoreError> {
-    Ok(AreaRow {
-        owner: account_from(r.get(0))?,
-        manifest: from_json(r.get::<_, &str>(1))?,
-    })
+    Ok(AreaRow { owner: account_from(r.get(0))?, manifest: from_json(r.get::<_, &str>(1))? })
 }
 
-async fn exists(
-    c: &impl GenericClient,
-    sql: &str,
-    param: &(dyn tokio_postgres::types::ToSql + Sync),
-) -> Result<bool, StoreError> {
+async fn exists(c: &impl GenericClient, sql: &str, param: &(dyn tokio_postgres::types::ToSql + Sync)) -> Result<bool, StoreError> {
     Ok(c.query_opt(sql, &[param]).await.map_err(pg)?.is_some())
 }
 
 async fn insert_device(c: &impl GenericClient, cert: &DeviceCertificate) -> Result<(), StoreError> {
-    if exists(
-        c,
-        "SELECT 1 FROM devices WHERE device_id = $1",
-        &cert.device_id,
-    )
-    .await?
-    {
+    if exists(c, "SELECT 1 FROM devices WHERE device_id = $1", &cert.device_id).await? {
         return Err(StoreError::DeviceIdTaken);
     }
     c.execute(
@@ -248,10 +203,7 @@ async fn insert_device(c: &impl GenericClient, cert: &DeviceCertificate) -> Resu
 /// Owner and key version of an area, locked for the rest of the transaction, or `NotFound`.
 async fn area_head(c: &impl GenericClient, area_id: Uuid) -> Result<(Vec<u8>, u32), StoreError> {
     let row = c
-        .query_opt(
-            "SELECT owner, key_version FROM areas WHERE area_id = $1 FOR UPDATE",
-            &[&area_id],
-        )
+        .query_opt("SELECT owner, key_version FROM areas WHERE area_id = $1 FOR UPDATE", &[&area_id])
         .await
         .map_err(pg)?
         .ok_or(StoreError::NotFound)?;
@@ -261,11 +213,7 @@ async fn area_head(c: &impl GenericClient, area_id: Uuid) -> Result<(Vec<u8>, u3
 
 /// The fate of each area the account owns; with `lock`, the area rows stay locked until the
 /// transaction ends, so no manifest write can change them in between.
-async fn owned_area_fates(
-    c: &impl GenericClient,
-    account: &AccountPublic,
-    lock: bool,
-) -> Result<Vec<AreaFate>, StoreError> {
+async fn owned_area_fates(c: &impl GenericClient, account: &AccountPublic, lock: bool) -> Result<Vec<AreaFate>, StoreError> {
     let sql = if lock {
         "SELECT manifest FROM areas WHERE owner = $1 ORDER BY area_id FOR UPDATE"
     } else {
@@ -273,18 +221,13 @@ async fn owned_area_fates(
     };
     let rows = c.query(sql, &[&account.0.as_slice()]).await.map_err(pg)?;
     let open = c
-        .query(
-            "SELECT account FROM accounts WHERE NOT locked AND account <> $1",
-            &[&account.0.as_slice()],
-        )
+        .query("SELECT account FROM accounts WHERE NOT locked AND account <> $1", &[&account.0.as_slice()])
         .await
         .map_err(pg)?
         .iter()
         .map(|r| account_from(r.get(0)))
         .collect::<Result<std::collections::HashSet<_>, _>>()?;
-    rows.iter()
-        .map(|r| from_json::<AreaManifest>(r.get::<_, &str>(0)).map(|m| area_fate(&m, &open)))
-        .collect()
+    rows.iter().map(|r| from_json::<AreaManifest>(r.get::<_, &str>(0)).map(|m| area_fate(&m, &open))).collect()
 }
 
 #[async_trait::async_trait]
@@ -292,17 +235,11 @@ impl Store for PostgresStore {
     async fn api_key(&self) -> Result<(String, bool), StoreError> {
         let c = self.client().await?;
         let created = c
-            .execute(
-                "INSERT INTO server_config (key, value) VALUES ('api_key', $1) ON CONFLICT (key) DO NOTHING",
-                &[&random_key()],
-            )
+            .execute("INSERT INTO server_config (key, value) VALUES ('api_key', $1) ON CONFLICT (key) DO NOTHING", &[&random_key()])
             .await
             .map_err(pg)?
             == 1;
-        let row = c
-            .query_one("SELECT value FROM server_config WHERE key = 'api_key'", &[])
-            .await
-            .map_err(pg)?;
+        let row = c.query_one("SELECT value FROM server_config WHERE key = 'api_key'", &[]).await.map_err(pg)?;
         Ok((row.get(0), created))
     }
 
@@ -320,57 +257,28 @@ impl Store for PostgresStore {
         Ok(key)
     }
 
-    async fn create_account(
-        &self,
-        row: &AccountRow,
-        email_norm: &str,
-        first: &LogEntry,
-        device: &DeviceCertificate,
-    ) -> Result<(), StoreError> {
+    async fn create_account(&self, row: &AccountRow, email_norm: &str, first: &LogEntry, device: &DeviceCertificate) -> Result<(), StoreError> {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let key = row.account.0.as_slice();
         // A deleted account key stays taken, so deleting a user also keeps them out of the areas
         // whose manifests still name them.
         if exists(&tx, "SELECT 1 FROM accounts WHERE account = $1", &key).await?
-            || exists(
-                &tx,
-                "SELECT 1 FROM deleted_accounts WHERE account = $1",
-                &key,
-            )
-            .await?
+            || exists(&tx, "SELECT 1 FROM deleted_accounts WHERE account = $1", &key).await?
         {
             return Err(StoreError::AccountExists);
         }
-        if exists(
-            &tx,
-            "SELECT 1 FROM accounts WHERE email_norm = $1",
-            &email_norm,
-        )
-        .await?
-        {
+        if exists(&tx, "SELECT 1 FROM accounts WHERE email_norm = $1", &email_norm).await? {
             return Err(StoreError::EmailTaken);
         }
         tx.execute(
             "INSERT INTO accounts (account, name, email, email_norm, created_at, locked)
              VALUES ($1, $2, $3, $4, $5, $6)",
-            &[
-                &key,
-                &row.name,
-                &row.email,
-                &email_norm,
-                &row.created_at,
-                &row.locked,
-            ],
+            &[&key, &row.name, &row.email, &email_norm, &row.created_at, &row.locked],
         )
         .await
         .map_err(pg)?;
-        tx.execute(
-            "INSERT INTO log_entries (account, seq, entry) VALUES ($1, 0, $2)",
-            &[&key, &to_json(first)?],
-        )
-        .await
-        .map_err(pg)?;
+        tx.execute("INSERT INTO log_entries (account, seq, entry) VALUES ($1, 0, $2)", &[&key, &to_json(first)?]).await.map_err(pg)?;
         insert_device(&tx, device).await?;
         tx.commit().await.map_err(pg)
     }
@@ -378,10 +286,7 @@ impl Store for PostgresStore {
     async fn account(&self, account: &AccountPublic) -> Result<Option<AccountRow>, StoreError> {
         self.client()
             .await?
-            .query_opt(
-                &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE account = $1"),
-                &[&account.0.as_slice()],
-            )
+            .query_opt(&format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE account = $1"), &[&account.0.as_slice()])
             .await
             .map_err(pg)?
             .as_ref()
@@ -392,10 +297,7 @@ impl Store for PostgresStore {
     async fn account_by_email(&self, email_norm: &str) -> Result<Option<AccountRow>, StoreError> {
         self.client()
             .await?
-            .query_opt(
-                &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE email_norm = $1"),
-                &[&email_norm],
-            )
+            .query_opt(&format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE email_norm = $1"), &[&email_norm])
             .await
             .map_err(pg)?
             .as_ref()
@@ -406,10 +308,7 @@ impl Store for PostgresStore {
     async fn list_accounts(&self) -> Result<Vec<AccountRow>, StoreError> {
         self.client()
             .await?
-            .query(
-                &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts ORDER BY email_norm"),
-                &[],
-            )
+            .query(&format!("SELECT {ACCOUNT_COLUMNS} FROM accounts ORDER BY email_norm"), &[])
             .await
             .map_err(pg)?
             .iter()
@@ -421,20 +320,12 @@ impl Store for PostgresStore {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let key = account.0.as_slice();
-        let n = tx
-            .execute(
-                "UPDATE accounts SET locked = $2 WHERE account = $1",
-                &[&key, &locked],
-            )
-            .await
-            .map_err(pg)?;
+        let n = tx.execute("UPDATE accounts SET locked = $2 WHERE account = $1", &[&key, &locked]).await.map_err(pg)?;
         if n == 0 {
             return Err(StoreError::NotFound);
         }
         if locked {
-            tx.execute("DELETE FROM sessions WHERE account = $1", &[&key])
-                .await
-                .map_err(pg)?;
+            tx.execute("DELETE FROM sessions WHERE account = $1", &[&key]).await.map_err(pg)?;
         }
         tx.commit().await.map_err(pg)
     }
@@ -443,73 +334,34 @@ impl Store for PostgresStore {
         let rows = self
             .client()
             .await?
-            .query(
-                "SELECT entry FROM log_entries WHERE account = $1 ORDER BY seq",
-                &[&account.0.as_slice()],
-            )
+            .query("SELECT entry FROM log_entries WHERE account = $1 ORDER BY seq", &[&account.0.as_slice()])
             .await
             .map_err(pg)?;
-        Ok(DeviceLog {
-            entries: rows
-                .iter()
-                .map(|r| from_json(r.get::<_, &str>(0)))
-                .collect::<Result<_, _>>()?,
-        })
+        Ok(DeviceLog { entries: rows.iter().map(|r| from_json(r.get::<_, &str>(0))).collect::<Result<_, _>>()? })
     }
 
-    async fn append_log(
-        &self,
-        account: &AccountPublic,
-        expected_len: u64,
-        entries: &[LogEntry],
-        changes: &DeviceChanges,
-    ) -> Result<(), StoreError> {
+    async fn append_log(&self, account: &AccountPublic, expected_len: u64, entries: &[LogEntry], changes: &DeviceChanges) -> Result<(), StoreError> {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let key = account.0.as_slice();
-        if !exists(
-            &tx,
-            "SELECT 1 FROM accounts WHERE account = $1 FOR UPDATE",
-            &key,
-        )
-        .await?
-        {
+        if !exists(&tx, "SELECT 1 FROM accounts WHERE account = $1 FOR UPDATE", &key).await? {
             return Err(StoreError::NotFound);
         }
-        let len: i64 = tx
-            .query_one(
-                "SELECT COUNT(*) FROM log_entries WHERE account = $1",
-                &[&key],
-            )
-            .await
-            .map_err(pg)?
-            .get(0);
+        let len: i64 = tx.query_one("SELECT COUNT(*) FROM log_entries WHERE account = $1", &[&key]).await.map_err(pg)?.get(0);
         if len as u64 != expected_len {
-            return Err(StoreError::Conflict {
-                current: len as u64,
-            });
+            return Err(StoreError::Conflict { current: len as u64 });
         }
         for (offset, entry) in entries.iter().enumerate() {
-            tx.execute(
-                "INSERT INTO log_entries (account, seq, entry) VALUES ($1, $2, $3)",
-                &[&key, &(len + offset as i64), &to_json(entry)?],
-            )
-            .await
-            .map_err(pg)?;
+            tx.execute("INSERT INTO log_entries (account, seq, entry) VALUES ($1, $2, $3)", &[&key, &(len + offset as i64), &to_json(entry)?])
+                .await
+                .map_err(pg)?;
         }
         for cert in &changes.added {
             insert_device(&tx, cert).await?;
         }
         for id in &changes.revoked {
-            tx.execute(
-                "UPDATE devices SET active = FALSE WHERE device_id = $1 AND account = $2",
-                &[id, &key],
-            )
-            .await
-            .map_err(pg)?;
-            tx.execute("DELETE FROM sessions WHERE device_id = $1", &[id])
-                .await
-                .map_err(pg)?;
+            tx.execute("UPDATE devices SET active = FALSE WHERE device_id = $1 AND account = $2", &[id, &key]).await.map_err(pg)?;
+            tx.execute("DELETE FROM sessions WHERE device_id = $1", &[id]).await.map_err(pg)?;
         }
         tx.commit().await.map_err(pg)
     }
@@ -517,10 +369,7 @@ impl Store for PostgresStore {
     async fn device(&self, device_id: Uuid) -> Result<Option<DeviceRow>, StoreError> {
         self.client()
             .await?
-            .query_opt(
-                &format!("SELECT {DEVICE_COLUMNS} FROM devices WHERE device_id = $1"),
-                &[&device_id],
-            )
+            .query_opt(&format!("SELECT {DEVICE_COLUMNS} FROM devices WHERE device_id = $1"), &[&device_id])
             .await
             .map_err(pg)?
             .as_ref()
@@ -531,10 +380,7 @@ impl Store for PostgresStore {
     async fn devices_of(&self, account: &AccountPublic) -> Result<Vec<DeviceRow>, StoreError> {
         self.client()
             .await?
-            .query(
-                &format!("SELECT {DEVICE_COLUMNS} FROM devices WHERE account = $1 ORDER BY added"),
-                &[&account.0.as_slice()],
-            )
+            .query(&format!("SELECT {DEVICE_COLUMNS} FROM devices WHERE account = $1 ORDER BY added"), &[&account.0.as_slice()])
             .await
             .map_err(pg)?
             .iter()
@@ -545,55 +391,31 @@ impl Store for PostgresStore {
     async fn mark_logged_in(&self, device_id: Uuid, now: i64) -> Result<(), StoreError> {
         self.client()
             .await?
-            .execute(
-                "UPDATE devices SET has_logged_in = TRUE, last_seen = $2 WHERE device_id = $1",
-                &[&device_id, &now],
-            )
+            .execute("UPDATE devices SET has_logged_in = TRUE, last_seen = $2 WHERE device_id = $1", &[&device_id, &now])
             .await
             .map_err(pg)?;
         Ok(())
     }
 
     async fn touch_device(&self, device_id: Uuid, now: i64) -> Result<(), StoreError> {
-        self.client()
-            .await?
-            .execute(
-                "UPDATE devices SET last_seen = $2 WHERE device_id = $1",
-                &[&device_id, &now],
-            )
-            .await
-            .map_err(pg)?;
+        self.client().await?.execute("UPDATE devices SET last_seen = $2 WHERE device_id = $1", &[&device_id, &now]).await.map_err(pg)?;
         Ok(())
     }
 
     async fn set_admin_blocked(&self, device_id: Uuid, blocked: bool) -> Result<(), StoreError> {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
-        let n = tx
-            .execute(
-                "UPDATE devices SET admin_blocked = $2 WHERE device_id = $1",
-                &[&device_id, &blocked],
-            )
-            .await
-            .map_err(pg)?;
+        let n = tx.execute("UPDATE devices SET admin_blocked = $2 WHERE device_id = $1", &[&device_id, &blocked]).await.map_err(pg)?;
         if n == 0 {
             return Err(StoreError::NotFound);
         }
         if blocked {
-            tx.execute("DELETE FROM sessions WHERE device_id = $1", &[&device_id])
-                .await
-                .map_err(pg)?;
+            tx.execute("DELETE FROM sessions WHERE device_id = $1", &[&device_id]).await.map_err(pg)?;
         }
         tx.commit().await.map_err(pg)
     }
 
-    async fn create_session(
-        &self,
-        token_hash: [u8; 32],
-        device_id: Uuid,
-        account: &AccountPublic,
-        expires_at: i64,
-    ) -> Result<(), StoreError> {
+    async fn create_session(&self, token_hash: [u8; 32], device_id: Uuid, account: &AccountPublic, expires_at: i64) -> Result<(), StoreError> {
         self.client()
             .await?
             .execute(
@@ -609,37 +431,20 @@ impl Store for PostgresStore {
         let row = self
             .client()
             .await?
-            .query_opt(
-                "SELECT device_id, account, expires_at FROM sessions WHERE token_hash = $1",
-                &[&token_hash.as_slice()],
-            )
+            .query_opt("SELECT device_id, account, expires_at FROM sessions WHERE token_hash = $1", &[&token_hash.as_slice()])
             .await
             .map_err(pg)?;
-        row.map(|r| {
-            Ok(SessionRow {
-                device_id: r.get(0),
-                account: account_from(r.get(1))?,
-                expires_at: r.get(2),
-            })
-        })
-        .transpose()
+        row.map(|r| Ok(SessionRow { device_id: r.get(0), account: account_from(r.get(1))?, expires_at: r.get(2) })).transpose()
     }
 
     async fn delete_expired_sessions(&self, now: i64) -> Result<u64, StoreError> {
-        self.client()
-            .await?
-            .execute("DELETE FROM sessions WHERE expires_at <= $1", &[&now])
-            .await
-            .map_err(pg)
+        self.client().await?.execute("DELETE FROM sessions WHERE expires_at <= $1", &[&now]).await.map_err(pg)
     }
 
     async fn area(&self, area_id: AreaId) -> Result<Option<AreaRow>, StoreError> {
         self.client()
             .await?
-            .query_opt(
-                "SELECT owner, manifest FROM areas WHERE area_id = $1",
-                &[&area_id.0],
-            )
+            .query_opt("SELECT owner, manifest FROM areas WHERE area_id = $1", &[&area_id.0])
             .await
             .map_err(pg)?
             .as_ref()
@@ -679,41 +484,21 @@ impl Store for PostgresStore {
             )
             .await
             .map_err(pg)?;
-        rows.iter()
-            .map(|r| r.get::<_, Vec<u8>>(0))
-            .filter(|peer| peer.as_slice() != key)
-            .map(account_from)
-            .collect()
+        rows.iter().map(|r| r.get::<_, Vec<u8>>(0)).filter(|peer| peer.as_slice() != key).map(account_from).collect()
     }
 
-    async fn put_manifest(
-        &self,
-        owner: &AccountPublic,
-        manifest: &AreaManifest,
-        expected: Option<u64>,
-    ) -> Result<(), StoreError> {
+    async fn put_manifest(&self, owner: &AccountPublic, manifest: &AreaManifest, expected: Option<u64>) -> Result<(), StoreError> {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let id = manifest.area_id.0;
-        let stored = tx
-            .query_opt(
-                "SELECT version, owner FROM areas WHERE area_id = $1 FOR UPDATE",
-                &[&id],
-            )
-            .await
-            .map_err(pg)?;
+        let stored = tx.query_opt("SELECT version, owner FROM areas WHERE area_id = $1 FOR UPDATE", &[&id]).await.map_err(pg)?;
         // The owner changes only through account deletion, never through a manifest.
-        if stored
-            .as_ref()
-            .is_some_and(|r| r.get::<_, &[u8]>(1) != owner.0.as_slice())
-        {
+        if stored.as_ref().is_some_and(|r| r.get::<_, &[u8]>(1) != owner.0.as_slice()) {
             return Err(StoreError::NotAllowed);
         }
         let current: Option<u64> = stored.map(|r| r.get::<_, i64>(0) as u64);
         if current != expected || manifest.version != current.map_or(1, |v| v + 1) {
-            return Err(StoreError::Conflict {
-                current: current.unwrap_or(0),
-            });
+            return Err(StoreError::Conflict { current: current.unwrap_or(0) });
         }
         let (version, key_version) = (manifest.version as i64, i64::from(manifest.key_version));
         let json = to_json(manifest)?;
@@ -740,15 +525,8 @@ impl Store for PostgresStore {
             .await
             .map_err(pg)?;
         }
-        tx.execute(
-            "DELETE FROM envelopes WHERE area_id = $1 AND key_version < $2",
-            &[&id, &key_version],
-        )
-        .await
-        .map_err(pg)?;
-        tx.execute("DELETE FROM area_members WHERE area_id = $1", &[&id])
-            .await
-            .map_err(pg)?;
+        tx.execute("DELETE FROM envelopes WHERE area_id = $1 AND key_version < $2", &[&id, &key_version]).await.map_err(pg)?;
+        tx.execute("DELETE FROM area_members WHERE area_id = $1", &[&id]).await.map_err(pg)?;
         for member in &manifest.members {
             tx.execute(
                 "INSERT INTO area_members (area_id, account, role) VALUES ($1, $2, $3)
@@ -762,42 +540,26 @@ impl Store for PostgresStore {
     }
 
     async fn delete_area(&self, area_id: AreaId) -> Result<(), StoreError> {
-        let n = self
-            .client()
-            .await?
-            .execute("DELETE FROM areas WHERE area_id = $1", &[&area_id.0])
-            .await
-            .map_err(pg)?;
+        let n = self.client().await?.execute("DELETE FROM areas WHERE area_id = $1", &[&area_id.0]).await.map_err(pg)?;
         if n == 0 {
             return Err(StoreError::NotFound);
         }
         Ok(())
     }
 
-    async fn put_envelopes(
-        &self,
-        area_id: AreaId,
-        envelopes: &[KeyEnvelope],
-    ) -> Result<(), StoreError> {
+    async fn put_envelopes(&self, area_id: AreaId, envelopes: &[KeyEnvelope]) -> Result<(), StoreError> {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let (_, key_version) = area_head(&tx, area_id.0).await?;
         if envelopes.iter().any(|e| e.key_version != key_version) {
-            return Err(StoreError::WrongKeyVersion {
-                current: key_version,
-            });
+            return Err(StoreError::WrongKeyVersion { current: key_version });
         }
         for envelope in envelopes {
             tx.execute(
                 "INSERT INTO envelopes (area_id, device_id, key_version, envelope) VALUES ($1, $2, $3, $4)
                  ON CONFLICT (area_id, device_id) DO UPDATE SET key_version = EXCLUDED.key_version,
                      envelope = EXCLUDED.envelope",
-                &[
-                    &area_id.0,
-                    &envelope.device_id,
-                    &i64::from(envelope.key_version),
-                    &to_json(envelope)?,
-                ],
+                &[&area_id.0, &envelope.device_id, &i64::from(envelope.key_version), &to_json(envelope)?],
             )
             .await
             .map_err(pg)?;
@@ -805,17 +567,10 @@ impl Store for PostgresStore {
         tx.commit().await.map_err(pg)
     }
 
-    async fn envelope_for(
-        &self,
-        area_id: AreaId,
-        device_id: Uuid,
-    ) -> Result<Option<KeyEnvelope>, StoreError> {
+    async fn envelope_for(&self, area_id: AreaId, device_id: Uuid) -> Result<Option<KeyEnvelope>, StoreError> {
         self.client()
             .await?
-            .query_opt(
-                "SELECT envelope FROM envelopes WHERE area_id = $1 AND device_id = $2",
-                &[&area_id.0, &device_id],
-            )
+            .query_opt("SELECT envelope FROM envelopes WHERE area_id = $1 AND device_id = $2", &[&area_id.0, &device_id])
             .await
             .map_err(pg)?
             .map(|r| from_json(r.get::<_, &str>(0)))
@@ -831,10 +586,7 @@ impl Store for PostgresStore {
         let author = record.header.author_account.0.as_slice();
         let may_write = owner == author
             || tx
-                .query_opt(
-                    "SELECT 1 FROM area_members WHERE area_id = $1 AND account = $2 AND role = 'write'",
-                    &[&area, &author],
-                )
+                .query_opt("SELECT 1 FROM area_members WHERE area_id = $1 AND account = $2 AND role = 'write'", &[&area, &author])
                 .await
                 .map_err(pg)?
                 .is_some();
@@ -842,31 +594,17 @@ impl Store for PostgresStore {
             return Err(StoreError::NotAllowed);
         }
         if record.header.key_version != key_version {
-            return Err(StoreError::WrongKeyVersion {
-                current: key_version,
-            });
+            return Err(StoreError::WrongKeyVersion { current: key_version });
         }
         let current: Option<u64> = tx
-            .query_opt(
-                "SELECT version FROM records WHERE area_id = $1 AND record_id = $2",
-                &[&area, &id],
-            )
+            .query_opt("SELECT version FROM records WHERE area_id = $1 AND record_id = $2", &[&area, &id])
             .await
             .map_err(pg)?
             .map(|r| r.get::<_, i64>(0) as u64);
         if record.header.version != current.map_or(1, |v| v + 1) {
-            return Err(StoreError::Conflict {
-                current: current.unwrap_or(0),
-            });
+            return Err(StoreError::Conflict { current: current.unwrap_or(0) });
         }
-        let seq: i64 = tx
-            .query_one(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM records WHERE area_id = $1",
-                &[&area],
-            )
-            .await
-            .map_err(pg)?
-            .get(0);
+        let seq: i64 = tx.query_one("SELECT COALESCE(MAX(seq), 0) + 1 FROM records WHERE area_id = $1", &[&area]).await.map_err(pg)?.get(0);
         tx.execute(
             "INSERT INTO records (area_id, record_id, version, seq, record) VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (area_id, record_id) DO UPDATE SET version = EXCLUDED.version,
@@ -879,12 +617,7 @@ impl Store for PostgresStore {
         Ok(seq as u64)
     }
 
-    async fn records_since(
-        &self,
-        area_id: AreaId,
-        since: u64,
-        limit: u32,
-    ) -> Result<Vec<StoredRecord>, StoreError> {
+    async fn records_since(&self, area_id: AreaId, since: u64, limit: u32) -> Result<Vec<StoredRecord>, StoreError> {
         self.client()
             .await?
             .query(
@@ -895,19 +628,11 @@ impl Store for PostgresStore {
             .await
             .map_err(pg)?
             .iter()
-            .map(|r| {
-                Ok(StoredRecord {
-                    seq: r.get::<_, i64>(0) as u64,
-                    record: from_json(r.get::<_, &str>(1))?,
-                })
-            })
+            .map(|r| Ok(StoredRecord { seq: r.get::<_, i64>(0) as u64, record: from_json(r.get::<_, &str>(1))? }))
             .collect()
     }
 
-    async fn plan_account_deletion(
-        &self,
-        account: &AccountPublic,
-    ) -> Result<Vec<AreaFate>, StoreError> {
+    async fn plan_account_deletion(&self, account: &AccountPublic) -> Result<Vec<AreaFate>, StoreError> {
         owned_area_fates(&self.client().await?, account, false).await
     }
 
@@ -915,13 +640,7 @@ impl Store for PostgresStore {
         let mut c = self.client().await?;
         let tx = c.transaction().await.map_err(pg)?;
         let key = account.0.as_slice();
-        if !exists(
-            &tx,
-            "SELECT 1 FROM accounts WHERE account = $1 FOR UPDATE",
-            &key,
-        )
-        .await?
-        {
+        if !exists(&tx, "SELECT 1 FROM accounts WHERE account = $1 FOR UPDATE", &key).await? {
             return Err(StoreError::NotFound);
         }
         let plan = owned_area_fates(&tx, account, true).await?;
@@ -930,44 +649,18 @@ impl Store for PostgresStore {
             match &fate.outcome {
                 AreaOutcome::TransferTo(heir) => {
                     let heir = heir.0.as_slice();
-                    tx.execute(
-                        "UPDATE areas SET owner = $2 WHERE area_id = $1",
-                        &[&id, &heir],
-                    )
-                    .await
-                    .map_err(pg)?;
-                    tx.execute(
-                        "DELETE FROM area_members WHERE area_id = $1 AND account = $2",
-                        &[&id, &heir],
-                    )
-                    .await
-                    .map_err(pg)?;
+                    tx.execute("UPDATE areas SET owner = $2 WHERE area_id = $1", &[&id, &heir]).await.map_err(pg)?;
+                    tx.execute("DELETE FROM area_members WHERE area_id = $1 AND account = $2", &[&id, &heir]).await.map_err(pg)?;
                 }
                 AreaOutcome::Delete => {
-                    tx.execute("DELETE FROM areas WHERE area_id = $1", &[&id])
-                        .await
-                        .map_err(pg)?;
+                    tx.execute("DELETE FROM areas WHERE area_id = $1", &[&id]).await.map_err(pg)?;
                 }
             }
         }
-        tx.execute("DELETE FROM area_members WHERE account = $1", &[&key])
-            .await
-            .map_err(pg)?;
-        tx.execute(
-            "DELETE FROM envelopes WHERE device_id IN (SELECT device_id FROM devices WHERE account = $1)",
-            &[&key],
-        )
-        .await
-        .map_err(pg)?;
-        tx.execute(
-            "INSERT INTO deleted_accounts (account) VALUES ($1) ON CONFLICT DO NOTHING",
-            &[&key],
-        )
-        .await
-        .map_err(pg)?;
-        tx.execute("DELETE FROM accounts WHERE account = $1", &[&key])
-            .await
-            .map_err(pg)?;
+        tx.execute("DELETE FROM area_members WHERE account = $1", &[&key]).await.map_err(pg)?;
+        tx.execute("DELETE FROM envelopes WHERE device_id IN (SELECT device_id FROM devices WHERE account = $1)", &[&key]).await.map_err(pg)?;
+        tx.execute("INSERT INTO deleted_accounts (account) VALUES ($1) ON CONFLICT DO NOTHING", &[&key]).await.map_err(pg)?;
+        tx.execute("DELETE FROM accounts WHERE account = $1", &[&key]).await.map_err(pg)?;
         tx.commit().await.map_err(pg)?;
         Ok(plan)
     }

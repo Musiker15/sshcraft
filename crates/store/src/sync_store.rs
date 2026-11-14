@@ -107,31 +107,15 @@ pub struct RecordEntry {
     pub modified_at: i64,
 }
 
-type RawServer = (
-    String,
-    String,
-    String,
-    Vec<u8>,
-    String,
-    Vec<u8>,
-    bool,
-    bool,
-    bool,
-    Option<String>,
-    Option<String>,
-    i64,
-);
+type RawServer = (String, String, String, Vec<u8>, String, Vec<u8>, bool, bool, bool, Option<String>, Option<String>, i64);
 
 fn to_server(raw: RawServer) -> Result<ServerRow, StoreError> {
-    let (id, name, origin, account, device_id, sealed_device, en, keys, rev, head, tracker, at) =
-        raw;
+    let (id, name, origin, account, device_id, sealed_device, en, keys, rev, head, tracker, at) = raw;
     Ok(ServerRow {
         id: ServerId(parse_uuid(&id)?),
         name,
         origin,
-        account: account
-            .try_into()
-            .map_err(|_| StoreError::Malformed("account key length".into()))?,
+        account: account.try_into().map_err(|_| StoreError::Malformed("account key length".into()))?,
         device_id: parse_uuid(&device_id)?,
         sealed_device,
         sync_enabled: en,
@@ -147,20 +131,7 @@ const SERVER_COLUMNS: &str = "id, name, origin, account, device_id, sealed_devic
      sync_keys, revoked, log_head, tracker, created_at";
 
 fn server_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawServer> {
-    Ok((
-        r.get(0)?,
-        r.get(1)?,
-        r.get(2)?,
-        r.get(3)?,
-        r.get(4)?,
-        r.get(5)?,
-        r.get(6)?,
-        r.get(7)?,
-        r.get(8)?,
-        r.get(9)?,
-        r.get(10)?,
-        r.get(11)?,
-    ))
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?))
 }
 
 impl Store {
@@ -186,22 +157,14 @@ impl Store {
     }
 
     pub fn servers(&self) -> Result<Vec<ServerRow>, StoreError> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {SERVER_COLUMNS} FROM sync_servers ORDER BY created_at, id"
-        ))?;
-        let rows = stmt
-            .query_map([], server_row)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = self.conn.prepare(&format!("SELECT {SERVER_COLUMNS} FROM sync_servers ORDER BY created_at, id"))?;
+        let rows = stmt.query_map([], server_row)?.collect::<Result<Vec<_>, _>>()?;
         rows.into_iter().map(to_server).collect()
     }
 
     pub fn server(&self, id: ServerId) -> Result<Option<ServerRow>, StoreError> {
         self.conn
-            .query_row(
-                &format!("SELECT {SERVER_COLUMNS} FROM sync_servers WHERE id = ?1"),
-                [id.0.to_string()],
-                server_row,
-            )
+            .query_row(&format!("SELECT {SERVER_COLUMNS} FROM sync_servers WHERE id = ?1"), [id.0.to_string()], server_row)
             .optional()?
             .map(to_server)
             .transpose()
@@ -209,29 +172,12 @@ impl Store {
 
     /// Turning key sync on fetches every area from the start again: key records skipped while
     /// it was off were never counted, so they arrive now.
-    pub fn update_server_flags(
-        &self,
-        id: ServerId,
-        sync_enabled: bool,
-        sync_keys: bool,
-    ) -> Result<(), StoreError> {
+    pub fn update_server_flags(&self, id: ServerId, sync_enabled: bool, sync_keys: bool) -> Result<(), StoreError> {
         let tx = self.conn.unchecked_transaction()?;
-        let was: Option<bool> = tx
-            .query_row(
-                "SELECT sync_keys FROM sync_servers WHERE id = ?1",
-                [id.0.to_string()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        tx.execute(
-            "UPDATE sync_servers SET sync_enabled = ?2, sync_keys = ?3 WHERE id = ?1",
-            params![id.0.to_string(), sync_enabled, sync_keys],
-        )?;
+        let was: Option<bool> = tx.query_row("SELECT sync_keys FROM sync_servers WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?;
+        tx.execute("UPDATE sync_servers SET sync_enabled = ?2, sync_keys = ?3 WHERE id = ?1", params![id.0.to_string(), sync_enabled, sync_keys])?;
         if sync_keys && was == Some(false) {
-            tx.execute(
-                "UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1",
-                [id.0.to_string()],
-            )?;
+            tx.execute("UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1", [id.0.to_string()])?;
         }
         tx.commit()?;
         Ok(())
@@ -239,61 +185,30 @@ impl Store {
 
     /// Whether session logs sync with this server (off until switched on).
     pub fn sync_logs(&self, id: ServerId) -> Result<bool, StoreError> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT sync_logs FROM sync_servers WHERE id = ?1",
-                [id.0.to_string()],
-                |r| r.get(0),
-            )
-            .optional()?
-            .unwrap_or(false))
+        Ok(self.conn.query_row("SELECT sync_logs FROM sync_servers WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?.unwrap_or(false))
     }
 
     /// Switches log sync. Turning it on fetches every area from the start again, like key sync:
     /// log records skipped while it was off were never counted.
     pub fn set_sync_logs(&self, id: ServerId, on: bool) -> Result<(), StoreError> {
         self.atomic(|| {
-            let was: Option<bool> = self
-                .conn
-                .query_row(
-                    "SELECT sync_logs FROM sync_servers WHERE id = ?1",
-                    [id.0.to_string()],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            self.conn.execute(
-                "UPDATE sync_servers SET sync_logs = ?2 WHERE id = ?1",
-                params![id.0.to_string(), on],
-            )?;
+            let was: Option<bool> =
+                self.conn.query_row("SELECT sync_logs FROM sync_servers WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?;
+            self.conn.execute("UPDATE sync_servers SET sync_logs = ?2 WHERE id = ?1", params![id.0.to_string(), on])?;
             if on && was == Some(false) {
-                self.conn.execute(
-                    "UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1",
-                    [id.0.to_string()],
-                )?;
+                self.conn.execute("UPDATE sync_areas SET cursor = 0 WHERE server_id = ?1", [id.0.to_string()])?;
             }
             Ok(())
         })
     }
 
     pub fn mark_server_revoked(&self, id: ServerId) -> Result<(), StoreError> {
-        self.conn.execute(
-            "UPDATE sync_servers SET revoked = 1 WHERE id = ?1",
-            [id.0.to_string()],
-        )?;
+        self.conn.execute("UPDATE sync_servers SET revoked = 1 WHERE id = ?1", [id.0.to_string()])?;
         Ok(())
     }
 
-    pub fn save_server_state(
-        &self,
-        id: ServerId,
-        log_head: &str,
-        tracker: &str,
-    ) -> Result<(), StoreError> {
-        self.conn.execute(
-            "UPDATE sync_servers SET log_head = ?2, tracker = ?3 WHERE id = ?1",
-            params![id.0.to_string(), log_head, tracker],
-        )?;
+    pub fn save_server_state(&self, id: ServerId, log_head: &str, tracker: &str) -> Result<(), StoreError> {
+        self.conn.execute("UPDATE sync_servers SET log_head = ?2, tracker = ?3 WHERE id = ?1", params![id.0.to_string(), log_head, tracker])?;
         Ok(())
     }
 
@@ -301,17 +216,8 @@ impl Store {
     pub fn remove_server(&self, id: ServerId) -> Result<(), StoreError> {
         let tx = self.conn.unchecked_transaction()?;
         let key = id.0.to_string();
-        for table in [
-            "groups",
-            "hosts",
-            "keys",
-            "session_logs",
-            "session_log_chunks",
-        ] {
-            tx.execute(
-                &format!("UPDATE {table} SET location = NULL WHERE location = ?1"),
-                [&key],
-            )?;
+        for table in ["groups", "hosts", "keys", "session_logs", "session_log_chunks"] {
+            tx.execute(&format!("UPDATE {table} SET location = NULL WHERE location = ?1"), [&key])?;
         }
         tx.execute("DELETE FROM sync_servers WHERE id = ?1", [&key])?;
         tx.commit()?;
@@ -320,46 +226,28 @@ impl Store {
 
     /// Moves an item to a server or back to this device. A group takes its hosts along; a
     /// host inside a group cannot move on its own.
-    pub fn set_location(
-        &self,
-        kind: ItemKind,
-        id: &str,
-        location: Option<ServerId>,
-    ) -> Result<(), StoreError> {
+    pub fn set_location(&self, kind: ItemKind, id: &str, location: Option<ServerId>) -> Result<(), StoreError> {
         let target = location.map(|s| s.0.to_string());
         let tx = self.conn.unchecked_transaction()?;
         if kind == ItemKind::Key && location.is_some() {
-            let key_kind: Option<String> = tx
-                .query_row("SELECT kind FROM keys WHERE id = ?1", [id], |r| r.get(0))
-                .optional()?;
+            let key_kind: Option<String> = tx.query_row("SELECT kind FROM keys WHERE id = ?1", [id], |r| r.get(0)).optional()?;
             if key_kind.as_deref() == Some(sshcraft_model::keytypes::KeyKind::Device.as_str()) {
                 return Err(StoreError::DeviceBound);
             }
         }
         if kind == ItemKind::Host {
-            let group: Option<Option<String>> = tx
-                .query_row("SELECT group_id FROM hosts WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })
-                .optional()?;
+            let group: Option<Option<String>> = tx.query_row("SELECT group_id FROM hosts WHERE id = ?1", [id], |r| r.get(0)).optional()?;
             if matches!(group, Some(Some(_))) {
                 return Err(StoreError::Malformed("host follows its group".into()));
             }
         }
         if kind == ItemKind::Group {
-            let parent: Option<Option<String>> = tx
-                .query_row("SELECT parent_id FROM groups WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })
-                .optional()?;
+            let parent: Option<Option<String>> = tx.query_row("SELECT parent_id FROM groups WHERE id = ?1", [id], |r| r.get(0)).optional()?;
             if matches!(parent, Some(Some(_))) {
                 return Err(StoreError::Malformed("group follows its parent".into()));
             }
         }
-        let changed = tx.execute(
-            &format!("UPDATE {} SET location = ?2 WHERE id = ?1", kind.table()),
-            params![id, target],
-        )?;
+        let changed = tx.execute(&format!("UPDATE {} SET location = ?2 WHERE id = ?1", kind.table()), params![id, target])?;
         if changed == 0 {
             return Err(StoreError::Malformed("no such item".into()));
         }
@@ -367,14 +255,8 @@ impl Store {
             let mut groups = super::subgroups_of(&tx, id)?;
             groups.push(id.to_owned());
             for group in groups {
-                tx.execute(
-                    "UPDATE groups SET location = ?2 WHERE id = ?1",
-                    params![group, target],
-                )?;
-                tx.execute(
-                    "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
-                    params![group, target],
-                )?;
+                tx.execute("UPDATE groups SET location = ?2 WHERE id = ?1", params![group, target])?;
+                tx.execute("UPDATE hosts SET location = ?2 WHERE group_id = ?1", params![group, target])?;
             }
         }
         super::carry_passwords(&tx, kind, id)?;
@@ -383,13 +265,7 @@ impl Store {
     }
 
     /// Stores an area's verified manifest and this device's envelope; keeps the cursor.
-    pub fn put_area(
-        &self,
-        server: ServerId,
-        area_id: Uuid,
-        manifest: &str,
-        envelope: &str,
-    ) -> Result<(), StoreError> {
+    pub fn put_area(&self, server: ServerId, area_id: Uuid, manifest: &str, envelope: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO sync_areas (server_id, area_id, manifest, envelope) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(server_id, area_id) DO UPDATE SET manifest = excluded.manifest,
@@ -405,33 +281,14 @@ impl Store {
              ORDER BY area_id",
         )?;
         let rows = stmt
-            .query_map([server.0.to_string()], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, i64>(3)?,
-                ))
-            })?
+            .query_map([server.0.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(area, manifest, envelope, cursor)| {
-                Ok(AreaState {
-                    area_id: parse_uuid(&area)?,
-                    manifest,
-                    envelope,
-                    cursor: cursor as u64,
-                })
-            })
+            .map(|(area, manifest, envelope, cursor)| Ok(AreaState { area_id: parse_uuid(&area)?, manifest, envelope, cursor: cursor as u64 }))
             .collect()
     }
 
-    pub fn set_cursor(
-        &self,
-        server: ServerId,
-        area_id: Uuid,
-        cursor: u64,
-    ) -> Result<(), StoreError> {
+    pub fn set_cursor(&self, server: ServerId, area_id: Uuid, cursor: u64) -> Result<(), StoreError> {
         self.conn.execute(
             "UPDATE sync_areas SET cursor = ?3 WHERE server_id = ?1 AND area_id = ?2",
             params![server.0.to_string(), area_id.to_string(), cursor as i64],
@@ -439,12 +296,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn record_entry(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<Option<RecordEntry>, StoreError> {
+    pub fn record_entry(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<Option<RecordEntry>, StoreError> {
         let raw: Option<(String, String, i64, i64)> = self
             .conn
             .query_row(
@@ -455,22 +307,13 @@ impl Store {
             )
             .optional()?;
         raw.map(|(record, area, version, modified_at)| {
-            Ok(RecordEntry {
-                record_id: parse_uuid(&record)?,
-                area_id: parse_uuid(&area)?,
-                version: version as u64,
-                modified_at,
-            })
+            Ok(RecordEntry { record_id: parse_uuid(&record)?, area_id: parse_uuid(&area)?, version: version as u64, modified_at })
         })
         .transpose()
     }
 
     /// The item a record holds on this server, if this device has seen it before.
-    pub fn item_for_record(
-        &self,
-        server: ServerId,
-        record_id: Uuid,
-    ) -> Result<Option<(ItemKind, String)>, StoreError> {
+    pub fn item_for_record(&self, server: ServerId, record_id: Uuid) -> Result<Option<(ItemKind, String)>, StoreError> {
         let raw: Option<(String, String)> = self
             .conn
             .query_row(
@@ -479,27 +322,15 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        raw.map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item)))
-            .transpose()
+        raw.map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item))).transpose()
     }
 
-    pub fn put_record_entry(
-        &self,
-        server: ServerId,
-        entry: &RecordEntry,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<(), StoreError> {
+    pub fn put_record_entry(&self, server: ServerId, entry: &RecordEntry, kind: ItemKind, item_id: &str) -> Result<(), StoreError> {
         // An item that moved to another area has a new record: the old one no longer holds it.
         self.conn.execute(
             "DELETE FROM sync_records WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3
              AND record_id != ?4",
-            params![
-                server.0.to_string(),
-                kind.as_str(),
-                item_id,
-                entry.record_id.to_string()
-            ],
+            params![server.0.to_string(), kind.as_str(), item_id, entry.record_id.to_string()],
         )?;
         self.conn.execute(
             "INSERT INTO sync_records (server_id, record_id, area_id, kind, item_id, version, modified_at)
@@ -520,12 +351,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn remove_record_entry(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<(), StoreError> {
+    pub fn remove_record_entry(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "DELETE FROM sync_records WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3",
             params![server.0.to_string(), kind.as_str(), item_id],
@@ -535,13 +361,7 @@ impl Store {
 
     /// Notes that an item changed locally and still has to go to `server`; the time is the
     /// latest change, which "last change wins" compares against the server's state.
-    pub fn queue(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-        at: i64,
-    ) -> Result<(), StoreError> {
+    pub fn queue(&self, server: ServerId, kind: ItemKind, item_id: &str, at: i64) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO sync_outbox (server_id, kind, item_id, queued_at) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(server_id, kind, item_id) DO UPDATE SET queued_at = excluded.queued_at",
@@ -556,25 +376,14 @@ impl Store {
             "SELECT kind, item_id FROM sync_outbox WHERE server_id = ?1
              ORDER BY queued_at, kind, item_id",
         )?;
-        let rows = stmt
-            .query_map([server.0.to_string()], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item)))
-            .collect()
+        let rows =
+            stmt.query_map([server.0.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().map(|(kind, item)| Ok((ItemKind::parse(&kind)?, item))).collect()
     }
 
     /// Takes an item out of the outbox only if it was not changed again since `queued_at`, so a
     /// change made while the previous one was being sent is not lost.
-    pub fn dequeue_if(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-        queued_at: i64,
-    ) -> Result<(), StoreError> {
+    pub fn dequeue_if(&self, server: ServerId, kind: ItemKind, item_id: &str, queued_at: i64) -> Result<(), StoreError> {
         self.conn.execute(
             "DELETE FROM sync_outbox WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3
              AND queued_at = ?4",
@@ -583,12 +392,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn dequeue(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<(), StoreError> {
+    pub fn dequeue(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "DELETE FROM sync_outbox WHERE server_id = ?1 AND kind = ?2 AND item_id = ?3",
             params![server.0.to_string(), kind.as_str(), item_id],
@@ -597,12 +401,7 @@ impl Store {
     }
 
     /// When a still unsent local change to an item was queued (Unix milliseconds).
-    pub fn queued_at(
-        &self,
-        server: ServerId,
-        kind: ItemKind,
-        item_id: &str,
-    ) -> Result<Option<i64>, StoreError> {
+    pub fn queued_at(&self, server: ServerId, kind: ItemKind, item_id: &str) -> Result<Option<i64>, StoreError> {
         Ok(self
             .conn
             .query_row(
@@ -614,36 +413,17 @@ impl Store {
     }
 
     /// `None` if the item does not exist; otherwise where it lives (`Some(None)`: this device only).
-    pub fn item_location(
-        &self,
-        kind: ItemKind,
-        id: &str,
-    ) -> Result<Option<Option<ServerId>>, StoreError> {
-        let raw: Option<Option<String>> = self
-            .conn
-            .query_row(
-                &format!("SELECT location FROM {} WHERE id = ?1", kind.table()),
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        raw.map(|loc| loc.map(|t| parse_uuid(&t).map(ServerId)).transpose())
-            .transpose()
+    pub fn item_location(&self, kind: ItemKind, id: &str) -> Result<Option<Option<ServerId>>, StoreError> {
+        let raw: Option<Option<String>> =
+            self.conn.query_row(&format!("SELECT location FROM {} WHERE id = ?1", kind.table()), [id], |r| r.get(0)).optional()?;
+        raw.map(|loc| loc.map(|t| parse_uuid(&t).map(ServerId)).transpose()).transpose()
     }
 
     /// Where an item lives, or `None` for a local item (or one that does not exist).
     pub fn location_of(&self, kind: ItemKind, id: &str) -> Result<Option<ServerId>, StoreError> {
-        let raw: Option<Option<String>> = self
-            .conn
-            .query_row(
-                &format!("SELECT location FROM {} WHERE id = ?1", kind.table()),
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        raw.flatten()
-            .map(|t| parse_uuid(&t).map(ServerId))
-            .transpose()
+        let raw: Option<Option<String>> =
+            self.conn.query_row(&format!("SELECT location FROM {} WHERE id = ?1", kind.table()), [id], |r| r.get(0)).optional()?;
+        raw.flatten().map(|t| parse_uuid(&t).map(ServerId)).transpose()
     }
 }
 

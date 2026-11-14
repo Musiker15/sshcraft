@@ -43,9 +43,7 @@ pub mod b64 {
         T: TryFrom<Vec<u8>>,
     {
         let text = String::deserialize(d)?;
-        let bytes = BASE64URL_NOPAD
-            .decode(text.as_bytes())
-            .map_err(D::Error::custom)?;
+        let bytes = BASE64URL_NOPAD.decode(text.as_bytes()).map_err(D::Error::custom)?;
         T::try_from(bytes).map_err(|_| D::Error::custom("wrong length"))
     }
 }
@@ -56,10 +54,7 @@ mod tests {
 
     #[test]
     fn field_boundaries_are_unambiguous() {
-        assert_ne!(
-            signing_bytes("d", &[b"ab", b"c"]),
-            signing_bytes("d", &[b"a", b"bc"])
-        );
+        assert_ne!(signing_bytes("d", &[b"ab", b"c"]), signing_bytes("d", &[b"a", b"bc"]));
     }
 
     #[test]

@@ -25,10 +25,7 @@ fn mobaxterm_bookmarks_with_folders() {
     let names: Vec<_> = plan.candidates.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["top", "web"]);
     let web = &plan.candidates[1];
-    assert_eq!(
-        web.group_path,
-        vec!["Kunden".to_owned(), "Müller".to_owned()]
-    );
+    assert_eq!(web.group_path, vec!["Kunden".to_owned(), "Müller".to_owned()]);
     assert_eq!(web.settings.address.as_deref(), Some("web.example.org"));
     assert_eq!(web.settings.port, Some(2222));
     assert_eq!(web.settings.username.as_deref(), Some("deploy"));
@@ -71,25 +68,13 @@ fn securecrt_tree_becomes_groups() {
     write(dir.path(), "Kunden/Müller/web.ini", CRT_WEB);
     write(dir.path(), "Kunden/__FolderData__.ini", "S:\"Folder\"=x\n");
     write(dir.path(), "Default.ini", CRT_WEB);
-    write(
-        dir.path(),
-        "telnet.ini",
-        "S:\"Protocol Name\"=Telnet\nS:\"Hostname\"=old.example.org\n",
-    );
+    write(dir.path(), "telnet.ini", "S:\"Protocol Name\"=Telnet\nS:\"Hostname\"=old.example.org\n");
     let plan = securecrt::parse_dir(dir.path());
     assert_eq!(plan.candidates.len(), 1, "{:?}", plan.skipped);
     let web = &plan.candidates[0];
     assert_eq!(web.name, "web");
-    assert_eq!(
-        web.group_path,
-        vec!["Kunden".to_owned(), "Müller".to_owned()]
-    );
-    assert_eq!(
-        web.key_note,
-        Some(KeyNote::File {
-            path: r"C:\keys\web.pub".into()
-        })
-    );
+    assert_eq!(web.group_path, vec!["Kunden".to_owned(), "Müller".to_owned()]);
+    assert_eq!(web.key_note, Some(KeyNote::File { path: r"C:\keys\web.pub".into() }));
     assert!(web.warnings.contains(&ImportWarning::PasswordNotImported));
     assert!(!serde_json::to_string(&plan).unwrap().contains("_SECRET_"));
     assert_eq!(plan.skipped.len(), 1, "the telnet session");

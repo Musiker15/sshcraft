@@ -33,15 +33,7 @@ pub enum AgentCategory {
 }
 
 impl AgentCategory {
-    pub const ALL: [Self; 7] = [
-        Self::List,
-        Self::Connect,
-        Self::Edit,
-        Self::Delete,
-        Self::Keys,
-        Self::Share,
-        Self::Sync,
-    ];
+    pub const ALL: [Self; 7] = [Self::List, Self::Connect, Self::Edit, Self::Delete, Self::Keys, Self::Share, Self::Sync];
 
     /// The level on a fresh install (design, section 10).
     pub fn default_level(self) -> AgentLevel {
@@ -75,10 +67,7 @@ const POLICY_KEY: &str = "agents.policy";
 
 impl AgentPolicy {
     pub fn level(&self, category: AgentCategory) -> AgentLevel {
-        self.levels
-            .get(&category)
-            .copied()
-            .unwrap_or_else(|| category.default_level())
+        self.levels.get(&category).copied().unwrap_or_else(|| category.default_level())
     }
 
     /// The stored policy, or an error when it is there but cannot be read: then agents get
@@ -109,11 +98,7 @@ impl AgentPolicy {
     }
 
     /// Sets the level of one kind of action on the stored policy.
-    pub fn set_level(
-        store: &Store,
-        category: AgentCategory,
-        level: AgentLevel,
-    ) -> Result<Self, StoreError> {
+    pub fn set_level(store: &Store, category: AgentCategory, level: AgentLevel) -> Result<Self, StoreError> {
         let mut policy = Self::load(store);
         policy.levels.insert(category, level);
         policy.save(store)?;
@@ -125,8 +110,7 @@ impl AgentPolicy {
         let Ok(Some(text)) = store.get_setting(POLICY_KEY) else {
             return Self::default();
         };
-        let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text)
-        else {
+        let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text) else {
             return Self::default();
         };
         let levels = map
@@ -136,18 +120,14 @@ impl AgentPolicy {
                 levels
                     .iter()
                     .filter_map(|(k, v)| {
-                        let category =
-                            serde_json::from_value(serde_json::Value::String(k.clone())).ok()?;
+                        let category = serde_json::from_value(serde_json::Value::String(k.clone())).ok()?;
                         let level = serde_json::from_value(v.clone()).ok()?;
                         Some((category, level))
                     })
                     .collect()
             })
             .unwrap_or_default();
-        let hidden = map
-            .get("hidden")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+        let hidden = map.get("hidden").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
         Self { levels, hidden }
     }
 
@@ -158,24 +138,17 @@ impl AgentPolicy {
 
     /// Whether `group` or a group above it is hidden.
     pub fn group_hidden(&self, groups: &[Group], group: GroupId) -> bool {
-        group_chain(groups, group)
-            .iter()
-            .any(|g| self.hidden.contains(&g.id.0))
+        group_chain(groups, group).iter().any(|g| self.hidden.contains(&g.id.0))
     }
 
     /// Whether `host` is hidden itself or through one of its groups.
     pub fn host_hidden(&self, groups: &[Group], host: &Host) -> bool {
-        self.hidden.contains(&host.id.0)
-            || host.group_id.is_some_and(|g| self.group_hidden(groups, g))
+        self.hidden.contains(&host.id.0) || host.group_id.is_some_and(|g| self.group_hidden(groups, g))
     }
 
     /// Every hidden host among `hosts`.
     pub fn hidden_hosts(&self, hosts: &[Host], groups: &[Group]) -> HashSet<HostId> {
-        hosts
-            .iter()
-            .filter(|h| self.host_hidden(groups, h))
-            .map(|h| h.id)
-            .collect()
+        hosts.iter().filter(|h| self.host_hidden(groups, h)).map(|h| h.id).collect()
     }
 }
 
@@ -246,20 +219,15 @@ fn label(id: Uuid) -> String {
 
 /// Keeps an entry (its detail cut to [`MAX_DETAIL`] characters); the oldest beyond
 /// [`MAX_LOG`] go.
-pub fn log_append(
-    vault: &Vault,
-    store: &Store,
-    entry: &AgentLogEntry,
-) -> Result<(), AgentLogError> {
+pub fn log_append(vault: &Vault, store: &Store, entry: &AgentLogEntry) -> Result<(), AgentLogError> {
     let mut entry = entry.clone();
     entry.detail = entry.detail.chars().take(MAX_DETAIL).collect();
     let json = serde_json::to_vec(&entry).map_err(|e| StoreError::Malformed(e.to_string()))?;
     let sealed = vault.seal_secret(&label(entry.id), &json)?;
     store.atomic(|| {
-        store.conn.execute(
-            "INSERT OR REPLACE INTO agent_log (id, at, sealed) VALUES (?1, ?2, ?3)",
-            params![entry.id.to_string(), entry.at, sealed],
-        )?;
+        store
+            .conn
+            .execute("INSERT OR REPLACE INTO agent_log (id, at, sealed) VALUES (?1, ?2, ?3)", params![entry.id.to_string(), entry.at, sealed])?;
         store.conn.execute(
             "DELETE FROM agent_log WHERE id NOT IN
                  (SELECT id FROM agent_log ORDER BY at DESC, id DESC LIMIT ?1)",
@@ -271,14 +239,8 @@ pub fn log_append(
 
 /// The log, newest first; an entry that does not open is left out.
 pub fn log_list(vault: &Vault, store: &Store) -> Result<Vec<AgentLogEntry>, AgentLogError> {
-    let mut stmt = store
-        .conn
-        .prepare("SELECT id, sealed FROM agent_log ORDER BY at DESC, id DESC")?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut stmt = store.conn.prepare("SELECT id, sealed FROM agent_log ORDER BY at DESC, id DESC")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
     Ok(rows
         .into_iter()
         .filter_map(|(id, sealed)| {

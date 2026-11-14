@@ -10,28 +10,20 @@
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Networking::WindowsWebServices::{
-    WEBAUTHN_API_VERSION_1, WEBAUTHN_API_VERSION_4,
-    WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
-    WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM, WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM,
-    WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS, WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS,
-    WEBAUTHN_CLIENT_DATA, WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
-    WEBAUTHN_COSE_ALGORITHM_ECDSA_P256_WITH_SHA256, WEBAUTHN_COSE_CREDENTIAL_PARAMETER,
-    WEBAUTHN_COSE_CREDENTIAL_PARAMETER_CURRENT_VERSION, WEBAUTHN_COSE_CREDENTIAL_PARAMETERS,
-    WEBAUTHN_CREDENTIAL, WEBAUTHN_CREDENTIAL_CURRENT_VERSION, WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY,
-    WEBAUTHN_CREDENTIALS, WEBAUTHN_HASH_ALGORITHM_SHA_256, WEBAUTHN_RP_ENTITY_INFORMATION,
-    WEBAUTHN_RP_ENTITY_INFORMATION_CURRENT_VERSION, WEBAUTHN_USER_ENTITY_INFORMATION,
-    WEBAUTHN_USER_ENTITY_INFORMATION_CURRENT_VERSION,
-    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED,
-    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED, WebAuthNAuthenticatorGetAssertion,
-    WebAuthNAuthenticatorMakeCredential, WebAuthNDeletePlatformCredential, WebAuthNFreeAssertion,
-    WebAuthNFreeCredentialAttestation, WebAuthNGetApiVersionNumber, WebAuthNGetErrorName,
+    WEBAUTHN_API_VERSION_1, WEBAUTHN_API_VERSION_4, WEBAUTHN_ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
+    WEBAUTHN_AUTHENTICATOR_ATTACHMENT_CROSS_PLATFORM, WEBAUTHN_AUTHENTICATOR_ATTACHMENT_PLATFORM, WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS,
+    WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS, WEBAUTHN_CLIENT_DATA, WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
+    WEBAUTHN_COSE_ALGORITHM_ECDSA_P256_WITH_SHA256, WEBAUTHN_COSE_CREDENTIAL_PARAMETER, WEBAUTHN_COSE_CREDENTIAL_PARAMETER_CURRENT_VERSION,
+    WEBAUTHN_COSE_CREDENTIAL_PARAMETERS, WEBAUTHN_CREDENTIAL, WEBAUTHN_CREDENTIAL_CURRENT_VERSION, WEBAUTHN_CREDENTIAL_TYPE_PUBLIC_KEY,
+    WEBAUTHN_CREDENTIALS, WEBAUTHN_HASH_ALGORITHM_SHA_256, WEBAUTHN_RP_ENTITY_INFORMATION, WEBAUTHN_RP_ENTITY_INFORMATION_CURRENT_VERSION,
+    WEBAUTHN_USER_ENTITY_INFORMATION, WEBAUTHN_USER_ENTITY_INFORMATION_CURRENT_VERSION, WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED,
+    WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED, WebAuthNAuthenticatorGetAssertion, WebAuthNAuthenticatorMakeCredential,
+    WebAuthNDeletePlatformCredential, WebAuthNFreeAssertion, WebAuthNFreeCredentialAttestation, WebAuthNGetApiVersionNumber, WebAuthNGetErrorName,
     WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable,
 };
 use windows::core::{HRESULT, HSTRING, PCWSTR};
 
-use crate::{
-    Assertion, Attachment, Attestation, Authenticator, CreateOptions, FidoError, SkAlgorithm,
-};
+use crate::{Assertion, Attachment, Attestation, Authenticator, CreateOptions, FidoError, SkAlgorithm};
 
 /// How long Windows waits for a touch or a PIN.
 const TIMEOUT_MS: u32 = 120_000;
@@ -68,8 +60,7 @@ pub fn delete_platform_credential(credential_id: &[u8]) -> Result<(), FidoError>
         return Err(FidoError::NotSupported);
     }
     // SAFETY: the slice lives for the call.
-    unsafe { WebAuthNDeletePlatformCredential(credential_id) }
-        .map_err(|e| map_error(e.code().0, &error_name(e.code())))
+    unsafe { WebAuthNDeletePlatformCredential(credential_id) }.map_err(|e| map_error(e.code().0, &error_name(e.code())))
 }
 
 /// Turns a failed call into a [`FidoError`]: a closed dialog or a timeout is `Cancelled`.
@@ -103,11 +94,7 @@ fn attachment_flag(attachment: Attachment) -> u32 {
 }
 
 fn verification(verify_user: bool) -> u32 {
-    if verify_user {
-        WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED
-    } else {
-        WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED
-    }
+    if verify_user { WEBAUTHN_USER_VERIFICATION_REQUIREMENT_REQUIRED } else { WEBAUTHN_USER_VERIFICATION_REQUIREMENT_DISCOURAGED }
 }
 
 /// Copies `len` bytes from a pointer owned by webauthn.dll.
@@ -122,12 +109,7 @@ unsafe fn copy(ptr: *const u8, len: u32) -> Vec<u8> {
     unsafe { std::slice::from_raw_parts(ptr, len as usize) }.to_vec()
 }
 
-fn make_credential_blocking(
-    hwnd: isize,
-    application: &str,
-    options: &CreateOptions,
-    client_data: &[u8],
-) -> Result<Attestation, FidoError> {
+fn make_credential_blocking(hwnd: isize, application: &str, options: &CreateOptions, client_data: &[u8]) -> Result<Attestation, FidoError> {
     let rp_id = HSTRING::from(application);
     let rp_name = HSTRING::from("SSHCraft");
     let user_name = HSTRING::from(options.user_name.as_str());
@@ -155,10 +137,7 @@ fn make_credential_blocking(
             SkAlgorithm::Ed25519 => COSE_ALGORITHM_EDDSA,
         },
     };
-    let parameters = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS {
-        cCredentialParameters: 1,
-        pCredentialParameters: &mut parameter,
-    };
+    let parameters = WEBAUTHN_COSE_CREDENTIAL_PARAMETERS { cCredentialParameters: 1, pCredentialParameters: &mut parameter };
     let client = WEBAUTHN_CLIENT_DATA {
         dwVersion: WEBAUTHN_CLIENT_DATA_CURRENT_VERSION,
         cbClientDataJSON: data.len() as u32,
@@ -175,17 +154,9 @@ fn make_credential_blocking(
         ..Default::default()
     };
     // SAFETY: every pointer above points into locals that live until the call returns.
-    let result = unsafe {
-        WebAuthNAuthenticatorMakeCredential(
-            HWND(hwnd as *mut core::ffi::c_void),
-            &rp,
-            &user,
-            &parameters,
-            &client,
-            Some(&make_options),
-        )
-    }
-    .map_err(failure)?;
+    let result =
+        unsafe { WebAuthNAuthenticatorMakeCredential(HWND(hwnd as *mut core::ffi::c_void), &rp, &user, &parameters, &client, Some(&make_options)) }
+            .map_err(failure)?;
     // SAFETY: on success the result is a valid attestation until it is freed below.
     let attestation = unsafe {
         let a = &*result;
@@ -225,31 +196,18 @@ fn get_assertion_blocking(
     let options = WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS {
         dwVersion: OPTIONS_VERSION,
         dwTimeoutMilliseconds: TIMEOUT_MS,
-        CredentialList: WEBAUTHN_CREDENTIALS {
-            cCredentials: 1,
-            pCredentials: &mut credential,
-        },
+        CredentialList: WEBAUTHN_CREDENTIALS { cCredentials: 1, pCredentials: &mut credential },
         dwAuthenticatorAttachment: attachment_flag(attachment),
         dwUserVerificationRequirement: verification(verify_user),
         ..Default::default()
     };
     // SAFETY: every pointer above points into locals that live until the call returns.
-    let result = unsafe {
-        WebAuthNAuthenticatorGetAssertion(
-            HWND(hwnd as *mut core::ffi::c_void),
-            PCWSTR(rp_id.as_ptr()),
-            &client,
-            Some(&options),
-        )
-    }
-    .map_err(failure)?;
+    let result = unsafe { WebAuthNAuthenticatorGetAssertion(HWND(hwnd as *mut core::ffi::c_void), PCWSTR(rp_id.as_ptr()), &client, Some(&options)) }
+        .map_err(failure)?;
     // SAFETY: on success the result is a valid assertion until it is freed below.
     let assertion = unsafe {
         let a = &*result;
-        Assertion {
-            authenticator_data: copy(a.pbAuthenticatorData, a.cbAuthenticatorData),
-            signature: copy(a.pbSignature, a.cbSignature),
-        }
+        Assertion { authenticator_data: copy(a.pbAuthenticatorData, a.cbAuthenticatorData), signature: copy(a.pbSignature, a.cbSignature) }
     };
     // SAFETY: freed exactly once, after the copy.
     unsafe { WebAuthNFreeAssertion(result) };
@@ -258,26 +216,14 @@ fn get_assertion_blocking(
 
 #[async_trait::async_trait]
 impl Authenticator for WebAuthn {
-    async fn make_credential(
-        &self,
-        application: &str,
-        options: &CreateOptions,
-        client_data: &[u8],
-    ) -> Result<Attestation, FidoError> {
+    async fn make_credential(&self, application: &str, options: &CreateOptions, client_data: &[u8]) -> Result<Attestation, FidoError> {
         if !webauthn_available() {
             return Err(FidoError::NotSupported);
         }
-        let (hwnd, application, options, client_data) = (
-            self.hwnd,
-            application.to_owned(),
-            options.clone(),
-            client_data.to_vec(),
-        );
-        tokio::task::spawn_blocking(move || {
-            make_credential_blocking(hwnd, &application, &options, &client_data)
-        })
-        .await
-        .map_err(|e| FidoError::Failed(e.to_string()))?
+        let (hwnd, application, options, client_data) = (self.hwnd, application.to_owned(), options.clone(), client_data.to_vec());
+        tokio::task::spawn_blocking(move || make_credential_blocking(hwnd, &application, &options, &client_data))
+            .await
+            .map_err(|e| FidoError::Failed(e.to_string()))?
     }
 
     async fn get_assertion(
@@ -291,24 +237,10 @@ impl Authenticator for WebAuthn {
         if !webauthn_available() {
             return Err(FidoError::NotSupported);
         }
-        let (hwnd, application, credential_id, client_data) = (
-            self.hwnd,
-            application.to_owned(),
-            credential_id.to_vec(),
-            client_data.to_vec(),
-        );
-        tokio::task::spawn_blocking(move || {
-            get_assertion_blocking(
-                hwnd,
-                &application,
-                &credential_id,
-                &client_data,
-                verify_user,
-                attachment,
-            )
-        })
-        .await
-        .map_err(|e| FidoError::Failed(e.to_string()))?
+        let (hwnd, application, credential_id, client_data) = (self.hwnd, application.to_owned(), credential_id.to_vec(), client_data.to_vec());
+        tokio::task::spawn_blocking(move || get_assertion_blocking(hwnd, &application, &credential_id, &client_data, verify_user, attachment))
+            .await
+            .map_err(|e| FidoError::Failed(e.to_string()))?
     }
 }
 
@@ -320,14 +252,8 @@ mod tests {
     fn cancel_codes_map_to_cancelled() {
         assert_eq!(map_error(NTE_USER_CANCELLED, ""), FidoError::Cancelled);
         assert_eq!(map_error(HRESULT_ERROR_CANCELLED, ""), FidoError::Cancelled);
-        assert_eq!(
-            map_error(0x8000_4005_u32 as i32, "NotAllowedError"),
-            FidoError::Cancelled
-        );
-        assert_eq!(
-            map_error(0x8009_0027_u32 as i32, "UnknownError"),
-            FidoError::Failed("UnknownError (0x80090027)".into())
-        );
+        assert_eq!(map_error(0x8000_4005_u32 as i32, "NotAllowedError"), FidoError::Cancelled);
+        assert_eq!(map_error(0x8009_0027_u32 as i32, "UnknownError"), FidoError::Failed("UnknownError (0x80090027)".into()));
     }
 
     #[test]

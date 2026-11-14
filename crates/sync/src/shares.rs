@@ -8,15 +8,12 @@ use crate::engine::{Engine, from_json, lock, record_local_change};
 use crate::items::{ItemBody, SyncItem, encode, local_item};
 use serde::{Deserialize, Serialize};
 use sshcraft_model::model::{
-    ConnectionSettings, Group, GroupId, Host, HostId, IdentityId, KeyId, KeyRef, PasswordId, Proxy,
-    ServerId, flatten, group_chain,
+    ConnectionSettings, Group, GroupId, Host, HostId, IdentityId, KeyId, KeyRef, PasswordId, Proxy, ServerId, flatten, group_chain,
 };
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role};
 use sshcraft_proto::identity::AccountPublic;
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
-use sshcraft_store::store::{
-    ItemKind, RecordEntry, ShareKind, ShareRole, ShareRow, Store, copy_id,
-};
+use sshcraft_store::store::{ItemKind, RecordEntry, ShareKind, ShareRole, ShareRow, Store, copy_id};
 use sshcraft_store::vault::Vault;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -42,10 +39,7 @@ pub fn share_info_record_id(area: Uuid) -> Uuid {
 }
 
 pub fn encode_share_info(info: &ShareInfo) -> Vec<u8> {
-    serde_json::to_vec(&ShareInfoBody {
-        share_info: info.clone(),
-    })
-    .expect("share info serializes")
+    serde_json::to_vec(&ShareInfoBody { share_info: info.clone() }).expect("share info serializes")
 }
 
 /// Which key the owner uses for an item in one of its shares when that key is not shared: kept
@@ -70,12 +64,7 @@ pub struct KeyAssignment {
 
 impl KeyAssignment {
     pub fn refs(&self) -> crate::creds::CredentialRefs {
-        crate::creds::CredentialRefs {
-            key: self.key.clone(),
-            password: self.password,
-            identity: self.identity,
-            proxy_password: self.proxy_password,
-        }
+        crate::creds::CredentialRefs { key: self.key.clone(), password: self.password, identity: self.identity, proxy_password: self.proxy_password }
     }
 }
 
@@ -85,23 +74,16 @@ struct KeyAssignmentBody {
 }
 
 pub(crate) fn encode_key_assignment(assignment: &KeyAssignment) -> Vec<u8> {
-    serde_json::to_vec(&KeyAssignmentBody {
-        key_assignment: assignment.clone(),
-    })
-    .expect("key assignment serializes")
+    serde_json::to_vec(&KeyAssignmentBody { key_assignment: assignment.clone() }).expect("key assignment serializes")
 }
 
 pub(crate) fn decode_key_assignment(body: &[u8]) -> Option<KeyAssignment> {
-    serde_json::from_slice::<KeyAssignmentBody>(body)
-        .ok()
-        .map(|b| b.key_assignment)
+    serde_json::from_slice::<KeyAssignmentBody>(body).ok().map(|b| b.key_assignment)
 }
 
 /// The share info a record body holds, if it is one.
 pub(crate) fn decode_share_info(body: &[u8]) -> Option<ShareInfo> {
-    serde_json::from_slice::<ShareInfoBody>(body)
-        .ok()
-        .map(|b| b.share_info)
+    serde_json::from_slice::<ShareInfoBody>(body).ok().map(|b| b.share_info)
 }
 
 /// What to share.
@@ -135,11 +117,7 @@ fn not_allowed<T>() -> Result<T, SyncError> {
 
 /// The group and hosts a share starts with, checked: all at this server, none received from
 /// someone else, a group shared "with all hosts" only once.
-fn plan(
-    store: &Store,
-    server: ServerId,
-    what: &ShareWhat,
-) -> Result<(ShareKind, Option<Group>, Vec<Host>), SyncError> {
+fn plan(store: &Store, server: ServerId, what: &ShareWhat) -> Result<(ShareKind, Option<Group>, Vec<Host>), SyncError> {
     let groups = store.list_groups()?;
     let hosts = store.list_hosts()?;
     let group_of = |id: GroupId| groups.iter().find(|g| g.id == id).cloned();
@@ -156,11 +134,7 @@ fn plan(
             // The group's hosts at every level.
             let mut tree = store.subgroups(*id)?;
             tree.push(*id);
-            let members = hosts
-                .iter()
-                .filter(|h| h.group_id.is_some_and(|g| tree.contains(&g)))
-                .cloned()
-                .collect();
+            let members = hosts.iter().filter(|h| h.group_id.is_some_and(|g| tree.contains(&g))).cloned().collect();
             if let Some(area) = store.item_area(server, ItemKind::Group, &id.0.to_string())?
                 && store.share(server, area)?.is_some_and(|s| s.owned)
             {
@@ -177,9 +151,7 @@ fn plan(
             let mut picked = Vec::new();
             for id in ids {
                 match host_of(*id) {
-                    Some(host) if host.group_id.is_some_and(|g| tree.contains(&g)) => {
-                        picked.push(host)
-                    }
+                    Some(host) if host.group_id.is_some_and(|g| tree.contains(&g)) => picked.push(host),
                     _ => return not_allowed(),
                 }
             }
@@ -193,17 +165,12 @@ fn plan(
             None => return not_allowed(),
         },
     };
-    let mut items: Vec<(ItemKind, String)> = picked
-        .iter()
-        .map(|h| (ItemKind::Host, h.id.0.to_string()))
-        .collect();
+    let mut items: Vec<(ItemKind, String)> = picked.iter().map(|h| (ItemKind::Host, h.id.0.to_string())).collect();
     if let Some(group) = &group {
         items.push((ItemKind::Group, group.id.0.to_string()));
     }
     for (kind, id) in items {
-        if store.location_of(kind, &id)? != Some(server)
-            || store.received_share_of(server, kind, &id)?.is_some()
-        {
+        if store.location_of(kind, &id)? != Some(server) || store.received_share_of(server, kind, &id)?.is_some() {
             return not_allowed();
         }
     }
@@ -224,13 +191,7 @@ struct Credentials {
 /// The credentials of the hosts' own settings and of every group a shared host takes values
 /// from (all groups of a tree shared with all hosts; for copies every group above the host, as
 /// those values are written into the copies).
-fn used_credentials(
-    server: ServerId,
-    store: &Store,
-    kind: ShareKind,
-    group: &Option<Group>,
-    hosts: &[Host],
-) -> Result<Credentials, SyncError> {
+fn used_credentials(server: ServerId, store: &Store, kind: ShareKind, group: &Option<Group>, hosts: &[Host]) -> Result<Credentials, SyncError> {
     let all_groups = store.list_groups()?;
     let mut groups: Vec<Group> = Vec::new();
     match (kind, group) {
@@ -260,17 +221,13 @@ fn used_credentials(
     }
     // An item that came in someone else's share is theirs to share, not this account's.
     let own = |kind: ItemKind, id: &str| -> Result<bool, SyncError> {
-        Ok(store.location_of(kind, id)? == Some(server)
-            && store.received_share_of(server, kind, id)?.is_none())
+        Ok(store.location_of(kind, id)? == Some(server) && store.received_share_of(server, kind, id)?.is_none())
     };
     let identities = store.list_identities()?;
     let mut out = Credentials::default();
     let mut keys: Vec<KeyRef> = Vec::new();
     let mut passwords: Vec<PasswordId> = Vec::new();
-    let settings = hosts
-        .iter()
-        .map(|h| &h.settings)
-        .chain(groups.iter().map(|g| &g.defaults));
+    let settings = hosts.iter().map(|h| &h.settings).chain(groups.iter().map(|g| &g.defaults));
     for s in settings {
         keys.extend(s.key.clone());
         passwords.extend(s.password_ids());
@@ -328,29 +285,14 @@ pub(crate) async fn write_record(
 }
 
 /// The copy in share `area` of the item `id`, if there is one.
-fn copy_in(
-    store: &Store,
-    server: ServerId,
-    area: Uuid,
-    kind: ItemKind,
-    id: Uuid,
-) -> Result<Option<Uuid>, SyncError> {
-    Ok(store
-        .copies_of(server, kind, &id.to_string())?
-        .into_iter()
-        .find(|(a, _)| *a == area)
-        .and_then(|(_, copy)| Uuid::parse_str(&copy).ok()))
+fn copy_in(store: &Store, server: ServerId, area: Uuid, kind: ItemKind, id: Uuid) -> Result<Option<Uuid>, SyncError> {
+    Ok(store.copies_of(server, kind, &id.to_string())?.into_iter().find(|(a, _)| *a == area).and_then(|(_, copy)| Uuid::parse_str(&copy).ok()))
 }
 
 /// The references a copy carries: the copies of shared stored keys and passwords, nothing for
 /// what was not shared (an agent key, a key or password shared without keys), no identity (the
 /// copy carries its values), and jump hosts pointing to their copies where there are some.
-fn to_copy_refs(
-    store: &Store,
-    server: ServerId,
-    area: Uuid,
-    settings: &mut ConnectionSettings,
-) -> Result<(), SyncError> {
+fn to_copy_refs(store: &Store, server: ServerId, area: Uuid, settings: &mut ConnectionSettings) -> Result<(), SyncError> {
     let password = |p: Option<PasswordId>| -> Result<Option<PasswordId>, SyncError> {
         Ok(match p {
             Some(p) => copy_in(store, server, area, ItemKind::Password, p.0)?.map(PasswordId),
@@ -358,8 +300,7 @@ fn to_copy_refs(
         })
     };
     settings.key = match settings.key.take() {
-        Some(KeyRef::Stored { id }) => copy_in(store, server, area, ItemKind::Key, id.0)?
-            .map(|copy| KeyRef::Stored { id: KeyId(copy) }),
+        Some(KeyRef::Stored { id }) => copy_in(store, server, area, ItemKind::Key, id.0)?.map(|copy| KeyRef::Stored { id: KeyId(copy) }),
         _ => None,
     };
     settings.password = password(settings.password)?;
@@ -380,11 +321,7 @@ fn to_copy_refs(
 /// The settings a host's copy starts from: its own and those of the groups between its group
 /// and the shared group `shared` (its own group counts, the shared group does not; with nothing
 /// shared as a group, the whole chain), identities resolved.
-fn host_copy_settings(
-    store: &Store,
-    host: &Host,
-    shared: Option<&str>,
-) -> Result<ConnectionSettings, SyncError> {
+fn host_copy_settings(store: &Store, host: &Host, shared: Option<&str>) -> Result<ConnectionSettings, SyncError> {
     let groups = store.list_groups()?;
     let chain = match host.group_id {
         Some(start) => group_chain(&groups, start),
@@ -450,9 +387,7 @@ pub(crate) fn copy_item(
         ItemBody::Deleted { item_id, .. } => *item_id = copy,
         // Session logs are personal: they have no copies in shares.
         ItemBody::Log { .. } | ItemBody::LogChunk { .. } => {
-            return Err(SyncError::Proto(sshcraft_proto::ProtoError::Malformed(
-                "session logs are not shared".into(),
-            )));
+            return Err(SyncError::Proto(sshcraft_proto::ProtoError::Malformed("session logs are not shared".into())));
         }
     }
     Ok(item)
@@ -480,41 +415,14 @@ pub async fn share(
     let (kind, group, hosts) = plan(&*lock(store)?, engine.server, &what)?;
     let credentials = used_credentials(engine.server, &*lock(store)?, kind, &group, &hosts)?;
     let agent_keys_skipped = credentials.agent;
-    let members = grants
-        .iter()
-        .map(|g| Member {
-            account: g.account,
-            role: g.role,
-        })
-        .collect();
+    let members = grants.iter().map(|g| Member { account: g.account, role: g.role }).collect();
     let (manifest, key) = create_area(engine, store, members).await?;
     let area = manifest.area_id.0;
-    let info = ShareInfo {
-        kind,
-        group: group.as_ref().map(|g| g.id.0.to_string()),
-        with_keys,
-    };
-    write_record(
-        engine,
-        store,
-        &manifest,
-        &key,
-        share_info_record_id(area),
-        1,
-        &encode_share_info(&info),
-    )
-    .await?;
+    let info = ShareInfo { kind, group: group.as_ref().map(|g| g.id.0.to_string()), with_keys };
+    write_record(engine, store, &manifest, &key, share_info_record_id(area), 1, &encode_share_info(&info)).await?;
     lock(store)?.put_share(
         engine.server,
-        &ShareRow {
-            area_id: area,
-            kind,
-            group_id: info.group.clone(),
-            with_keys,
-            owned: true,
-            role: None,
-            owner: engine.account.0,
-        },
+        &ShareRow { area_id: area, kind, group_id: info.group.clone(), with_keys, owned: true, role: None, owner: engine.account.0 },
     )?;
     let server = engine.server;
     if kind == ShareKind::GroupAll {
@@ -534,24 +442,10 @@ pub async fn share(
             crate::engine::record_group_hosts(&guard, &group_id, now_ms)?;
             // Identities always go along (without them members lack the user); keys and
             // passwords only with keys. Without, the identities go without theirs.
-            let mut along: Vec<(ItemKind, String)> = credentials
-                .identities
-                .iter()
-                .map(|i| (ItemKind::Identity, i.0.to_string()))
-                .collect();
+            let mut along: Vec<(ItemKind, String)> = credentials.identities.iter().map(|i| (ItemKind::Identity, i.0.to_string())).collect();
             if with_keys {
-                along.extend(
-                    credentials
-                        .keys
-                        .iter()
-                        .map(|k| (ItemKind::Key, k.0.to_string())),
-                );
-                along.extend(
-                    credentials
-                        .passwords
-                        .iter()
-                        .map(|p| (ItemKind::Password, p.0.to_string())),
-                );
+                along.extend(credentials.keys.iter().map(|k| (ItemKind::Key, k.0.to_string())));
+                along.extend(credentials.passwords.iter().map(|p| (ItemKind::Password, p.0.to_string())));
             }
             for (item_kind, id) in &along {
                 guard.set_item_area(server, *item_kind, id, area)?;
@@ -564,18 +458,8 @@ pub async fn share(
         // can apply each as it comes. Identities are not copied: the copies carry their values.
         let mut originals: Vec<(ItemKind, String)> = Vec::new();
         if with_keys {
-            originals.extend(
-                credentials
-                    .keys
-                    .iter()
-                    .map(|k| (ItemKind::Key, k.0.to_string())),
-            );
-            originals.extend(
-                credentials
-                    .passwords
-                    .iter()
-                    .map(|p| (ItemKind::Password, p.0.to_string())),
-            );
+            originals.extend(credentials.keys.iter().map(|k| (ItemKind::Key, k.0.to_string())));
+            originals.extend(credentials.passwords.iter().map(|p| (ItemKind::Password, p.0.to_string())));
         }
         if kind == ShareKind::Selection
             && let Some(group) = &group
@@ -584,47 +468,23 @@ pub async fn share(
         }
         originals.extend(hosts.iter().map(|h| (ItemKind::Host, h.id.0.to_string())));
         for (item_kind, original) in &originals {
-            let original_uuid =
-                Uuid::parse_str(original).map_err(|e| SyncError::Store(e.to_string()))?;
+            let original_uuid = Uuid::parse_str(original).map_err(|e| SyncError::Store(e.to_string()))?;
             let copy = copy_id(area, original_uuid).to_string();
             lock(store)?.put_copy(server, area, *item_kind, original, &copy)?;
         }
         for (item_kind, original) in &originals {
-            let original_uuid =
-                Uuid::parse_str(original).map_err(|e| SyncError::Store(e.to_string()))?;
+            let original_uuid = Uuid::parse_str(original).map_err(|e| SyncError::Store(e.to_string()))?;
             let copy = copy_id(area, original_uuid).to_string();
             let item = {
                 let guard = lock(store)?;
                 copy_item(&guard, vault, server, area, *item_kind, original, now_ms)?
             };
             let record_id = Uuid::new_v4();
-            write_record(
-                engine,
-                store,
-                &manifest,
-                &key,
-                record_id,
-                1,
-                &encode(&item)?,
-            )
-            .await?;
-            lock(store)?.put_record_entry(
-                server,
-                &RecordEntry {
-                    record_id,
-                    area_id: area,
-                    version: 1,
-                    modified_at: now_ms,
-                },
-                *item_kind,
-                &copy,
-            )?;
+            write_record(engine, store, &manifest, &key, record_id, 1, &encode(&item)?).await?;
+            lock(store)?.put_record_entry(server, &RecordEntry { record_id, area_id: area, version: 1, modified_at: now_ms }, *item_kind, &copy)?;
         }
     }
-    Ok(ShareOutcome {
-        area,
-        agent_keys_skipped,
-    })
+    Ok(ShareOutcome { area, agent_keys_skipped })
 }
 
 /// After taking someone out: whether keys went along, so the user can be told to change them
@@ -687,32 +547,15 @@ pub async fn set_grants(
             require_confirmed(store, engine.server, &grant.account)?;
         }
     }
-    let removed = manifest
-        .members
-        .iter()
-        .any(|m| !grants.iter().any(|g| g.account == m.account));
-    let members = grants
-        .iter()
-        .map(|g| Member {
-            account: g.account,
-            role: g.role,
-        })
-        .collect();
+    let removed = manifest.members.iter().any(|m| !grants.iter().any(|g| g.account == m.account));
+    let members = grants.iter().map(|g| Member { account: g.account, role: g.role }).collect();
     set_members(engine, store, vault, AreaId(area), members, now_ms / 1000).await?;
-    Ok(RevokeOutcome {
-        keys_were_shared: removed && share.with_keys,
-    })
+    Ok(RevokeOutcome { keys_were_shared: removed && share.with_keys })
 }
 
 /// Ends a share. A group shared with all its hosts goes back into the personal area; copies
 /// are deleted with the share's area.
-pub async fn unshare(
-    engine: &mut Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    area: Uuid,
-    now_ms: i64,
-) -> Result<RevokeOutcome, SyncError> {
+pub async fn unshare(engine: &mut Engine, store: &Mutex<Store>, vault: &Vault, area: Uuid, now_ms: i64) -> Result<RevokeOutcome, SyncError> {
     let share = owned_share(store, engine.server, area)?;
     let server = engine.server;
     if share.kind == ShareKind::GroupAll {
@@ -738,9 +581,7 @@ pub async fn unshare(
         Err(err) => return engine.revoked_check(store, Err(err)),
     }
     lock(store)?.forget_area(server, area)?;
-    Ok(RevokeOutcome {
-        keys_were_shared: share.with_keys,
-    })
+    Ok(RevokeOutcome { keys_were_shared: share.with_keys })
 }
 
 /// Every share this device knows on `server`, own and received.
@@ -764,10 +605,7 @@ pub fn list(store: &Mutex<Store>, server: ServerId) -> Result<Vec<ShareView>, Sy
             guard
                 .list_hosts()?
                 .into_iter()
-                .filter(|h| {
-                    h.group_id
-                        .is_some_and(|g| Some(g.0.to_string()) == share.group_id)
-                })
+                .filter(|h| h.group_id.is_some_and(|g| Some(g.0.to_string()) == share.group_id))
                 .map(|h| h.id.0.to_string())
                 .collect()
         } else {
@@ -775,29 +613,15 @@ pub fn list(store: &Mutex<Store>, server: ServerId) -> Result<Vec<ShareView>, Sy
                 .list_hosts()?
                 .into_iter()
                 .map(|h| h.id.0.to_string())
-                .filter(|id| {
-                    guard
-                        .effective_area(server, ItemKind::Host, id)
-                        .ok()
-                        .flatten()
-                        == Some(share.area_id)
-                })
+                .filter(|id| guard.effective_area(server, ItemKind::Host, id).ok().flatten() == Some(share.area_id))
                 .collect()
         };
         let grants = manifest
             .members
             .iter()
             .map(|m| {
-                let contact = guard
-                    .contact_by_account(server, &m.account.0)
-                    .ok()
-                    .flatten();
-                GrantView {
-                    account: m.account,
-                    role: m.role,
-                    email: contact.as_ref().map(|c| c.email.clone()),
-                    name: contact.map(|c| c.name),
-                }
+                let contact = guard.contact_by_account(server, &m.account.0).ok().flatten();
+                GrantView { account: m.account, role: m.role, email: contact.as_ref().map(|c| c.email.clone()), name: contact.map(|c| c.name) }
             })
             .collect();
         views.push(ShareView {

@@ -28,11 +28,7 @@ fn mpint(bytes: &[u8]) -> Vec<u8> {
 /// The SSH signature blob: `string algorithm, string signature, byte flags, uint32 counter`.
 /// The authenticator data must be for `application` and carry no extensions: an `sk-`
 /// signature has no room for them.
-pub fn ssh_signature(
-    algorithm: SkAlgorithm,
-    application: &str,
-    assertion: &Assertion,
-) -> Result<Vec<u8>, FidoError> {
+pub fn ssh_signature(algorithm: SkAlgorithm, application: &str, assertion: &Assertion) -> Result<Vec<u8>, FidoError> {
     let data = &assertion.authenticator_data;
     if data.len() < 37 {
         return Err(bad("authenticator data too short"));
@@ -48,8 +44,7 @@ pub fn ssh_signature(
     let mut out = Vec::new();
     match algorithm {
         SkAlgorithm::EcdsaP256 => {
-            let signature = p256::ecdsa::Signature::from_der(&assertion.signature)
-                .map_err(|_| bad("ECDSA signature is no DER"))?;
+            let signature = p256::ecdsa::Signature::from_der(&assertion.signature).map_err(|_| bad("ECDSA signature is no DER"))?;
             let (r, s) = signature.split_bytes();
             let mut inner = Vec::new();
             put_string(&mut inner, &mpint(&r));

@@ -22,13 +22,7 @@ fn new_meta(started_at: i64) -> LogMeta {
 }
 
 fn mark(kind: MarkKind, offset: u64, text: &str) -> LogMark {
-    LogMark {
-        id: Uuid::new_v4(),
-        offset,
-        kind,
-        text: text.into(),
-        created_at: 1,
-    }
+    LogMark { id: Uuid::new_v4(), offset, kind, text: text.into(), created_at: 1 }
 }
 
 /// A finished log of the given parts.
@@ -61,10 +55,7 @@ fn a_missing_part_is_damage() {
     create(&vault, &store, &meta).unwrap();
     append_chunk(&vault, &store, meta.id, 0, b"a", 2).unwrap();
     append_chunk(&vault, &store, meta.id, 2, b"c", 2).unwrap();
-    assert!(matches!(
-        read(&vault, &store, meta.id),
-        Err(LogError::Damaged)
-    ));
+    assert!(matches!(read(&vault, &store, meta.id), Err(LogError::Damaged)));
 }
 
 #[test]
@@ -81,10 +72,7 @@ fn a_part_moved_to_another_position_does_not_open() {
             id = meta.id.0
         ))
         .unwrap();
-    assert!(matches!(
-        read(&vault, &store, meta.id),
-        Err(LogError::Damaged)
-    ));
+    assert!(matches!(read(&vault, &store, meta.id), Err(LogError::Damaged)));
 }
 
 #[test]
@@ -108,33 +96,14 @@ fn a_part_of_another_log_does_not_open() {
 fn a_finished_log_shorter_than_its_size_is_damaged() {
     let (store, vault) = setup();
     let meta = recorded(&store, &vault, 1, &[b"abc", b"def"]);
-    store
-        .conn
-        .execute(
-            "DELETE FROM session_log_chunks WHERE log_id = ?1 AND seq = 1",
-            [meta.id.0.to_string()],
-        )
-        .unwrap();
-    assert!(matches!(
-        read(&vault, &store, meta.id),
-        Err(LogError::Damaged)
-    ));
+    store.conn.execute("DELETE FROM session_log_chunks WHERE log_id = ?1 AND seq = 1", [meta.id.0.to_string()]).unwrap();
+    assert!(matches!(read(&vault, &store, meta.id), Err(LogError::Damaged)));
 }
 
 #[test]
 fn parts_without_header_are_not_listed() {
     let (store, vault) = setup();
-    put_chunk(
-        &vault,
-        &store,
-        Uuid::new_v4(),
-        LogId(Uuid::new_v4()),
-        0,
-        b"early",
-        1,
-        None,
-    )
-    .unwrap();
+    put_chunk(&vault, &store, Uuid::new_v4(), LogId(Uuid::new_v4()), 0, b"early", 1, None).unwrap();
     assert!(list(&vault, &store).unwrap().is_empty());
 }
 
@@ -144,10 +113,7 @@ fn chunk_size_is_limited() {
     let meta = new_meta(1);
     create(&vault, &store, &meta).unwrap();
     let big = vec![b'x'; CHUNK_SIZE + 1];
-    assert!(matches!(
-        append_chunk(&vault, &store, meta.id, 0, &big, 1),
-        Err(LogError::Invalid("chunk"))
-    ));
+    assert!(matches!(append_chunk(&vault, &store, meta.id, 0, &big, 1), Err(LogError::Invalid("chunk"))));
     append_chunk(&vault, &store, meta.id, 0, &big[..CHUNK_SIZE], 1).unwrap();
 }
 
@@ -155,11 +121,7 @@ fn chunk_size_is_limited() {
 fn marks_are_checked() {
     let (store, vault) = setup();
     let meta = recorded(&store, &vault, 1, &[b"0123456789"]);
-    let ok = vec![
-        mark(MarkKind::Bookmark, 0, ""),
-        mark(MarkKind::Bookmark, 10, "end"),
-        mark(MarkKind::Comment, 5, "line one\nline two"),
-    ];
+    let ok = vec![mark(MarkKind::Bookmark, 0, ""), mark(MarkKind::Bookmark, 10, "end"), mark(MarkKind::Comment, 5, "line one\nline two")];
     let saved = save_marks(&vault, &store, meta.id, ok.clone()).unwrap();
     assert_eq!(saved.marks, ok);
     assert_eq!(meta_of(&store, &vault, meta.id).marks, ok);
@@ -171,17 +133,9 @@ fn marks_are_checked() {
         vec![mark(MarkKind::Comment, 0, "  ")],
         vec![mark(MarkKind::Comment, 0, &"x".repeat(MAX_COMMENT + 1))],
         vec![mark(MarkKind::Comment, 0, "bell\u{7}")],
-        (0..=MAX_MARKS)
-            .map(|_| mark(MarkKind::Bookmark, 0, ""))
-            .collect(),
+        (0..=MAX_MARKS).map(|_| mark(MarkKind::Bookmark, 0, "")).collect(),
     ] {
-        assert!(
-            matches!(
-                save_marks(&vault, &store, meta.id, bad.clone()),
-                Err(LogError::Invalid(_))
-            ),
-            "{bad:?}"
-        );
+        assert!(matches!(save_marks(&vault, &store, meta.id, bad.clone()), Err(LogError::Invalid(_))), "{bad:?}");
     }
 }
 
@@ -191,13 +145,7 @@ fn marks_of_a_running_log_may_point_into_stored_parts() {
     let meta = new_meta(1);
     create(&vault, &store, &meta).unwrap();
     append_chunk(&vault, &store, meta.id, 0, b"abcdef", 2).unwrap();
-    save_marks(
-        &vault,
-        &store,
-        meta.id,
-        vec![mark(MarkKind::Bookmark, 6, "now")],
-    )
-    .unwrap();
+    save_marks(&vault, &store, meta.id, vec![mark(MarkKind::Bookmark, 6, "now")]).unwrap();
     // Finishing keeps them.
     let done = finish(&vault, &store, meta.id, 3, 6, false).unwrap();
     assert_eq!(done.marks.len(), 1);
@@ -212,15 +160,9 @@ fn title_is_checked() {
     let (store, vault) = setup();
     let mut meta = new_meta(1);
     meta.title = " ".into();
-    assert!(matches!(
-        create(&vault, &store, &meta),
-        Err(LogError::Invalid("title"))
-    ));
+    assert!(matches!(create(&vault, &store, &meta), Err(LogError::Invalid("title"))));
     meta.title = "x".repeat(MAX_TITLE + 1);
-    assert!(matches!(
-        create(&vault, &store, &meta),
-        Err(LogError::Invalid("title"))
-    ));
+    assert!(matches!(create(&vault, &store, &meta), Err(LogError::Invalid("title"))));
 }
 
 #[test]
@@ -230,11 +172,7 @@ fn delete_removes_header_and_parts() {
     let kept = recorded(&store, &vault, 2, &[b"c"]);
     delete(&store, gone.id).unwrap();
     assert_eq!(chunk_ids(&store, gone.id).unwrap(), Vec::<String>::new());
-    let listed: Vec<LogId> = list(&vault, &store)
-        .unwrap()
-        .into_iter()
-        .map(|s| s.meta.id)
-        .collect();
+    let listed: Vec<LogId> = list(&vault, &store).unwrap().into_iter().map(|s| s.meta.id).collect();
     assert_eq!(listed, vec![kept.id]);
     assert_eq!(read(&vault, &store, kept.id).unwrap(), b"c");
 }
@@ -283,24 +221,9 @@ fn abandoned_logs_end_at_their_last_part() {
 fn search_finds_words_across_parts() {
     let (store, vault) = setup();
     let older = recorded(&store, &vault, 1, &[b"nothing here\r\n"]);
-    let log = recorded(
-        &store,
-        &vault,
-        2,
-        &[
-            b"$ systemctl status ngi",
-            b"nx\r\n\x1b[32mActive\x1b[0m: running\r\n",
-        ],
-    );
+    let log = recorded(&store, &vault, 2, &[b"$ systemctl status ngi", b"nx\r\n\x1b[32mActive\x1b[0m: running\r\n"]);
     let hits = search(&vault, &store, "NGINX").unwrap();
-    assert_eq!(
-        hits,
-        vec![LogHit {
-            log_id: log.id,
-            line: 0,
-            snippet: "$ systemctl status nginx".into()
-        }]
-    );
+    assert_eq!(hits, vec![LogHit { log_id: log.id, line: 0, snippet: "$ systemctl status nginx".into() }]);
     let hits = search(&vault, &store, "active: run").unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].line, 1);
@@ -354,10 +277,7 @@ fn session_log_setting_inherits_from_groups() {
         id: GroupId(Uuid::new_v4()),
         name: "p".into(),
         parent_id: None,
-        defaults: ConnectionSettings {
-            session_log: Some(true),
-            ..Default::default()
-        },
+        defaults: ConnectionSettings { session_log: Some(true), ..Default::default() },
         location: None,
         tags: Vec::new(),
     };
@@ -380,15 +300,9 @@ fn session_log_setting_inherits_from_groups() {
         forwards: Vec::new(),
     };
     let groups = vec![parent, child];
-    assert_eq!(
-        sshcraft_model::model::session_log_for(&host, &groups),
-        Some(true)
-    );
+    assert_eq!(sshcraft_model::model::session_log_for(&host, &groups), Some(true));
     host.settings.session_log = Some(false);
-    assert_eq!(
-        sshcraft_model::model::session_log_for(&host, &groups),
-        Some(false)
-    );
+    assert_eq!(sshcraft_model::model::session_log_for(&host, &groups), Some(false));
     host.group_id = None;
     host.settings.session_log = None;
     assert_eq!(sshcraft_model::model::session_log_for(&host, &groups), None);
@@ -399,13 +313,7 @@ fn adding_a_mark_keeps_marks_added_meanwhile() {
     let (store, vault) = setup();
     let meta = recorded(&store, &vault, 1, &[b"0123456789"]);
     // The terminal sets a bookmark while a viewer still shows no marks.
-    add_mark(
-        &vault,
-        &store,
-        meta.id,
-        mark(MarkKind::Bookmark, 4, "terminal"),
-    )
-    .unwrap();
+    add_mark(&vault, &store, meta.id, mark(MarkKind::Bookmark, 4, "terminal")).unwrap();
     let from_viewer = mark(MarkKind::Comment, 8, "viewer");
     let saved = add_mark(&vault, &store, meta.id, from_viewer.clone()).unwrap();
     let texts: Vec<&str> = saved.marks.iter().map(|m| m.text.as_str()).collect();
@@ -422,17 +330,7 @@ fn orphaned_local_parts_are_purged_synced_ones_kept() {
     let gone = LogId(Uuid::new_v4());
     append_chunk(&vault, &store, gone, 0, b"left over", 2).unwrap();
     let early = LogId(Uuid::new_v4());
-    put_chunk(
-        &vault,
-        &store,
-        Uuid::new_v4(),
-        early,
-        0,
-        b"header follows",
-        2,
-        Some(ServerId(Uuid::new_v4())),
-    )
-    .unwrap();
+    put_chunk(&vault, &store, Uuid::new_v4(), early, 0, b"header follows", 2, Some(ServerId(Uuid::new_v4()))).unwrap();
     assert_eq!(purge_orphans(&store).unwrap(), 1);
     assert!(chunk_ids(&store, gone).unwrap().is_empty());
     assert_eq!(chunk_ids(&store, early).unwrap().len(), 1);
@@ -482,9 +380,6 @@ fn search_bytes_counts_towards_one_limit() {
 fn a_file_store_writes_ahead() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("s.db")).unwrap();
-    let mode: String = store
-        .conn
-        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
-        .unwrap();
+    let mode: String = store.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
 }

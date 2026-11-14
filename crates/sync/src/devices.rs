@@ -25,10 +25,7 @@ pub struct DeviceInfo {
 }
 
 /// Every device ever added to the account, in log order, with its current state.
-pub async fn list_devices(
-    engine: &mut Engine,
-    store: &Mutex<Store>,
-) -> Result<Vec<DeviceInfo>, SyncError> {
+pub async fn list_devices(engine: &mut Engine, store: &Mutex<Store>) -> Result<Vec<DeviceInfo>, SyncError> {
     let (set, log) = engine.own_devices(store).await?;
     let states = engine.revoked_check(store, engine.client().my_devices().await)?;
     Ok(log
@@ -58,13 +55,7 @@ pub async fn list_devices(
 /// personal one and its shares): new key, envelopes only for devices that may still read, every
 /// record sealed again. The plan is stored (sealed) before the first step, and every step can be
 /// repeated, so an interruption is finished by the next sync.
-pub async fn revoke_device(
-    engine: &mut Engine,
-    store: &Mutex<Store>,
-    vault: &Vault,
-    target: Uuid,
-    now: i64,
-) -> Result<(), SyncError> {
+pub async fn revoke_device(engine: &mut Engine, store: &Mutex<Store>, vault: &Vault, target: Uuid, now: i64) -> Result<(), SyncError> {
     // An earlier rotation that did not finish goes first.
     resume_rotation(engine, store, vault, now).await?;
     let (_, log) = engine.own_devices(store).await?;

@@ -5,17 +5,9 @@ use sshcraft_model::policy::{Disconnect, ShellEvent};
 
 fn echo_command() -> ShellCommand {
     if cfg!(windows) {
-        ShellCommand {
-            program: "cmd.exe".into(),
-            args: vec!["/c".into(), "echo sshcraft-local".into()],
-            label: "echo".into(),
-        }
+        ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     } else {
-        ShellCommand {
-            program: "sh".into(),
-            args: vec!["-c".into(), "echo sshcraft-local".into()],
-            label: "echo".into(),
-        }
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     }
 }
 
@@ -34,10 +26,7 @@ async fn spawned_shell_echoes() {
                 output.extend(d);
             }
             Ok(Some(ShellEvent::Ended(reason))) => break reason,
-            other => panic!(
-                "no end: {other:?}, got {:?}",
-                String::from_utf8_lossy(&output)
-            ),
+            other => panic!("no end: {other:?}, got {:?}", String::from_utf8_lossy(&output)),
         }
     };
     let text = String::from_utf8_lossy(&output);
@@ -48,17 +37,9 @@ async fn spawned_shell_echoes() {
 #[tokio::test]
 async fn resize_does_not_fail() {
     let interactive = if cfg!(windows) {
-        ShellCommand {
-            program: "cmd.exe".into(),
-            args: Vec::new(),
-            label: "cmd".into(),
-        }
+        ShellCommand { program: "cmd.exe".into(), args: Vec::new(), label: "cmd".into() }
     } else {
-        ShellCommand {
-            program: "sh".into(),
-            args: Vec::new(),
-            label: "sh".into(),
-        }
+        ShellCommand { program: "sh".into(), args: Vec::new(), label: "sh".into() }
     };
     let (writer, _events) = spawn(&interactive, 80, 24, "xterm-256color", None).unwrap();
     writer.resize(120, 40).unwrap();
@@ -67,52 +48,28 @@ async fn resize_does_not_fail() {
 
 #[test]
 fn unknown_program_fails_to_spawn() {
-    let missing = ShellCommand {
-        program: "sshcraft-no-such-shell-xyz".into(),
-        args: Vec::new(),
-        label: "missing".into(),
-    };
+    let missing = ShellCommand { program: "sshcraft-no-such-shell-xyz".into(), args: Vec::new(), label: "missing".into() };
     assert!(spawn(&missing, 80, 24, "xterm-256color", None).is_err());
 }
 
 #[test]
 fn available_shells_ends_with_custom() {
-    let custom = ShellCommand {
-        program: "my-shell".into(),
-        args: vec!["--login".into()],
-        label: "Mine".into(),
-    };
+    let custom = ShellCommand { program: "my-shell".into(), args: vec!["--login".into()], label: "Mine".into() };
     let shells = available_shells(Some(custom.clone()));
     assert!(shells.len() >= 2);
     assert_eq!(shells.last(), Some(&custom));
     if cfg!(windows) {
-        assert!(
-            shells
-                .iter()
-                .any(|s| s.program.eq_ignore_ascii_case("cmd.exe"))
-        );
-        assert!(
-            shells
-                .iter()
-                .any(|s| s.program.eq_ignore_ascii_case("powershell.exe"))
-        );
+        assert!(shells.iter().any(|s| s.program.eq_ignore_ascii_case("cmd.exe")));
+        assert!(shells.iter().any(|s| s.program.eq_ignore_ascii_case("powershell.exe")));
     }
 }
 
 #[tokio::test]
 async fn close_ends_the_shell_even_while_a_clone_lives() {
     let interactive = if cfg!(windows) {
-        ShellCommand {
-            program: "cmd.exe".into(),
-            args: Vec::new(),
-            label: "cmd".into(),
-        }
+        ShellCommand { program: "cmd.exe".into(), args: Vec::new(), label: "cmd".into() }
     } else {
-        ShellCommand {
-            program: "sh".into(),
-            args: Vec::new(),
-            label: "sh".into(),
-        }
+        ShellCommand { program: "sh".into(), args: Vec::new(), label: "sh".into() }
     };
     let (writer, mut events) = spawn(&interactive, 80, 24, "xterm-256color", None).unwrap();
     let _held = writer.clone();
@@ -132,11 +89,7 @@ async fn close_ends_the_shell_even_while_a_clone_lives() {
 }
 
 /// Runs `cmd` to its end and returns what it printed.
-async fn run_to_end(
-    cmd: &ShellCommand,
-    term: &str,
-    cwd: Option<&std::path::Path>,
-) -> (String, Disconnect) {
+async fn run_to_end(cmd: &ShellCommand, term: &str, cwd: Option<&std::path::Path>) -> (String, Disconnect) {
     let (writer, mut events) = spawn(cmd, 200, 24, term, cwd).unwrap();
     let mut output = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
@@ -151,27 +104,16 @@ async fn run_to_end(
             Ok(Some(ShellEvent::Ended(reason))) => {
                 return (String::from_utf8_lossy(&output).into_owned(), reason);
             }
-            other => panic!(
-                "no end: {other:?}, got {:?}",
-                String::from_utf8_lossy(&output)
-            ),
+            other => panic!("no end: {other:?}, got {:?}", String::from_utf8_lossy(&output)),
         }
     }
 }
 
 fn term_and_dir_command() -> ShellCommand {
     if cfg!(windows) {
-        ShellCommand {
-            program: "cmd.exe".into(),
-            args: vec!["/c".into(), "echo %TERM% & cd".into()],
-            label: "probe".into(),
-        }
+        ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo %TERM% & cd".into()], label: "probe".into() }
     } else {
-        ShellCommand {
-            program: "sh".into(),
-            args: vec!["-c".into(), "echo $TERM; pwd".into()],
-            label: "probe".into(),
-        }
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd".into()], label: "probe".into() }
     }
 }
 

@@ -1,13 +1,6 @@
 //! Platform folders for SSHCraft: where the app keeps its data.
 
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unimplemented,
-    clippy::todo,
-    clippy::unreachable
-)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::path::PathBuf;
 
@@ -22,9 +15,7 @@ pub enum PlatformError {
 /// The folder that holds `sshcraft.db`. It is the folder the Tauri version used, so a rebuilt
 /// app finds the data an earlier version wrote (on Windows `%APPDATA%\musiker15\SSHCraft\data`).
 pub fn data_dir() -> Result<PathBuf, PlatformError> {
-    directories::ProjectDirs::from("de", "musiker15", "SSHCraft")
-        .map(|dirs| dirs.data_dir().to_path_buf())
-        .ok_or(PlatformError::NoHome)
+    directories::ProjectDirs::from("de", "musiker15", "SSHCraft").map(|dirs| dirs.data_dir().to_path_buf()).ok_or(PlatformError::NoHome)
 }
 
 /// The user's home folder, if the operating system reports one.
@@ -44,11 +35,7 @@ mod tests {
         let expected = ProjectDirs::from("de", "musiker15", "SSHCraft").unwrap();
         assert_eq!(dir, expected.data_dir());
         if cfg!(windows) {
-            assert!(
-                dir.ends_with(r"musiker15\SSHCraft\data"),
-                "{}",
-                dir.display()
-            );
+            assert!(dir.ends_with(r"musiker15\SSHCraft\data"), "{}", dir.display());
         }
     }
 }

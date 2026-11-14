@@ -24,18 +24,13 @@ pub struct Auth {
 
 impl Auth {
     pub fn key(credential: Credential) -> Self {
-        Self {
-            key: Some(credential),
-            ..Default::default()
-        }
+        Self { key: Some(credential), ..Default::default() }
     }
 }
 
 /// Whether `cert` is valid right now (`valid_after <= now < valid_before`).
 pub fn certificate_valid_now(cert: &Certificate) -> bool {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     cert.valid_after() <= now && now < cert.valid_before()
 }
 
@@ -70,13 +65,8 @@ impl russh::Signer for SignerAdapter<'_> {
         to_sign: Vec<u8>,
     ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send {
         async move {
-            let blob = self
-                .0
-                .sign(&to_sign)
-                .await
-                .map_err(SignerAuthError::Signer)?;
-            let len = u32::try_from(blob.len())
-                .map_err(|_| SignerAuthError::Signer(SshError::SignerFailed("too long".into())))?;
+            let blob = self.0.sign(&to_sign).await.map_err(SignerAuthError::Signer)?;
+            let len = u32::try_from(blob.len()).map_err(|_| SignerAuthError::Signer(SshError::SignerFailed("too long".into())))?;
             let mut out = to_sign;
             out.extend_from_slice(&len.to_be_bytes());
             out.extend_from_slice(&blob);
@@ -98,14 +88,10 @@ impl crate::KeySigner for HashedKeySigner {
         use russh::keys::ssh_encoding::Encode;
         let failed = |e: russh::keys::signature::Error| SshError::SignerFailed(e.to_string());
         let signature: russh::keys::ssh_key::Signature = match self.key.key_data() {
-            russh::keys::ssh_key::private::KeypairData::Rsa(pair) => {
-                (pair, self.hash).try_sign(data).map_err(failed)?
-            }
+            russh::keys::ssh_key::private::KeypairData::Rsa(pair) => (pair, self.hash).try_sign(data).map_err(failed)?,
             other => other.try_sign(data).map_err(failed)?,
         };
-        signature
-            .encode_vec()
-            .map_err(|e| SshError::SignerFailed(e.to_string()))
+        signature.encode_vec().map_err(|e| SshError::SignerFailed(e.to_string()))
     }
 }
 
@@ -113,9 +99,7 @@ impl crate::KeySigner for HashedKeySigner {
 fn may_retry_key(result: &russh::client::AuthResult) -> bool {
     match result {
         russh::client::AuthResult::Success => false,
-        russh::client::AuthResult::Failure {
-            remaining_methods, ..
-        } => remaining_methods.contains(&MethodKind::PublicKey),
+        russh::client::AuthResult::Failure { remaining_methods, .. } => remaining_methods.contains(&MethodKind::PublicKey),
     }
 }
 
@@ -180,12 +164,7 @@ impl Flow<'_> {
         self.methods = remaining;
     }
 
-    async fn ask(
-        &self,
-        name: String,
-        instructions: String,
-        prompts: Vec<AuthPromptLine>,
-    ) -> Result<Vec<Zeroizing<String>>, SshError> {
+    async fn ask(&self, name: String, instructions: String, prompts: Vec<AuthPromptLine>) -> Result<Vec<Zeroizing<String>>, SshError> {
         let count = prompts.len();
         let answers = self
             .prompter
@@ -217,14 +196,7 @@ pub(crate) async fn authenticate<H: client::Handler>(
     auth: Auth,
     prompter: &dyn AuthPrompter,
 ) -> Result<(), SshError> {
-    let mut flow = Flow {
-        username,
-        host_name,
-        prompter,
-        methods: MethodSet::empty(),
-        password_rejected: false,
-        offers_tried_password: false,
-    };
+    let mut flow = Flow { username, host_name, prompter, methods: MethodSet::empty(), password_rejected: false, offers_tried_password: false };
     // An expired (or not yet valid) certificate is not offered at all.
     let certificate = auth.certificate.filter(certificate_valid_now);
     let first = match auth.key {
@@ -233,25 +205,16 @@ pub(crate) async fn authenticate<H: client::Handler>(
     };
     match first {
         russh::client::AuthResult::Success => return Ok(()),
-        russh::client::AuthResult::Failure {
-            remaining_methods, ..
-        } => flow.failed(remaining_methods),
+        russh::client::AuthResult::Failure { remaining_methods, .. } => flow.failed(remaining_methods),
     }
 
     let mut stored = auth.password;
     if let Some(password) = &stored
         && flow.offers(MethodKind::Password)
     {
-        match handle
-            .authenticate_password(username, password.as_str())
-            .await
-            .map_err(protocol)?
-        {
+        match handle.authenticate_password(username, password.as_str()).await.map_err(protocol)? {
             russh::client::AuthResult::Success => return Ok(()),
-            russh::client::AuthResult::Failure {
-                remaining_methods,
-                partial_success,
-            } => {
+            russh::client::AuthResult::Failure { remaining_methods, partial_success } => {
                 flow.password_rejected = !partial_success;
                 flow.failed(remaining_methods);
             }
@@ -266,24 +229,15 @@ pub(crate) async fn authenticate<H: client::Handler>(
 
     if flow.offers(MethodKind::KeyboardInteractive) {
         let mut asked = 0;
-        let mut response = handle
-            .authenticate_keyboard_interactive_start(username, None)
-            .await
-            .map_err(protocol)?;
+        let mut response = handle.authenticate_keyboard_interactive_start(username, None).await.map_err(protocol)?;
         loop {
             match response {
                 KeyboardInteractiveAuthResponse::Success => return Ok(()),
-                KeyboardInteractiveAuthResponse::Failure {
-                    remaining_methods, ..
-                } => {
+                KeyboardInteractiveAuthResponse::Failure { remaining_methods, .. } => {
                     flow.failed(remaining_methods);
                     break;
                 }
-                KeyboardInteractiveAuthResponse::InfoRequest {
-                    name,
-                    instructions,
-                    prompts,
-                } => {
+                KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts } => {
                     let single_hidden = prompts.len() == 1 && !prompts[0].echo;
                     let answers: Vec<Zeroizing<String>> = if prompts.is_empty() {
                         Vec::new()
@@ -294,53 +248,27 @@ pub(crate) async fn authenticate<H: client::Handler>(
                         if asked > MAX_ASKED_ROUNDS {
                             return Err(SshError::AuthFailed);
                         }
-                        let lines = prompts
-                            .into_iter()
-                            .map(|p| AuthPromptLine {
-                                text: p.prompt,
-                                echo: p.echo,
-                            })
-                            .collect();
+                        let lines = prompts.into_iter().map(|p| AuthPromptLine { text: p.prompt, echo: p.echo }).collect();
                         flow.ask(name, instructions, lines).await?
                     };
                     // russh takes plain strings; they live only until they are sent.
                     let plain = answers.iter().map(|a| a.to_string()).collect();
-                    response = handle
-                        .authenticate_keyboard_interactive_respond(plain)
-                        .await
-                        .map_err(protocol)?;
+                    response = handle.authenticate_keyboard_interactive_respond(plain).await.map_err(protocol)?;
                 }
             }
         }
     }
 
     if !flow.password_rejected && stored.is_none() && flow.offers(MethodKind::Password) {
-        let typed = flow
-            .ask(
-                String::new(),
-                String::new(),
-                vec![AuthPromptLine {
-                    text: "Password: ".into(),
-                    echo: false,
-                }],
-            )
-            .await?;
+        let typed = flow.ask(String::new(), String::new(), vec![AuthPromptLine { text: "Password: ".into(), echo: false }]).await?;
         let password = typed.into_iter().next().unwrap_or_default();
-        match handle
-            .authenticate_password(username, password.as_str())
-            .await
-            .map_err(protocol)?
-        {
+        match handle.authenticate_password(username, password.as_str()).await.map_err(protocol)? {
             russh::client::AuthResult::Success => return Ok(()),
             russh::client::AuthResult::Failure { .. } => return Err(SshError::PasswordRejected),
         }
     }
 
-    Err(if flow.password_rejected {
-        SshError::PasswordRejected
-    } else {
-        SshError::AuthFailed
-    })
+    Err(if flow.password_rejected { SshError::PasswordRejected } else { SshError::AuthFailed })
 }
 
 async fn publickey<H: client::Handler>(
@@ -349,11 +277,7 @@ async fn publickey<H: client::Handler>(
     credential: Credential,
     certificate: Option<Certificate>,
 ) -> Result<russh::client::AuthResult, SshError> {
-    let hash = handle
-        .best_supported_rsa_hash()
-        .await
-        .map_err(protocol)?
-        .flatten();
+    let hash = handle.best_supported_rsa_hash().await.map_err(protocol)?.flatten();
     match credential {
         Credential::Key(key) => {
             let key = Arc::new(key);
@@ -361,78 +285,46 @@ async fn publickey<H: client::Handler>(
                 let result = if key.algorithm().is_rsa() {
                     // russh's own certificate method announces `ssh-rsa-cert-v01` (SHA-1),
                     // which OpenSSH refuses since 8.8: sign with the server's best RSA hash.
-                    let mut signer = HashedKeySigner {
-                        key: key.clone(),
-                        hash,
-                    };
+                    let mut signer = HashedKeySigner { key: key.clone(), hash };
                     let mut adapter = SignerAdapter(&mut signer);
-                    handle
-                        .authenticate_certificate_with(username, cert, hash, &mut adapter)
-                        .await?
+                    handle.authenticate_certificate_with(username, cert, hash, &mut adapter).await?
                 } else {
-                    handle
-                        .authenticate_openssh_cert(username, key.clone(), cert)
-                        .await
-                        .map_err(protocol)?
+                    handle.authenticate_openssh_cert(username, key.clone(), cert).await.map_err(protocol)?
                 };
                 if !may_retry_key(&result) {
                     return Ok(result);
                 }
             }
-            handle
-                .authenticate_publickey(username, PrivateKeyWithHashAlg::new(key, hash))
-                .await
-                .map_err(protocol)
+            handle.authenticate_publickey(username, PrivateKeyWithHashAlg::new(key, hash)).await.map_err(protocol)
         }
-        Credential::Signer {
-            public_key,
-            mut signer,
-        } => {
+        Credential::Signer { public_key, mut signer } => {
             // Signers are hardware keys (`sk-`): no RSA hash to choose.
             let mut adapter = SignerAdapter(signer.as_mut());
             if let Some(cert) = certificate {
-                let signed =
-                    handle.authenticate_certificate_with(username, cert, None, &mut adapter);
-                let result = tokio::time::timeout(SIGNER_TIMEOUT, signed)
-                    .await
-                    .map_err(|_| SshError::SignerFailed("no answer while signing".into()))??;
+                let signed = handle.authenticate_certificate_with(username, cert, None, &mut adapter);
+                let result =
+                    tokio::time::timeout(SIGNER_TIMEOUT, signed).await.map_err(|_| SshError::SignerFailed("no answer while signing".into()))??;
                 if !may_retry_key(&result) {
                     return Ok(result);
                 }
             }
-            let signed =
-                handle.authenticate_publickey_with(username, public_key, None, &mut adapter);
-            Ok(tokio::time::timeout(SIGNER_TIMEOUT, signed)
-                .await
-                .map_err(|_| SshError::SignerFailed("no answer while signing".into()))??)
+            let signed = handle.authenticate_publickey_with(username, public_key, None, &mut adapter);
+            Ok(tokio::time::timeout(SIGNER_TIMEOUT, signed).await.map_err(|_| SshError::SignerFailed("no answer while signing".into()))??)
         }
-        Credential::Agent {
-            fingerprint,
-            mut agent,
-        } => {
+        Credential::Agent { fingerprint, mut agent } => {
             let identities = agent_identities(&mut agent).await?;
             let identity = identities
                 .into_iter()
                 .find(|i| i.public_key().fingerprint(HashAlg::Sha256).to_string() == fingerprint)
                 .ok_or(SshError::AgentKeyMissing)?;
-            let signed = handle.authenticate_publickey_with(
-                username,
-                identity.public_key().into_owned(),
-                hash,
-                &mut agent,
-            );
-            tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed)
-                .await
-                .map_err(|_| SshError::AgentUnavailable("no answer while signing".into()))?
-                .map_err(|e| match e {
-                    russh::AgentAuthError::Key(russh::keys::Error::AgentFailure) => {
-                        SshError::AgentRefused
-                    }
-                    russh::AgentAuthError::Key(other) => {
-                        SshError::AgentUnavailable(other.to_string())
-                    }
+            let signed = handle.authenticate_publickey_with(username, identity.public_key().into_owned(), hash, &mut agent);
+            tokio::time::timeout(AGENT_SIGN_TIMEOUT, signed).await.map_err(|_| SshError::AgentUnavailable("no answer while signing".into()))?.map_err(
+                |e| match e {
+                    russh::AgentAuthError::Key(russh::keys::Error::AgentFailure) => SshError::AgentRefused,
+                    russh::AgentAuthError::Key(other) => SshError::AgentUnavailable(other.to_string()),
                     other => protocol(other),
-                })
+                },
+            )
         }
     }
 }

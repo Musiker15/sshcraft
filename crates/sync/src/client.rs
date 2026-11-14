@@ -33,9 +33,7 @@ pub struct Session {
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Session")
-            .field("expires_at", &self.expires_at)
-            .finish_non_exhaustive()
+        f.debug_struct("Session").field("expires_at", &self.expires_at).finish_non_exhaustive()
     }
 }
 
@@ -80,23 +78,12 @@ impl ServerClient {
     /// also what login signatures are made for.
     pub fn new(origin: &str) -> Result<Self, SyncError> {
         let origin = normalize_origin(origin);
-        let host = origin
-            .strip_prefix("https://")
-            .or_else(|| origin.strip_prefix("http://"))
-            .unwrap_or_default();
+        let host = origin.strip_prefix("https://").or_else(|| origin.strip_prefix("http://")).unwrap_or_default();
         if host.is_empty() || host.contains(['/', '@', ' ']) {
             return Err(SyncError::BadOrigin);
         }
-        let http = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .map_err(|e| SyncError::Network(e.to_string()))?;
-        Ok(Self {
-            http,
-            origin,
-            api_key: None,
-            token: None,
-        })
+        let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().map_err(|e| SyncError::Network(e.to_string()))?;
+        Ok(Self { http, origin, api_key: None, token: None })
     }
 
     fn fail(&self, op: &str) -> Result<(), SyncError> {
@@ -130,11 +117,7 @@ impl ServerClient {
             .origin
             .strip_prefix("https://")
             .map(|h| format!("wss://{h}"))
-            .or_else(|| {
-                self.origin
-                    .strip_prefix("http://")
-                    .map(|h| format!("ws://{h}"))
-            })
+            .or_else(|| self.origin.strip_prefix("http://").map(|h| format!("ws://{h}")))
             .unwrap_or_default();
         format!("{rest}/v1/events")
     }
@@ -151,22 +134,14 @@ impl ServerClient {
     }
 
     async fn send<T: DeserializeOwned>(&self, builder: RequestBuilder) -> Result<T, SyncError> {
-        let response = builder
-            .send()
-            .await
-            .map_err(|e| SyncError::Network(e.to_string()))?;
+        let response = builder.send().await.map_err(|e| SyncError::Network(e.to_string()))?;
         let status = response.status();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| SyncError::Network(e.to_string()))?;
+        let bytes = response.bytes().await.map_err(|e| SyncError::Network(e.to_string()))?;
         if !status.is_success() {
             let body: Option<ErrorBody> = serde_json::from_slice(&bytes).ok();
             return Err(SyncError::Server {
                 status: status.as_u16(),
-                code: body
-                    .as_ref()
-                    .map_or_else(|| "unknown".into(), |b| b.code.clone()),
+                code: body.as_ref().map_or_else(|| "unknown".into(), |b| b.code.clone()),
                 current: body.and_then(|b| b.current),
             });
         }
@@ -174,62 +149,39 @@ impl ServerClient {
     }
 
     pub async fn server_info(&self) -> Result<ServerInfo, SyncError> {
-        self.send(self.request(Method::GET, "/v1/server", false))
-            .await
+        self.send(self.request(Method::GET, "/v1/server", false)).await
     }
 
-    pub async fn register(
-        &self,
-        account: &AccountPublic,
-        name: &str,
-        email: &str,
-        log: &DeviceLog,
-    ) -> Result<(), SyncError> {
+    pub async fn register(&self, account: &AccountPublic, name: &str, email: &str, log: &DeviceLog) -> Result<(), SyncError> {
         self.fail("register")?;
         let body = json!({ "account": account, "name": name, "email": email, "log": log });
-        let _: Value = self
-            .send(self.request(Method::POST, "/v1/accounts", true).json(&body))
-            .await?;
+        let _: Value = self.send(self.request(Method::POST, "/v1/accounts", true).json(&body)).await?;
         Ok(())
     }
 
     /// Fetches a challenge, signs it for this origin and keeps the session token. Sends the API
     /// key too when one is set (needed for a device's first login).
-    pub async fn login(
-        &mut self,
-        device_id: Uuid,
-        keys: &DeviceKeys,
-    ) -> Result<Session, SyncError> {
+    pub async fn login(&mut self, device_id: Uuid, keys: &DeviceKeys) -> Result<Session, SyncError> {
         self.fail("login")?;
         #[derive(Deserialize)]
         struct Challenge {
             challenge: String,
         }
-        let challenge: Challenge = self
-            .send(self.request(Method::POST, "/v1/auth/challenge", false))
-            .await?;
-        let bytes = BASE64URL_NOPAD
-            .decode(challenge.challenge.as_bytes())
-            .map_err(|e| SyncError::Network(format!("bad challenge: {e}")))?;
+        let challenge: Challenge = self.send(self.request(Method::POST, "/v1/auth/challenge", false)).await?;
+        let bytes = BASE64URL_NOPAD.decode(challenge.challenge.as_bytes()).map_err(|e| SyncError::Network(format!("bad challenge: {e}")))?;
         let signature = keys.sign_auth(&bytes, device_id, &self.origin);
         let body = json!({
             "device_id": device_id,
             "challenge": challenge.challenge,
             "signature": BASE64URL_NOPAD.encode(&signature),
         });
-        let session: Session = self
-            .send(
-                self.request(Method::POST, "/v1/auth/login", true)
-                    .json(&body),
-            )
-            .await?;
+        let session: Session = self.send(self.request(Method::POST, "/v1/auth/login", true).json(&body)).await?;
         self.token = Some(session.token.clone());
         Ok(session)
     }
 
     pub async fn me(&self) -> Result<Me, SyncError> {
-        self.send(self.request(Method::GET, "/v1/accounts/me", false))
-            .await
+        self.send(self.request(Method::GET, "/v1/accounts/me", false)).await
     }
 
     pub async fn my_devices(&self) -> Result<Vec<DeviceState>, SyncError> {
@@ -237,9 +189,7 @@ impl ServerClient {
         struct Devices {
             devices: Vec<DeviceState>,
         }
-        let list: Devices = self
-            .send(self.request(Method::GET, "/v1/accounts/me/devices", false))
-            .await?;
+        let list: Devices = self.send(self.request(Method::GET, "/v1/accounts/me/devices", false)).await?;
         Ok(list.devices)
     }
 
@@ -249,12 +199,7 @@ impl ServerClient {
             account: AccountPublic,
             name: String,
         }
-        let found: Found = self
-            .send(
-                self.request(Method::GET, "/v1/accounts/lookup", false)
-                    .query(&[("email", email)]),
-            )
-            .await?;
+        let found: Found = self.send(self.request(Method::GET, "/v1/accounts/lookup", false).query(&[("email", email)])).await?;
         Ok((found.account, found.name))
     }
 
@@ -262,45 +207,26 @@ impl ServerClient {
         BASE64URL_NOPAD.encode(&account.0)
     }
 
-    pub async fn log(
-        &self,
-        account: &AccountPublic,
-        from: u64,
-    ) -> Result<Vec<LogEntry>, SyncError> {
+    pub async fn log(&self, account: &AccountPublic, from: u64) -> Result<Vec<LogEntry>, SyncError> {
         #[derive(Deserialize)]
         struct Entries {
             entries: Vec<LogEntry>,
         }
         let path = format!("/v1/accounts/{}/log", Self::account_path(account));
-        let entries: Entries = self
-            .send(
-                self.request(Method::GET, &path, false)
-                    .query(&[("from", from)]),
-            )
-            .await?;
+        let entries: Entries = self.send(self.request(Method::GET, &path, false).query(&[("from", from)])).await?;
         Ok(entries.entries)
     }
 
     /// Appends to an account's log; with `via_api_key` the API key is used instead of the
     /// session (a new device enrolling itself). Returns the new length.
-    pub async fn append_log(
-        &self,
-        account: &AccountPublic,
-        entries: &[LogEntry],
-        via_api_key: bool,
-    ) -> Result<u64, SyncError> {
+    pub async fn append_log(&self, account: &AccountPublic, entries: &[LogEntry], via_api_key: bool) -> Result<u64, SyncError> {
         self.fail("append_log")?;
         #[derive(Deserialize)]
         struct Len {
             len: u64,
         }
         let path = format!("/v1/accounts/{}/log", Self::account_path(account));
-        let len: Len = self
-            .send(
-                self.request(Method::POST, &path, via_api_key)
-                    .json(&json!({ "entries": entries })),
-            )
-            .await?;
+        let len: Len = self.send(self.request(Method::POST, &path, via_api_key).json(&json!({ "entries": entries }))).await?;
         Ok(len.len)
     }
 
@@ -309,9 +235,7 @@ impl ServerClient {
         struct Areas {
             areas: Vec<AreaListing>,
         }
-        let areas: Areas = self
-            .send(self.request(Method::GET, "/v1/areas", false))
-            .await?;
+        let areas: Areas = self.send(self.request(Method::GET, "/v1/areas", false)).await?;
         Ok(areas.areas)
     }
 
@@ -322,33 +246,20 @@ impl ServerClient {
             version: u64,
         }
         let path = format!("/v1/areas/{}/manifest", manifest.area_id.0);
-        let v: Version = self
-            .send(self.request(Method::PUT, &path, false).json(manifest))
-            .await?;
+        let v: Version = self.send(self.request(Method::PUT, &path, false).json(manifest)).await?;
         Ok(v.version)
     }
 
     pub async fn delete_area(&self, area: AreaId) -> Result<(), SyncError> {
         let path = format!("/v1/areas/{}", area.0);
-        let _: Value = self
-            .send(self.request(Method::DELETE, &path, false))
-            .await?;
+        let _: Value = self.send(self.request(Method::DELETE, &path, false)).await?;
         Ok(())
     }
 
-    pub async fn put_envelopes(
-        &self,
-        area: AreaId,
-        envelopes: &[KeyEnvelope],
-    ) -> Result<(), SyncError> {
+    pub async fn put_envelopes(&self, area: AreaId, envelopes: &[KeyEnvelope]) -> Result<(), SyncError> {
         self.fail("put_envelopes")?;
         let path = format!("/v1/areas/{}/envelopes", area.0);
-        let _: Value = self
-            .send(
-                self.request(Method::PUT, &path, false)
-                    .json(&json!({ "envelopes": envelopes })),
-            )
-            .await?;
+        let _: Value = self.send(self.request(Method::PUT, &path, false).json(&json!({ "envelopes": envelopes }))).await?;
         Ok(())
     }
 
@@ -357,9 +268,7 @@ impl ServerClient {
         let path = format!("/v1/areas/{}/envelope", area.0);
         match self.send(self.request(Method::GET, &path, false)).await {
             Ok(envelope) => Ok(Some(envelope)),
-            Err(SyncError::Server { status, .. }) if status == StatusCode::NOT_FOUND.as_u16() => {
-                Ok(None)
-            }
+            Err(SyncError::Server { status, .. }) if status == StatusCode::NOT_FOUND.as_u16() => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -371,23 +280,13 @@ impl ServerClient {
         struct Seq {
             seq: u64,
         }
-        let path = format!(
-            "/v1/areas/{}/records/{}",
-            record.header.area_id.0, record.header.record_id
-        );
-        let seq: Seq = self
-            .send(self.request(Method::PUT, &path, false).json(record))
-            .await?;
+        let path = format!("/v1/areas/{}/records/{}", record.header.area_id.0, record.header.record_id);
+        let seq: Seq = self.send(self.request(Method::PUT, &path, false).json(record)).await?;
         Ok(seq.seq)
     }
 
     /// Records whose latest write is after `since`; the flag says whether more follow.
-    pub async fn records(
-        &self,
-        area: AreaId,
-        since: u64,
-        limit: u32,
-    ) -> Result<(Vec<(u64, SealedRecord)>, bool), SyncError> {
+    pub async fn records(&self, area: AreaId, since: u64, limit: u32) -> Result<(Vec<(u64, SealedRecord)>, bool), SyncError> {
         self.fail("records")?;
         #[derive(Deserialize)]
         struct Entry {
@@ -400,19 +299,8 @@ impl ServerClient {
             more: bool,
         }
         let path = format!("/v1/areas/{}/records", area.0);
-        let page: Page = self
-            .send(
-                self.request(Method::GET, &path, false)
-                    .query(&[("since", since), ("limit", u64::from(limit))]),
-            )
-            .await?;
-        Ok((
-            page.records
-                .into_iter()
-                .map(|e| (e.seq, e.record))
-                .collect(),
-            page.more,
-        ))
+        let page: Page = self.send(self.request(Method::GET, &path, false).query(&[("since", since), ("limit", u64::from(limit))])).await?;
+        Ok((page.records.into_iter().map(|e| (e.seq, e.record)).collect(), page.more))
     }
 }
 

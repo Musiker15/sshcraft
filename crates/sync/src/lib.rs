@@ -30,11 +30,7 @@ pub enum SyncError {
     Network(String),
     /// The server answered with an error code (see docs/server-api.md).
     #[error("server answered {status} {code}")]
-    Server {
-        status: u16,
-        code: String,
-        current: Option<u64>,
-    },
+    Server { status: u16, code: String, current: Option<u64> },
     /// Something the server sent did not verify, or local data is malformed.
     #[error("protocol: {0}")]
     Proto(ProtoError),

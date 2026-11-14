@@ -45,20 +45,9 @@ pub struct SyncRuntime {
 }
 
 impl SyncRuntime {
-    pub fn start(
-        store: Arc<Mutex<Store>>,
-        vault: Arc<Vault>,
-        server: ServerId,
-        observer: Arc<dyn SyncObserver>,
-    ) -> SyncRuntime {
+    pub fn start(store: Arc<Mutex<Store>>, vault: Arc<Vault>, server: ServerId, observer: Arc<dyn SyncObserver>) -> SyncRuntime {
         let nudge = Arc::new(Notify::new());
-        let worker = Worker {
-            store,
-            vault,
-            server,
-            observer,
-            nudge: nudge.clone(),
-        };
+        let worker = Worker { store, vault, server, observer, nudge: nudge.clone() };
         let task = tokio::spawn(worker.run());
         SyncRuntime { nudge, task }
     }
@@ -123,10 +112,7 @@ impl Backoff {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or_default()
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default()
 }
 
 impl Worker {
@@ -140,16 +126,9 @@ impl Worker {
                     self.observer.status(self.server, SyncStatus::Revoked);
                     return;
                 }
-                Ended::Lost => self.observer.status(
-                    self.server,
-                    SyncStatus::Offline {
-                        retry_in_secs: pause,
-                    },
-                ),
+                Ended::Lost => self.observer.status(self.server, SyncStatus::Offline { retry_in_secs: pause }),
                 Ended::Blocked => self.observer.status(self.server, SyncStatus::Blocked),
-                Ended::Failed(detail) => {
-                    self.observer.status(self.server, SyncStatus::Error(detail))
-                }
+                Ended::Failed(detail) => self.observer.status(self.server, SyncStatus::Error(detail)),
             }
             // A local change does not shorten the pause; the outbox keeps it.
             tokio::time::sleep(Duration::from_secs(pause)).await;
@@ -242,20 +221,11 @@ impl Worker {
     async fn open_events(
         &self,
         engine: &Engine,
-    ) -> Option<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-    > {
+    ) -> Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
         let mut request = engine.client().events_url().into_client_request().ok()?;
         let token = engine.client().token()?;
-        request
-            .headers_mut()
-            .insert("authorization", format!("Bearer {token}").parse().ok()?);
-        tokio_tungstenite::connect_async(request)
-            .await
-            .ok()
-            .map(|(socket, _)| socket)
+        request.headers_mut().insert("authorization", format!("Bearer {token}").parse().ok()?);
+        tokio_tungstenite::connect_async(request).await.ok().map(|(socket, _)| socket)
     }
 }
 

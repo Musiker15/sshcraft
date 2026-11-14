@@ -22,22 +22,9 @@ async fn member_receives_a_shared_area() {
     let server = TestServer::start().await;
     let (a, b, c) = three(&server).await;
     let e = engine(&a).await;
-    let (manifest, _) = create_area(
-        &e,
-        &a.store,
-        vec![member(&b, Role::Read), member(&c, Role::Write)],
-    )
-    .await
-    .unwrap();
+    let (manifest, _) = create_area(&e, &a.store, vec![member(&b, Role::Read), member(&c, Role::Write)]).await.unwrap();
     let host = sample_host("web");
-    let record = seal_in(
-        &a,
-        manifest.area_id.0,
-        ItemBody::Host { host: host.clone() },
-        Uuid::new_v4(),
-        1,
-        10,
-    );
+    let record = seal_in(&a, manifest.area_id.0, ItemBody::Host { host: host.clone() }, Uuid::new_v4(), 1, 10);
     a.client(&server).await.put_record(&record).await.unwrap();
     sync(&b).await;
     let hosts = b.hosts();
@@ -47,10 +34,7 @@ async fn member_receives_a_shared_area() {
     let store = b.store.lock().unwrap();
     let id = host.id.0.to_string();
     assert!(store.read_only(server_b, ItemKind::Host, &id).unwrap());
-    assert_eq!(
-        store.effective_area(server_b, ItemKind::Host, &id).unwrap(),
-        Some(manifest.area_id.0)
-    );
+    assert_eq!(store.effective_area(server_b, ItemKind::Host, &id).unwrap(), Some(manifest.area_id.0));
 }
 
 #[tokio::test]
@@ -58,24 +42,9 @@ async fn record_from_a_reader_is_refused() {
     let server = TestServer::start().await;
     let (a, b, c) = three(&server).await;
     let e = engine(&a).await;
-    let (manifest, _) = create_area(
-        &e,
-        &a.store,
-        vec![member(&b, Role::Read), member(&c, Role::Write)],
-    )
-    .await
-    .unwrap();
+    let (manifest, _) = create_area(&e, &a.store, vec![member(&b, Role::Read), member(&c, Role::Write)]).await.unwrap();
     sync(&b).await;
-    let forged = seal_in(
-        &b,
-        manifest.area_id.0,
-        ItemBody::Host {
-            host: sample_host("evil"),
-        },
-        Uuid::new_v4(),
-        1,
-        10,
-    );
+    let forged = seal_in(&b, manifest.area_id.0, ItemBody::Host { host: sample_host("evil") }, Uuid::new_v4(), 1, 10);
     // The server refuses it ...
     let refused = b.client(&server).await.put_record(&forged).await;
     assert_eq!(refused.unwrap_err().server_code(), Some("forbidden"));
@@ -84,13 +53,7 @@ async fn record_from_a_reader_is_refused() {
     let mut ec = engine(&c).await;
     let report = ec.pull(&c.store, &c.vault).await.unwrap();
     assert!(c.hosts().is_empty());
-    assert!(
-        report
-            .rejected
-            .iter()
-            .any(|r| r.contains(&forged.header.record_id.to_string())),
-        "{report:?}"
-    );
+    assert!(report.rejected.iter().any(|r| r.contains(&forged.header.record_id.to_string())), "{report:?}");
 }
 
 #[tokio::test]
@@ -98,36 +61,12 @@ async fn removed_member_loses_the_items() {
     let server = TestServer::start().await;
     let (a, b, c) = three(&server).await;
     let e = engine(&a).await;
-    let (manifest, _) = create_area(
-        &e,
-        &a.store,
-        vec![member(&b, Role::Read), member(&c, Role::Read)],
-    )
-    .await
-    .unwrap();
-    let record = seal_in(
-        &a,
-        manifest.area_id.0,
-        ItemBody::Host {
-            host: sample_host("web"),
-        },
-        Uuid::new_v4(),
-        1,
-        10,
-    );
+    let (manifest, _) = create_area(&e, &a.store, vec![member(&b, Role::Read), member(&c, Role::Read)]).await.unwrap();
+    let record = seal_in(&a, manifest.area_id.0, ItemBody::Host { host: sample_host("web") }, Uuid::new_v4(), 1, 10);
     a.client(&server).await.put_record(&record).await.unwrap();
     sync(&b).await;
     assert_eq!(b.hosts().len(), 1);
-    set_members(
-        &e,
-        &a.store,
-        &a.vault,
-        manifest.area_id,
-        vec![member(&c, Role::Read)],
-        20,
-    )
-    .await
-    .unwrap();
+    set_members(&e, &a.store, &a.vault, manifest.area_id, vec![member(&c, Role::Read)], 20).await.unwrap();
     sync(&b).await;
     assert!(b.hosts().is_empty());
     let server_b = b.row().id;
@@ -149,30 +88,17 @@ fn sample_group(name: &str) -> sshcraft_model::model::Group {
 }
 
 /// A shares group G with host H with B (write) and C (read); everyone has synced.
-async fn shared_group(
-    server: &TestServer,
-    kind: sshcraft_store::store::ShareKind,
-) -> (Dev, Dev, Dev, Uuid, sshcraft_model::model::Host) {
+async fn shared_group(server: &TestServer, kind: sshcraft_store::store::ShareKind) -> (Dev, Dev, Dev, Uuid, sshcraft_model::model::Host) {
     let (a, b, c) = three(server).await;
     let e = engine(&a).await;
-    let (manifest, _) = create_area(
-        &e,
-        &a.store,
-        vec![member(&b, Role::Write), member(&c, Role::Read)],
-    )
-    .await
-    .unwrap();
+    let (manifest, _) = create_area(&e, &a.store, vec![member(&b, Role::Write), member(&c, Role::Read)]).await.unwrap();
     let area = manifest.area_id.0;
     let group = sample_group("team");
     let mut host = sample_host("web");
     host.group_id = Some(group.id);
     let client = a.client(server).await;
     let (m, key) = common::stored_area(&a, area);
-    let info = sshcraft_sync::shares::ShareInfo {
-        kind,
-        group: Some(group.id.0.to_string()),
-        with_keys: false,
-    };
+    let info = sshcraft_sync::shares::ShareInfo { kind, group: Some(group.id.0.to_string()), with_keys: false };
     let header = sshcraft_proto::record::RecordHeader {
         record_id: sshcraft_sync::shares::share_info_record_id(area),
         area_id: m.area_id,
@@ -181,23 +107,11 @@ async fn shared_group(
         author_account: common::account(&a),
         author_device: a.row().device_id,
     };
-    let sealed = sshcraft_proto::record::SealedRecord::seal(
-        header,
-        &sshcraft_sync::shares::encode_share_info(&info),
-        &key,
-        &a.keys(),
-    );
+    let sealed = sshcraft_proto::record::SealedRecord::seal(header, &sshcraft_sync::shares::encode_share_info(&info), &key, &a.keys());
     client.put_record(&sealed).await.unwrap();
     let g = seal_in(&a, area, ItemBody::Group { group }, Uuid::new_v4(), 1, 10);
     client.put_record(&g).await.unwrap();
-    let h = seal_in(
-        &a,
-        area,
-        ItemBody::Host { host: host.clone() },
-        Uuid::new_v4(),
-        1,
-        10,
-    );
+    let h = seal_in(&a, area, ItemBody::Host { host: host.clone() }, Uuid::new_v4(), 1, 10);
     client.put_record(&h).await.unwrap();
     for dev in [&a, &b, &c] {
         sync(dev).await;
@@ -209,12 +123,7 @@ async fn shared_group(
 fn edit_host(dev: &Dev, host: &sshcraft_model::model::Host, name: &str, at: i64) {
     let server = dev.row().id;
     let store = dev.store.lock().unwrap();
-    let mut host = store
-        .list_hosts()
-        .unwrap()
-        .into_iter()
-        .find(|h| h.id == host.id)
-        .unwrap();
+    let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == host.id).unwrap();
     host.name = name.into();
     store.upsert_host(&host).unwrap();
     let _ = server;
@@ -239,11 +148,7 @@ async fn reader_edit_is_rolled_back() {
     let mut e = engine(&c).await;
     assert_eq!(e.push(&c.store, &c.vault, 100).await.unwrap(), 0);
     assert_eq!(c.hosts()[0].name, "web");
-    assert!(
-        e.warnings().iter().any(|w| w == "share_read_only"),
-        "{:?}",
-        e.warnings()
-    );
+    assert!(e.warnings().iter().any(|w| w == "share_read_only"), "{:?}", e.warnings());
     let server_c = c.row().id;
     assert!(c.store.lock().unwrap().outbox(server_c).unwrap().is_empty());
 }
@@ -272,11 +177,7 @@ async fn selection_member_cannot_add_or_delete() {
     assert_eq!(e.push(&b.store, &b.vault, 101).await.unwrap(), 0);
     let names: Vec<String> = b.hosts().into_iter().map(|h| h.name).collect();
     assert_eq!(names, vec!["web".to_owned()]);
-    assert!(
-        e.warnings().iter().any(|w| w == "share_no_add_remove"),
-        "{:?}",
-        e.warnings()
-    );
+    assert!(e.warnings().iter().any(|w| w == "share_no_add_remove"), "{:?}", e.warnings());
 }
 
 // ---------- Task 6: creating shares
@@ -315,10 +216,7 @@ async fn befriend(a: &Dev, b: &Dev, email: &str) {
 }
 
 fn grant(dev: &Dev, role: Role) -> Grant {
-    Grant {
-        account: common::account(dev),
-        role,
-    }
+    Grant { account: common::account(dev), role }
 }
 
 #[tokio::test]
@@ -329,17 +227,7 @@ async fn group_all_share_includes_later_hosts() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(group.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(group.id), vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     sync(&b).await;
     assert_eq!(b.hosts().len(), 2);
     // A later host of the group goes along.
@@ -369,21 +257,8 @@ async fn selection_shares_copies_only() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let what = ShareWhat::Selection {
-        group: group.id,
-        hosts: vec![one.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Write)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    let what = ShareWhat::Selection { group: group.id, hosts: vec![one.id] };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Write)], false, 5).await.unwrap();
     sync(&b).await;
     let hosts = b.hosts();
     assert_eq!(hosts.len(), 1);
@@ -406,29 +281,11 @@ async fn share_needs_a_confirmed_contact() {
     let (group, _, _) = local_group(&a);
     sync(&a).await;
     let mut e = engine(&a).await;
-    let refused = share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(group.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await;
+    let refused = share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(group.id), vec![grant(&b, Role::Read)], false, 5).await;
     assert_eq!(refused.unwrap_err(), SyncError::ContactUnconfirmed);
     // Looked up but not confirmed is not enough either.
     find(&e, &a.store, "b@example.org").await.unwrap();
-    let refused = share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(group.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await;
+    let refused = share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(group.id), vec![grant(&b, Role::Read)], false, 5).await;
     assert_eq!(refused.unwrap_err(), SyncError::ContactUnconfirmed);
 }
 
@@ -437,24 +294,12 @@ async fn agent_keys_are_not_shared() {
     let server = TestServer::start().await;
     let (a, b, _c) = three(&server).await;
     let (_, mut one, _) = local_group(&a);
-    one.settings.key = Some(KeyRef::Agent {
-        fingerprint: "SHA256:abc".into(),
-    });
+    one.settings.key = Some(KeyRef::Agent { fingerprint: "SHA256:abc".into() });
     a.store.lock().unwrap().upsert_host(&one).unwrap();
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let outcome = share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::Host(one.id),
-        vec![grant(&b, Role::Read)],
-        true,
-        5,
-    )
-    .await
-    .unwrap();
+    let outcome = share(&mut e, &a.store, &a.vault, ShareWhat::Host(one.id), vec![grant(&b, Role::Read)], true, 5).await.unwrap();
     assert_eq!(outcome.agent_keys_skipped, 1);
     sync(&b).await;
     assert_eq!(b.hosts()[0].settings.key, None);
@@ -466,20 +311,14 @@ async fn keys_go_along_only_when_asked() {
     let (a, b, c) = three(&server).await;
     for dev in [&a, &b, &c] {
         let id = dev.row().id;
-        dev.store
-            .lock()
-            .unwrap()
-            .update_server_flags(id, true, true)
-            .unwrap();
+        dev.store.lock().unwrap().update_server_flags(id, true, true).unwrap();
     }
     let (group, mut one, _) = local_group(&a);
     let server_a = a.row().id;
     {
         let store = a.store.lock().unwrap();
         let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
-        store
-            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
-            .unwrap();
+        store.set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a)).unwrap();
         record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
         one.settings.key = Some(KeyRef::Stored { id: info.id });
         store.upsert_host(&one).unwrap();
@@ -488,45 +327,15 @@ async fn keys_go_along_only_when_asked() {
     befriend(&a, &b, "b@example.org").await;
     befriend(&a, &c, "c@example.org").await;
     let mut e = engine(&a).await;
-    let with = ShareWhat::Selection {
-        group: group.id,
-        hosts: vec![one.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        with,
-        vec![grant(&b, Role::Read)],
-        true,
-        5,
-    )
-    .await
-    .unwrap();
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::Host(one.id),
-        vec![grant(&c, Role::Read)],
-        false,
-        6,
-    )
-    .await
-    .unwrap();
+    let with = ShareWhat::Selection { group: group.id, hosts: vec![one.id] };
+    share(&mut e, &a.store, &a.vault, with, vec![grant(&b, Role::Read)], true, 5).await.unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::Host(one.id), vec![grant(&c, Role::Read)], false, 6).await.unwrap();
     sync(&b).await;
     sync(&c).await;
     let b_keys = b.store.lock().unwrap().list_key_records().unwrap();
     assert_eq!(b_keys.len(), 1);
     assert!(matches!(b.hosts()[0].settings.key, Some(KeyRef::Stored { id }) if id == b_keys[0].id));
-    assert!(
-        c.store
-            .lock()
-            .unwrap()
-            .list_key_records()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(c.store.lock().unwrap().list_key_records().unwrap().is_empty());
     assert_eq!(c.hosts()[0].settings.key, None);
     // The owner keeps its key on the host.
     sync(&a).await;
@@ -538,12 +347,7 @@ async fn keys_go_along_only_when_asked() {
 
 fn rename(dev: &Dev, id: sshcraft_model::model::HostId, name: &str, at: i64) {
     let store = dev.store.lock().unwrap();
-    let mut host = store
-        .list_hosts()
-        .unwrap()
-        .into_iter()
-        .find(|h| h.id == id)
-        .unwrap();
+    let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == id).unwrap();
     host.name = name.into();
     store.upsert_host(&host).unwrap();
     record_local_change(&store, ItemKind::Host, &id.0.to_string(), at).unwrap();
@@ -556,21 +360,8 @@ async fn selection_of_one(server: &TestServer) -> (Dev, Dev, Dev, Host) {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let what = ShareWhat::Selection {
-        group: group.id,
-        hosts: vec![one.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Write)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    let what = ShareWhat::Selection { group: group.id, hosts: vec![one.id] };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Write)], false, 5).await.unwrap();
     sync(&b).await;
     (a, b, c, one)
 }
@@ -591,17 +382,7 @@ async fn writer_edit_on_a_copy_reaches_the_original() {
     let (a, b, c, one) = selection_of_one(&server).await;
     befriend(&a, &c, "c@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::Host(one.id),
-        vec![grant(&c, Role::Read)],
-        false,
-        6,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::Host(one.id), vec![grant(&c, Role::Read)], false, 6).await.unwrap();
     sync(&c).await;
     let copy = b.hosts()[0].id;
     rename(&b, copy, "from-b", 100);
@@ -609,10 +390,7 @@ async fn writer_edit_on_a_copy_reaches_the_original() {
     sync(&a).await;
     let original = a.hosts().into_iter().find(|h| h.id == one.id).unwrap();
     assert_eq!(original.name, "from-b");
-    assert_eq!(
-        original.group_id, one.group_id,
-        "the original stays in its group"
-    );
+    assert_eq!(original.group_id, one.group_id, "the original stays in its group");
     sync(&c).await;
     assert_eq!(c.hosts()[0].name, "from-b");
 }
@@ -690,16 +468,8 @@ async fn own_host_moved_into_a_received_selection_stays() {
     }
     let mut e = engine(&b).await;
     e.push(&b.store, &b.vault, 60).await.unwrap();
-    assert!(
-        e.warnings().iter().any(|w| w == "share_no_add_remove"),
-        "{:?}",
-        e.warnings()
-    );
-    let kept = b
-        .hosts()
-        .into_iter()
-        .find(|h| h.id == mine.id)
-        .expect("the own host stays");
+    assert!(e.warnings().iter().any(|w| w == "share_no_add_remove"), "{:?}", e.warnings());
+    let kept = b.hosts().into_iter().find(|h| h.id == mine.id).expect("the own host stays");
     assert_eq!(kept.group_id, None);
     // And it is still in the personal area on the server: another sync keeps it.
     sync(&b).await;
@@ -708,27 +478,18 @@ async fn own_host_moved_into_a_received_selection_stays() {
 
 /// A shares host "one" with key "deploy" as a selection with B (write, key sync on); returns
 /// the key B received.
-async fn received_key(
-    server: &TestServer,
-    all_hosts: bool,
-) -> (Dev, Dev, Dev, sshcraft_model::model::KeyId) {
+async fn received_key(server: &TestServer, all_hosts: bool) -> (Dev, Dev, Dev, sshcraft_model::model::KeyId) {
     let (a, b, c) = three(server).await;
     for dev in [&a, &b, &c] {
         let id = dev.row().id;
-        dev.store
-            .lock()
-            .unwrap()
-            .update_server_flags(id, true, true)
-            .unwrap();
+        dev.store.lock().unwrap().update_server_flags(id, true, true).unwrap();
     }
     let (group, mut one, _) = local_group(&a);
     let server_a = a.row().id;
     {
         let store = a.store.lock().unwrap();
         let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
-        store
-            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
-            .unwrap();
+        store.set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a)).unwrap();
         record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
         one.settings.key = Some(KeyRef::Stored { id: info.id });
         store.upsert_host(&one).unwrap();
@@ -736,25 +497,8 @@ async fn received_key(
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let what = if all_hosts {
-        ShareWhat::GroupAll(group.id)
-    } else {
-        ShareWhat::Selection {
-            group: group.id,
-            hosts: vec![one.id],
-        }
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Write)],
-        true,
-        5,
-    )
-    .await
-    .unwrap();
+    let what = if all_hosts { ShareWhat::GroupAll(group.id) } else { ShareWhat::Selection { group: group.id, hosts: vec![one.id] } };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Write)], true, 5).await.unwrap();
     sync(&b).await;
     let key = b.store.lock().unwrap().list_key_records().unwrap()[0].id;
     (a, b, c, key)
@@ -786,45 +530,12 @@ async fn received_keys_are_not_shared_on() {
     sync(&b).await;
     befriend(&b, &c, "c@example.org").await;
     let mut e = engine(&b).await;
-    share(
-        &mut e,
-        &b.store,
-        &b.vault,
-        ShareWhat::Host(mine.id),
-        vec![grant(&c, Role::Read)],
-        true,
-        60,
-    )
-    .await
-    .unwrap();
-    share(
-        &mut e,
-        &b.store,
-        &b.vault,
-        ShareWhat::GroupAll(group.id),
-        vec![grant(&c, Role::Read)],
-        true,
-        61,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &b.store, &b.vault, ShareWhat::Host(mine.id), vec![grant(&c, Role::Read)], true, 60).await.unwrap();
+    share(&mut e, &b.store, &b.vault, ShareWhat::GroupAll(group.id), vec![grant(&c, Role::Read)], true, 61).await.unwrap();
     sync(&c).await;
-    assert!(
-        c.store
-            .lock()
-            .unwrap()
-            .list_key_records()
-            .unwrap()
-            .is_empty(),
-        "A's key never reaches C"
-    );
+    assert!(c.store.lock().unwrap().list_key_records().unwrap().is_empty(), "A's key never reaches C");
     // The received key stays in A's share, and A keeps it.
-    let area_of_key = b
-        .store
-        .lock()
-        .unwrap()
-        .effective_area(server_b, ItemKind::Key, &key.0.to_string())
-        .unwrap();
+    let area_of_key = b.store.lock().unwrap().effective_area(server_b, ItemKind::Key, &key.0.to_string()).unwrap();
     assert!(area_of_key.is_some());
     sync(&a).await;
     assert_eq!(a.store.lock().unwrap().list_key_records().unwrap().len(), 1);
@@ -842,11 +553,7 @@ async fn members_cannot_delete_a_shared_key() {
     let mut e = engine(&b).await;
     e.push(&b.store, &b.vault, 70).await.unwrap();
     assert!(!e.warnings().is_empty());
-    assert_eq!(
-        b.store.lock().unwrap().list_key_records().unwrap().len(),
-        1,
-        "restored"
-    );
+    assert_eq!(b.store.lock().unwrap().list_key_records().unwrap().len(), 1, "restored");
     sync(&a).await;
     assert_eq!(a.store.lock().unwrap().list_key_records().unwrap().len(), 1);
 }
@@ -866,16 +573,9 @@ async fn selection_writer_cannot_change_the_group() {
     }
     let mut e = engine(&b).await;
     e.push(&b.store, &b.vault, 80).await.unwrap();
-    assert!(
-        e.warnings().iter().any(|w| w == "share_read_only"),
-        "{:?}",
-        e.warnings()
-    );
+    assert!(e.warnings().iter().any(|w| w == "share_read_only"), "{:?}", e.warnings());
     sync(&a).await;
-    assert_eq!(
-        a.store.lock().unwrap().list_groups().unwrap()[0].name,
-        "team"
-    );
+    assert_eq!(a.store.lock().unwrap().list_groups().unwrap()[0].name, "team");
     let _ = server_b;
 }
 
@@ -889,41 +589,20 @@ async fn owner_key_assignments_reach_the_owners_other_devices() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(group.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(group.id), vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     common::join(&server, &a2, &export).await;
     for dev in [&a, &a2] {
         let id = dev.row().id;
-        dev.store
-            .lock()
-            .unwrap()
-            .update_server_flags(id, true, true)
-            .unwrap();
+        dev.store.lock().unwrap().update_server_flags(id, true, true).unwrap();
     }
     sync(&a2).await;
     let server_a = a.row().id;
     let key = {
         let store = a.store.lock().unwrap();
         let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
-        store
-            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
-            .unwrap();
+        store.set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a)).unwrap();
         record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 10).unwrap();
-        let mut host = store
-            .list_hosts()
-            .unwrap()
-            .into_iter()
-            .find(|h| h.id == one.id)
-            .unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == one.id).unwrap();
         host.settings.key = Some(KeyRef::Stored { id: info.id });
         store.upsert_host(&host).unwrap();
         record_local_change(&store, ItemKind::Host, &one.id.0.to_string(), 11).unwrap();
@@ -943,37 +622,15 @@ async fn members_ignore_additions_and_deletions_of_other_members_in_a_selection(
     let server = TestServer::start().await;
     let (_a, b, c, area, host) = shared_group(&server, ShareKind::Selection).await;
     let server_b = b.row().id;
-    let entry = b
-        .store
-        .lock()
-        .unwrap()
-        .record_entry(server_b, ItemKind::Host, &host.id.0.to_string())
-        .unwrap()
-        .unwrap();
+    let entry = b.store.lock().unwrap().record_entry(server_b, ItemKind::Host, &host.id.0.to_string()).unwrap().unwrap();
     // A modified client of B deletes the host and adds another, straight on the server.
     let client = b.client(&server).await;
-    let deleted = seal_in(
-        &b,
-        area,
-        ItemBody::Deleted {
-            item_kind: ItemKind::Host,
-            item_id: host.id.0.to_string(),
-        },
-        entry.record_id,
-        entry.version + 1,
-        500,
-    );
+    let deleted =
+        seal_in(&b, area, ItemBody::Deleted { item_kind: ItemKind::Host, item_id: host.id.0.to_string() }, entry.record_id, entry.version + 1, 500);
     client.put_record(&deleted).await.unwrap();
     let mut extra = sample_host("extra");
     extra.group_id = host.group_id;
-    let added = seal_in(
-        &b,
-        area,
-        ItemBody::Host { host: extra },
-        Uuid::new_v4(),
-        1,
-        501,
-    );
+    let added = seal_in(&b, area, ItemBody::Host { host: extra }, Uuid::new_v4(), 1, 501);
     client.put_record(&added).await.unwrap();
     sync(&c).await;
     let names: Vec<String> = c.hosts().into_iter().map(|h| h.name).collect();
@@ -983,13 +640,7 @@ async fn members_ignore_additions_and_deletions_of_other_members_in_a_selection(
 // ---------- Teilplan 8: subgroups in shares
 
 /// A puts group "team" (address) > "inner" (username deploy) > host "deep" on the server.
-fn nested_group(
-    a: &Dev,
-) -> (
-    sshcraft_model::model::Group,
-    sshcraft_model::model::Group,
-    Host,
-) {
+fn nested_group(a: &Dev) -> (sshcraft_model::model::Group, sshcraft_model::model::Group, Host) {
     let server = a.row().id;
     let mut team = sample_group("team");
     team.location = Some(server);
@@ -1019,24 +670,10 @@ async fn group_share_takes_subgroups() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(team.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(team.id), vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     sync(&b).await;
     let groups = b.store.lock().unwrap().list_groups().unwrap();
-    assert!(
-        groups
-            .iter()
-            .any(|g| g.id == inner.id && g.parent_id == Some(team.id))
-    );
+    assert!(groups.iter().any(|g| g.id == inner.id && g.parent_id == Some(team.id)));
     assert!(b.hosts().iter().any(|h| h.id == deep.id));
     // A later subgroup goes along.
     let server_a = a.row().id;
@@ -1050,15 +687,7 @@ async fn group_share_takes_subgroups() {
     }
     sync(&a).await;
     sync(&b).await;
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .list_groups()
-            .unwrap()
-            .iter()
-            .any(|g| g.id == later.id)
-    );
+    assert!(b.store.lock().unwrap().list_groups().unwrap().iter().any(|g| g.id == later.id));
 }
 
 #[tokio::test]
@@ -1069,35 +698,15 @@ async fn selection_copies_inherit_intermediate_settings() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let what = ShareWhat::Selection {
-        group: team.id,
-        hosts: vec![deep.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Write)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    let what = ShareWhat::Selection { group: team.id, hosts: vec![deep.id] };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Write)], false, 5).await.unwrap();
     sync(&b).await;
     let copy = b.hosts().pop().unwrap();
     let groups = b.store.lock().unwrap().list_groups().unwrap();
     assert_eq!(groups.len(), 1, "a flat copy of the shared group");
     assert_eq!(copy.group_id, Some(groups[0].id));
-    assert_eq!(
-        copy.settings.username.as_deref(),
-        Some("deploy"),
-        "baked in from the subgroup"
-    );
-    assert_eq!(
-        groups[0].defaults.address.as_deref(),
-        Some("team.example.org")
-    );
+    assert_eq!(copy.settings.username.as_deref(), Some("deploy"), "baked in from the subgroup");
+    assert_eq!(groups[0].defaults.address.as_deref(), Some("team.example.org"));
     // A change by B does not write the inherited value into the original.
     rename(&b, copy.id, "deep-new", 100);
     sync(&b).await;
@@ -1116,17 +725,7 @@ async fn reader_cannot_add_a_subgroup() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(team.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(team.id), vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     sync(&b).await;
     let server_b = b.row().id;
     let mut mine = sample_group("mine");
@@ -1139,20 +738,8 @@ async fn reader_cannot_add_a_subgroup() {
     }
     let mut eb = engine(&b).await;
     eb.push(&b.store, &b.vault, 20).await.unwrap();
-    assert!(
-        eb.warnings().iter().any(|w| w == "share_read_only"),
-        "{:?}",
-        eb.warnings()
-    );
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .list_groups()
-            .unwrap()
-            .iter()
-            .all(|g| g.id != mine.id)
-    );
+    assert!(eb.warnings().iter().any(|w| w == "share_read_only"), "{:?}", eb.warnings());
+    assert!(b.store.lock().unwrap().list_groups().unwrap().iter().all(|g| g.id != mine.id));
 }
 
 // ---------- Teilplan 8 review: nested groups in shares
@@ -1165,29 +752,13 @@ async fn nested_group_can_be_shared_as_selection() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let what = ShareWhat::Selection {
-        group: inner.id,
-        hosts: vec![deep.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    let what = ShareWhat::Selection { group: inner.id, hosts: vec![deep.id] };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     sync(&b).await;
     let groups = b.store.lock().unwrap().list_groups().unwrap();
     assert_eq!(groups.len(), 1, "{:?}", groups);
     assert_eq!(groups[0].parent_id, None, "the copy is a top-level group");
-    assert_eq!(
-        groups[0].defaults.address.as_deref(),
-        Some("team.example.org")
-    );
+    assert_eq!(groups[0].defaults.address.as_deref(), Some("team.example.org"));
     assert_eq!(groups[0].defaults.username.as_deref(), Some("deploy"));
     assert_eq!(b.hosts().len(), 1);
 }
@@ -1200,17 +771,7 @@ async fn host_share_carries_what_the_host_inherits() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::Host(deep.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::Host(deep.id), vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     sync(&b).await;
     let copy = b.hosts().pop().unwrap();
     assert_eq!(copy.settings.address.as_deref(), Some("team.example.org"));
@@ -1225,45 +786,13 @@ async fn nested_group_all_and_nested_own_shares_are_refused() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let nested = share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(inner.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await;
+    let nested = share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(inner.id), vec![grant(&b, Role::Read)], false, 5).await;
     assert_eq!(nested.unwrap_err(), SyncError::NestedGroupAll);
     // A selection of the inner group and the whole tree above it can live side by side: the
     // copies follow their originals wherever those are.
-    let what = ShareWhat::Selection {
-        group: inner.id,
-        hosts: vec![deep.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Read)],
-        false,
-        6,
-    )
-    .await
-    .unwrap();
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(team.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        7,
-    )
-    .await
-    .unwrap();
+    let what = ShareWhat::Selection { group: inner.id, hosts: vec![deep.id] };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Read)], false, 6).await.unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(team.id), vec![grant(&b, Role::Read)], false, 7).await.unwrap();
 }
 
 #[tokio::test]
@@ -1274,31 +803,13 @@ async fn a_group_change_reaches_copies_below_it() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    let what = ShareWhat::Selection {
-        group: team.id,
-        hosts: vec![deep.id],
-    };
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    let what = ShareWhat::Selection { group: team.id, hosts: vec![deep.id] };
+    share(&mut e, &a.store, &a.vault, what, vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     sync(&b).await;
     assert_eq!(b.hosts()[0].settings.username.as_deref(), Some("deploy"));
     {
         let store = a.store.lock().unwrap();
-        let mut changed = store
-            .list_groups()
-            .unwrap()
-            .into_iter()
-            .find(|g| g.id == inner.id)
-            .unwrap();
+        let mut changed = store.list_groups().unwrap().into_iter().find(|g| g.id == inner.id).unwrap();
         changed.defaults.username = Some("admin".into());
         store.upsert_group(&changed).unwrap();
         record_local_change(&store, ItemKind::Group, &inner.id.0.to_string(), 50).unwrap();
@@ -1315,44 +826,23 @@ async fn keys_on_subgroups_go_along() {
     let (a, b, _c) = three(&server).await;
     for dev in [&a, &b] {
         let id = dev.row().id;
-        dev.store
-            .lock()
-            .unwrap()
-            .update_server_flags(id, true, true)
-            .unwrap();
+        dev.store.lock().unwrap().update_server_flags(id, true, true).unwrap();
     }
     let (team, inner, _deep) = nested_group(&a);
     let server_a = a.row().id;
     {
         let store = a.store.lock().unwrap();
         let info = a.vault.generate_ed25519(&store, "inner-key").unwrap();
-        store
-            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a))
-            .unwrap();
+        store.set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_a)).unwrap();
         record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
-        let mut g = store
-            .list_groups()
-            .unwrap()
-            .into_iter()
-            .find(|g| g.id == inner.id)
-            .unwrap();
+        let mut g = store.list_groups().unwrap().into_iter().find(|g| g.id == inner.id).unwrap();
         g.defaults.key = Some(KeyRef::Stored { id: info.id });
         store.upsert_group(&g).unwrap();
     }
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(team.id),
-        vec![grant(&b, Role::Read)],
-        true,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(team.id), vec![grant(&b, Role::Read)], true, 5).await.unwrap();
     sync(&b).await;
     assert_eq!(b.store.lock().unwrap().list_key_records().unwrap().len(), 1);
 }
@@ -1377,17 +867,7 @@ async fn moving_a_populated_group_into_a_shared_group_sends_its_hosts() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(team.id),
-        vec![grant(&b, Role::Read)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(team.id), vec![grant(&b, Role::Read)], false, 5).await.unwrap();
     {
         let store = a.store.lock().unwrap();
         let mut moved = loose.clone();
@@ -1397,10 +877,7 @@ async fn moving_a_populated_group_into_a_shared_group_sends_its_hosts() {
     }
     sync(&a).await;
     sync(&b).await;
-    assert!(
-        b.hosts().iter().any(|h| h.id == inside.id),
-        "the moved group's host arrives"
-    );
+    assert!(b.hosts().iter().any(|h| h.id == inside.id), "the moved group's host arrives");
 }
 
 #[tokio::test]
@@ -1411,17 +888,7 @@ async fn a_writer_cannot_move_the_share_root() {
     sync(&a).await;
     befriend(&a, &b, "b@example.org").await;
     let mut e = engine(&a).await;
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(team.id),
-        vec![grant(&b, Role::Write)],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(team.id), vec![grant(&b, Role::Write)], false, 5).await.unwrap();
     sync(&b).await;
     let server_b = b.row().id;
     let mut own = sample_group("b-own");
@@ -1430,12 +897,7 @@ async fn a_writer_cannot_move_the_share_root() {
         let store = b.store.lock().unwrap();
         store.upsert_group(&own).unwrap();
         record_local_change(&store, ItemKind::Group, &own.id.0.to_string(), 30).unwrap();
-        let mut root = store
-            .list_groups()
-            .unwrap()
-            .into_iter()
-            .find(|g| g.id == team.id)
-            .unwrap();
+        let mut root = store.list_groups().unwrap().into_iter().find(|g| g.id == team.id).unwrap();
         root.parent_id = Some(own.id);
         store.upsert_group(&root).unwrap();
         record_local_change(&store, ItemKind::Group, &team.id.0.to_string(), 31).unwrap();
@@ -1443,18 +905,7 @@ async fn a_writer_cannot_move_the_share_root() {
     sync(&b).await;
     let mut ea = engine(&a).await;
     let report = ea.pull(&a.store, &a.vault).await.unwrap();
-    let root = a
-        .store
-        .lock()
-        .unwrap()
-        .list_groups()
-        .unwrap()
-        .into_iter()
-        .find(|g| g.id == team.id)
-        .unwrap();
+    let root = a.store.lock().unwrap().list_groups().unwrap().into_iter().find(|g| g.id == team.id).unwrap();
     assert_eq!(root.parent_id, None, "{report:?}");
-    assert!(
-        report.rejected.is_empty(),
-        "the change is taken, the parent kept: {report:?}"
-    );
+    assert!(report.rejected.is_empty(), "the change is taken, the parent kept: {report:?}");
 }

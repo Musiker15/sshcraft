@@ -36,28 +36,14 @@ async fn revoked_device_loses_access() {
     join(&server, &b, &export).await;
     let b_id = b.row().device_id;
     let mut e = engine(&a).await.unwrap();
-    revoke_device(&mut e, &a.store, &a.vault, b_id, 10)
-        .await
-        .unwrap();
+    revoke_device(&mut e, &a.store, &a.vault, b_id, 10).await.unwrap();
 
     assert_eq!(engine(&b).await.err(), Some(SyncError::Revoked));
     let (manifest, _) = a.area();
     assert_eq!(manifest.key_version, 2, "the area key was rotated");
     let on_server = server.store().await;
-    assert_eq!(
-        on_server
-            .envelope_for(AreaId(manifest.area_id.0), b_id)
-            .await
-            .unwrap(),
-        None
-    );
-    assert!(
-        on_server
-            .envelope_for(manifest.area_id, a.row().device_id)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    assert_eq!(on_server.envelope_for(AreaId(manifest.area_id.0), b_id).await.unwrap(), None);
+    assert!(on_server.envelope_for(manifest.area_id, a.row().device_id).await.unwrap().is_some());
 }
 
 #[tokio::test]
@@ -70,9 +56,7 @@ async fn rotation_keeps_data_readable() {
     save(&a, &sample_host("two"), 100);
     sync(&a).await;
     let mut e = engine(&a).await.unwrap();
-    revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10)
-        .await
-        .unwrap();
+    revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10).await.unwrap();
 
     join(&server, &c, &export).await;
     sync(&c).await;
@@ -96,10 +80,7 @@ async fn cannot_revoke_self_or_recovery() {
     let own = row.device_id;
     let recovery = recovery_device_id(&AccountPublic(row.account));
     for target in [own, recovery] {
-        assert_eq!(
-            revoke_device(&mut e, &a.store, &a.vault, target, 10).await,
-            Err(SyncError::NotAllowed)
-        );
+        assert_eq!(revoke_device(&mut e, &a.store, &a.vault, target, 10).await, Err(SyncError::NotAllowed));
     }
 }
 
@@ -113,25 +94,14 @@ async fn device_list_names_and_marks() {
     let list = list_devices(&mut e, &a.store).await.unwrap();
     assert_eq!(list.len(), 3);
     let me = list.iter().find(|d| d.this_device).unwrap();
-    assert_eq!(
-        (me.name.as_str(), me.platform.as_str()),
-        ("first", "windows")
-    );
+    assert_eq!((me.name.as_str(), me.platform.as_str()), ("first", "windows"));
     assert!(list.iter().any(|d| d.recovery && !d.this_device));
-    let other = list
-        .iter()
-        .find(|d| d.device_id == b.row().device_id)
-        .unwrap();
+    let other = list.iter().find(|d| d.device_id == b.row().device_id).unwrap();
     assert!(other.active && other.name == "next");
 
-    revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10)
-        .await
-        .unwrap();
+    revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10).await.unwrap();
     let list = list_devices(&mut e, &a.store).await.unwrap();
-    let other = list
-        .iter()
-        .find(|d| d.device_id == b.row().device_id)
-        .unwrap();
+    let other = list.iter().find(|d| d.device_id == b.row().device_id).unwrap();
     assert!(!other.active);
 }
 
@@ -145,15 +115,10 @@ async fn retry_after_a_failed_rotation_still_rotates() {
     common::revoke_raw(&server, &a, b.row().device_id).await;
     assert_eq!(a.area().0.key_version, 1);
     let mut e = engine(&a).await.unwrap();
-    revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10)
-        .await
-        .unwrap();
+    revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10).await.unwrap();
     assert_eq!(a.area().0.key_version, 2);
     let unknown = uuid::Uuid::new_v4();
-    assert_eq!(
-        revoke_device(&mut e, &a.store, &a.vault, unknown, 10).await,
-        Err(SyncError::NotAllowed)
-    );
+    assert_eq!(revoke_device(&mut e, &a.store, &a.vault, unknown, 10).await, Err(SyncError::NotAllowed));
 }
 
 /// A revoke that fails at `op` (after `skip` successful calls) and is finished by the next pull.
@@ -170,10 +135,7 @@ async fn interrupted_rotation(op: &str, skip: usize) {
     sshcraft_sync::client::failpoints::arm(&server.origin, op, skip);
     let mut e = engine(&a).await.unwrap();
     let failed = revoke_device(&mut e, &a.store, &a.vault, b.row().device_id, 10).await;
-    assert!(
-        matches!(failed, Err(SyncError::Network(_))),
-        "{op}: {failed:?}"
-    );
+    assert!(matches!(failed, Err(SyncError::Network(_))), "{op}: {failed:?}");
 
     // The next sync on A finishes the rotation.
     sync(&a).await;
@@ -181,11 +143,7 @@ async fn interrupted_rotation(op: &str, skip: usize) {
     assert_eq!(engine(&b).await.err(), Some(SyncError::Revoked), "{op}");
     join(&server, &c, &export).await;
     sync(&c).await;
-    assert_eq!(
-        c.hosts().len(),
-        3,
-        "{op}: every host readable under the new key"
-    );
+    assert_eq!(c.hosts().len(), 3, "{op}: every host readable under the new key");
     // A keeps writing under the new key.
     save(&a, &sample_host("four"), 200);
     sync(&a).await;

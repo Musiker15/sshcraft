@@ -47,9 +47,7 @@ pub fn delete_log(store: &Store, id: LogId, now_ms: i64) -> Result<Option<Server
 }
 
 fn delete_log_inner(store: &Store, id: LogId, now_ms: i64) -> Result<Option<ServerId>, SyncError> {
-    let at = session_log::location(store, id)
-        .map_err(log_error)?
-        .flatten();
+    let at = session_log::location(store, id).map_err(log_error)?.flatten();
     if let Some(server) = at {
         queue_log(store, server, id, now_ms)?;
     }
@@ -59,21 +57,13 @@ fn delete_log_inner(store: &Store, id: LogId, now_ms: i64) -> Result<Option<Serv
 
 /// Switches log sync for a server; turning it on queues the logs there that it has not had yet
 /// (a log already sent, or received from another device, is not sent again).
-pub fn set_sync_logs(
-    store: &Store,
-    server: ServerId,
-    on: bool,
-    now_ms: i64,
-) -> Result<(), SyncError> {
+pub fn set_sync_logs(store: &Store, server: ServerId, on: bool, now_ms: i64) -> Result<(), SyncError> {
     store.atomic(|| {
         store.set_sync_logs(server, on)?;
         if on {
             place_logs_inner(store, now_ms)?;
             for id in session_log::logs_at(store, server).map_err(log_error)? {
-                if store
-                    .record_entry(server, ItemKind::Log, &id.0.to_string())?
-                    .is_none()
-                {
+                if store.record_entry(server, ItemKind::Log, &id.0.to_string())?.is_none() {
                     queue_log(store, server, id, now_ms)?;
                 }
             }

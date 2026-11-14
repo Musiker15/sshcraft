@@ -10,13 +10,10 @@ pub const WINDOWS_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn open_windows_agent() -> Result<DynAgent, SshError> {
-    let client = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        AgentClient::connect_named_pipe(WINDOWS_AGENT_PIPE),
-    )
-    .await
-    .map_err(|_| SshError::AgentUnavailable("timed out".into()))?
-    .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
+    let client = tokio::time::timeout(CONNECT_TIMEOUT, AgentClient::connect_named_pipe(WINDOWS_AGENT_PIPE))
+        .await
+        .map_err(|_| SshError::AgentUnavailable("timed out".into()))?
+        .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
     Ok(client.dynamic())
 }
 
@@ -26,9 +23,7 @@ pub struct WindowsAgentOpener;
 #[async_trait::async_trait]
 impl AgentOpener for WindowsAgentOpener {
     async fn open(&self) -> Result<Box<dyn Io>, SshError> {
-        let open = async {
-            tokio::net::windows::named_pipe::ClientOptions::new().open(WINDOWS_AGENT_PIPE)
-        };
+        let open = async { tokio::net::windows::named_pipe::ClientOptions::new().open(WINDOWS_AGENT_PIPE) };
         let pipe = tokio::time::timeout(CONNECT_TIMEOUT, open)
             .await
             .map_err(|_| SshError::AgentUnavailable("timed out".into()))?

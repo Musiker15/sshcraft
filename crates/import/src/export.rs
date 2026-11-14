@@ -3,9 +3,7 @@
 
 use serde::Serialize;
 
-use sshcraft_model::model::{
-    ConnectionSettings, DEFAULT_PORT, Group, GroupId, Host, HostOs, KeyRef, ServerId, group_chain,
-};
+use sshcraft_model::model::{ConnectionSettings, DEFAULT_PORT, Group, GroupId, Host, HostOs, KeyRef, ServerId, group_chain};
 use sshcraft_store::store::{Store, StoreError};
 
 pub use crate::import::csv::CSV_HEADER;
@@ -136,37 +134,19 @@ fn select(store: &Store, filter: &ExportFilter) -> Result<Selection, StoreError>
         Some(ExportPlace::Local) => location.is_none(),
         Some(ExportPlace::Server { id }) => *location == Some(id),
     };
-    let groups = all_groups
-        .iter()
-        .filter(|g| at(&g.location) && tree.as_ref().is_none_or(|t| t.contains(&g.id)))
-        .cloned()
-        .collect();
+    let groups = all_groups.iter().filter(|g| at(&g.location) && tree.as_ref().is_none_or(|t| t.contains(&g.id))).cloned().collect();
     let hosts = store
         .list_hosts()?
         .into_iter()
-        .filter(|h| {
-            at(&h.location)
-                && tree
-                    .as_ref()
-                    .is_none_or(|t| h.group_id.is_some_and(|g| t.contains(&g)))
-        })
+        .filter(|h| at(&h.location) && tree.as_ref().is_none_or(|t| h.group_id.is_some_and(|g| t.contains(&g))))
         .collect();
-    Ok(Selection {
-        groups,
-        all_groups,
-        hosts,
-    })
+    Ok(Selection { groups, all_groups, hosts })
 }
 
 fn key_out(store: &Store, key: &Option<KeyRef>) -> Result<Option<KeyOut>, StoreError> {
     Ok(match key {
-        Some(KeyRef::Stored { id }) => store.key_record(*id)?.map(|record| KeyOut::Stored {
-            name: record.name,
-            fingerprint: record.fingerprint,
-        }),
-        Some(KeyRef::Agent { fingerprint }) => Some(KeyOut::Agent {
-            agent_fingerprint: fingerprint.clone(),
-        }),
+        Some(KeyRef::Stored { id }) => store.key_record(*id)?.map(|record| KeyOut::Stored { name: record.name, fingerprint: record.fingerprint }),
+        Some(KeyRef::Agent { fingerprint }) => Some(KeyOut::Agent { agent_fingerprint: fingerprint.clone() }),
         None => None,
     })
 }
@@ -179,17 +159,10 @@ fn settings_out(store: &Store, s: &ConnectionSettings) -> Result<SettingsOut, St
         key: key_out(store, &s.key)?,
         has_password: s.password.is_some(),
         identity: match s.identity {
-            Some(id) => store
-                .list_identities()?
-                .into_iter()
-                .find(|i| i.id == id)
-                .map(|i| i.name),
+            Some(id) => store.list_identities()?.into_iter().find(|i| i.id == id).map(|i| i.name),
             None => None,
         },
-        jump_hosts: s
-            .jump_hosts
-            .as_ref()
-            .map(|j| j.iter().map(|h| h.0.to_string()).collect()),
+        jump_hosts: s.jump_hosts.as_ref().map(|j| j.iter().map(|h| h.0.to_string()).collect()),
         proxy: proxy_out(&s.proxy),
         agent_forwarding: s.agent_forwarding,
         env: s.env.clone(),
@@ -253,36 +226,19 @@ pub fn export_csv(store: &Store, filter: &ExportFilter) -> Result<String, StoreE
     let bad = |e: ::csv::Error| StoreError::Malformed(e.to_string());
     writer.write_record(CSV_HEADER.split(',')).map_err(bad)?;
     for host in &selection.hosts {
-        let chain = host
-            .group_id
-            .map(|g| group_chain(&selection.all_groups, g))
-            .unwrap_or_default();
+        let chain = host.group_id.map(|g| group_chain(&selection.all_groups, g)).unwrap_or_default();
         let path = crate::import::csv::join_path(chain.iter().rev().map(|g| g.name.as_str()));
         let text = |own: &Option<String>, get: fn(&ConnectionSettings) -> &Option<String>| {
-            own.clone()
-                .or_else(|| chain.iter().find_map(|g| get(&g.defaults).clone()))
-                .unwrap_or_default()
+            own.clone().or_else(|| chain.iter().find_map(|g| get(&g.defaults).clone())).unwrap_or_default()
         };
-        let port = host
-            .settings
-            .port
-            .or_else(|| chain.iter().find_map(|g| g.defaults.port))
-            .unwrap_or(DEFAULT_PORT);
-        let key = host
-            .settings
-            .key
-            .clone()
-            .or_else(|| chain.iter().find_map(|g| g.defaults.key.clone()));
+        let port = host.settings.port.or_else(|| chain.iter().find_map(|g| g.defaults.port)).unwrap_or(DEFAULT_PORT);
+        let key = host.settings.key.clone().or_else(|| chain.iter().find_map(|g| g.defaults.key.clone()));
         let key = match key_out(store, &key)? {
             Some(KeyOut::Stored { name, .. }) => name,
             Some(KeyOut::Agent { agent_fingerprint }) => format!("agent:{agent_fingerprint}"),
             None => String::new(),
         };
-        let os = host
-            .os
-            .and_then(|os| serde_json::to_value(os).ok())
-            .and_then(|v| v.as_str().map(str::to_owned))
-            .unwrap_or_default();
+        let os = host.os.and_then(|os| serde_json::to_value(os).ok()).and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
         writer
             .write_record(
                 [
@@ -300,9 +256,7 @@ pub fn export_csv(store: &Store, filter: &ExportFilter) -> Result<String, StoreE
             )
             .map_err(bad)?;
     }
-    let bytes = writer
-        .into_inner()
-        .map_err(|e| StoreError::Malformed(e.to_string()))?;
+    let bytes = writer.into_inner().map_err(|e| StoreError::Malformed(e.to_string()))?;
     String::from_utf8(bytes).map_err(|e| StoreError::Malformed(e.to_string()))
 }
 

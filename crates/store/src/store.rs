@@ -169,18 +169,7 @@ CREATE TABLE sync_outbox (
 );
 ";
 
-type KeyRow = (
-    String,
-    String,
-    String,
-    String,
-    String,
-    Vec<u8>,
-    Option<String>,
-    String,
-    bool,
-    Option<String>,
-);
+type KeyRow = (String, String, String, String, String, Vec<u8>, Option<String>, String, bool, Option<String>);
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
@@ -194,20 +183,14 @@ impl Store {
 
     /// Runs `f` as one unit: all its writes or none. Nests (savepoints), unlike a transaction.
     pub fn atomic<T, E: From<StoreError>>(&self, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
-        self.conn
-            .execute_batch("SAVEPOINT atomic")
-            .map_err(|e| E::from(e.into()))?;
+        self.conn.execute_batch("SAVEPOINT atomic").map_err(|e| E::from(e.into()))?;
         match f() {
             Ok(value) => {
-                self.conn
-                    .execute_batch("RELEASE atomic")
-                    .map_err(|e| E::from(e.into()))?;
+                self.conn.execute_batch("RELEASE atomic").map_err(|e| E::from(e.into()))?;
                 Ok(value)
             }
             Err(err) => {
-                let _ = self
-                    .conn
-                    .execute_batch("ROLLBACK TO atomic; RELEASE atomic");
+                let _ = self.conn.execute_batch("ROLLBACK TO atomic; RELEASE atomic");
                 Err(err)
             }
         }
@@ -316,10 +299,7 @@ impl Store {
                      WHERE g.parent_id IS NOT NULL AND up.depth <= ?2
                  )
                  SELECT MAX(depth) FROM up",
-                rusqlite::params![
-                    parent.0.to_string(),
-                    sshcraft_model::model::MAX_GROUP_DEPTH as i64
-                ],
+                rusqlite::params![parent.0.to_string(), sshcraft_model::model::MAX_GROUP_DEPTH as i64],
                 |r| r.get(0),
             )?;
             let below: i64 = tx.query_row(
@@ -336,11 +316,7 @@ impl Store {
             if above + 1 + below > sshcraft_model::model::MAX_GROUP_DEPTH as i64 {
                 return Err(StoreError::TooDeep);
             }
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?1)",
-                [parent.0.to_string()],
-                |r| r.get(0),
-            )?;
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM groups WHERE id = ?1)", [parent.0.to_string()], |r| r.get(0))?;
             if !exists {
                 return Err(StoreError::Malformed("no such parent group".into()));
             }
@@ -368,24 +344,12 @@ impl Store {
             ],
         )?;
         // Whatever is below follows the group's (possibly new) location.
-        let location: Option<String> =
-            tx.query_row("SELECT location FROM groups WHERE id = ?1", [&id], |r| {
-                r.get(0)
-            })?;
+        let location: Option<String> = tx.query_row("SELECT location FROM groups WHERE id = ?1", [&id], |r| r.get(0))?;
         for sub in subgroups_of(&tx, &id)? {
-            tx.execute(
-                "UPDATE groups SET location = ?2 WHERE id = ?1",
-                rusqlite::params![sub, location],
-            )?;
-            tx.execute(
-                "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
-                rusqlite::params![sub, location],
-            )?;
+            tx.execute("UPDATE groups SET location = ?2 WHERE id = ?1", rusqlite::params![sub, location])?;
+            tx.execute("UPDATE hosts SET location = ?2 WHERE group_id = ?1", rusqlite::params![sub, location])?;
         }
-        tx.execute(
-            "UPDATE hosts SET location = ?2 WHERE group_id = ?1",
-            rusqlite::params![id, location],
-        )?;
+        tx.execute("UPDATE hosts SET location = ?2 WHERE group_id = ?1", rusqlite::params![id, location])?;
         carry_passwords(&tx, ItemKind::Group, &id)?;
         tx.commit()?;
         Ok(())
@@ -393,16 +357,12 @@ impl Store {
 
     /// Every group below `id`, at any depth.
     pub fn subgroups(&self, id: GroupId) -> Result<Vec<GroupId>, StoreError> {
-        subgroups_of(&self.conn, &id.0.to_string())?
-            .iter()
-            .map(|s| parse_uuid(s).map(GroupId))
-            .collect()
+        subgroups_of(&self.conn, &id.0.to_string())?.iter().map(|s| parse_uuid(s).map(GroupId)).collect()
     }
 
     /// Deletes a group with its subgroups and all their hosts.
     pub fn delete_group(&self, id: GroupId) -> Result<(), StoreError> {
-        self.conn
-            .execute("DELETE FROM groups WHERE id = ?1", [id.0.to_string()])?;
+        self.conn.execute("DELETE FROM groups WHERE id = ?1", [id.0.to_string()])?;
         Ok(())
     }
 
@@ -467,17 +427,14 @@ impl Store {
     }
 
     pub fn delete_host(&self, id: HostId) -> Result<(), StoreError> {
-        self.conn
-            .execute("DELETE FROM hosts WHERE id = ?1", [id.0.to_string()])?;
+        self.conn.execute("DELETE FROM hosts WHERE id = ?1", [id.0.to_string()])?;
         Ok(())
     }
 
     pub fn list_hosts(&self) -> Result<Vec<Host>, StoreError> {
         /// Rules one by one: a damaged value or rule never hides the host.
         fn read_forwards(text: &str) -> Vec<sshcraft_model::forward::ForwardRule> {
-            serde_json::from_str::<Vec<serde_json::Value>>(text)
-                .map(sshcraft_model::forward::parse_rules)
-                .unwrap_or_default()
+            serde_json::from_str::<Vec<serde_json::Value>>(text).map(sshcraft_model::forward::parse_rules).unwrap_or_default()
         }
         let mut stmt = self.conn.prepare(
             "SELECT id, name, group_id, settings, location, tags, os, forwards FROM hosts
@@ -514,20 +471,11 @@ impl Store {
     pub fn known_host(&self, address: &str, port: u16) -> Result<Option<String>, StoreError> {
         Ok(self
             .conn
-            .query_row(
-                "SELECT fingerprint FROM known_hosts WHERE address = ?1 AND port = ?2",
-                rusqlite::params![address, port],
-                |r| r.get(0),
-            )
+            .query_row("SELECT fingerprint FROM known_hosts WHERE address = ?1 AND port = ?2", rusqlite::params![address, port], |r| r.get(0))
             .optional()?)
     }
 
-    pub fn set_known_host(
-        &self,
-        address: &str,
-        port: u16,
-        fingerprint: &str,
-    ) -> Result<(), StoreError> {
+    pub fn set_known_host(&self, address: &str, port: u16, fingerprint: &str) -> Result<(), StoreError> {
         self.conn.execute(
             "INSERT INTO known_hosts (address, port, fingerprint) VALUES (?1, ?2, ?3)
              ON CONFLICT(address, port) DO UPDATE SET fingerprint = excluded.fingerprint",
@@ -537,10 +485,7 @@ impl Store {
     }
 
     pub fn forget_known_host(&self, address: &str, port: u16) -> Result<(), StoreError> {
-        self.conn.execute(
-            "DELETE FROM known_hosts WHERE address = ?1 AND port = ?2",
-            rusqlite::params![address, port],
-        )?;
+        self.conn.execute("DELETE FROM known_hosts WHERE address = ?1 AND port = ?2", rusqlite::params![address, port])?;
         Ok(())
     }
 
@@ -570,10 +515,7 @@ impl Store {
     }
 
     pub fn key_record(&self, id: KeyId) -> Result<Option<KeyRecord>, StoreError> {
-        Ok(self
-            .query_keys("WHERE id = ?1", &[&id.0.to_string()])?
-            .into_iter()
-            .next())
+        Ok(self.query_keys("WHERE id = ?1", &[&id.0.to_string()])?.into_iter().next())
     }
 
     pub fn list_key_records(&self) -> Result<Vec<KeyRecord>, StoreError> {
@@ -581,18 +523,12 @@ impl Store {
     }
 
     pub fn delete_key_record(&self, id: KeyId) -> Result<(), StoreError> {
-        self.conn
-            .execute("DELETE FROM keys WHERE id = ?1", [id.0.to_string()])?;
+        self.conn.execute("DELETE FROM keys WHERE id = ?1", [id.0.to_string()])?;
         Ok(())
     }
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, StoreError> {
-        Ok(self
-            .conn
-            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
-                r.get(0)
-            })
-            .optional()?)
+        Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
     }
 
     pub fn put_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
@@ -616,56 +552,26 @@ impl Store {
 
     /// Hosts connected to most recently, newest first.
     pub fn recent_hosts(&self, limit: u32) -> Result<Vec<HostId>, StoreError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT host_id FROM recent_hosts ORDER BY connected_at DESC, host_id LIMIT ?1",
-        )?;
+        let mut stmt = self.conn.prepare("SELECT host_id FROM recent_hosts ORDER BY connected_at DESC, host_id LIMIT ?1")?;
         let rows = stmt.query_map([limit], |r| r.get::<_, String>(0))?;
         rows.map(|row| Ok(HostId(parse_uuid(&row?)?))).collect()
     }
 
     pub fn has_key_records(&self) -> Result<bool, StoreError> {
-        Ok(self
-            .conn
-            .query_row("SELECT EXISTS(SELECT 1 FROM keys)", [], |r| r.get(0))?)
+        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM keys)", [], |r| r.get(0))?)
     }
 
-    fn query_keys(
-        &self,
-        tail: &str,
-        params: &[&dyn rusqlite::ToSql],
-    ) -> Result<Vec<KeyRecord>, StoreError> {
+    fn query_keys(&self, tail: &str, params: &[&dyn rusqlite::ToSql]) -> Result<Vec<KeyRecord>, StoreError> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT id, name, algorithm, fingerprint, public_key, sealed_secret, location,
                  kind, protected, certificate
              FROM keys {tail}"
         ))?;
         let rows = stmt.query_map(params, |r| -> rusqlite::Result<KeyRow> {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-                r.get(6)?,
-                r.get(7)?,
-                r.get(8)?,
-                r.get(9)?,
-            ))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?))
         })?;
         rows.map(|row| {
-            let (
-                id,
-                name,
-                algorithm,
-                fingerprint,
-                public_key,
-                sealed_secret,
-                location,
-                kind,
-                protected,
-                certificate,
-            ) = row?;
+            let (id, name, algorithm, fingerprint, public_key, sealed_secret, location, kind, protected, certificate) = row?;
             Ok(KeyRecord {
                 id: KeyId(parse_uuid(&id)?),
                 name,
@@ -674,8 +580,7 @@ impl Store {
                 public_key,
                 sealed_secret,
                 location: parse_location(location)?,
-                kind: KeyKind::parse(&kind)
-                    .ok_or_else(|| StoreError::Malformed(format!("key kind {kind}")))?,
+                kind: KeyKind::parse(&kind).ok_or_else(|| StoreError::Malformed(format!("key kind {kind}")))?,
                 protected,
                 certificate,
             })
@@ -696,22 +601,14 @@ fn subgroups_of(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, St
          SELECT DISTINCT id FROM below WHERE id != ?1",
     )?;
     let rows = stmt
-        .query_map(
-            rusqlite::params![id, sshcraft_model::model::MAX_GROUP_DEPTH as i64],
-            |r| r.get::<_, String>(0),
-        )?
+        .query_map(rusqlite::params![id, sshcraft_model::model::MAX_GROUP_DEPTH as i64], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
 /// Settings as they are stored: environment variables normalized.
-fn normalized(
-    settings: &sshcraft_model::model::ConnectionSettings,
-) -> sshcraft_model::model::ConnectionSettings {
-    sshcraft_model::model::ConnectionSettings {
-        env: sshcraft_model::model::normalize_env(&settings.env),
-        ..settings.clone()
-    }
+fn normalized(settings: &sshcraft_model::model::ConnectionSettings) -> sshcraft_model::model::ConnectionSettings {
+    sshcraft_model::model::ConnectionSettings { env: sshcraft_model::model::normalize_env(&settings.env), ..settings.clone() }
 }
 
 fn to_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {

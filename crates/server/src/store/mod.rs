@@ -98,13 +98,7 @@ pub trait Store: Send + Sync {
     async fn api_key(&self) -> Result<(String, bool), StoreError>;
     async fn rotate_api_key(&self) -> Result<String, StoreError>;
 
-    async fn create_account(
-        &self,
-        row: &AccountRow,
-        email_norm: &str,
-        first: &LogEntry,
-        device: &DeviceCertificate,
-    ) -> Result<(), StoreError>;
+    async fn create_account(&self, row: &AccountRow, email_norm: &str, first: &LogEntry, device: &DeviceCertificate) -> Result<(), StoreError>;
     async fn account(&self, account: &AccountPublic) -> Result<Option<AccountRow>, StoreError>;
     async fn account_by_email(&self, email_norm: &str) -> Result<Option<AccountRow>, StoreError>;
     async fn list_accounts(&self) -> Result<Vec<AccountRow>, StoreError>;
@@ -115,13 +109,7 @@ pub trait Store: Send + Sync {
     /// Appends only if the stored log has exactly `expected_len` entries, else
     /// `Conflict { current }`. Adds `changes.added` as active devices, marks `changes.revoked`
     /// inactive and deletes their sessions.
-    async fn append_log(
-        &self,
-        account: &AccountPublic,
-        expected_len: u64,
-        entries: &[LogEntry],
-        changes: &DeviceChanges,
-    ) -> Result<(), StoreError>;
+    async fn append_log(&self, account: &AccountPublic, expected_len: u64, entries: &[LogEntry], changes: &DeviceChanges) -> Result<(), StoreError>;
     async fn device(&self, device_id: Uuid) -> Result<Option<DeviceRow>, StoreError>;
     async fn devices_of(&self, account: &AccountPublic) -> Result<Vec<DeviceRow>, StoreError>;
     async fn mark_logged_in(&self, device_id: Uuid, now: i64) -> Result<(), StoreError>;
@@ -129,13 +117,7 @@ pub trait Store: Send + Sync {
     /// Blocking also deletes the device's sessions.
     async fn set_admin_blocked(&self, device_id: Uuid, blocked: bool) -> Result<(), StoreError>;
 
-    async fn create_session(
-        &self,
-        token_hash: [u8; 32],
-        device_id: Uuid,
-        account: &AccountPublic,
-        expires_at: i64,
-    ) -> Result<(), StoreError>;
+    async fn create_session(&self, token_hash: [u8; 32], device_id: Uuid, account: &AccountPublic, expires_at: i64) -> Result<(), StoreError>;
     async fn session(&self, token_hash: [u8; 32]) -> Result<Option<SessionRow>, StoreError>;
     async fn delete_expired_sessions(&self, now: i64) -> Result<u64, StoreError>;
 
@@ -147,39 +129,18 @@ pub trait Store: Send + Sync {
     /// `expected` = `None` for a new area (version must be 1), else the stored version (new =
     /// stored + 1). Rewrites the member index from `manifest.members`; a higher `key_version`
     /// drops older envelopes.
-    async fn put_manifest(
-        &self,
-        owner: &AccountPublic,
-        manifest: &AreaManifest,
-        expected: Option<u64>,
-    ) -> Result<(), StoreError>;
+    async fn put_manifest(&self, owner: &AccountPublic, manifest: &AreaManifest, expected: Option<u64>) -> Result<(), StoreError>;
     async fn delete_area(&self, area_id: AreaId) -> Result<(), StoreError>;
     /// Replaces the envelope per (area, device); all must carry the area's current key version.
-    async fn put_envelopes(
-        &self,
-        area_id: AreaId,
-        envelopes: &[KeyEnvelope],
-    ) -> Result<(), StoreError>;
-    async fn envelope_for(
-        &self,
-        area_id: AreaId,
-        device_id: Uuid,
-    ) -> Result<Option<KeyEnvelope>, StoreError>;
+    async fn put_envelopes(&self, area_id: AreaId, envelopes: &[KeyEnvelope]) -> Result<(), StoreError>;
+    async fn envelope_for(&self, area_id: AreaId, device_id: Uuid) -> Result<Option<KeyEnvelope>, StoreError>;
 
     /// Compare and swap: version 1 for a new record id, else stored + 1. Returns the area-local
     /// change number (`seq`), which grows by one per accepted write in this area.
     async fn put_record(&self, record: &SealedRecord) -> Result<u64, StoreError>;
-    async fn records_since(
-        &self,
-        area_id: AreaId,
-        since: u64,
-        limit: u32,
-    ) -> Result<Vec<StoredRecord>, StoreError>;
+    async fn records_since(&self, area_id: AreaId, since: u64, limit: u32) -> Result<Vec<StoredRecord>, StoreError>;
 
-    async fn plan_account_deletion(
-        &self,
-        account: &AccountPublic,
-    ) -> Result<Vec<AreaFate>, StoreError>;
+    async fn plan_account_deletion(&self, account: &AccountPublic) -> Result<Vec<AreaFate>, StoreError>;
     /// Runs exactly the plan of `plan_account_deletion` in one transaction and returns it.
     async fn delete_account(&self, account: &AccountPublic) -> Result<Vec<AreaFate>, StoreError>;
 }
@@ -193,29 +154,20 @@ pub async fn open(url: &str) -> Result<Arc<dyn Store>, StoreError> {
         return Ok(Arc::new(postgres::PostgresStore::connect(url).await?));
     }
     // Never echo the URL: it may carry a password.
-    Err(StoreError::Backend(
-        "unsupported database url, expected sqlite://... or postgres://...".into(),
-    ))
+    Err(StoreError::Backend("unsupported database url, expected sqlite://... or postgres://...".into()))
 }
 
 /// What happens to the areas of an account that is deleted (design, section 12): an area with a
 /// member who may write goes to the first such member in manifest order whose account still
 /// exists and is not locked (`open_accounts`); every other area goes.
-pub(crate) fn area_fate(
-    manifest: &AreaManifest,
-    open_accounts: &std::collections::HashSet<AccountPublic>,
-) -> AreaFate {
+pub(crate) fn area_fate(manifest: &AreaManifest, open_accounts: &std::collections::HashSet<AccountPublic>) -> AreaFate {
     let outcome = manifest
         .members
         .iter()
         .find(|m| m.role == Role::Write && open_accounts.contains(&m.account))
         .map(|m| AreaOutcome::TransferTo(m.account))
         .unwrap_or(AreaOutcome::Delete);
-    AreaFate {
-        area_id: manifest.area_id,
-        members: manifest.members.len(),
-        outcome,
-    }
+    AreaFate { area_id: manifest.area_id, members: manifest.members.len(), outcome }
 }
 
 pub(crate) fn role_name(role: Role) -> &'static str {

@@ -51,14 +51,11 @@ pub fn parse(text: &str) -> KnownHostsImport {
             continue;
         }
         if line.starts_with('@') {
-            out.skipped.push(format!(
-                "line {number}: certificate authority or revoked key"
-            ));
+            out.skipped.push(format!("line {number}: certificate authority or revoked key"));
             continue;
         }
         let mut fields = line.split_whitespace();
-        let (Some(names), Some(kind), Some(data)) = (fields.next(), fields.next(), fields.next())
-        else {
+        let (Some(names), Some(kind), Some(data)) = (fields.next(), fields.next(), fields.next()) else {
             out.skipped.push(format!("line {number}: incomplete"));
             continue;
         };
@@ -82,8 +79,7 @@ pub fn parse(text: &str) -> KnownHostsImport {
             }
         }
         if usable.is_empty() {
-            out.skipped
-                .push(format!("line {number}: no usable host name"));
+            out.skipped.push(format!("line {number}: no usable host name"));
             continue;
         }
         // One host per line: further names of the same line are the same machine.
@@ -91,16 +87,12 @@ pub fn parse(text: &str) -> KnownHostsImport {
         for (address, port) in usable {
             let fresh = std::mem::take(&mut first);
             if fresh
-                && !out.candidates.iter().any(|c| {
-                    c.settings.address.as_deref() == Some(address.as_str())
-                        && c.settings.port.unwrap_or(DEFAULT_PORT) == port
-                })
+                && !out
+                    .candidates
+                    .iter()
+                    .any(|c| c.settings.address.as_deref() == Some(address.as_str()) && c.settings.port.unwrap_or(DEFAULT_PORT) == port)
             {
-                let name = if port == DEFAULT_PORT {
-                    address.clone()
-                } else {
-                    format!("{address}:{port}")
-                };
+                let name = if port == DEFAULT_PORT { address.clone() } else { format!("{address}:{port}") };
                 out.candidates.push(ImportCandidate {
                     name: clean(&name),
                     settings: ConnectionSettings {
@@ -111,11 +103,7 @@ pub fn parse(text: &str) -> KnownHostsImport {
                     ..ImportCandidate::default()
                 });
             }
-            out.entries.push(KnownEntry {
-                address,
-                port,
-                fingerprint: fingerprint.clone(),
-            });
+            out.entries.push(KnownEntry { address, port, fingerprint: fingerprint.clone() });
         }
     }
     out

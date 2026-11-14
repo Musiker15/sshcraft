@@ -46,13 +46,7 @@ fn record(dev: &Dev, host: &Host, title: &str) -> LogId {
         &dev.vault,
         &store,
         meta.id,
-        vec![LogMark {
-            id: Uuid::new_v4(),
-            offset: 10,
-            kind: MarkKind::Comment,
-            text: "after uptime".into(),
-            created_at: 12,
-        }],
+        vec![LogMark { id: Uuid::new_v4(), offset: 10, kind: MarkKind::Comment, text: "after uptime".into(), created_at: 12 }],
     )
     .unwrap();
     session_log::finish(&dev.vault, &store, meta.id, 20, 22, false).unwrap();
@@ -98,13 +92,8 @@ async fn a_log_reaches_the_other_device_whole() {
     let id = record(&a, &host, "web");
     sync(&a).await;
     sync(&b).await;
-    assert_eq!(
-        logs_on(&b),
-        vec![("web".to_owned(), b"$ uptime\r\n up 3 days\r\n".to_vec())]
-    );
-    let meta = session_log::meta(&b.vault, &b.store.lock().unwrap(), id)
-        .unwrap()
-        .unwrap();
+    assert_eq!(logs_on(&b), vec![("web".to_owned(), b"$ uptime\r\n up 3 days\r\n".to_vec())]);
+    let meta = session_log::meta(&b.vault, &b.store.lock().unwrap(), id).unwrap().unwrap();
     assert_eq!(meta.marks.len(), 1);
     assert_eq!(meta.marks[0].text, "after uptime");
 }
@@ -153,16 +142,11 @@ async fn deleting_a_log_removes_it_everywhere() {
     sync(&b).await;
     assert_eq!(logs_on(&b).len(), 1);
     let server_a = server_of(&a);
-    assert_eq!(
-        delete_log(&a.store.lock().unwrap(), id, 30).unwrap(),
-        Some(server_a)
-    );
+    assert_eq!(delete_log(&a.store.lock().unwrap(), id, 30).unwrap(), Some(server_a));
     sync(&a).await;
     sync(&b).await;
     assert!(logs_on(&b).is_empty());
-    let left: i64 = session_log::chunk_ids(&b.store.lock().unwrap(), id)
-        .unwrap()
-        .len() as i64;
+    let left: i64 = session_log::chunk_ids(&b.store.lock().unwrap(), id).unwrap().len() as i64;
     assert_eq!(left, 0);
 }
 
@@ -180,15 +164,10 @@ async fn logs_follow_their_host_off_the_server() {
     {
         let store = a.store.lock().unwrap();
         record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 40).unwrap();
-        store
-            .set_location(ItemKind::Host, &host.id.0.to_string(), None)
-            .unwrap();
+        store.set_location(ItemKind::Host, &host.id.0.to_string(), None).unwrap();
     }
     sync(&a).await;
-    assert_eq!(
-        session_log::location(&a.store.lock().unwrap(), id).unwrap(),
-        Some(None)
-    );
+    assert_eq!(session_log::location(&a.store.lock().unwrap(), id).unwrap(), Some(None));
     assert_eq!(logs_on(&a).len(), 1);
     sync(&b).await;
     assert!(logs_on(&b).is_empty());
@@ -202,10 +181,7 @@ async fn removing_the_server_keeps_logs_here() {
     let id = record(&a, &host, "web");
     let server_a = server_of(&a);
     let store = a.store.lock().unwrap();
-    assert_eq!(
-        session_log::location(&store, id).unwrap(),
-        Some(Some(server_a))
-    );
+    assert_eq!(session_log::location(&store, id).unwrap(), Some(Some(server_a)));
     store.remove_server(server_a).unwrap();
     assert_eq!(session_log::location(&store, id).unwrap(), Some(None));
     assert_eq!(session_log::list(&a.vault, &store).unwrap().len(), 1);
@@ -241,20 +217,9 @@ async fn a_log_of_a_shared_host_stays_personal() {
     let found = find(&e, &a.store, "b@example.org").await.unwrap();
     let server_a = server_of(&a);
     confirm(&a.store, server_a, "b@example.org", &found.account).unwrap();
-    share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        ShareWhat::GroupAll(group.id),
-        vec![Grant {
-            account: common::account(&b),
-            role: Role::Write,
-        }],
-        false,
-        5,
-    )
-    .await
-    .unwrap();
+    share(&mut e, &a.store, &a.vault, ShareWhat::GroupAll(group.id), vec![Grant { account: common::account(&b), role: Role::Write }], false, 5)
+        .await
+        .unwrap();
     logs_sync(&a, true);
     logs_sync(&b, true);
     record(&a, &host, "shared host");
@@ -268,31 +233,16 @@ async fn a_log_of_a_shared_host_stays_personal() {
     let server_a = server_of(&a);
     let id = {
         let store = a.store.lock().unwrap();
-        let personal = store
-            .get_setting(&sshcraft_sync::account::personal_setting(server_a))
-            .unwrap()
-            .unwrap();
+        let personal = store.get_setting(&sshcraft_sync::account::personal_setting(server_a)).unwrap().unwrap();
         let id = session_log::list(&a.vault, &store).unwrap()[0].meta.id;
-        let entry = store
-            .record_entry(server_a, ItemKind::Log, &id.0.to_string())
-            .unwrap()
-            .unwrap();
+        let entry = store.record_entry(server_a, ItemKind::Log, &id.0.to_string()).unwrap().unwrap();
         assert_eq!(entry.area_id.to_string(), personal);
         id
     };
     // A log record put into the share is not taken by its members.
     let area = a.store.lock().unwrap().shares(server_a).unwrap()[0].area_id;
-    let meta = session_log::meta(&a.vault, &a.store.lock().unwrap(), id)
-        .unwrap()
-        .unwrap();
-    let record = common::seal_in(
-        &a,
-        area,
-        sshcraft_sync::items::ItemBody::Log { meta },
-        Uuid::new_v4(),
-        1,
-        50,
-    );
+    let meta = session_log::meta(&a.vault, &a.store.lock().unwrap(), id).unwrap().unwrap();
+    let record = common::seal_in(&a, area, sshcraft_sync::items::ItemBody::Log { meta }, Uuid::new_v4(), 1, 50);
     a.client(&server).await.put_record(&record).await.unwrap();
     sync(&b).await;
     assert!(logs_on(&b).is_empty());
@@ -337,14 +287,7 @@ async fn switching_log_sync_off_and_on_sends_nothing_again() {
         logs_sync(dev, false);
         logs_sync(dev, true);
         let server_id = server_of(dev);
-        assert!(
-            dev.store
-                .lock()
-                .unwrap()
-                .outbox(server_id)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(dev.store.lock().unwrap().outbox(server_id).unwrap().is_empty());
     }
 }
 
@@ -356,13 +299,7 @@ async fn a_broken_log_record_is_refused_for_good() {
     let personal = {
         let server_a = server_of(&a);
         let store = a.store.lock().unwrap();
-        Uuid::parse_str(
-            &store
-                .get_setting(&sshcraft_sync::account::personal_setting(server_a))
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap()
+        Uuid::parse_str(&store.get_setting(&sshcraft_sync::account::personal_setting(server_a)).unwrap().unwrap()).unwrap()
     };
     let broken = LogMeta {
         id: LogId(Uuid::new_v4()),
@@ -375,28 +312,12 @@ async fn a_broken_log_record_is_refused_for_good() {
         truncated: false,
         marks: Vec::new(),
     };
-    let record = common::seal_in(
-        &a,
-        personal,
-        sshcraft_sync::items::ItemBody::Log {
-            meta: broken.clone(),
-        },
-        Uuid::new_v4(),
-        1,
-        5,
-    );
+    let record = common::seal_in(&a, personal, sshcraft_sync::items::ItemBody::Log { meta: broken.clone() }, Uuid::new_v4(), 1, 5);
     a.client(&server).await.put_record(&record).await.unwrap();
     sync(&b).await;
     assert!(logs_on(&b).is_empty());
     let server_b = server_of(&b);
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .record_entry(server_b, ItemKind::Log, &broken.id.0.to_string())
-            .unwrap()
-            .is_some()
-    );
+    assert!(b.store.lock().unwrap().record_entry(server_b, ItemKind::Log, &broken.id.0.to_string()).unwrap().is_some());
 }
 
 #[tokio::test]
@@ -405,14 +326,7 @@ async fn a_damaged_log_does_not_stop_the_other_changes() {
     let (a, b, host) = pair(&server).await;
     logs_sync(&a, true);
     let id = record(&a, &host, "web");
-    a.store
-        .lock()
-        .unwrap()
-        .execute_raw(&format!(
-            "UPDATE session_log_chunks SET sealed = x'00' WHERE log_id = '{}'",
-            id.0
-        ))
-        .unwrap();
+    a.store.lock().unwrap().execute_raw(&format!("UPDATE session_log_chunks SET sealed = x'00' WHERE log_id = '{}'", id.0)).unwrap();
     let mut renamed = host.clone();
     renamed.name = "renamed".into();
     renamed.location = Some(server_of(&a));

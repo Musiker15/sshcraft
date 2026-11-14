@@ -39,9 +39,7 @@ pub fn valid_scope(scope: &str) -> bool {
     if let Some(id) = scope.strip_prefix("host:") {
         return uuid::Uuid::parse_str(id).is_ok();
     }
-    scope
-        .strip_prefix("local:")
-        .is_some_and(|label| !label.trim().is_empty())
+    scope.strip_prefix("local:").is_some_and(|label| !label.trim().is_empty())
 }
 
 fn label(scope: &str) -> String {
@@ -49,19 +47,11 @@ fn label(scope: &str) -> String {
 }
 
 /// Records `command` as just used: a known one moves to the front and counts once more.
-pub fn record(
-    vault: &Vault,
-    store: &Store,
-    scope: &str,
-    command: &str,
-    now_ms: i64,
-) -> Result<(), HistoryError> {
+pub fn record(vault: &Vault, store: &Store, scope: &str, command: &str, now_ms: i64) -> Result<(), HistoryError> {
     if !valid_scope(scope) {
         return Err(HistoryError::Scope);
     }
-    let command_ok = !command.trim().is_empty()
-        && command.chars().count() <= MAX_COMMAND
-        && !command.chars().any(char::is_control);
+    let command_ok = !command.trim().is_empty() && command.chars().count() <= MAX_COMMAND && !command.chars().any(char::is_control);
     if !command_ok {
         return Err(HistoryError::Command);
     }
@@ -70,18 +60,9 @@ pub fn record(
         Some(index) => entries.remove(index).uses.saturating_add(1),
         None => 1,
     };
-    entries.insert(
-        0,
-        HistoryEntry {
-            command: command.to_owned(),
-            uses,
-            last_used: now_ms,
-        },
-    );
+    entries.insert(0, HistoryEntry { command: command.to_owned(), uses, last_used: now_ms });
     entries.truncate(MAX_ENTRIES);
-    let plain = zeroize::Zeroizing::new(
-        serde_json::to_vec(&entries).map_err(|e| StoreError::Malformed(e.to_string()))?,
-    );
+    let plain = zeroize::Zeroizing::new(serde_json::to_vec(&entries).map_err(|e| StoreError::Malformed(e.to_string()))?);
     let sealed = vault.seal_secret(&label(scope), &plain)?;
     store.put_history_block(scope, &sealed)?;
     Ok(())
@@ -124,11 +105,7 @@ mod tests {
     }
 
     fn commands(vault: &Vault, store: &Store, scope: &str) -> Vec<String> {
-        list(vault, store, scope)
-            .unwrap()
-            .into_iter()
-            .map(|e| e.command)
-            .collect()
+        list(vault, store, scope).unwrap().into_iter().map(|e| e.command).collect()
     }
 
     #[test]
@@ -147,14 +124,7 @@ mod tests {
         record(&vault, &store, HOST, "ls", 3).unwrap();
         let entries = list(&vault, &store, HOST).unwrap();
         assert_eq!(entries.len(), 2);
-        assert_eq!(
-            entries[0],
-            HistoryEntry {
-                command: "ls".into(),
-                uses: 2,
-                last_used: 3
-            }
-        );
+        assert_eq!(entries[0], HistoryEntry { command: "ls".into(), uses: 2, last_used: 3 });
     }
 
     #[test]
@@ -172,20 +142,8 @@ mod tests {
     #[test]
     fn rejects_long_and_control_commands() {
         let (store, vault) = setup();
-        for bad in [
-            "x".repeat(2001),
-            "a\nb".into(),
-            "a\u{1b}b".into(),
-            String::new(),
-            "   ".into(),
-        ] {
-            assert!(
-                matches!(
-                    record(&vault, &store, HOST, &bad, 1),
-                    Err(HistoryError::Command)
-                ),
-                "{bad:?}"
-            );
+        for bad in ["x".repeat(2001), "a\nb".into(), "a\u{1b}b".into(), String::new(), "   ".into()] {
+            assert!(matches!(record(&vault, &store, HOST, &bad, 1), Err(HistoryError::Command)), "{bad:?}");
         }
         assert!(commands(&vault, &store, HOST).is_empty());
     }
@@ -215,10 +173,7 @@ mod tests {
     fn nothing_in_plain_text() {
         let (store, vault) = setup();
         record(&vault, &store, HOST, "export TOKEN=geheim42", 1).unwrap();
-        let blob: Vec<u8> = store
-            .conn
-            .query_row("SELECT sealed FROM command_history", [], |r| r.get(0))
-            .unwrap();
+        let blob: Vec<u8> = store.conn.query_row("SELECT sealed FROM command_history", [], |r| r.get(0)).unwrap();
         assert!(!blob.windows(8).any(|w| w == b"geheim42"));
         assert!(!blob.is_empty());
     }
@@ -227,10 +182,7 @@ mod tests {
     fn a_block_moved_to_another_scope_does_not_open() {
         let (store, vault) = setup();
         record(&vault, &store, HOST, "secret of the host", 1).unwrap();
-        store
-            .conn
-            .execute("UPDATE command_history SET scope = ?1", [OTHER])
-            .unwrap();
+        store.conn.execute("UPDATE command_history SET scope = ?1", [OTHER]).unwrap();
         assert!(list(&vault, &store, OTHER).is_err());
     }
 
@@ -239,10 +191,7 @@ mod tests {
         let (store, vault) = setup();
         for bad in ["", "x", "host:", "local:", "host:not-a-uuid", "serial:COM3"] {
             assert!(!valid_scope(bad), "{bad}");
-            assert!(matches!(
-                record(&vault, &store, bad, "ls", 1),
-                Err(HistoryError::Scope)
-            ));
+            assert!(matches!(record(&vault, &store, bad, "ls", 1), Err(HistoryError::Scope)));
         }
         assert!(valid_scope(HOST));
         assert!(valid_scope(OTHER));

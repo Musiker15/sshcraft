@@ -29,9 +29,7 @@ pub enum SocksError {
 }
 
 /// Reads the greeting and the request; returns the target the client wants.
-pub async fn read_request<S: AsyncRead + AsyncWrite + Unpin>(
-    stream: &mut S,
-) -> Result<(String, u16), SocksError> {
+pub async fn read_request<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S) -> Result<(String, u16), SocksError> {
     let [version, count] = read_array::<2, _>(stream).await?;
     if version != VERSION {
         return Err(SocksError::Version);
@@ -75,10 +73,7 @@ pub async fn read_request<S: AsyncRead + AsyncWrite + Unpin>(
     Ok((host, port))
 }
 
-pub async fn reply_success<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    bound: SocketAddr,
-) -> Result<(), SocksError> {
+pub async fn reply_success<S: AsyncWrite + Unpin>(stream: &mut S, bound: SocketAddr) -> Result<(), SocksError> {
     let mut reply = vec![VERSION, 0, 0];
     match bound {
         SocketAddr::V4(a) => {
@@ -94,10 +89,7 @@ pub async fn reply_success<S: AsyncWrite + Unpin>(
     write(stream, &reply).await
 }
 
-pub async fn reply_failure<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    code: u8,
-) -> Result<(), SocksError> {
+pub async fn reply_failure<S: AsyncWrite + Unpin>(stream: &mut S, code: u8) -> Result<(), SocksError> {
     write(stream, &[VERSION, code, 0, 1, 0, 0, 0, 0, 0, 0]).await
 }
 
@@ -105,9 +97,7 @@ fn io(e: std::io::Error) -> SocksError {
     SocksError::Io(e.to_string())
 }
 
-async fn read_array<const N: usize, S: AsyncRead + Unpin>(
-    stream: &mut S,
-) -> Result<[u8; N], SocksError> {
+async fn read_array<const N: usize, S: AsyncRead + Unpin>(stream: &mut S) -> Result<[u8; N], SocksError> {
     let mut buf = [0u8; N];
     stream.read_exact(&mut buf).await.map_err(io)?;
     Ok(buf)
@@ -207,9 +197,7 @@ mod tests {
     #[tokio::test]
     async fn replies_have_the_socks5_layout() {
         let mut out = Vec::new();
-        reply_success(&mut out, "127.0.0.1:1080".parse().unwrap())
-            .await
-            .unwrap();
+        reply_success(&mut out, "127.0.0.1:1080".parse().unwrap()).await.unwrap();
         assert_eq!(out, vec![5, 0, 0, 1, 127, 0, 0, 1, 0x04, 0x38]);
         let mut out = Vec::new();
         reply_failure(&mut out, HOST_UNREACHABLE).await.unwrap();

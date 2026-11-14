@@ -30,11 +30,7 @@ fn bad(what: &str) -> FidoError {
 
 /// The public key from the authenticator data of a new credential, after checking that it was
 /// made for `application`.
-pub fn attested_public_key(
-    auth_data: &[u8],
-    application: &str,
-    algorithm: SkAlgorithm,
-) -> Result<CosePublic, FidoError> {
+pub fn attested_public_key(auth_data: &[u8], application: &str, algorithm: SkAlgorithm) -> Result<CosePublic, FidoError> {
     if auth_data.len() < 37 + 16 + 2 {
         return Err(bad("authenticator data too short"));
     }
@@ -45,9 +41,7 @@ pub fn attested_public_key(
         return Err(bad("no attested credential data"));
     }
     let id_len = u16::from_be_bytes([auth_data[53], auth_data[54]]) as usize;
-    let key = auth_data
-        .get(55 + id_len..)
-        .ok_or_else(|| bad("credential id too long"))?;
+    let key = auth_data.get(55 + id_len..).ok_or_else(|| bad("credential id too long"))?;
     public_key(key, algorithm)
 }
 

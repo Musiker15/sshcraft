@@ -35,9 +35,7 @@ pub fn from_output(text: &str) -> Option<HostOs> {
         return Some(os);
     }
     if let Some(like) = field(text, "ID_LIKE")
-        && let Some(os) = like
-            .split_whitespace()
-            .find_map(|id| from_id(&id.to_lowercase()))
+        && let Some(os) = like.split_whitespace().find_map(|id| from_id(&id.to_lowercase()))
     {
         return Some(os);
     }

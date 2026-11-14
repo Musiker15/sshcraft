@@ -1,9 +1,7 @@
 mod common;
 
 use common::{Dev, TestServer, create, engine, join, sync};
-use sshcraft_model::model::{
-    ConnectionSettings, Group, GroupId, Host, HostId, group_chain, resolve,
-};
+use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, group_chain, resolve};
 use sshcraft_store::store::ItemKind;
 use sshcraft_sync::engine::{record_group_hosts, record_local_change};
 
@@ -25,14 +23,7 @@ fn save_group(dev: &Dev, g: &Group, at: i64) {
 }
 
 fn find(dev: &Dev, id: GroupId) -> Group {
-    dev.store
-        .lock()
-        .unwrap()
-        .list_groups()
-        .unwrap()
-        .into_iter()
-        .find(|g| g.id == id)
-        .unwrap()
+    dev.store.lock().unwrap().list_groups().unwrap().into_iter().find(|g| g.id == id).unwrap()
 }
 
 #[tokio::test]
@@ -55,12 +46,7 @@ async fn subgroups_reach_other_devices() {
         id: HostId::new(),
         name: "h".into(),
         group_id: Some(bottom.id),
-        settings: ConnectionSettings {
-            key: Some(sshcraft_model::model::KeyRef::Agent {
-                fingerprint: "SHA256:x".into(),
-            }),
-            ..Default::default()
-        },
+        settings: ConnectionSettings { key: Some(sshcraft_model::model::KeyRef::Agent { fingerprint: "SHA256:x".into() }), ..Default::default() },
         location: Some(s),
         tags: vec!["prod".into()],
         os: Some(sshcraft_model::model::HostOs::Debian),
@@ -80,10 +66,7 @@ async fn subgroups_reach_other_devices() {
     assert_eq!(on_y.os, Some(sshcraft_model::model::HostOs::Debian));
     let refs: Vec<&Group> = chain.iter().collect();
     let resolved = resolve(&on_y, &refs, &[]).unwrap();
-    assert_eq!(
-        (resolved.address.as_str(), resolved.username.as_str()),
-        ("top.example.org", "deploy")
-    );
+    assert_eq!((resolved.address.as_str(), resolved.username.as_str()), ("top.example.org", "deploy"));
 }
 
 #[tokio::test]
@@ -123,40 +106,19 @@ async fn cycle_from_the_server_is_refused() {
     sync(&x).await;
     sync(&y).await;
     // X puts A under B, Y (later) puts B under A.
-    save_group(
-        &x,
-        &Group {
-            parent_id: Some(b.id),
-            ..a.clone()
-        },
-        100,
-    );
-    save_group(
-        &y,
-        &Group {
-            parent_id: Some(a.id),
-            ..find(&y, b.id)
-        },
-        200,
-    );
+    save_group(&x, &Group { parent_id: Some(b.id), ..a.clone() }, 100);
+    save_group(&y, &Group { parent_id: Some(a.id), ..find(&y, b.id) }, 200);
     sync(&x).await;
     let mut ey = engine(&y).await;
     let report = ey.pull(&y.store, &y.vault).await.unwrap();
-    assert!(
-        !report.rejected.is_empty(),
-        "the older change is refused: {report:?}"
-    );
+    assert!(!report.rejected.is_empty(), "the older change is refused: {report:?}");
     ey.push(&y.store, &y.vault, 0).await.unwrap();
     for _ in 0..2 {
         sync(&x).await;
         sync(&y).await;
     }
     for dev in [&x, &y] {
-        assert_eq!(
-            find(dev, b.id).parent_id,
-            Some(a.id),
-            "the later change wins"
-        );
+        assert_eq!(find(dev, b.id).parent_id, Some(a.id), "the later change wins");
         assert_eq!(find(dev, a.id).parent_id, None);
     }
 }
@@ -186,9 +148,7 @@ async fn moving_a_group_takes_subgroups_along() {
         store.upsert_group(&top).unwrap();
         store.upsert_group(&sub).unwrap();
         store.upsert_host(&host).unwrap();
-        store
-            .set_location(ItemKind::Group, &top.id.0.to_string(), Some(s))
-            .unwrap();
+        store.set_location(ItemKind::Group, &top.id.0.to_string(), Some(s)).unwrap();
         record_local_change(&store, ItemKind::Group, &top.id.0.to_string(), 5).unwrap();
         record_group_hosts(&store, &top.id.0.to_string(), 5).unwrap();
         let outbox = store.outbox(s).unwrap();

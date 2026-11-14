@@ -48,18 +48,10 @@ fn entry(at: i64, detail: &str) -> AgentLogEntry {
 fn fresh_install_levels_follow_the_design() {
     let policy = AgentPolicy::default();
     assert_eq!(policy.level(AgentCategory::List), AgentLevel::Allow);
-    for ask in [
-        AgentCategory::Connect,
-        AgentCategory::Edit,
-        AgentCategory::Keys,
-    ] {
+    for ask in [AgentCategory::Connect, AgentCategory::Edit, AgentCategory::Keys] {
         assert_eq!(policy.level(ask), AgentLevel::Ask, "{ask:?}");
     }
-    for deny in [
-        AgentCategory::Delete,
-        AgentCategory::Share,
-        AgentCategory::Sync,
-    ] {
+    for deny in [AgentCategory::Delete, AgentCategory::Share, AgentCategory::Sync] {
         assert_eq!(policy.level(deny), AgentLevel::Deny, "{deny:?}");
     }
 }
@@ -68,9 +60,7 @@ fn fresh_install_levels_follow_the_design() {
 fn a_stored_level_wins_and_survives_reloading() {
     let (store, _) = setup();
     let mut policy = AgentPolicy::default();
-    policy
-        .levels
-        .insert(AgentCategory::Connect, AgentLevel::Allow);
+    policy.levels.insert(AgentCategory::Connect, AgentLevel::Allow);
     policy.hidden.insert(Uuid::new_v4());
     policy.save(&store).unwrap();
     let loaded = AgentPolicy::load(&store);
@@ -81,12 +71,7 @@ fn a_stored_level_wins_and_survives_reloading() {
 #[test]
 fn unknown_or_broken_entries_fall_back_to_defaults() {
     let (store, _) = setup();
-    store
-        .put_setting(
-            POLICY_KEY,
-            r#"{"levels": {"teleport": "allow", "delete": "allow", "edit": "maybe"}}"#,
-        )
-        .unwrap();
+    store.put_setting(POLICY_KEY, r#"{"levels": {"teleport": "allow", "delete": "allow", "edit": "maybe"}}"#).unwrap();
     let loaded = AgentPolicy::load(&store);
     assert_eq!(loaded.level(AgentCategory::Delete), AgentLevel::Allow);
     assert_eq!(loaded.level(AgentCategory::Edit), AgentLevel::Ask);
@@ -144,14 +129,8 @@ fn log_entries_are_sealed_and_cut() {
     let long = "x".repeat(MAX_DETAIL + 10);
     log_append(&vault, &store, &entry(1, "mysql -psecret123")).unwrap();
     log_append(&vault, &store, &entry(2, &long)).unwrap();
-    let raw: Vec<Vec<u8>> = store
-        .conn
-        .prepare("SELECT sealed FROM agent_log")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
+    let raw: Vec<Vec<u8>> =
+        store.conn.prepare("SELECT sealed FROM agent_log").unwrap().query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
     assert!(raw.iter().all(|b| !b.windows(9).any(|w| w == b"secret123")));
     let list = log_list(&vault, &store).unwrap();
     assert_eq!(list[0].detail.chars().count(), MAX_DETAIL);
@@ -162,9 +141,7 @@ fn log_entries_are_sealed_and_cut() {
 fn a_damaged_hidden_list_is_an_error_not_an_empty_list() {
     let (store, _) = setup();
     assert!(AgentPolicy::load_checked(&store).is_ok());
-    store
-        .put_setting(POLICY_KEY, r#"{"hidden": ["not-a-uuid"]}"#)
-        .unwrap();
+    store.put_setting(POLICY_KEY, r#"{"hidden": ["not-a-uuid"]}"#).unwrap();
     assert!(AgentPolicy::load_checked(&store).is_err());
     store.put_setting(POLICY_KEY, "{").unwrap();
     assert!(AgentPolicy::load_checked(&store).is_err());

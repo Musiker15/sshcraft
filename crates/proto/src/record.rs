@@ -67,21 +67,10 @@ impl SealedRecord {
         let mut nonce = [0u8; 24];
         rand::rng().fill(&mut nonce[..]);
         let ciphertext = cipher(key)
-            .encrypt(
-                &XNonce::from(nonce),
-                Payload {
-                    msg: body,
-                    aad: &header.aad(),
-                },
-            )
+            .encrypt(&XNonce::from(nonce), Payload { msg: body, aad: &header.aad() })
             .expect("XChaCha20-Poly1305 encryption does not fail for in-memory buffers");
         let signature = keys.sign(&Self::signed_bytes(&header, &nonce, &ciphertext));
-        Self {
-            header,
-            nonce,
-            ciphertext,
-            signature,
-        }
+        Self { header, nonce, ciphertext, signature }
     }
 
     /// Checks area, write permission, author device and signature, then decrypts.
@@ -89,12 +78,7 @@ impl SealedRecord {
     /// Preconditions: `manifest` must already have passed [`AreaManifest::verify`], and
     /// `author_devices` must be the verified device set of `header.author_account`. This
     /// function trusts both and does not check them again.
-    pub fn open(
-        &self,
-        key: &AreaKey,
-        manifest: &AreaManifest,
-        author_devices: &DeviceSet,
-    ) -> Result<Zeroizing<Vec<u8>>, ProtoError> {
+    pub fn open(&self, key: &AreaKey, manifest: &AreaManifest, author_devices: &DeviceSet) -> Result<Zeroizing<Vec<u8>>, ProtoError> {
         let header = &self.header;
         if header.area_id != manifest.area_id || header.key_version != manifest.key_version {
             return Err(ProtoError::NotAllowed);
@@ -106,18 +90,9 @@ impl SealedRecord {
         if device.account != header.author_account {
             return Err(ProtoError::NotAllowed);
         }
-        device.verify_signed(
-            &Self::signed_bytes(header, &self.nonce, &self.ciphertext),
-            &self.signature,
-        )?;
+        device.verify_signed(&Self::signed_bytes(header, &self.nonce, &self.ciphertext), &self.signature)?;
         cipher(key)
-            .decrypt(
-                &XNonce::from(self.nonce),
-                Payload {
-                    msg: &self.ciphertext,
-                    aad: &header.aad(),
-                },
-            )
+            .decrypt(&XNonce::from(self.nonce), Payload { msg: &self.ciphertext, aad: &header.aad() })
             .map(Zeroizing::new)
             .map_err(|_| ProtoError::Decrypt)
     }
@@ -154,12 +129,7 @@ pub struct VersionTracker {
     manifests: HashMap<Uuid, Seen>,
 }
 
-fn check(
-    map: &mut HashMap<Uuid, Seen>,
-    id: Uuid,
-    version: u64,
-    digest: [u8; 32],
-) -> Result<Freshness, ProtoError> {
+fn check(map: &mut HashMap<Uuid, Seen>, id: Uuid, version: u64, digest: [u8; 32]) -> Result<Freshness, ProtoError> {
     match map.get(&id) {
         Some(seen) if version < seen.version => Err(ProtoError::Rollback),
         Some(seen) if version == seen.version && digest != seen.digest => Err(ProtoError::Fork),
@@ -181,27 +151,13 @@ impl VersionTracker {
         author_devices: &DeviceSet,
     ) -> Result<(Freshness, Zeroizing<Vec<u8>>), ProtoError> {
         let body = record.open(key, manifest, author_devices)?;
-        let freshness = check(
-            &mut self.records,
-            record.header.record_id,
-            record.header.version,
-            record.digest(),
-        )?;
+        let freshness = check(&mut self.records, record.header.record_id, record.header.version, record.digest())?;
         Ok((freshness, body))
     }
 
     /// Verifies the manifest against its owner's devices and only then counts it.
-    pub fn accept_manifest(
-        &mut self,
-        manifest: &AreaManifest,
-        owner_devices: &DeviceSet,
-    ) -> Result<Freshness, ProtoError> {
+    pub fn accept_manifest(&mut self, manifest: &AreaManifest, owner_devices: &DeviceSet) -> Result<Freshness, ProtoError> {
         manifest.verify(owner_devices)?;
-        check(
-            &mut self.manifests,
-            manifest.area_id.0,
-            manifest.version,
-            manifest.digest(),
-        )
+        check(&mut self.manifests, manifest.area_id.0, manifest.version, manifest.digest())
     }
 }

@@ -52,11 +52,7 @@ pub(crate) fn refs_of(body: &ItemBody) -> Option<CredentialRefs> {
     match body {
         ItemBody::Host { host } => Some(CredentialRefs::of_settings(&host.settings)),
         ItemBody::Group { group } => Some(CredentialRefs::of_settings(&group.defaults)),
-        ItemBody::Identity { identity } => Some(CredentialRefs {
-            key: identity.key.clone(),
-            password: identity.password,
-            ..Default::default()
-        }),
+        ItemBody::Identity { identity } => Some(CredentialRefs { key: identity.key.clone(), password: identity.password, ..Default::default() }),
         _ => None,
     }
 }
@@ -74,36 +70,15 @@ pub(crate) fn set_refs(body: &mut ItemBody, refs: &CredentialRefs) {
 }
 
 /// Whether the item `id` of `kind` goes into `target` at `server`.
-fn goes_with(
-    store: &Store,
-    server: ServerId,
-    kind: ItemKind,
-    id: &str,
-    target: Uuid,
-    personal: Uuid,
-) -> Result<bool, SyncError> {
-    Ok(store.location_of(kind, id)? == Some(server)
-        && store.area_for(server, kind, id, personal)? == target)
+fn goes_with(store: &Store, server: ServerId, kind: ItemKind, id: &str, target: Uuid, personal: Uuid) -> Result<bool, SyncError> {
+    Ok(store.location_of(kind, id)? == Some(server) && store.area_for(server, kind, id, personal)? == target)
 }
 
 /// Drops every reference whose item does not go into `target` at `server`. Agent keys only go
 /// into the personal area.
-pub(crate) fn strip_unsynced(
-    store: &Store,
-    server: ServerId,
-    refs: &mut CredentialRefs,
-    target: Uuid,
-    personal: Uuid,
-) -> Result<(), SyncError> {
+pub(crate) fn strip_unsynced(store: &Store, server: ServerId, refs: &mut CredentialRefs, target: Uuid, personal: Uuid) -> Result<(), SyncError> {
     let keep_key = match &refs.key {
-        Some(KeyRef::Stored { id }) => goes_with(
-            store,
-            server,
-            ItemKind::Key,
-            &id.0.to_string(),
-            target,
-            personal,
-        )?,
+        Some(KeyRef::Stored { id }) => goes_with(store, server, ItemKind::Key, &id.0.to_string(), target, personal)?,
         Some(KeyRef::Agent { .. }) => target == personal,
         None => true,
     };
@@ -112,27 +87,13 @@ pub(crate) fn strip_unsynced(
     }
     for password in [&mut refs.password, &mut refs.proxy_password] {
         if let Some(id) = *password
-            && !goes_with(
-                store,
-                server,
-                ItemKind::Password,
-                &id.0.to_string(),
-                target,
-                personal,
-            )?
+            && !goes_with(store, server, ItemKind::Password, &id.0.to_string(), target, personal)?
         {
             *password = None;
         }
     }
     if let Some(id) = refs.identity
-        && !goes_with(
-            store,
-            server,
-            ItemKind::Identity,
-            &id.0.to_string(),
-            target,
-            personal,
-        )?
+        && !goes_with(store, server, ItemKind::Identity, &id.0.to_string(), target, personal)?
     {
         refs.identity = None;
     }
@@ -141,14 +102,7 @@ pub(crate) fn strip_unsynced(
 
 /// Whether a local reference to `id` points where a record of `area` could not carry it:
 /// elsewhere than `server`, or (for a record of a known area) in another area.
-fn foreign(
-    store: &Store,
-    server: ServerId,
-    kind: ItemKind,
-    id: &str,
-    area: Option<Uuid>,
-    personal: Option<Uuid>,
-) -> Result<bool, SyncError> {
+fn foreign(store: &Store, server: ServerId, kind: ItemKind, id: &str, area: Option<Uuid>, personal: Option<Uuid>) -> Result<bool, SyncError> {
     let elsewhere = store.location_of(kind, id)? != Some(server);
     let other_area = match area {
         Some(area) => store.area_for(server, kind, id, personal.unwrap_or_default())? != area,
@@ -187,9 +141,7 @@ pub(crate) fn drop_unreferenced(store: &Store, ids: &[PasswordId]) -> Result<(),
     for identity in store.list_identities()? {
         used.extend(identity.password);
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
     for id in ids {
         if !used.contains(id) && store.password_record(*id)?.is_some() {
             crate::engine::record_local_change(store, ItemKind::Password, &id.0.to_string(), now)?;
@@ -215,52 +167,25 @@ pub(crate) fn keep_local(
     let shared_area = area.is_some() && area != personal;
     if incoming.key.is_none() {
         incoming.key = match &local.key {
-            Some(KeyRef::Stored { id }) => foreign(
-                store,
-                server,
-                ItemKind::Key,
-                &id.0.to_string(),
-                area,
-                personal,
-            )?
-            .then_some(KeyRef::Stored { id: *id }),
+            Some(KeyRef::Stored { id }) => {
+                foreign(store, server, ItemKind::Key, &id.0.to_string(), area, personal)?.then_some(KeyRef::Stored { id: *id })
+            }
             Some(agent @ KeyRef::Agent { .. }) if shared_area => Some(agent.clone()),
             _ => None,
         };
     }
-    let local_proxy = if same_proxy {
-        local.proxy_password
-    } else {
-        None
-    };
-    for (incoming, local) in [
-        (&mut incoming.password, local.password),
-        (&mut incoming.proxy_password, local_proxy),
-    ] {
+    let local_proxy = if same_proxy { local.proxy_password } else { None };
+    for (incoming, local) in [(&mut incoming.password, local.password), (&mut incoming.proxy_password, local_proxy)] {
         if incoming.is_none()
             && let Some(id) = local
-            && foreign(
-                store,
-                server,
-                ItemKind::Password,
-                &id.0.to_string(),
-                area,
-                personal,
-            )?
+            && foreign(store, server, ItemKind::Password, &id.0.to_string(), area, personal)?
         {
             *incoming = Some(id);
         }
     }
     if incoming.identity.is_none()
         && let Some(id) = local.identity
-        && foreign(
-            store,
-            server,
-            ItemKind::Identity,
-            &id.0.to_string(),
-            area,
-            personal,
-        )?
+        && foreign(store, server, ItemKind::Identity, &id.0.to_string(), area, personal)?
     {
         incoming.identity = Some(id);
     }

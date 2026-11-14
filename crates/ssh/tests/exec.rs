@@ -20,12 +20,7 @@ async fn install_runs_one_command_over_exec() {
     let server = TestServer::start(key.public_key().clone()).await;
     server.set_exec_output("motd\nSSHCRAFT_ADDED\n");
     let session = connect(
-        ConnectParams {
-            address: "127.0.0.1".into(),
-            port: server.port,
-            username: "tester".into(),
-            auth: Auth::key(Credential::Key(key.clone())),
-        },
+        ConnectParams { address: "127.0.0.1".into(), port: server.port, username: "tester".into(), auth: Auth::key(Credential::Key(key.clone())) },
         Arc::new(Trust),
         Arc::new(NoPrompter),
     )

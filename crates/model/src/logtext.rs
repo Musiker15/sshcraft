@@ -57,11 +57,7 @@ pub fn plain_text(bytes: &[u8]) -> String {
                     }
                     _ => {}
                 }
-                if c == '\u{1b}' {
-                    State::Escape
-                } else {
-                    State::Text
-                }
+                if c == '\u{1b}' { State::Escape } else { State::Text }
             }
         };
     }

@@ -62,14 +62,7 @@ const EMPTY_PAUSE: Duration = Duration::from_millis(20);
 impl Default for SerialSettings {
     /// 115200 baud, 8 data bits, no parity, 1 stop bit, no flow control.
     fn default() -> Self {
-        Self {
-            port: String::new(),
-            baud: 115_200,
-            data_bits: 8,
-            stop_bits: 1,
-            parity: Parity::None,
-            flow: FlowControl::None,
-        }
+        Self { port: String::new(), baud: 115_200, data_bits: 8, stop_bits: 1, parity: Parity::None, flow: FlowControl::None }
     }
 }
 
@@ -97,10 +90,7 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
     serial2::SerialPort::available_ports()
         .unwrap_or_default()
         .into_iter()
-        .map(|path| SerialPortInfo {
-            name: path.to_string_lossy().into_owned(),
-            description: String::new(),
-        })
+        .map(|path| SerialPortInfo { name: path.to_string_lossy().into_owned(), description: String::new() })
         .collect()
 }
 
@@ -140,13 +130,7 @@ pub(crate) fn to_serial2(settings: &SerialSettings) -> Result<Serial2Values, Ser
         FlowControl::Software => serial2::FlowControl::XonXoff,
         FlowControl::Hardware => serial2::FlowControl::RtsCts,
     };
-    Ok(Serial2Values {
-        baud: settings.baud,
-        char_size,
-        stop_bits,
-        parity,
-        flow,
-    })
+    Ok(Serial2Values { baud: settings.baud, char_size, stop_bits, parity, flow })
 }
 
 /// Reads until the port fails: timeouts are waited out, anything else ends the session as lost
@@ -161,9 +145,7 @@ pub(crate) fn pump<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<She
             Ok(0) => {
                 empty += 1;
                 if empty >= MAX_EMPTY_READS {
-                    let _ = tx.blocking_send(ShellEvent::Ended(Disconnect::Lost(
-                        "the port closed".into(),
-                    )));
+                    let _ = tx.blocking_send(ShellEvent::Ended(Disconnect::Lost("the port closed".into())));
                     return;
                 }
                 std::thread::sleep(EMPTY_PAUSE);
@@ -171,18 +153,11 @@ pub(crate) fn pump<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<She
             }
             Ok(n) => {
                 empty = 0;
-                if tx
-                    .blocking_send(ShellEvent::Data(buf[..n].to_vec()))
-                    .is_err()
-                {
+                if tx.blocking_send(ShellEvent::Data(buf[..n].to_vec())).is_err() {
                     return;
                 }
             }
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
-                ) => {}
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {}
             Err(e) => {
                 let _ = tx.blocking_send(ShellEvent::Ended(Disconnect::Lost(e.to_string())));
                 return;
@@ -204,43 +179,28 @@ pub struct SerialWriter {
 impl SerialWriter {
     pub fn write(&self, data: &[u8]) -> Result<(), SerialError> {
         let port = self.port.lock().expect("port lock");
-        port.write_all(data)
-            .and_then(|()| port.flush())
-            .map_err(|e| SerialError::Open(e.to_string()))
+        port.write_all(data).and_then(|()| port.flush()).map_err(|e| SerialError::Open(e.to_string()))
     }
 }
 
 /// Opens the port with the settings; its output comes as [`ShellEvent::Data`].
-pub fn open(
-    settings: &SerialSettings,
-) -> Result<(SerialWriter, mpsc::Receiver<ShellEvent>), SerialError> {
+pub fn open(settings: &SerialSettings) -> Result<(SerialWriter, mpsc::Receiver<ShellEvent>), SerialError> {
     let values = to_serial2(settings)?;
-    let mut port = serial2::SerialPort::open(
-        settings.port.trim(),
-        move |mut port_settings: serial2::Settings| {
-            port_settings.set_raw();
-            port_settings.set_baud_rate(values.baud)?;
-            port_settings.set_char_size(values.char_size);
-            port_settings.set_stop_bits(values.stop_bits);
-            port_settings.set_parity(values.parity);
-            port_settings.set_flow_control(values.flow);
-            Ok(port_settings)
-        },
-    )
+    let mut port = serial2::SerialPort::open(settings.port.trim(), move |mut port_settings: serial2::Settings| {
+        port_settings.set_raw();
+        port_settings.set_baud_rate(values.baud)?;
+        port_settings.set_char_size(values.char_size);
+        port_settings.set_stop_bits(values.stop_bits);
+        port_settings.set_parity(values.parity);
+        port_settings.set_flow_control(values.flow);
+        Ok(port_settings)
+    })
     .map_err(|e| SerialError::Open(e.to_string()))?;
-    port.set_read_timeout(READ_TIMEOUT)
-        .map_err(|e| SerialError::Open(e.to_string()))?;
-    let reader = port
-        .try_clone()
-        .map_err(|e| SerialError::Open(e.to_string()))?;
+    port.set_read_timeout(READ_TIMEOUT).map_err(|e| SerialError::Open(e.to_string()))?;
+    let reader = port.try_clone().map_err(|e| SerialError::Open(e.to_string()))?;
     let (tx, rx) = mpsc::channel(EVENT_BUFFER);
     std::thread::spawn(move || pump(reader, tx));
-    Ok((
-        SerialWriter {
-            port: Arc::new(Mutex::new(port)),
-        },
-        rx,
-    ))
+    Ok((SerialWriter { port: Arc::new(Mutex::new(port)) }, rx))
 }
 
 #[cfg(test)]
@@ -252,71 +212,29 @@ mod tests {
     #[test]
     fn default_is_115200_8n1() {
         let d = SerialSettings::default();
-        assert_eq!(
-            (d.baud, d.data_bits, d.stop_bits, d.parity, d.flow),
-            (115_200, 8, 1, Parity::None, FlowControl::None)
-        );
+        assert_eq!((d.baud, d.data_bits, d.stop_bits, d.parity, d.flow), (115_200, 8, 1, Parity::None, FlowControl::None));
         assert!(d.port.is_empty());
     }
 
     #[test]
     fn validate_rejects_bad_values() {
-        let ok = SerialSettings {
-            port: "COM3".into(),
-            ..SerialSettings::default()
-        };
+        let ok = SerialSettings { port: "COM3".into(), ..SerialSettings::default() };
         assert!(ok.validate().is_ok());
         for bad in [
-            SerialSettings {
-                baud: 0,
-                ..ok.clone()
-            },
-            SerialSettings {
-                baud: 49,
-                ..ok.clone()
-            },
-            SerialSettings {
-                baud: 4_000_001,
-                ..ok.clone()
-            },
-            SerialSettings {
-                data_bits: 9,
-                ..ok.clone()
-            },
-            SerialSettings {
-                data_bits: 4,
-                ..ok.clone()
-            },
-            SerialSettings {
-                stop_bits: 3,
-                ..ok.clone()
-            },
-            SerialSettings {
-                port: "  ".into(),
-                ..ok.clone()
-            },
+            SerialSettings { baud: 0, ..ok.clone() },
+            SerialSettings { baud: 49, ..ok.clone() },
+            SerialSettings { baud: 4_000_001, ..ok.clone() },
+            SerialSettings { data_bits: 9, ..ok.clone() },
+            SerialSettings { data_bits: 4, ..ok.clone() },
+            SerialSettings { stop_bits: 3, ..ok.clone() },
+            SerialSettings { port: "  ".into(), ..ok.clone() },
         ] {
             assert!(bad.validate().is_err(), "{bad:?}");
         }
         for fine in [5, 6, 7, 8] {
-            assert!(
-                SerialSettings {
-                    data_bits: fine,
-                    ..ok.clone()
-                }
-                .validate()
-                .is_ok()
-            );
+            assert!(SerialSettings { data_bits: fine, ..ok.clone() }.validate().is_ok());
         }
-        assert!(
-            SerialSettings {
-                stop_bits: 2,
-                baud: 50,
-                ..ok.clone()
-            }
-            .validate()
-            .is_ok()
-        );
+        assert!(SerialSettings { stop_bits: 2, baud: 50, ..ok.clone() }.validate().is_ok());
     }
 
     /// Hands out prepared reads, then fails like an unplugged adapter.
@@ -368,21 +286,12 @@ mod tests {
     async fn endless_empty_reads_end_as_lost() {
         let (tx, mut rx) = mpsc::channel(16);
         std::thread::spawn(move || pump(Empty, tx));
-        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-            .await
-            .expect("the pump must not spin forever");
-        assert!(matches!(
-            event,
-            Some(ShellEvent::Ended(Disconnect::Lost(_)))
-        ));
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.expect("the pump must not spin forever");
+        assert!(matches!(event, Some(ShellEvent::Ended(Disconnect::Lost(_)))));
     }
 
     fn port(settings: SerialSettings) -> SerialSettings {
-        SerialSettings {
-            port: "COM3".into(),
-            baud: 9600,
-            ..settings
-        }
+        SerialSettings { port: "COM3".into(), baud: 9600, ..settings }
     }
 
     /// Every value of the settings reaches serial2 as it was set; none falls back to a default.
@@ -390,50 +299,21 @@ mod tests {
     fn settings_map_to_serial2() {
         use serial2::{CharSize, FlowControl as Flow, Parity as Par, StopBits};
         let base = port(SerialSettings::default());
-        for (bits, size) in [
-            (5, CharSize::Bits5),
-            (6, CharSize::Bits6),
-            (7, CharSize::Bits7),
-            (8, CharSize::Bits8),
-        ] {
-            let values = to_serial2(&SerialSettings {
-                data_bits: bits,
-                ..base.clone()
-            })
-            .unwrap();
+        for (bits, size) in [(5, CharSize::Bits5), (6, CharSize::Bits6), (7, CharSize::Bits7), (8, CharSize::Bits8)] {
+            let values = to_serial2(&SerialSettings { data_bits: bits, ..base.clone() }).unwrap();
             assert_eq!(values.char_size, size, "{bits} data bits");
             assert_eq!(values.baud, 9600);
         }
         for (stop, want) in [(1, StopBits::One), (2, StopBits::Two)] {
-            let values = to_serial2(&SerialSettings {
-                stop_bits: stop,
-                ..base.clone()
-            })
-            .unwrap();
+            let values = to_serial2(&SerialSettings { stop_bits: stop, ..base.clone() }).unwrap();
             assert_eq!(values.stop_bits, want, "{stop} stop bits");
         }
-        for (parity, want) in [
-            (Parity::None, Par::None),
-            (Parity::Odd, Par::Odd),
-            (Parity::Even, Par::Even),
-        ] {
-            let values = to_serial2(&SerialSettings {
-                parity,
-                ..base.clone()
-            })
-            .unwrap();
+        for (parity, want) in [(Parity::None, Par::None), (Parity::Odd, Par::Odd), (Parity::Even, Par::Even)] {
+            let values = to_serial2(&SerialSettings { parity, ..base.clone() }).unwrap();
             assert_eq!(values.parity, want, "{parity:?}");
         }
-        for (flow, want) in [
-            (FlowControl::None, Flow::None),
-            (FlowControl::Software, Flow::XonXoff),
-            (FlowControl::Hardware, Flow::RtsCts),
-        ] {
-            let values = to_serial2(&SerialSettings {
-                flow,
-                ..base.clone()
-            })
-            .unwrap();
+        for (flow, want) in [(FlowControl::None, Flow::None), (FlowControl::Software, Flow::XonXoff), (FlowControl::Hardware, Flow::RtsCts)] {
+            let values = to_serial2(&SerialSettings { flow, ..base.clone() }).unwrap();
             assert_eq!(values.flow, want, "{flow:?}");
         }
     }
@@ -442,15 +322,8 @@ mod tests {
     #[test]
     fn invalid_data_bits_are_an_error() {
         for bits in [4, 9] {
-            let settings = port(SerialSettings {
-                data_bits: bits,
-                ..SerialSettings::default()
-            });
-            assert_eq!(
-                to_serial2(&settings),
-                Err(SerialError::Invalid("data_bits")),
-                "{bits}"
-            );
+            let settings = port(SerialSettings { data_bits: bits, ..SerialSettings::default() });
+            assert_eq!(to_serial2(&settings), Err(SerialError::Invalid("data_bits")), "{bits}");
         }
     }
 
@@ -458,26 +331,14 @@ mod tests {
     #[test]
     fn invalid_stop_bits_are_an_error() {
         for stop in [0, 3] {
-            let settings = port(SerialSettings {
-                stop_bits: stop,
-                ..SerialSettings::default()
-            });
-            assert_eq!(
-                to_serial2(&settings),
-                Err(SerialError::Invalid("stop_bits")),
-                "{stop}"
-            );
+            let settings = port(SerialSettings { stop_bits: stop, ..SerialSettings::default() });
+            assert_eq!(to_serial2(&settings), Err(SerialError::Invalid("stop_bits")), "{stop}");
         }
     }
 
     #[test]
     fn settings_json_roundtrip() {
-        let s = SerialSettings {
-            port: "/dev/ttyUSB0".into(),
-            parity: Parity::Even,
-            flow: FlowControl::Hardware,
-            ..SerialSettings::default()
-        };
+        let s = SerialSettings { port: "/dev/ttyUSB0".into(), parity: Parity::Even, flow: FlowControl::Hardware, ..SerialSettings::default() };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"parity\":\"even\""), "{json}");
         assert_eq!(serde_json::from_str::<SerialSettings>(&json).unwrap(), s);

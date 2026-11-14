@@ -2,8 +2,7 @@ mod common;
 
 use common::{Dev, TestServer, account, create, engine, seal_in, sync};
 use sshcraft_model::model::{
-    ConnectionSettings, Directory, Group, GroupId, Host, Identity, IdentityId, PasswordId, Proxy,
-    ProxyEndpoint, ResolvedHost, resolve_route,
+    ConnectionSettings, Directory, Group, GroupId, Host, Identity, IdentityId, PasswordId, Proxy, ProxyEndpoint, ResolvedHost, resolve_route,
 };
 use sshcraft_proto::area::Role;
 use sshcraft_store::store::ItemKind;
@@ -23,11 +22,7 @@ async fn people(server: &TestServer) -> (Dev, Dev) {
     create(server, &b, "b@example.org").await;
     for dev in [&a, &b] {
         let id = dev.row().id;
-        dev.store
-            .lock()
-            .unwrap()
-            .update_server_flags(id, true, true)
-            .unwrap();
+        dev.store.lock().unwrap().update_server_flags(id, true, true).unwrap();
     }
     let e = engine(&a).await;
     let found = find(&e, &a.store, "b@example.org").await.unwrap();
@@ -58,10 +53,7 @@ async fn team(a: &Dev) -> Setup {
     let group = Group {
         id: GroupId::new(),
         name: "team".into(),
-        defaults: ConnectionSettings {
-            identity: Some(identity.id),
-            ..Default::default()
-        },
+        defaults: ConnectionSettings { identity: Some(identity.id), ..Default::default() },
         location: Some(server),
         parent_id: None,
         tags: Vec::new(),
@@ -81,12 +73,8 @@ async fn team(a: &Dev) -> Setup {
     };
     {
         let store = a.store.lock().unwrap();
-        a.vault
-            .store_password(&store, identity_password, SECRET, Some(server))
-            .unwrap();
-        a.vault
-            .store_password(&store, proxy_password, PROXY_SECRET, Some(server))
-            .unwrap();
+        a.vault.store_password(&store, identity_password, SECRET, Some(server)).unwrap();
+        a.vault.store_password(&store, proxy_password, PROXY_SECRET, Some(server)).unwrap();
         store.upsert_identity(&identity).unwrap();
         store.upsert_group(&group).unwrap();
         store.upsert_host(&host).unwrap();
@@ -101,30 +89,12 @@ async fn team(a: &Dev) -> Setup {
         }
     }
     sync(a).await;
-    Setup {
-        group,
-        host,
-        identity_password,
-        proxy_password,
-    }
+    Setup { group, host, identity_password, proxy_password }
 }
 
 async fn share_it(a: &Dev, b: &Dev, what: ShareWhat, role: Role, with_keys: bool) -> Uuid {
     let mut e = engine(a).await;
-    let outcome = share(
-        &mut e,
-        &a.store,
-        &a.vault,
-        what,
-        vec![Grant {
-            account: account(b),
-            role,
-        }],
-        with_keys,
-        5,
-    )
-    .await
-    .unwrap();
+    let outcome = share(&mut e, &a.store, &a.vault, what, vec![Grant { account: account(b), role }], with_keys, 5).await.unwrap();
     sync(b).await;
     outcome.area
 }
@@ -132,28 +102,14 @@ async fn share_it(a: &Dev, b: &Dev, what: ShareWhat, role: Role, with_keys: bool
 /// How `dev` would connect to the only host it has with name `name`.
 fn route_on(dev: &Dev, name: &str) -> ResolvedHost {
     let store = dev.store.lock().unwrap();
-    let (groups, hosts, identities) = (
-        store.list_groups().unwrap(),
-        store.list_hosts().unwrap(),
-        store.list_identities().unwrap(),
-    );
+    let (groups, hosts, identities) = (store.list_groups().unwrap(), store.list_hosts().unwrap(), store.list_identities().unwrap());
     let host = hosts.iter().find(|h| h.name == name).expect("host there");
-    resolve_route(
-        &Directory {
-            groups: &groups,
-            hosts: &hosts,
-            identities: &identities,
-        },
-        host.id,
-    )
-    .unwrap()
-    .target
+    resolve_route(&Directory { groups: &groups, hosts: &hosts, identities: &identities }, host.id).unwrap().target
 }
 
 fn secret(dev: &Dev, id: Option<PasswordId>) -> Option<String> {
     let store = dev.store.lock().unwrap();
-    id.and_then(|p| dev.vault.password(&store, p).ok())
-        .map(|p| p.to_string())
+    id.and_then(|p| dev.vault.password(&store, p).ok()).map(|p| p.to_string())
 }
 
 fn proxy_password(route: &ResolvedHost) -> Option<PasswordId> {
@@ -184,14 +140,7 @@ async fn group_share_without_keys_carries_identity_user_only() {
     assert_eq!(route.username, "deploy");
     assert_eq!(secret(&b, route.password), None);
     assert_eq!(secret(&b, proxy_password(&route)), None);
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .list_password_ids()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(b.store.lock().unwrap().list_password_ids().unwrap().is_empty());
     // The owner keeps everything.
     let mine = route_on(&a, "one");
     assert_eq!(secret(&a, mine.password).as_deref(), Some(SECRET));
@@ -202,17 +151,7 @@ async fn selection_share_copies_identity_and_password() {
     let server = TestServer::start().await;
     let (a, b) = people(&server).await;
     let s = team(&a).await;
-    share_it(
-        &a,
-        &b,
-        ShareWhat::Selection {
-            group: s.group.id,
-            hosts: vec![s.host.id],
-        },
-        Role::Read,
-        true,
-    )
-    .await;
+    share_it(&a, &b, ShareWhat::Selection { group: s.group.id, hosts: vec![s.host.id] }, Role::Read, true).await;
     let route = route_on(&b, "one");
     assert_eq!(route.username, "deploy");
     assert_eq!(secret(&b, route.password).as_deref(), Some(SECRET));
@@ -227,14 +166,7 @@ async fn single_host_share_without_keys_has_user_but_no_password() {
     let route = route_on(&b, "one");
     assert_eq!(route.username, "deploy");
     assert_eq!(secret(&b, route.password), None);
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .list_password_ids()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(b.store.lock().unwrap().list_password_ids().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -244,10 +176,7 @@ async fn proxy_password_follows_with_keys() {
     let s = team(&a).await;
     share_it(&a, &b, ShareWhat::Host(s.host.id), Role::Read, true).await;
     let route = route_on(&b, "one");
-    assert_eq!(
-        secret(&b, proxy_password(&route)).as_deref(),
-        Some(PROXY_SECRET)
-    );
+    assert_eq!(secret(&b, proxy_password(&route)).as_deref(), Some(PROXY_SECRET));
     // The member's copy, not the owner's original.
     assert_ne!(proxy_password(&route), Some(s.proxy_password));
 }
@@ -261,27 +190,16 @@ async fn member_cannot_change_shared_password() {
     let mine = route_on(&b, "one").password.unwrap();
     {
         let store = b.store.lock().unwrap();
-        let at = store
-            .location_of(ItemKind::Password, &mine.0.to_string())
-            .unwrap();
-        b.vault
-            .store_password(&store, mine, "changed-by-member", at)
-            .unwrap();
+        let at = store.location_of(ItemKind::Password, &mine.0.to_string()).unwrap();
+        b.vault.store_password(&store, mine, "changed-by-member", at).unwrap();
         record_local_change(&store, ItemKind::Password, &mine.0.to_string(), 50).unwrap();
     }
     let mut e = engine(&b).await;
     e.pull(&b.store, &b.vault).await.unwrap();
     e.push(&b.store, &b.vault, 50).await.unwrap();
-    assert!(
-        e.warnings().iter().any(|w| w == "share_read_only"),
-        "{:?}",
-        e.warnings()
-    );
+    assert!(e.warnings().iter().any(|w| w == "share_read_only"), "{:?}", e.warnings());
     sync(&a).await;
-    assert_eq!(
-        secret(&a, Some(s.identity_password)).as_deref(),
-        Some(SECRET)
-    );
+    assert_eq!(secret(&a, Some(s.identity_password)).as_deref(), Some(SECRET));
     assert_eq!(secret(&b, Some(mine)).as_deref(), Some(SECRET));
 }
 
@@ -295,32 +213,19 @@ async fn member_written_password_is_refused_by_owner() {
     let server_b = b.row().id;
     let entry = {
         let store = b.store.lock().unwrap();
-        store
-            .record_entry(
-                server_b,
-                ItemKind::Password,
-                &s.identity_password.0.to_string(),
-            )
-            .unwrap()
-            .unwrap()
+        store.record_entry(server_b, ItemKind::Password, &s.identity_password.0.to_string()).unwrap().unwrap()
     };
     let forged = seal_in(
         &b,
         area,
-        ItemBody::Password {
-            id: s.identity_password,
-            secret: Zeroizing::new("forged".into()),
-        },
+        ItemBody::Password { id: s.identity_password, secret: Zeroizing::new("forged".into()) },
         entry.record_id,
         entry.version + 1,
         999,
     );
     b.client(&server).await.put_record(&forged).await.unwrap();
     sync(&a).await;
-    assert_eq!(
-        secret(&a, Some(s.identity_password)).as_deref(),
-        Some(SECRET)
-    );
+    assert_eq!(secret(&a, Some(s.identity_password)).as_deref(), Some(SECRET));
 }
 
 #[tokio::test]
@@ -328,32 +233,12 @@ async fn owner_password_change_reaches_member() {
     let server = TestServer::start().await;
     let (a, b) = people(&server).await;
     let s = team(&a).await;
-    share_it(
-        &a,
-        &b,
-        ShareWhat::Selection {
-            group: s.group.id,
-            hosts: vec![s.host.id],
-        },
-        Role::Read,
-        true,
-    )
-    .await;
+    share_it(&a, &b, ShareWhat::Selection { group: s.group.id, hosts: vec![s.host.id] }, Role::Read, true).await;
     {
         let store = a.store.lock().unwrap();
-        let at = store
-            .location_of(ItemKind::Password, &s.identity_password.0.to_string())
-            .unwrap();
-        a.vault
-            .store_password(&store, s.identity_password, "rotated", at)
-            .unwrap();
-        record_local_change(
-            &store,
-            ItemKind::Password,
-            &s.identity_password.0.to_string(),
-            60,
-        )
-        .unwrap();
+        let at = store.location_of(ItemKind::Password, &s.identity_password.0.to_string()).unwrap();
+        a.vault.store_password(&store, s.identity_password, "rotated", at).unwrap();
+        record_local_change(&store, ItemKind::Password, &s.identity_password.0.to_string(), 60).unwrap();
     }
     sync(&a).await;
     sync(&b).await;
@@ -366,18 +251,9 @@ async fn member_moves_proxy(b: &Dev, port: u16) {
     let server_b = b.row().id;
     {
         let store = b.store.lock().unwrap();
-        let mut host = store
-            .list_hosts()
-            .unwrap()
-            .into_iter()
-            .find(|h| h.name == "one")
-            .unwrap();
-        host.settings.proxy = Some(Proxy::Socks5(ProxyEndpoint {
-            address: "attacker.example.org".into(),
-            port,
-            username: Some("p".into()),
-            password: None,
-        }));
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.name == "one").unwrap();
+        host.settings.proxy =
+            Some(Proxy::Socks5(ProxyEndpoint { address: "attacker.example.org".into(), port, username: Some("p".into()), password: None }));
         store.upsert_host(&host).unwrap();
         record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 70).unwrap();
     }
@@ -427,12 +303,7 @@ async fn member_edit_elsewhere_keeps_the_owners_proxy_password() {
     share_it(&a, &b, ShareWhat::Host(s.host.id), Role::Write, false).await;
     {
         let store = b.store.lock().unwrap();
-        let mut host = store
-            .list_hosts()
-            .unwrap()
-            .into_iter()
-            .find(|h| h.name == "one")
-            .unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.name == "one").unwrap();
         host.settings.port = Some(2222);
         store.upsert_host(&host).unwrap();
         record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 70).unwrap();
@@ -441,10 +312,7 @@ async fn member_edit_elsewhere_keeps_the_owners_proxy_password() {
     sync(&a).await;
     let route = route_on(&a, "one");
     assert_eq!(route.port, 2222);
-    assert_eq!(
-        secret(&a, proxy_password(&route)).as_deref(),
-        Some(PROXY_SECRET)
-    );
+    assert_eq!(secret(&a, proxy_password(&route)).as_deref(), Some(PROXY_SECRET));
 }
 
 #[tokio::test]
@@ -468,14 +336,7 @@ async fn device_key_never_shared_even_with_keys() {
     share_it(&a, &b, ShareWhat::GroupAll(s.group.id), Role::Read, true).await;
     let route = route_on(&b, "one");
     assert_eq!(route.key, None);
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .list_key_records()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(b.store.lock().unwrap().list_key_records().unwrap().is_empty());
     // The password still went with the keys: the share itself worked.
     assert_eq!(secret(&b, route.password).as_deref(), Some(SECRET));
 }

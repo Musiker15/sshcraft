@@ -20,20 +20,14 @@ async fn serve_starts_answers_and_shuts_down() {
     }));
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    stream
-        .write_all(b"GET /v1/server HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        .await
-        .unwrap();
+    stream.write_all(b"GET /v1/server HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await.unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("\"api\":1"), "{response}");
 
     stop.send(()).unwrap();
-    let result = tokio::time::timeout(Duration::from_secs(5), server)
-        .await
-        .expect("serve returns after shutdown")
-        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), server).await.expect("serve returns after shutdown").unwrap();
     assert!(result.is_ok(), "{result:?}");
 }
 
@@ -41,12 +35,9 @@ async fn serve_starts_answers_and_shuts_down() {
 async fn serve_refuses_a_missing_origin() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let config = ServeConfig::default();
-    let result = tokio::time::timeout(
-        Duration::from_secs(5),
-        sshcraft_server_lib::serve_on(listener, config, std::future::pending()),
-    )
-    .await
-    .expect("returns at once");
+    let result = tokio::time::timeout(Duration::from_secs(5), sshcraft_server_lib::serve_on(listener, config, std::future::pending()))
+        .await
+        .expect("returns at once");
     assert!(result.is_err());
 }
 
@@ -61,16 +52,8 @@ async fn health_check_reports_a_running_server() {
         public_origin: "https://sync.example.org".into(),
         ..ServeConfig::default()
     };
-    tokio::spawn(sshcraft_server_lib::serve_on(
-        listener,
-        config,
-        std::future::pending(),
-    ));
+    tokio::spawn(sshcraft_server_lib::serve_on(listener, config, std::future::pending()));
     assert!(sshcraft_server_lib::health(addr).await.is_ok());
-    let closed = TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap()
-        .local_addr()
-        .unwrap();
+    let closed = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
     assert!(sshcraft_server_lib::health(closed).await.is_err());
 }

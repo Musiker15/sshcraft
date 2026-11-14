@@ -8,8 +8,8 @@ use ciborium::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Assertion, Attachment, Attestation, Authenticator, CreateOptions, FLAG_ATTESTED,
-    FLAG_USER_PRESENCE, FLAG_USER_VERIFICATION, FidoError, SkAlgorithm,
+    Assertion, Attachment, Attestation, Authenticator, CreateOptions, FLAG_ATTESTED, FLAG_USER_PRESENCE, FLAG_USER_VERIFICATION, FidoError,
+    SkAlgorithm,
 };
 
 enum Secret {
@@ -53,12 +53,7 @@ fn int(i: i64) -> Value {
 
 #[async_trait::async_trait]
 impl Authenticator for SoftAuthenticator {
-    async fn make_credential(
-        &self,
-        application: &str,
-        options: &CreateOptions,
-        _client_data: &[u8],
-    ) -> Result<Attestation, FidoError> {
+    async fn make_credential(&self, application: &str, options: &CreateOptions, _client_data: &[u8]) -> Result<Attestation, FidoError> {
         if self.cancel.load(Ordering::SeqCst) {
             return Err(FidoError::Cancelled);
         }
@@ -85,10 +80,7 @@ impl Authenticator for SoftAuthenticator {
                     (int(1), int(1)),
                     (int(3), int(-8)),
                     (int(-1), int(6)),
-                    (
-                        int(-2),
-                        Value::Bytes(key.verifying_key().to_bytes().to_vec()),
-                    ),
+                    (int(-2), Value::Bytes(key.verifying_key().to_bytes().to_vec())),
                 ]);
                 (Secret::Ed25519(key), cose)
             }
@@ -102,10 +94,7 @@ impl Authenticator for SoftAuthenticator {
         data.extend_from_slice(&id);
         ciborium::into_writer(&cose, &mut data).map_err(|e| FidoError::Failed(e.to_string()))?;
         self.credentials.lock().unwrap().push((id.to_vec(), secret));
-        Ok(Attestation {
-            authenticator_data: data,
-            credential_id: id.to_vec(),
-        })
+        Ok(Attestation { authenticator_data: data, credential_id: id.to_vec() })
     }
 
     async fn get_assertion(
@@ -122,22 +111,12 @@ impl Authenticator for SoftAuthenticator {
         }
         let counter = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
         let mut data = Sha256::digest(application.as_bytes()).to_vec();
-        data.push(
-            FLAG_USER_PRESENCE
-                | if verify_user {
-                    FLAG_USER_VERIFICATION
-                } else {
-                    0
-                },
-        );
+        data.push(FLAG_USER_PRESENCE | if verify_user { FLAG_USER_VERIFICATION } else { 0 });
         data.extend_from_slice(&counter.to_be_bytes());
         let mut message = data.clone();
         message.extend_from_slice(&Sha256::digest(client_data));
         let credentials = self.credentials.lock().unwrap();
-        let (_, secret) = credentials
-            .iter()
-            .find(|(id, _)| id == credential_id)
-            .ok_or_else(|| FidoError::Failed("unknown credential".into()))?;
+        let (_, secret) = credentials.iter().find(|(id, _)| id == credential_id).ok_or_else(|| FidoError::Failed("unknown credential".into()))?;
         let signature = match secret {
             Secret::P256(key) => {
                 use p256::ecdsa::signature::Signer;
@@ -149,9 +128,6 @@ impl Authenticator for SoftAuthenticator {
                 key.sign(&message).to_bytes().to_vec()
             }
         };
-        Ok(Assertion {
-            authenticator_data: data,
-            signature,
-        })
+        Ok(Assertion { authenticator_data: data, signature })
     }
 }

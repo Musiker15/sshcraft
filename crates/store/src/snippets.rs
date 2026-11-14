@@ -62,10 +62,7 @@ pub fn validate(snippet: &Snippet) -> Result<(), SnippetError> {
     // Lines and tabs are what a script is made of; no other control characters.
     let content_ok = !snippet.content.trim().is_empty()
         && snippet.content.chars().count() <= MAX_CONTENT
-        && !snippet
-            .content
-            .chars()
-            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'));
+        && !snippet.content.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'));
     if !content_ok {
         return Err(SnippetError::Invalid("content"));
     }
@@ -83,11 +80,7 @@ fn label(id: SnippetId) -> String {
 /// All snippets by name; one that cannot be opened or read is left out.
 pub fn list(vault: &Vault, store: &Store) -> Result<Vec<Snippet>, SnippetStoreError> {
     let mut stmt = store.conn.prepare("SELECT id, sealed FROM snippets")?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
     let mut snippets: Vec<Snippet> = rows
         .into_iter()
         .filter_map(|(id, sealed)| {
@@ -97,12 +90,7 @@ pub fn list(vault: &Vault, store: &Store) -> Result<Vec<Snippet>, SnippetStoreEr
             (snippet.id == id && validate(&snippet).is_ok()).then_some(snippet)
         })
         .collect();
-    snippets.sort_by(|a, b| {
-        a.name
-            .to_lowercase()
-            .cmp(&b.name.to_lowercase())
-            .then(a.id.0.cmp(&b.id.0))
-    });
+    snippets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.0.cmp(&b.id.0)));
     Ok(snippets)
 }
 
@@ -110,25 +98,13 @@ pub fn list(vault: &Vault, store: &Store) -> Result<Vec<Snippet>, SnippetStoreEr
 pub fn save(vault: &Vault, store: &Store, snippet: &Snippet) -> Result<(), SnippetStoreError> {
     validate(snippet)?;
     let id = snippet.id.0.to_string();
-    let exists: bool = store.conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM snippets WHERE id = ?1)",
-        [&id],
-        |r| r.get(0),
-    )?;
-    let count: i64 = store
-        .conn
-        .query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get(0))?;
+    let exists: bool = store.conn.query_row("SELECT EXISTS(SELECT 1 FROM snippets WHERE id = ?1)", [&id], |r| r.get(0))?;
+    let count: i64 = store.conn.query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get(0))?;
     if !exists && usize::try_from(count).unwrap_or(usize::MAX) >= MAX_SNIPPETS {
         return Err(SnippetError::Invalid("too many").into());
     }
-    let clean = Snippet {
-        name: snippet.name.trim().to_owned(),
-        package: snippet.package.trim().to_owned(),
-        ..snippet.clone()
-    };
-    let plain = zeroize::Zeroizing::new(
-        serde_json::to_vec(&clean).map_err(|e| StoreError::Malformed(e.to_string()))?,
-    );
+    let clean = Snippet { name: snippet.name.trim().to_owned(), package: snippet.package.trim().to_owned(), ..snippet.clone() };
+    let plain = zeroize::Zeroizing::new(serde_json::to_vec(&clean).map_err(|e| StoreError::Malformed(e.to_string()))?);
     let sealed = vault.seal_secret(&label(snippet.id), &plain)?;
     store.conn.execute(
         "INSERT INTO snippets (id, sealed) VALUES (?1, ?2)
@@ -139,23 +115,14 @@ pub fn save(vault: &Vault, store: &Store, snippet: &Snippet) -> Result<(), Snipp
 }
 
 pub fn delete(store: &Store, id: SnippetId) -> Result<(), SnippetStoreError> {
-    store
-        .conn
-        .execute("DELETE FROM snippets WHERE id = ?1", [id.0.to_string()])?;
+    store.conn.execute("DELETE FROM snippets WHERE id = ?1", [id.0.to_string()])?;
     Ok(())
 }
 
 impl Store {
     pub(crate) fn history_block(&self, scope: &str) -> Result<Option<Vec<u8>>, StoreError> {
         use rusqlite::OptionalExtension;
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT sealed FROM command_history WHERE scope = ?1",
-                [scope],
-                |r| r.get(0),
-            )
-            .optional()?)
+        Ok(self.conn.query_row("SELECT sealed FROM command_history WHERE scope = ?1", [scope], |r| r.get(0)).optional()?)
     }
 
     pub(crate) fn put_history_block(&self, scope: &str, sealed: &[u8]) -> Result<(), StoreError> {
@@ -169,9 +136,7 @@ impl Store {
 
     pub(crate) fn delete_history_blocks(&self, scope: Option<&str>) -> Result<(), StoreError> {
         match scope {
-            Some(scope) => self
-                .conn
-                .execute("DELETE FROM command_history WHERE scope = ?1", [scope])?,
+            Some(scope) => self.conn.execute("DELETE FROM command_history WHERE scope = ?1", [scope])?,
             None => self.conn.execute("DELETE FROM command_history", [])?,
         };
         Ok(())
@@ -251,10 +216,7 @@ mod tests {
     #[test]
     fn invalid_snippets_are_not_saved() {
         let (store, vault) = setup();
-        assert!(matches!(
-            save(&vault, &store, &snippet("")),
-            Err(SnippetStoreError::Invalid(_))
-        ));
+        assert!(matches!(save(&vault, &store, &snippet("")), Err(SnippetStoreError::Invalid(_))));
         assert!(list(&vault, &store).unwrap().is_empty());
     }
 
@@ -264,10 +226,7 @@ mod tests {
         for i in 0..MAX_SNIPPETS {
             save(&vault, &store, &snippet(&format!("s{i}"))).unwrap();
         }
-        assert!(matches!(
-            save(&vault, &store, &snippet("one more")),
-            Err(SnippetStoreError::Invalid(_))
-        ));
+        assert!(matches!(save(&vault, &store, &snippet("one more")), Err(SnippetStoreError::Invalid(_))));
         let mut first = list(&vault, &store).unwrap().remove(0);
         first.content = "changed".into();
         save(&vault, &store, &first).unwrap();
@@ -279,10 +238,7 @@ mod tests {
         let mut s = snippet("Datenbank");
         s.content = "mysql -uroot -pGeheim42".into();
         save(&vault, &store, &s).unwrap();
-        let blob: Vec<u8> = store
-            .conn
-            .query_row("SELECT sealed FROM snippets", [], |r| r.get(0))
-            .unwrap();
+        let blob: Vec<u8> = store.conn.query_row("SELECT sealed FROM snippets", [], |r| r.get(0)).unwrap();
         assert!(!blob.windows(8).any(|w| w == b"Geheim42"));
         assert!(!blob.windows(9).any(|w| w == b"Datenbank"));
     }
@@ -295,20 +251,8 @@ mod tests {
         let other = snippet("other");
         save(&vault, &store, &other).unwrap();
         // The block of "other" under a new id does not open.
-        store
-            .conn
-            .execute(
-                "UPDATE snippets SET id = ?1 WHERE id = ?2",
-                [uuid::Uuid::new_v4().to_string(), other.id.0.to_string()],
-            )
-            .unwrap();
-        store
-            .conn
-            .execute(
-                "INSERT INTO snippets (id, sealed) VALUES ('not-a-uuid', x'00')",
-                [],
-            )
-            .unwrap();
+        store.conn.execute("UPDATE snippets SET id = ?1 WHERE id = ?2", [uuid::Uuid::new_v4().to_string(), other.id.0.to_string()]).unwrap();
+        store.conn.execute("INSERT INTO snippets (id, sealed) VALUES ('not-a-uuid', x'00')", []).unwrap();
         assert_eq!(list(&vault, &store).unwrap(), vec![good]);
     }
 }

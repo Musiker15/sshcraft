@@ -40,11 +40,7 @@ pub async fn read(
     ApiQuery(query): ApiQuery<From>,
 ) -> Result<Json<Value>, ApiError> {
     let account = parse_account(&account)?;
-    state
-        .store
-        .account(&account)
-        .await?
-        .ok_or(ApiError::NotFound)?;
+    state.store.account(&account).await?.ok_or(ApiError::NotFound)?;
     let log = state.store.device_log(&account).await?;
     let from = usize::try_from(query.from).unwrap_or(usize::MAX);
     let entries = log.entries.get(from..).unwrap_or_default();
@@ -74,11 +70,7 @@ pub async fn append(
     } else {
         return Err(ApiError::Unauthorized);
     }
-    let row = state
-        .store
-        .account(&account)
-        .await?
-        .ok_or(ApiError::NotFound)?;
+    let row = state.store.account(&account).await?.ok_or(ApiError::NotFound)?;
     if row.locked {
         return Err(ApiError::AccountLocked);
     }
@@ -94,9 +86,7 @@ pub async fn append(
     if stored.entries.len() + body.entries.len() > MAX_LOG {
         return Err(ApiError::Invalid("the device log is full".into()));
     }
-    let mut extended = DeviceLog {
-        entries: stored.entries,
-    };
+    let mut extended = DeviceLog { entries: stored.entries };
     extended.entries.extend(body.entries.iter().cloned());
     let extended = verify_off_runtime(extended, account).await?;
 
@@ -110,34 +100,19 @@ pub async fn append(
             LogAction::Revoke { device_id } => changes.revoked.push(*device_id),
         }
     }
-    state
-        .store
-        .append_log(&account, len, &body.entries, &changes)
-        .await?;
+    state.store.append_log(&account, len, &body.entries, &changes).await?;
     for device_id in &changes.revoked {
         state.hub.end_device(*device_id);
     }
     let new_len = extended.entries.len() as u64;
     let mut accounts = state.store.area_peers(&account).await?;
     accounts.push(account);
-    state.hub.publish(
-        &accounts,
-        Event::DeviceLog {
-            account,
-            len: new_len,
-        },
-    );
+    state.hub.publish(&accounts, Event::DeviceLog { account, len: new_len });
     Ok(Json(json!({ "len": new_len })))
 }
 
 /// Runs the full log verification on the blocking pool, so a long log does not hold up a
 /// runtime thread that serves other requests.
-pub async fn verify_off_runtime(
-    log: DeviceLog,
-    account: AccountPublic,
-) -> Result<DeviceLog, ApiError> {
-    tokio::task::spawn_blocking(move || log.verify(&account).map(|_| log))
-        .await
-        .map_err(ApiError::internal)?
-        .map_err(ApiError::from)
+pub async fn verify_off_runtime(log: DeviceLog, account: AccountPublic) -> Result<DeviceLog, ApiError> {
+    tokio::task::spawn_blocking(move || log.verify(&account).map(|_| log)).await.map_err(ApiError::internal)?.map_err(ApiError::from)
 }

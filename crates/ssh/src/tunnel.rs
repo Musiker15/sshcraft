@@ -77,11 +77,7 @@ impl Drop for Tunnel {
             accept.abort();
         }
         if let Some(remote) = self.remote.take() {
-            remote
-                .remotes
-                .lock()
-                .expect("remotes lock")
-                .remove(&remote.key);
+            remote.remotes.lock().expect("remotes lock").remove(&remote.key);
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
                 runtime.spawn(async move {
                     let (address, port) = remote.key;
@@ -113,18 +109,11 @@ impl Drop for Slot {
 
 /// `[::1]` as ssh writes it, `::1` as the system wants it.
 pub(crate) fn unbracket(address: &str) -> &str {
-    address
-        .strip_prefix('[')
-        .and_then(|a| a.strip_suffix(']'))
-        .unwrap_or(address)
+    address.strip_prefix('[').and_then(|a| a.strip_suffix(']')).unwrap_or(address)
 }
 
 fn bind_error(e: std::io::Error) -> SshError {
-    if e.kind() == std::io::ErrorKind::AddrInUse {
-        SshError::PortInUse
-    } else {
-        SshError::Bind(e.to_string())
-    }
+    if e.kind() == std::io::ErrorKind::AddrInUse { SshError::PortInUse } else { SshError::Bind(e.to_string()) }
 }
 
 /// The listeners for `address:port`. `localhost` listens on IPv4 and, where there is one, IPv6
@@ -132,15 +121,9 @@ fn bind_error(e: std::io::Error) -> SshError {
 async fn bind(address: &str, port: u16) -> Result<Vec<TcpListener>, SshError> {
     let address = unbracket(address);
     if !address.eq_ignore_ascii_case("localhost") {
-        return Ok(vec![
-            TcpListener::bind((address, port))
-                .await
-                .map_err(bind_error)?,
-        ]);
+        return Ok(vec![TcpListener::bind((address, port)).await.map_err(bind_error)?]);
     }
-    let first = TcpListener::bind(("127.0.0.1", port))
-        .await
-        .map_err(bind_error)?;
+    let first = TcpListener::bind(("127.0.0.1", port)).await.map_err(bind_error)?;
     let port = first.local_addr().map_err(bind_error)?.port();
     let mut listeners = vec![first];
     if let Ok(second) = TcpListener::bind(("::1", port)).await {
@@ -178,10 +161,7 @@ pub(crate) async fn listen(
     target: Option<(String, u16)>,
 ) -> Result<Tunnel, SshError> {
     let listeners = bind(bind_address, bind_port).await?;
-    let bound_port = listeners[0]
-        .local_addr()
-        .map_err(|e| SshError::Bind(e.to_string()))?
-        .port();
+    let bound_port = listeners[0].local_addr().map_err(|e| SshError::Bind(e.to_string()))?.port();
     let target = target.map(|(host, port)| (unbracket(&host).to_owned(), port));
     let (stop_tx, stop) = watch::channel(());
     let count = Arc::new(AtomicUsize::new(0));
@@ -198,38 +178,17 @@ pub(crate) async fn listen(
                     let Some(slot) = Slot::take(&count) else {
                         return;
                     };
-                    let work = connection(
-                        handle.clone(),
-                        stream,
-                        peer,
-                        target.clone(),
-                        slot,
-                        refused.clone(),
-                    );
+                    let work = connection(handle.clone(), stream, peer, target.clone(), slot, refused.clone());
                     tokio::spawn(until_stopped(work, stop.clone()));
                 })
                 .await;
             })
         })
         .collect();
-    Ok(Tunnel {
-        bound_port,
-        count,
-        refused,
-        _stop: stop_tx,
-        accept,
-        remote: None,
-    })
+    Ok(Tunnel { bound_port, count, refused, _stop: stop_tx, accept, remote: None })
 }
 
-async fn connection(
-    handle: Handle,
-    mut stream: TcpStream,
-    peer: SocketAddr,
-    target: Option<(String, u16)>,
-    _slot: Slot,
-    refused: Arc<AtomicUsize>,
-) {
+async fn connection(handle: Handle, mut stream: TcpStream, peer: SocketAddr, target: Option<(String, u16)>, _slot: Slot, refused: Arc<AtomicUsize>) {
     let socks = target.is_none();
     let (host, port) = match target {
         Some(target) => target,
@@ -238,16 +197,9 @@ async fn connection(
             _ => return,
         },
     };
-    let opened = tokio::time::timeout(
-        OPEN_TIMEOUT,
-        handle.channel_open_direct_tcpip(
-            host,
-            u32::from(port),
-            peer.ip().to_string(),
-            u32::from(peer.port()),
-        ),
-    )
-    .await;
+    let opened =
+        tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_direct_tcpip(host, u32::from(port), peer.ip().to_string(), u32::from(peer.port())))
+            .await;
     let Ok(Ok(channel)) = opened else {
         refused.fetch_add(1, Ordering::SeqCst);
         if socks {
@@ -255,11 +207,7 @@ async fn connection(
         }
         return;
     };
-    if socks
-        && socks::reply_success(&mut stream, SocketAddr::from(([0, 0, 0, 0], 0)))
-            .await
-            .is_err()
-    {
+    if socks && socks::reply_success(&mut stream, SocketAddr::from(([0, 0, 0, 0], 0))).await.is_err() {
         return;
     }
     let mut channel = channel.into_stream();
@@ -281,22 +229,11 @@ pub(crate) async fn remote(
     let target_host = unbracket(target_host);
     let (stop_tx, stop) = watch::channel(());
     let count = Arc::new(AtomicUsize::new(0));
-    let entry = RemoteTarget {
-        host: target_host.to_owned(),
-        port: target_port,
-        count: count.clone(),
-        stop,
-    };
+    let entry = RemoteTarget { host: target_host.to_owned(), port: target_port, count: count.clone(), stop };
     let mut key = (bind_address.to_owned(), u32::from(bind_port));
     // Registered first: the server may send a connection right after it agreed.
-    remotes
-        .lock()
-        .expect("remotes lock")
-        .insert(key.clone(), entry.clone());
-    let port = match handle
-        .tcpip_forward(bind_address, u32::from(bind_port))
-        .await
-    {
+    remotes.lock().expect("remotes lock").insert(key.clone(), entry.clone());
+    let port = match handle.tcpip_forward(bind_address, u32::from(bind_port)).await {
         Ok(port) => port,
         Err(e) => {
             remotes.lock().expect("remotes lock").remove(&key);
@@ -323,11 +260,7 @@ pub(crate) async fn remote(
         refused: Arc::new(AtomicUsize::new(0)),
         _stop: stop_tx,
         accept: vec![accept],
-        remote: Some(RemoteRegistration {
-            handle,
-            remotes,
-            key,
-        }),
+        remote: Some(RemoteRegistration { handle, remotes, key }),
     })
 }
 
@@ -346,11 +279,7 @@ pub(crate) fn remote_target(remotes: &Remotes, address: &str, port: u32) -> Opti
 }
 
 /// Carries one `forwarded-tcpip` channel to its local target.
-pub(crate) fn serve_remote(
-    channel: russh::Channel<client::Msg>,
-    target: RemoteTarget,
-    slot_count: Arc<AtomicUsize>,
-) -> bool {
+pub(crate) fn serve_remote(channel: russh::Channel<client::Msg>, target: RemoteTarget, slot_count: Arc<AtomicUsize>) -> bool {
     let Some(slot) = Slot::take(&slot_count) else {
         return false;
     };

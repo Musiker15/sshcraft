@@ -1,7 +1,5 @@
 use sshcraft_proto::ProtoError;
-use sshcraft_proto::area::{
-    AreaId, AreaKey, AreaManifest, KeyEnvelope, open_area_key, seal_area_key,
-};
+use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, KeyEnvelope, open_area_key, seal_area_key};
 use sshcraft_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys};
 use uuid::Uuid;
 
@@ -30,23 +28,8 @@ fn setup() -> Setup {
     let (a, b) = (device(&account), device(&account));
     let key = AreaKey::generate();
     let area = AreaId(Uuid::new_v4());
-    let manifest = AreaManifest::sign(
-        area,
-        1,
-        1,
-        &key,
-        account.public(),
-        vec![],
-        a.cert.device_id,
-        &a.keys,
-    );
-    Setup {
-        a,
-        b,
-        key,
-        area,
-        manifest,
-    }
+    let manifest = AreaManifest::sign(area, 1, 1, &key, account.public(), vec![], a.cert.device_id, &a.keys);
+    Setup { a, b, key, area, manifest }
 }
 
 fn open(s: &Setup, envelope: &KeyEnvelope, who: &Device) -> Result<AreaKey, ProtoError> {
@@ -66,25 +49,16 @@ fn key_planted_by_the_server_is_rejected() {
     let s = setup();
     let planted = AreaKey::generate();
     let envelope = seal_area_key(&planted, s.area, 1, &s.b.cert).unwrap();
-    assert_eq!(
-        open(&s, &envelope, &s.b).err(),
-        Some(ProtoError::WrongAreaKey)
-    );
+    assert_eq!(open(&s, &envelope, &s.b).err(), Some(ProtoError::WrongAreaKey));
 }
 
 #[test]
 fn envelope_for_another_area_or_key_version_than_the_manifest_is_not_allowed() {
     let s = setup();
     let other_area = seal_area_key(&s.key, AreaId(Uuid::new_v4()), 1, &s.b.cert).unwrap();
-    assert_eq!(
-        open(&s, &other_area, &s.b).err(),
-        Some(ProtoError::NotAllowed)
-    );
+    assert_eq!(open(&s, &other_area, &s.b).err(), Some(ProtoError::NotAllowed));
     let other_version = seal_area_key(&s.key, s.area, 2, &s.b.cert).unwrap();
-    assert_eq!(
-        open(&s, &other_version, &s.b).err(),
-        Some(ProtoError::NotAllowed)
-    );
+    assert_eq!(open(&s, &other_version, &s.b).err(), Some(ProtoError::NotAllowed));
 }
 
 #[test]
@@ -118,10 +92,7 @@ fn envelope_relabelled_for_other_device_fails() {
 fn envelope_for_another_device_id_is_not_allowed() {
     let s = setup();
     let envelope = seal_area_key(&s.key, s.area, 1, &s.a.cert).unwrap();
-    assert_eq!(
-        open_area_key(&envelope, s.b.cert.device_id, &s.a.keys, &s.manifest).err(),
-        Some(ProtoError::NotAllowed)
-    );
+    assert_eq!(open_area_key(&envelope, s.b.cert.device_id, &s.a.keys, &s.manifest).err(), Some(ProtoError::NotAllowed));
 }
 
 #[test]
@@ -137,8 +108,7 @@ fn two_seals_of_the_same_key_differ() {
 fn envelope_survives_json() {
     let s = setup();
     let envelope = seal_area_key(&s.key, s.area, 1, &s.b.cert).unwrap();
-    let back: KeyEnvelope =
-        serde_json::from_str(&serde_json::to_string(&envelope).unwrap()).unwrap();
+    let back: KeyEnvelope = serde_json::from_str(&serde_json::to_string(&envelope).unwrap()).unwrap();
     assert!(open(&s, &back, &s.b).unwrap().same_key_as(&s.key));
 }
 

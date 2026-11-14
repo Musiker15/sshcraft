@@ -35,25 +35,15 @@ fn session(text: &str, name: String, group_path: Vec<String>, plan: &mut ImportP
         .and_then(|p| port_from(&p.to_string(), &mut warnings))
         .filter(|p| *p != sshcraft_model::model::DEFAULT_PORT);
     let username = value(text, "Username").map(clean).filter(|u| !u.is_empty());
-    let key = value(text, "Identity Filename V2")
-        .map(|v| v.split("::").next().unwrap_or_default().trim().to_owned())
-        .filter(|v| !v.is_empty());
-    let stored_password = ["Password V2", "Password"]
-        .iter()
-        .any(|k| value(text, k).is_some_and(|v| !v.trim().is_empty()));
+    let key = value(text, "Identity Filename V2").map(|v| v.split("::").next().unwrap_or_default().trim().to_owned()).filter(|v| !v.is_empty());
+    let stored_password = ["Password V2", "Password"].iter().any(|k| value(text, k).is_some_and(|v| !v.trim().is_empty()));
     if stored_password {
         warnings.push(ImportWarning::PasswordNotImported);
     }
     plan.candidates.push(ImportCandidate {
         name,
         group_path,
-        settings: ConnectionSettings {
-            address: Some(address),
-            port,
-            username,
-            key: None,
-            ..Default::default()
-        },
+        settings: ConnectionSettings { address: Some(address), port, username, key: None, ..Default::default() },
         key_note: Some(match key {
             Some(path) => KeyNote::File { path },
             None => KeyNote::NoIdentityFile,

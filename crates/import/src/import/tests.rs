@@ -5,11 +5,7 @@ fn host(name: &str, path: &[&str], address: Option<&str>) -> ImportCandidate {
     ImportCandidate {
         name: name.into(),
         group_path: path.iter().map(|s| s.to_string()).collect(),
-        settings: ConnectionSettings {
-            address: address.map(Into::into),
-            username: Some("u".into()),
-            ..Default::default()
-        },
+        settings: ConnectionSettings { address: address.map(Into::into), username: Some("u".into()), ..Default::default() },
         ..ImportCandidate::default()
     }
 }
@@ -33,30 +29,15 @@ fn group_paths_create_nested_groups() {
     let kunden = groups.iter().find(|g| g.name == "Kunden").unwrap();
     let mueller = groups.iter().find(|g| g.name == "Müller").unwrap();
     assert_eq!(mueller.parent_id, Some(kunden.id));
-    let a = store
-        .list_hosts()
-        .unwrap()
-        .into_iter()
-        .find(|h| h.name == "a")
-        .unwrap();
+    let a = store.list_hosts().unwrap().into_iter().find(|h| h.name == "a").unwrap();
     assert_eq!(a.group_id, Some(mueller.id));
 }
 
 #[test]
 fn existing_groups_are_reused() {
     let store = Store::open_in_memory().unwrap();
-    apply_import(
-        &store,
-        &[host("a", &["Kunden", "Müller"], Some("a.org"))],
-        None,
-    )
-    .unwrap();
-    apply_import(
-        &store,
-        &[host("b", &["Kunden", "Müller"], Some("b.org"))],
-        None,
-    )
-    .unwrap();
+    apply_import(&store, &[host("a", &["Kunden", "Müller"], Some("a.org"))], None).unwrap();
+    apply_import(&store, &[host("b", &["Kunden", "Müller"], Some("b.org"))], None).unwrap();
     assert_eq!(store.list_groups().unwrap().len(), 2);
     // The same name on another level is another group.
     apply_import(&store, &[host("c", &["Müller"], Some("c.org"))], None).unwrap();
@@ -68,15 +49,7 @@ fn same_host_twice_is_one_host() {
     let store = Store::open_in_memory().unwrap();
     let first = apply_import(&store, &[host("a", &["G"], Some("a.org"))], None).unwrap();
     assert_eq!((first.created, first.duplicates), (1, 0));
-    let again = apply_import(
-        &store,
-        &[
-            host("a", &["G"], Some("a.org")),
-            host("a", &["G"], Some("a.org")),
-        ],
-        None,
-    )
-    .unwrap();
+    let again = apply_import(&store, &[host("a", &["G"], Some("a.org")), host("a", &["G"], Some("a.org"))], None).unwrap();
     assert_eq!((again.created, again.duplicates), (0, 2));
     assert_eq!(store.list_hosts().unwrap().len(), 1);
     // Another user on the same address is another host.
@@ -91,10 +64,7 @@ fn inherited_address_counts_for_duplicates() {
     let mut grouped = host("a", &["a.org"], None);
     grouped.group_defaults.address = Some("a.org".into());
     apply_import(&store, std::slice::from_ref(&grouped), None).unwrap();
-    assert_eq!(
-        apply_import(&store, &[grouped], None).unwrap().duplicates,
-        1
-    );
+    assert_eq!(apply_import(&store, &[grouped], None).unwrap().duplicates, 1);
     let groups = store.list_groups().unwrap();
     assert_eq!(groups[0].defaults.address.as_deref(), Some("a.org"));
 }
@@ -120,31 +90,11 @@ fn names_are_cleaned() {
 fn location_goes_to_new_top_level_items() {
     let store = Store::open_in_memory().unwrap();
     let server = sshcraft_model::model::ServerId::new();
-    let outcome = apply_import(
-        &store,
-        &[
-            host("a", &["G", "H"], Some("a.org")),
-            host("b", &[], Some("b.org")),
-        ],
-        Some(server),
-    )
-    .unwrap();
+    let outcome = apply_import(&store, &[host("a", &["G", "H"], Some("a.org")), host("b", &[], Some("b.org"))], Some(server)).unwrap();
     assert_eq!(outcome.groups.len(), 2);
     assert_eq!(outcome.hosts.len(), 2);
-    assert!(
-        store
-            .list_groups()
-            .unwrap()
-            .iter()
-            .all(|g| g.location == Some(server))
-    );
-    assert!(
-        store
-            .list_hosts()
-            .unwrap()
-            .iter()
-            .all(|h| h.location == Some(server))
-    );
+    assert!(store.list_groups().unwrap().iter().all(|g| g.location == Some(server)));
+    assert!(store.list_hosts().unwrap().iter().all(|h| h.location == Some(server)));
 }
 
 // ---------- known_hosts and key files
@@ -166,29 +116,13 @@ fn fingerprint(key: &PrivateKey) -> String {
 #[test]
 fn plain_and_bracketed_hosts() {
     let (k1, k2) = (ed25519(), ed25519());
-    let text = format!(
-        "example.org,10.0.0.1 {}\n[example.org]:2222 {}\n",
-        public_line(&k1),
-        public_line(&k2)
-    );
+    let text = format!("example.org,10.0.0.1 {}\n[example.org]:2222 {}\n", public_line(&k1), public_line(&k2));
     let parsed = knownhosts::parse(&text);
     assert_eq!(parsed.entries.len(), 3);
-    assert!(parsed.entries.contains(&knownhosts::KnownEntry {
-        address: "10.0.0.1".into(),
-        port: 22,
-        fingerprint: fingerprint(&k1),
-    }));
-    assert!(parsed.entries.contains(&knownhosts::KnownEntry {
-        address: "example.org".into(),
-        port: 2222,
-        fingerprint: fingerprint(&k2),
-    }));
+    assert!(parsed.entries.contains(&knownhosts::KnownEntry { address: "10.0.0.1".into(), port: 22, fingerprint: fingerprint(&k1) }));
+    assert!(parsed.entries.contains(&knownhosts::KnownEntry { address: "example.org".into(), port: 2222, fingerprint: fingerprint(&k2) }));
     let names: Vec<_> = parsed.candidates.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(
-        names,
-        vec!["example.org", "example.org:2222"],
-        "one host per line"
-    );
+    assert_eq!(names, vec!["example.org", "example.org:2222"], "one host per line");
     assert_eq!(parsed.candidates[1].settings.port, Some(2222));
 }
 
@@ -207,91 +141,49 @@ fn hashed_names_are_skipped_and_counted() {
 #[test]
 fn known_fingerprint_is_not_overwritten() {
     let store = Store::open_in_memory().unwrap();
-    store
-        .set_known_host("example.org", 22, "SHA256:old")
-        .unwrap();
+    store.set_known_host("example.org", 22, "SHA256:old").unwrap();
     store.set_known_host("same.org", 22, "SHA256:same").unwrap();
-    let entry = |address: &str, fingerprint: &str| knownhosts::KnownEntry {
-        address: address.into(),
-        port: 22,
-        fingerprint: fingerprint.into(),
-    };
-    let outcome = knownhosts::apply(
-        &store,
-        &[
-            entry("example.org", "SHA256:new"),
-            entry("same.org", "SHA256:same"),
-            entry("fresh.org", "SHA256:fresh"),
-        ],
-    )
-    .unwrap();
+    let entry = |address: &str, fingerprint: &str| knownhosts::KnownEntry { address: address.into(), port: 22, fingerprint: fingerprint.into() };
+    let outcome =
+        knownhosts::apply(&store, &[entry("example.org", "SHA256:new"), entry("same.org", "SHA256:same"), entry("fresh.org", "SHA256:fresh")])
+            .unwrap();
     assert_eq!(outcome.added, 1);
     assert_eq!(outcome.same, 1);
     assert_eq!(outcome.conflicts, vec![("example.org".to_owned(), 22)]);
-    assert_eq!(
-        store.known_host("example.org", 22).unwrap().as_deref(),
-        Some("SHA256:old")
-    );
-    assert_eq!(
-        store.known_host("fresh.org", 22).unwrap().as_deref(),
-        Some("SHA256:fresh")
-    );
+    assert_eq!(store.known_host("example.org", 22).unwrap().as_deref(), Some("SHA256:old"));
+    assert_eq!(store.known_host("fresh.org", 22).unwrap().as_deref(), Some("SHA256:fresh"));
 }
 
 #[test]
 fn garbage_lines_are_reported() {
     let k = ed25519();
-    let text = format!(
-        "# comment\n\nonlyonefield\nhost ssh-ed25519 notbase64!!\n[broken:22 {line}\nok.org {line}\n",
-        line = public_line(&k)
-    );
+    let text = format!("# comment\n\nonlyonefield\nhost ssh-ed25519 notbase64!!\n[broken:22 {line}\nok.org {line}\n", line = public_line(&k));
     let parsed = knownhosts::parse(&text);
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.skipped.len(), 3);
-    assert!(
-        parsed.skipped.iter().all(|s| !s.contains("notbase64")),
-        "no contents in messages"
-    );
+    assert!(parsed.skipped.iter().all(|s| !s.contains("notbase64")), "no contents in messages");
 }
 
 #[test]
 fn scan_finds_openssh_pem_and_ppk_keys() {
     let dir = tempfile::tempdir().unwrap();
     let plain = ed25519();
-    std::fs::write(
-        dir.path().join("id_ed25519"),
-        plain.to_openssh(LineEnding::LF).unwrap().as_bytes(),
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("id_ed25519"), plain.to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
     std::fs::write(dir.path().join("id_ed25519.pub"), public_line(&plain)).unwrap();
     let mut pem = Vec::new();
     russh::keys::encode_pkcs8_pem(&ed25519(), &mut pem).unwrap();
     std::fs::write(dir.path().join("deploy.pem"), &pem).unwrap();
-    std::fs::write(
-        dir.path().join("putty.ppk"),
-        include_str!("fixtures/id_ed25519.ppk"),
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("putty_enc.ppk"),
-        include_str!("fixtures/id_ed25519_enc.ppk"),
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("putty.ppk"), include_str!("fixtures/id_ed25519.ppk")).unwrap();
+    std::fs::write(dir.path().join("putty_enc.ppk"), include_str!("fixtures/id_ed25519_enc.ppk")).unwrap();
     std::fs::write(dir.path().join("known_hosts"), "x.org ssh-ed25519 AAAA").unwrap();
     std::fs::write(dir.path().join("config"), "Host x").unwrap();
     std::fs::write(dir.path().join("notes.txt"), "hello").unwrap();
     let mut found = keyfiles::scan(dir.path());
     found.sort_by(|a, b| a.name.cmp(&b.name));
     let names: Vec<_> = found.iter().map(|k| k.name.as_str()).collect();
-    assert_eq!(
-        names,
-        vec!["deploy.pem", "id_ed25519", "putty.ppk", "putty_enc.ppk"]
-    );
+    assert_eq!(names, vec!["deploy.pem", "id_ed25519", "putty.ppk", "putty_enc.ppk"]);
     let id = found.iter().find(|k| k.name == "id_ed25519").unwrap();
-    assert_eq!(
-        id.fingerprint.as_deref(),
-        Some(fingerprint(&plain).as_str())
-    );
+    assert_eq!(id.fingerprint.as_deref(), Some(fingerprint(&plain).as_str()));
     assert_eq!(id.format, keyfiles::KeyFormat::OpenSsh);
     assert!(found.iter().any(|k| k.format == keyfiles::KeyFormat::Pem));
     let enc = found.iter().find(|k| k.name == "putty_enc.ppk").unwrap();
@@ -305,11 +197,7 @@ fn encrypted_key_needs_the_passphrase() {
     let path = dir.path().join("putty_enc.ppk");
     std::fs::write(&path, include_str!("fixtures/id_ed25519_enc.ppk")).unwrap();
     let store = Store::open_in_memory().unwrap();
-    let vault = sshcraft_store::vault::Vault::unlock(
-        &store,
-        Box::new(sshcraft_store::vault::MemoryMasterKey::default()),
-    )
-    .unwrap();
+    let vault = sshcraft_store::vault::Vault::unlock(&store, Box::new(sshcraft_store::vault::MemoryMasterKey::default())).unwrap();
     assert!(keyfiles::import(&vault, &store, &path, None).is_err());
     assert!(keyfiles::import(&vault, &store, &path, Some("wrong")).is_err());
     let info = keyfiles::import(&vault, &store, &path, Some("123")).unwrap();
@@ -327,10 +215,7 @@ fn encrypted_key_needs_the_passphrase() {
 
 #[test]
 fn own_export_round_trips() {
-    let text = format!(
-        "{}\nweb,Kunden/Müller,prod;web,web.example.org,2222,deploy,,debian\n",
-        csv::CSV_HEADER
-    );
+    let text = format!("{}\nweb,Kunden/Müller,prod;web,web.example.org,2222,deploy,,debian\n", csv::CSV_HEADER);
     let plan = csv::parse(&text);
     assert!(plan.skipped.is_empty(), "{:?}", plan.skipped);
     let c = &plan.candidates[0];
@@ -347,23 +232,15 @@ fn own_export_round_trips() {
 fn semicolon_separated() {
     let plan = csv::parse("name;address;user\nweb;w.org;root\n");
     assert_eq!(plan.candidates.len(), 1);
-    assert_eq!(
-        plan.candidates[0].settings.username.as_deref(),
-        Some("root")
-    );
+    assert_eq!(plan.candidates[0].settings.username.as_deref(), Some("root"));
 }
 
 #[test]
 fn termius_style_columns() {
-    let plan = csv::parse(
-        "\u{feff}Groups,Label,Tags,Hostname/IP,Protocol,Port\nProd,db,\"a,b\",10.0.0.5,ssh,22\nProd,rdp,,10.0.0.6,rdp,3389\n",
-    );
+    let plan = csv::parse("\u{feff}Groups,Label,Tags,Hostname/IP,Protocol,Port\nProd,db,\"a,b\",10.0.0.5,ssh,22\nProd,rdp,,10.0.0.6,rdp,3389\n");
     assert_eq!(plan.candidates.len(), 1);
     let c = &plan.candidates[0];
-    assert_eq!(
-        (c.name.as_str(), c.group_path.clone()),
-        ("db", vec!["Prod".to_owned()])
-    );
+    assert_eq!((c.name.as_str(), c.group_path.clone()), ("db", vec!["Prod".to_owned()]));
     assert_eq!(c.tags, vec!["a".to_owned(), "b".to_owned()]);
     assert_eq!(plan.skipped.len(), 1, "the RDP row");
 }
@@ -407,11 +284,7 @@ fn utf16(text: &str) -> Vec<u8> {
 fn reg_file_utf16_is_read() {
     let sessions = putty::parse_reg(&utf16(REG));
     assert_eq!(sessions.len(), 3);
-    assert_eq!(
-        putty::parse_reg(REG.as_bytes()),
-        sessions,
-        "UTF-8 reads the same"
-    );
+    assert_eq!(putty::parse_reg(REG.as_bytes()), sessions, "UTF-8 reads the same");
 }
 
 #[test]
@@ -436,12 +309,7 @@ fn user_at_host_is_split() {
     assert_eq!(c.settings.address.as_deref(), Some("web.example.org"));
     assert_eq!(c.settings.username.as_deref(), Some("deploy"));
     assert_eq!(c.settings.port, Some(2222));
-    assert_eq!(
-        c.key_note,
-        Some(KeyNote::File {
-            path: r"C:\Users\me\web.ppk".into()
-        })
-    );
+    assert_eq!(c.key_note, Some(KeyNote::File { path: r"C:\Users\me\web.ppk".into() }));
 }
 
 // ---------- review fixes
@@ -455,10 +323,7 @@ fn putty_name_with_multibyte_does_not_panic() {
 #[test]
 fn known_hosts_line_is_one_host() {
     let k = ed25519();
-    let parsed = knownhosts::parse(&format!(
-        "web.example.org,203.0.113.5 {}\n",
-        public_line(&k)
-    ));
+    let parsed = knownhosts::parse(&format!("web.example.org,203.0.113.5 {}\n", public_line(&k)));
     assert_eq!(parsed.candidates.len(), 1);
     assert_eq!(parsed.entries.len(), 2, "both names keep their host key");
 }
@@ -469,10 +334,7 @@ fn same_server_from_two_sources_is_one_host() {
     apply_import(&store, &[host("web", &["G"], Some("web.org"))], None).unwrap();
     let from_known_hosts = ImportCandidate {
         name: "web.org".into(),
-        settings: ConnectionSettings {
-            address: Some("web.org".into()),
-            ..Default::default()
-        },
+        settings: ConnectionSettings { address: Some("web.org".into()), ..Default::default() },
         ..ImportCandidate::default()
     };
     let outcome = apply_import(&store, &[from_known_hosts], None).unwrap();
@@ -500,12 +362,7 @@ fn import_skips_received_read_only_groups() {
             created_at: 1,
         })
         .unwrap();
-    apply_import(
-        &store,
-        &[host("a", &["Kunden"], Some("a.org"))],
-        Some(server),
-    )
-    .unwrap();
+    apply_import(&store, &[host("a", &["Kunden"], Some("a.org"))], Some(server)).unwrap();
     let theirs = store.list_groups().unwrap().pop().unwrap();
     let area = uuid::Uuid::new_v4();
     store
@@ -522,21 +379,9 @@ fn import_skips_received_read_only_groups() {
             },
         )
         .unwrap();
-    store
-        .set_item_area(server, ItemKind::Group, &theirs.id.0.to_string(), area)
-        .unwrap();
-    apply_import(
-        &store,
-        &[host("b", &["Kunden"], Some("b.org"))],
-        Some(server),
-    )
-    .unwrap();
-    let kunden = store
-        .list_groups()
-        .unwrap()
-        .into_iter()
-        .filter(|g| g.name == "Kunden")
-        .count();
+    store.set_item_area(server, ItemKind::Group, &theirs.id.0.to_string(), area).unwrap();
+    apply_import(&store, &[host("b", &["Kunden"], Some("b.org"))], Some(server)).unwrap();
+    let kunden = store.list_groups().unwrap().into_iter().filter(|g| g.name == "Kunden").count();
     assert_eq!(kunden, 2, "a group shared to read only is not written into");
 }
 
@@ -544,17 +389,9 @@ fn import_skips_received_read_only_groups() {
 fn importing_a_key_file_twice_keeps_one_key() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("id_ed25519");
-    std::fs::write(
-        &path,
-        ed25519().to_openssh(LineEnding::LF).unwrap().as_bytes(),
-    )
-    .unwrap();
+    std::fs::write(&path, ed25519().to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
     let store = Store::open_in_memory().unwrap();
-    let vault = sshcraft_store::vault::Vault::unlock(
-        &store,
-        Box::new(sshcraft_store::vault::MemoryMasterKey::default()),
-    )
-    .unwrap();
+    let vault = sshcraft_store::vault::Vault::unlock(&store, Box::new(sshcraft_store::vault::MemoryMasterKey::default())).unwrap();
     let first = keyfiles::import(&vault, &store, &path, None).unwrap();
     let second = keyfiles::import(&vault, &store, &path, None).unwrap();
     assert_eq!(first.id, second.id);
@@ -564,30 +401,17 @@ fn importing_a_key_file_twice_keeps_one_key() {
 fn user_cert_line(key: &PrivateKey) -> String {
     use russh::keys::ssh_key::certificate::{Builder, CertType};
     let ca = ed25519();
-    let mut builder = Builder::new_with_random_nonce(
-        &mut rand::rng(),
-        key.public_key().key_data().clone(),
-        0,
-        u64::MAX,
-    )
-    .unwrap();
+    let mut builder = Builder::new_with_random_nonce(&mut rand::rng(), key.public_key().key_data().clone(), 0, u64::MAX).unwrap();
     builder.cert_type(CertType::User).unwrap();
     builder.valid_principal("deploy").unwrap();
     builder.sign(&ca).unwrap().to_openssh().unwrap()
 }
 
-fn keyfile_with_cert(
-    cert_of: &PrivateKey,
-    key: &PrivateKey,
-) -> (tempfile::TempDir, std::path::PathBuf) {
+fn keyfile_with_cert(cert_of: &PrivateKey, key: &PrivateKey) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("id_ed25519");
     std::fs::write(&path, key.to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
-    std::fs::write(
-        dir.path().join("id_ed25519-cert.pub"),
-        user_cert_line(cert_of),
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("id_ed25519-cert.pub"), user_cert_line(cert_of)).unwrap();
     (dir, path)
 }
 
@@ -596,11 +420,7 @@ fn keyfile_import_picks_up_cert_sibling() {
     let key = ed25519();
     let (_dir, path) = keyfile_with_cert(&key, &key);
     let store = Store::open_in_memory().unwrap();
-    let vault = sshcraft_store::vault::Vault::unlock(
-        &store,
-        Box::new(sshcraft_store::vault::MemoryMasterKey::default()),
-    )
-    .unwrap();
+    let vault = sshcraft_store::vault::Vault::unlock(&store, Box::new(sshcraft_store::vault::MemoryMasterKey::default())).unwrap();
     let info = keyfiles::import(&vault, &store, &path, None).unwrap();
     assert!(info.certificate.is_some());
     // Importing again keeps the one key with its certificate.
@@ -614,11 +434,7 @@ fn mismatching_cert_sibling_is_not_fatal() {
     let key = ed25519();
     let (_dir, path) = keyfile_with_cert(&ed25519(), &key);
     let store = Store::open_in_memory().unwrap();
-    let vault = sshcraft_store::vault::Vault::unlock(
-        &store,
-        Box::new(sshcraft_store::vault::MemoryMasterKey::default()),
-    )
-    .unwrap();
+    let vault = sshcraft_store::vault::Vault::unlock(&store, Box::new(sshcraft_store::vault::MemoryMasterKey::default())).unwrap();
     let info = keyfiles::import(&vault, &store, &path, None).unwrap();
     assert!(info.certificate.is_none());
     assert_eq!(store.list_key_records().unwrap().len(), 1);

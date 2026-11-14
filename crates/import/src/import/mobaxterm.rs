@@ -17,8 +17,7 @@ pub fn parse(bytes: &[u8]) -> ImportPlan {
             in_bookmarks = section == "Bookmarks" || section.starts_with("Bookmarks_");
             folder.clear();
             if section == "Passwords" {
-                plan.skipped
-                    .push("stored passwords are not imported".into());
+                plan.skipped.push("stored passwords are not imported".into());
             }
             continue;
         }
@@ -30,11 +29,7 @@ pub fn parse(bytes: &[u8]) -> ImportPlan {
         };
         match name {
             "SubRep" => {
-                folder = value
-                    .split('\\')
-                    .map(clean)
-                    .filter(|p| !p.is_empty())
-                    .collect();
+                folder = value.split('\\').map(clean).filter(|p| !p.is_empty()).collect();
                 continue;
             }
             "ImgNum" => continue,
@@ -57,19 +52,12 @@ pub fn parse(bytes: &[u8]) -> ImportPlan {
             continue;
         }
         let mut warnings = Vec::new();
-        let port = port_from(fields[2], &mut warnings)
-            .filter(|p| *p != sshcraft_model::model::DEFAULT_PORT);
+        let port = port_from(fields[2], &mut warnings).filter(|p| *p != sshcraft_model::model::DEFAULT_PORT);
         let username = Some(clean(fields[3])).filter(|u| !u.is_empty());
         plan.candidates.push(ImportCandidate {
             name,
             group_path: folder.clone(),
-            settings: ConnectionSettings {
-                address: Some(clean(fields[1])),
-                port,
-                username,
-                key: None,
-                ..Default::default()
-            },
+            settings: ConnectionSettings { address: Some(clean(fields[1])), port, username, key: None, ..Default::default() },
             warnings,
             ..ImportCandidate::default()
         });

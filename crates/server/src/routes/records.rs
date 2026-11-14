@@ -30,9 +30,7 @@ pub async fn put(
 ) -> Result<Json<Value>, ApiError> {
     let header = &record.header;
     if header.area_id.0 != area || header.record_id != record_id {
-        return Err(ApiError::Invalid(
-            "record header differs from the path".into(),
-        ));
+        return Err(ApiError::Invalid("record header differs from the path".into()));
     }
     if header.author_account != session.account || header.author_device != session.device_id {
         return Err(ApiError::Forbidden);
@@ -52,15 +50,7 @@ pub async fn put(
         return Err(ApiError::TooLarge);
     }
     let seq = state.store.put_record(&record).await?;
-    state.hub.publish(
-        &audience(&row),
-        Event::Record {
-            area_id: AreaId(area),
-            record_id,
-            version: record.header.version,
-            seq,
-        },
-    );
+    state.hub.publish(&audience(&row), Event::Record { area_id: AreaId(area), record_id, version: record.header.version, seq });
     Ok(Json(json!({ "seq": seq })))
 }
 
@@ -83,10 +73,7 @@ pub async fn list(
         return Err(ApiError::Forbidden);
     }
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let mut records = state
-        .store
-        .records_since(AreaId(area), query.since, limit + 1)
-        .await?;
+    let mut records = state.store.records_since(AreaId(area), query.since, limit + 1).await?;
     let mut more = records.len() > limit as usize;
     records.truncate(limit as usize);
     let mut page = Vec::with_capacity(records.len());

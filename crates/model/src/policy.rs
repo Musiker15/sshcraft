@@ -16,9 +16,7 @@ pub fn check_host_key(known: Option<&str>, presented: &str) -> HostKeyStatus {
     match known {
         None => HostKeyStatus::Unknown,
         Some(k) if k == presented => HostKeyStatus::Trusted,
-        Some(k) => HostKeyStatus::Mismatch {
-            expected: k.to_owned(),
-        },
+        Some(k) => HostKeyStatus::Mismatch { expected: k.to_owned() },
     }
 }
 
@@ -68,20 +66,12 @@ mod tests {
 
     #[test]
     fn trusted_when_equal() {
-        assert_eq!(
-            check_host_key(Some("SHA256:a"), "SHA256:a"),
-            HostKeyStatus::Trusted
-        );
+        assert_eq!(check_host_key(Some("SHA256:a"), "SHA256:a"), HostKeyStatus::Trusted);
     }
 
     #[test]
     fn mismatch_when_different() {
-        assert_eq!(
-            check_host_key(Some("SHA256:a"), "SHA256:b"),
-            HostKeyStatus::Mismatch {
-                expected: "SHA256:a".into()
-            }
-        );
+        assert_eq!(check_host_key(Some("SHA256:a"), "SHA256:b"), HostKeyStatus::Mismatch { expected: "SHA256:a".into() });
     }
 
     #[test]
@@ -89,10 +79,7 @@ mod tests {
         let lost = Disconnect::Lost("reset".into());
         let delays: Vec<_> = (1..=6).map(|a| next_reconnect_delay(&lost, a)).collect();
         let secs = |s| Some(Duration::from_secs(s));
-        assert_eq!(
-            delays,
-            vec![secs(1), secs(2), secs(5), secs(10), secs(10), None]
-        );
+        assert_eq!(delays, vec![secs(1), secs(2), secs(5), secs(10), secs(10), None]);
     }
 
     #[test]

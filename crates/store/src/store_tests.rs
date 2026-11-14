@@ -6,10 +6,7 @@ fn group(name: &str) -> Group {
         location: None,
         id: GroupId::new(),
         name: name.into(),
-        defaults: ConnectionSettings {
-            address: Some("example.org".into()),
-            ..Default::default()
-        },
+        defaults: ConnectionSettings { address: Some("example.org".into()), ..Default::default() },
         parent_id: None,
         tags: Vec::new(),
     }
@@ -69,10 +66,7 @@ fn known_host_set_get_forget() {
     let store = Store::open_in_memory().unwrap();
     assert_eq!(store.known_host("a", 22).unwrap(), None);
     store.set_known_host("a", 22, "SHA256:abc").unwrap();
-    assert_eq!(
-        store.known_host("a", 22).unwrap().as_deref(),
-        Some("SHA256:abc")
-    );
+    assert_eq!(store.known_host("a", 22).unwrap().as_deref(), Some("SHA256:abc"));
     assert_eq!(store.known_host("a", 2222).unwrap(), None);
     store.forget_known_host("a", 22).unwrap();
     assert_eq!(store.known_host("a", 22).unwrap(), None);
@@ -127,40 +121,21 @@ fn upgrade_from_v1_keeps_data() {
         conn.pragma_update(None, "user_version", 1).unwrap();
         conn.execute(
             "INSERT INTO groups (id, name, defaults) VALUES (?1, ?2, ?3)",
-            rusqlite::params![
-                g.id.0.to_string(),
-                g.name,
-                serde_json::to_string(&g.defaults).unwrap()
-            ],
+            rusqlite::params![g.id.0.to_string(), g.name, serde_json::to_string(&g.defaults).unwrap()],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO hosts (id, name, group_id, settings) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![
-                h.id.0.to_string(),
-                h.name,
-                g.id.0.to_string(),
-                serde_json::to_string(&h.settings).unwrap()
-            ],
+            rusqlite::params![h.id.0.to_string(), h.name, g.id.0.to_string(), serde_json::to_string(&h.settings).unwrap()],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO known_hosts (address, port, fingerprint) VALUES ('example.org', 22, 'SHA256:x')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO known_hosts (address, port, fingerprint) VALUES ('example.org', 22, 'SHA256:x')", []).unwrap();
     }
     let store = Store::open(&path).unwrap();
     assert_eq!(store.list_groups().unwrap(), vec![g]);
     assert_eq!(store.list_hosts().unwrap(), vec![h.clone()]);
-    assert_eq!(
-        store.known_host("example.org", 22).unwrap().as_deref(),
-        Some("SHA256:x")
-    );
-    let version: i64 = store
-        .conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .unwrap();
+    assert_eq!(store.known_host("example.org", 22).unwrap().as_deref(), Some("SHA256:x"));
+    let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(version, SCHEMA_VERSION);
     store.put_setting("app", "{}").unwrap();
     store.touch_recent(h.id, 1).unwrap();
@@ -188,10 +163,7 @@ fn recent_hosts_newest_first_and_limited() {
         store.upsert_host(h).unwrap();
         store.touch_recent(h.id, i as i64 * 10).unwrap();
     }
-    assert_eq!(
-        store.recent_hosts(3).unwrap(),
-        vec![hosts[3].id, hosts[2].id, hosts[1].id]
-    );
+    assert_eq!(store.recent_hosts(3).unwrap(), vec![hosts[3].id, hosts[2].id, hosts[1].id]);
 }
 
 #[test]
@@ -225,8 +197,7 @@ fn half_done_upgrade_to_v2_recovers() {
         conn.execute_batch(SCHEMA_V1).unwrap();
         conn.pragma_update(None, "user_version", 1).unwrap();
         // The process died after the first table of version 2 was created.
-        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
-            .unwrap();
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);").unwrap();
     }
     let store = Store::open(&path).unwrap();
     store.put_setting("app", "{}").unwrap();
@@ -241,14 +212,7 @@ fn schema_7_adds_key_columns_with_defaults() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.pragma_update(None, "foreign_keys", true).unwrap();
-        for batch in [
-            SCHEMA_V1,
-            SCHEMA_V2,
-            SCHEMA_V3,
-            super::share_store::SCHEMA_V4,
-            SCHEMA_V5,
-            super::credential_store::SCHEMA_V6,
-        ] {
+        for batch in [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, super::share_store::SCHEMA_V4, SCHEMA_V5, super::credential_store::SCHEMA_V6] {
             conn.execute_batch(batch).unwrap();
         }
         conn.pragma_update(None, "user_version", 6).unwrap();
@@ -292,10 +256,7 @@ fn unreadable_forwards_column_gives_none() {
     let store = Store::open_in_memory().unwrap();
     let h = host("web", None);
     store.upsert_host(&h).unwrap();
-    store
-        .conn
-        .execute("UPDATE hosts SET forwards = 'garbage'", [])
-        .unwrap();
+    store.conn.execute("UPDATE hosts SET forwards = 'garbage'", []).unwrap();
     assert!(store.list_hosts().unwrap()[0].forwards.is_empty());
 }
 
@@ -308,10 +269,7 @@ fn invalid_forward_from_elsewhere_is_dropped_on_load() {
     let mut bad = serde_json::to_value(local_rule(1)).unwrap();
     bad["bind_port"] = serde_json::json!(70000);
     let json = serde_json::to_string(&vec![serde_json::to_value(&good).unwrap(), bad]).unwrap();
-    store
-        .conn
-        .execute("UPDATE hosts SET forwards = ?1", [json])
-        .unwrap();
+    store.conn.execute("UPDATE hosts SET forwards = ?1", [json]).unwrap();
     assert_eq!(store.list_hosts().unwrap()[0].forwards, vec![good]);
 }
 
@@ -323,23 +281,11 @@ fn schema_8_adds_forwards_to_existing_hosts() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.pragma_update(None, "foreign_keys", true).unwrap();
-        for batch in [
-            SCHEMA_V1,
-            SCHEMA_V2,
-            SCHEMA_V3,
-            super::share_store::SCHEMA_V4,
-            SCHEMA_V5,
-            super::credential_store::SCHEMA_V6,
-            SCHEMA_V7,
-        ] {
+        for batch in [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, super::share_store::SCHEMA_V4, SCHEMA_V5, super::credential_store::SCHEMA_V6, SCHEMA_V7] {
             conn.execute_batch(batch).unwrap();
         }
         conn.pragma_update(None, "user_version", 7).unwrap();
-        conn.execute(
-            "INSERT INTO hosts (id, name, settings) VALUES (?1, 'web', '{}')",
-            [id.0.to_string()],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO hosts (id, name, settings) VALUES (?1, 'web', '{}')", [id.0.to_string()]).unwrap();
     }
     let store = Store::open(&path).unwrap();
     let hosts = store.list_hosts().unwrap();
@@ -352,10 +298,7 @@ fn saving_an_invalid_rule_is_refused() {
     let store = Store::open_in_memory().unwrap();
     let mut h = host("web", None);
     h.forwards = vec![local_rule(0)];
-    assert!(matches!(
-        store.upsert_host(&h),
-        Err(StoreError::InvalidForward(_))
-    ));
+    assert!(matches!(store.upsert_host(&h), Err(StoreError::InvalidForward(_))));
     assert!(store.list_hosts().unwrap().is_empty());
 }
 
@@ -369,10 +312,7 @@ fn schema_11_reopens_without_migration() {
     store.put_setting("app", "{}").unwrap();
     drop(store);
     let store = Store::open(&path).unwrap();
-    let version: i64 = store
-        .conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .unwrap();
+    let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(version, 11);
     assert_eq!(store.get_setting("app").unwrap().as_deref(), Some("{}"));
 }

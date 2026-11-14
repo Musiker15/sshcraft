@@ -1,30 +1,12 @@
 use super::*;
-use sshcraft_model::model::{
-    ConnectionSettings, Group, GroupId, Host, HostId, KeyId, KeyRef, ServerId, group_chain, resolve,
-};
+use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, KeyId, KeyRef, ServerId, group_chain, resolve};
 
 fn group(name: &str, parent: Option<GroupId>, defaults: ConnectionSettings) -> Group {
-    Group {
-        id: GroupId::new(),
-        name: name.into(),
-        defaults,
-        location: None,
-        parent_id: parent,
-        tags: Vec::new(),
-    }
+    Group { id: GroupId::new(), name: name.into(), defaults, location: None, parent_id: parent, tags: Vec::new() }
 }
 
 fn host(name: &str, group_id: Option<GroupId>, settings: ConnectionSettings) -> Host {
-    Host {
-        forwards: Vec::new(),
-        id: HostId::new(),
-        name: name.into(),
-        group_id,
-        settings,
-        location: None,
-        tags: Vec::new(),
-        os: None,
-    }
+    Host { forwards: Vec::new(), id: HostId::new(), name: name.into(), group_id, settings, location: None, tags: Vec::new(), os: None }
 }
 
 /// top > middle > bottom, each saved.
@@ -39,14 +21,7 @@ fn three_levels(store: &Store) -> (Group, Group, Group) {
             ..Default::default()
         },
     );
-    let middle = group(
-        "middle",
-        Some(top.id),
-        ConnectionSettings {
-            username: Some("middle-user".into()),
-            ..Default::default()
-        },
-    );
+    let middle = group("middle", Some(top.id), ConnectionSettings { username: Some("middle-user".into()), ..Default::default() });
     let bottom = group("bottom", Some(middle.id), ConnectionSettings::default());
     for g in [&top, &middle, &bottom] {
         store.upsert_group(g).unwrap();
@@ -66,11 +41,7 @@ fn migration_from_v4_keeps_data() {
         conn.execute_batch(SCHEMA_V3).unwrap();
         conn.execute_batch(share_store::SCHEMA_V4).unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();
-        conn.execute(
-            "INSERT INTO groups (id, name, defaults) VALUES (?1, 'old', '{}')",
-            [id.0.to_string()],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO groups (id, name, defaults) VALUES (?1, 'old', '{}')", [id.0.to_string()]).unwrap();
     }
     let store = Store::open(&path).unwrap();
     let groups = store.list_groups().unwrap();
@@ -83,14 +54,7 @@ fn migration_from_v4_keeps_data() {
 fn three_levels_inherit() {
     let store = Store::open_in_memory().unwrap();
     let (_, _, bottom) = three_levels(&store);
-    let h = host(
-        "h",
-        Some(bottom.id),
-        ConnectionSettings {
-            port: Some(2200),
-            ..Default::default()
-        },
-    );
+    let h = host("h", Some(bottom.id), ConnectionSettings { port: Some(2200), ..Default::default() });
     let groups = store.list_groups().unwrap();
     let chain = group_chain(&groups, bottom.id);
     let refs: Vec<&Group> = chain.iter().collect();
@@ -117,20 +81,11 @@ fn group_into_own_subgroup_is_refused() {
     let store = Store::open_in_memory().unwrap();
     let (mut top, _, bottom) = three_levels(&store);
     top.parent_id = Some(bottom.id);
-    assert!(matches!(
-        store.upsert_group(&top),
-        Err(StoreError::GroupCycle)
-    ));
+    assert!(matches!(store.upsert_group(&top), Err(StoreError::GroupCycle)));
     top.parent_id = Some(top.id);
-    assert!(matches!(
-        store.upsert_group(&top),
-        Err(StoreError::GroupCycle)
-    ));
+    assert!(matches!(store.upsert_group(&top), Err(StoreError::GroupCycle)));
     top.parent_id = Some(GroupId::new());
-    assert!(
-        store.upsert_group(&top).is_err(),
-        "a missing parent is refused"
-    );
+    assert!(store.upsert_group(&top).is_err(), "a missing parent is refused");
 }
 
 #[test]
@@ -141,36 +96,16 @@ fn subgroup_follows_parent_location() {
     let h = host("h", Some(bottom.id), ConnectionSettings::default());
     store.upsert_host(&h).unwrap();
     // Can't add a server row here without the sync tables' needs; set_location only stores ids.
-    store
-        .set_location(
-            crate::store::ItemKind::Group,
-            &top.id.0.to_string(),
-            Some(server),
-        )
-        .unwrap();
+    store.set_location(crate::store::ItemKind::Group, &top.id.0.to_string(), Some(server)).unwrap();
     for g in store.list_groups().unwrap() {
         assert_eq!(g.location, Some(server), "{}", g.name);
     }
     assert_eq!(store.list_hosts().unwrap()[0].location, Some(server));
-    assert!(
-        store
-            .set_location(
-                crate::store::ItemKind::Group,
-                &middle.id.0.to_string(),
-                None
-            )
-            .is_err(),
-        "a subgroup moves only with its parent"
-    );
+    assert!(store.set_location(crate::store::ItemKind::Group, &middle.id.0.to_string(), None).is_err(), "a subgroup moves only with its parent");
     // A new subgroup of a group at the server is at the server too.
     let late = group("late", Some(bottom.id), ConnectionSettings::default());
     store.upsert_group(&late).unwrap();
-    let late = store
-        .list_groups()
-        .unwrap()
-        .into_iter()
-        .find(|g| g.id == late.id)
-        .unwrap();
+    let late = store.list_groups().unwrap().into_iter().find(|g| g.id == late.id).unwrap();
     assert_eq!(late.location, Some(server));
     assert_eq!(store.subgroups(top.id).unwrap().len(), 3);
 }
@@ -179,9 +114,7 @@ fn subgroup_follows_parent_location() {
 fn deleting_a_group_deletes_subgroups_and_their_hosts() {
     let store = Store::open_in_memory().unwrap();
     let (top, _, bottom) = three_levels(&store);
-    store
-        .upsert_host(&host("h", Some(bottom.id), ConnectionSettings::default()))
-        .unwrap();
+    store.upsert_host(&host("h", Some(bottom.id), ConnectionSettings::default())).unwrap();
     store.delete_group(top.id).unwrap();
     assert!(store.list_groups().unwrap().is_empty());
     assert!(store.list_hosts().unwrap().is_empty());
@@ -203,19 +136,10 @@ fn group_chain_stops_on_a_cycle() {
 fn tags_are_normalized() {
     let store = Store::open_in_memory().unwrap();
     let mut h = host("h", None, ConnectionSettings::default());
-    h.tags = vec![
-        " prod ".into(),
-        "".into(),
-        "Prod".into(),
-        "web".into(),
-        "x".repeat(100),
-    ];
+    h.tags = vec![" prod ".into(), "".into(), "Prod".into(), "web".into(), "x".repeat(100)];
     store.upsert_host(&h).unwrap();
     let saved = store.list_hosts().unwrap().pop().unwrap();
-    assert_eq!(
-        saved.tags,
-        vec!["prod".to_owned(), "web".to_owned(), "x".repeat(64)]
-    );
+    assert_eq!(saved.tags, vec!["prod".to_owned(), "web".to_owned(), "x".repeat(64)]);
 }
 
 #[test]
@@ -242,10 +166,7 @@ fn too_deep_is_refused() {
         parent = Some(g.id);
     }
     let one_more = group("deep", parent, ConnectionSettings::default());
-    assert!(matches!(
-        store.upsert_group(&one_more),
-        Err(StoreError::TooDeep)
-    ));
+    assert!(matches!(store.upsert_group(&one_more), Err(StoreError::TooDeep)));
 }
 
 #[test]

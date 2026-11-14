@@ -48,10 +48,7 @@ pub struct LogHead {
 impl LogAction {
     fn canonical(&self) -> Vec<u8> {
         match self {
-            LogAction::Add { certificate } => signing_bytes(
-                "add",
-                &[&certificate.signed_bytes(), &certificate.signature],
-            ),
+            LogAction::Add { certificate } => signing_bytes("add", &[&certificate.signed_bytes(), &certificate.signature]),
             LogAction::Revoke { device_id } => signing_bytes("revoke", &[device_id.as_bytes()]),
         }
     }
@@ -70,23 +67,13 @@ impl LogEntry {
     fn signed_bytes(&self) -> Vec<u8> {
         signing_bytes(
             DOMAIN_LOG_ENTRY,
-            &[
-                &self.seq.to_be_bytes(),
-                &self.prev_hash,
-                &self.action.canonical(),
-                &self.signer.canonical(),
-                &self.created_at.to_be_bytes(),
-            ],
+            &[&self.seq.to_be_bytes(), &self.prev_hash, &self.action.canonical(), &self.signer.canonical(), &self.created_at.to_be_bytes()],
         )
     }
 
     /// Hash over the signed content and the signature; the next entry points to it.
     pub fn hash(&self) -> [u8; 32] {
-        Sha256::digest(signing_bytes(
-            DOMAIN_LOG_HASH,
-            &[&self.signed_bytes(), &self.signature],
-        ))
-        .into()
+        Sha256::digest(signing_bytes(DOMAIN_LOG_HASH, &[&self.signed_bytes(), &self.signature])).into()
     }
 }
 
@@ -136,84 +123,30 @@ impl DeviceLog {
         }
     }
 
-    fn push(
-        &mut self,
-        action: LogAction,
-        signer: LogSigner,
-        created_at: i64,
-        sign: impl FnOnce(&[u8]) -> [u8; 64],
-    ) {
+    fn push(&mut self, action: LogAction, signer: LogSigner, created_at: i64, sign: impl FnOnce(&[u8]) -> [u8; 64]) {
         let (seq, prev_hash) = self.next();
-        let mut entry = LogEntry {
-            seq,
-            prev_hash,
-            action,
-            signer,
-            created_at,
-            signature: [0; 64],
-        };
+        let mut entry = LogEntry { seq, prev_hash, action, signer, created_at, signature: [0; 64] };
         entry.signature = sign(&entry.signed_bytes());
         self.entries.push(entry);
     }
 
     /// Adds a device; only the account key may do this (when a device is set up).
     pub fn append_add(&mut self, account: &AccountKey, cert: DeviceCertificate, created_at: i64) {
-        self.push(
-            LogAction::Add {
-                certificate: Box::new(cert),
-            },
-            LogSigner::Account,
-            created_at,
-            |m| account.sign(m),
-        );
+        self.push(LogAction::Add { certificate: Box::new(cert) }, LogSigner::Account, created_at, |m| account.sign(m));
     }
 
-    pub fn append_revoke_by_device(
-        &mut self,
-        device_id: Uuid,
-        keys: &DeviceKeys,
-        target: Uuid,
-        created_at: i64,
-    ) {
-        self.push(
-            LogAction::Revoke { device_id: target },
-            LogSigner::Device { device_id },
-            created_at,
-            |m| keys.sign(m),
-        );
+    pub fn append_revoke_by_device(&mut self, device_id: Uuid, keys: &DeviceKeys, target: Uuid, created_at: i64) {
+        self.push(LogAction::Revoke { device_id: target }, LogSigner::Device { device_id }, created_at, |m| keys.sign(m));
     }
 
-    pub fn append_revoke_by_account(
-        &mut self,
-        account: &AccountKey,
-        target: Uuid,
-        created_at: i64,
-    ) {
-        self.push(
-            LogAction::Revoke { device_id: target },
-            LogSigner::Account,
-            created_at,
-            |m| account.sign(m),
-        );
+    pub fn append_revoke_by_account(&mut self, account: &AccountKey, target: Uuid, created_at: i64) {
+        self.push(LogAction::Revoke { device_id: target }, LogSigner::Account, created_at, |m| account.sign(m));
     }
 
     /// Builds an invalid entry (an `Add` signed by a device) so tests can check it is refused.
     #[doc(hidden)]
-    pub fn append_add_signed_by_device_for_test(
-        &mut self,
-        device_id: Uuid,
-        keys: &DeviceKeys,
-        cert: DeviceCertificate,
-        created_at: i64,
-    ) {
-        self.push(
-            LogAction::Add {
-                certificate: Box::new(cert),
-            },
-            LogSigner::Device { device_id },
-            created_at,
-            |m| keys.sign(m),
-        );
+    pub fn append_add_signed_by_device_for_test(&mut self, device_id: Uuid, keys: &DeviceKeys, cert: DeviceCertificate, created_at: i64) {
+        self.push(LogAction::Add { certificate: Box::new(cert) }, LogSigner::Device { device_id }, created_at, |m| keys.sign(m));
     }
 
     /// Replays the log and returns the active devices, or why the log is not acceptable.
@@ -233,11 +166,9 @@ impl DeviceLog {
             let msg = entry.signed_bytes();
             match entry.signer {
                 LogSigner::Account => account.verify(&msg, &entry.signature)?,
-                LogSigner::Device { device_id } => set
-                    .active
-                    .get(&device_id)
-                    .ok_or_else(|| broken("signer is not an active device"))?
-                    .verify_signed(&msg, &entry.signature)?,
+                LogSigner::Device { device_id } => {
+                    set.active.get(&device_id).ok_or_else(|| broken("signer is not an active device"))?.verify_signed(&msg, &entry.signature)?
+                }
             }
             match &entry.action {
                 LogAction::Add { certificate } => {
@@ -252,8 +183,7 @@ impl DeviceLog {
                         return Err(broken("device added twice"));
                     }
                     set.order.push(certificate.device_id);
-                    set.active
-                        .insert(certificate.device_id, (**certificate).clone());
+                    set.active.insert(certificate.device_id, (**certificate).clone());
                 }
                 LogAction::Revoke { device_id } => {
                     if set.active.remove(device_id).is_none() {
@@ -263,21 +193,14 @@ impl DeviceLog {
                 }
             }
             prev = entry.hash();
-            set.head = Some(LogHead {
-                seq: entry.seq,
-                hash: prev,
-            });
+            set.head = Some(LogHead { seq: entry.seq, hash: prev });
         }
         Ok(set)
     }
 
     /// Like [`verify`](Self::verify), and the log must contain the head this client saw before:
     /// a shorter log is a rollback, a different entry at that position a fork.
-    pub fn verify_extends(
-        &self,
-        account: &AccountPublic,
-        known: Option<&LogHead>,
-    ) -> Result<DeviceSet, ProtoError> {
+    pub fn verify_extends(&self, account: &AccountPublic, known: Option<&LogHead>) -> Result<DeviceSet, ProtoError> {
         let set = self.verify(account)?;
         if let Some(known) = known {
             // A sequence number beyond `usize` (32-bit targets) cannot be in this log either.

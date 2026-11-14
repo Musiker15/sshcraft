@@ -28,26 +28,17 @@ fn invalid(why: &str) -> ApiError {
 pub async fn devices_of(state: &AppState, account: &AccountPublic) -> Result<DeviceSet, ApiError> {
     let log = state.store.device_log(account).await?;
     let account = *account;
-    tokio::task::spawn_blocking(move || log.verify(&account))
-        .await
-        .map_err(ApiError::internal)?
-        .map_err(ApiError::internal)
+    tokio::task::spawn_blocking(move || log.verify(&account)).await.map_err(ApiError::internal)?.map_err(ApiError::internal)
 }
 
 /// The area, or `not_found`.
 pub async fn load(state: &AppState, area: Uuid) -> Result<AreaRow, ApiError> {
-    state
-        .store
-        .area(AreaId(area))
-        .await?
-        .ok_or(ApiError::NotFound)
+    state.store.area(AreaId(area)).await?.ok_or(ApiError::NotFound)
 }
 
 /// Owner and members of the area, who get its change notices.
 pub fn audience(row: &AreaRow) -> Vec<AccountPublic> {
-    std::iter::once(row.owner)
-        .chain(row.manifest.members.iter().map(|m| m.account))
-        .collect()
+    std::iter::once(row.owner).chain(row.manifest.members.iter().map(|m| m.account)).collect()
 }
 
 /// Whether `account` owns the area or is listed in its manifest.
@@ -56,17 +47,9 @@ pub fn can_read(row: &AreaRow, account: &AccountPublic) -> bool {
 }
 
 /// `GET /v1/areas`
-pub async fn list(
-    State(state): State<AppState>,
-    session: Session,
-) -> Result<Json<Value>, ApiError> {
-    let areas: Vec<Value> = state
-        .store
-        .areas_of(&session.account)
-        .await?
-        .into_iter()
-        .map(|row| json!({ "owner": row.owner, "manifest": row.manifest }))
-        .collect();
+pub async fn list(State(state): State<AppState>, session: Session) -> Result<Json<Value>, ApiError> {
+    let areas: Vec<Value> =
+        state.store.areas_of(&session.account).await?.into_iter().map(|row| json!({ "owner": row.owner, "manifest": row.manifest })).collect();
     Ok(Json(json!({ "areas": areas })))
 }
 
@@ -84,10 +67,7 @@ pub async fn put_manifest(
         return Err(ApiError::Forbidden);
     }
     let existing = state.store.area(manifest.area_id).await?;
-    if existing
-        .as_ref()
-        .is_some_and(|row| row.owner != session.account)
-    {
+    if existing.as_ref().is_some_and(|row| row.owner != session.account) {
         return Err(ApiError::Forbidden);
     }
     let owner_devices = devices_of(&state, &session.account).await?;
@@ -106,45 +86,24 @@ pub async fn put_manifest(
         }
     }
     let expected = existing.as_ref().map(|row| row.manifest.version);
-    state
-        .store
-        .put_manifest(&session.account, &manifest, expected)
-        .await?;
+    state.store.put_manifest(&session.account, &manifest, expected).await?;
     // Members who were just removed hear about it too, so they notice.
-    let mut accounts = audience(&AreaRow {
-        owner: session.account,
-        manifest: manifest.clone(),
-    });
+    let mut accounts = audience(&AreaRow { owner: session.account, manifest: manifest.clone() });
     if let Some(old) = &existing {
         accounts.extend(audience(old));
     }
-    state.hub.publish(
-        &accounts,
-        Event::Manifest {
-            area_id: manifest.area_id,
-            version: manifest.version,
-        },
-    );
+    state.hub.publish(&accounts, Event::Manifest { area_id: manifest.area_id, version: manifest.version });
     Ok(Json(json!({ "version": manifest.version })))
 }
 
 /// `DELETE /v1/areas/{area_id}`, owner only.
-pub async fn delete(
-    State(state): State<AppState>,
-    session: Session,
-    ApiPath(area): ApiPath<Uuid>,
-) -> Result<Json<Value>, ApiError> {
+pub async fn delete(State(state): State<AppState>, session: Session, ApiPath(area): ApiPath<Uuid>) -> Result<Json<Value>, ApiError> {
     let row = load(&state, area).await?;
     if row.owner != session.account {
         return Err(ApiError::Forbidden);
     }
     state.store.delete_area(AreaId(area)).await?;
-    state.hub.publish(
-        &audience(&row),
-        Event::AreaDeleted {
-            area_id: AreaId(area),
-        },
-    );
+    state.hub.publish(&audience(&row), Event::AreaDeleted { area_id: AreaId(area) });
     Ok(Json(json!({})))
 }
 
@@ -179,34 +138,16 @@ pub async fn put_envelopes(
             return Err(invalid("envelope for a device that may not read this area"));
         }
     }
-    state
-        .store
-        .put_envelopes(AreaId(area), &body.envelopes)
-        .await?;
-    state.hub.publish(
-        &audience(&row),
-        Event::Envelopes {
-            area_id: AreaId(area),
-            key_version: row.manifest.key_version,
-        },
-    );
+    state.store.put_envelopes(AreaId(area), &body.envelopes).await?;
+    state.hub.publish(&audience(&row), Event::Envelopes { area_id: AreaId(area), key_version: row.manifest.key_version });
     Ok(Json(json!({ "count": body.envelopes.len() })))
 }
 
 /// `GET /v1/areas/{area_id}/envelope`: the envelope for the calling device.
-pub async fn my_envelope(
-    State(state): State<AppState>,
-    session: Session,
-    ApiPath(area): ApiPath<Uuid>,
-) -> Result<Json<KeyEnvelope>, ApiError> {
+pub async fn my_envelope(State(state): State<AppState>, session: Session, ApiPath(area): ApiPath<Uuid>) -> Result<Json<KeyEnvelope>, ApiError> {
     let row = load(&state, area).await?;
     if !can_read(&row, &session.account) {
         return Err(ApiError::Forbidden);
     }
-    state
-        .store
-        .envelope_for(AreaId(area), session.device_id)
-        .await?
-        .map(Json)
-        .ok_or(ApiError::NotFound)
+    state.store.envelope_for(AreaId(area), session.device_id).await?.map(Json).ok_or(ApiError::NotFound)
 }

@@ -19,9 +19,7 @@ pub mod authorized_keys;
 mod proxy;
 pub mod socks;
 mod tunnel;
-pub use auth::{
-    Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter, certificate_valid_now,
-};
+pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter, certificate_valid_now};
 pub use tunnel::{MAX_TUNNEL_CONNECTIONS, Tunnel};
 
 /// Signs for a key whose private half SSHCraft does not hold (a FIDO2 key, Windows Hello).
@@ -35,9 +33,7 @@ pub trait KeySigner: Send {
 pub mod testing;
 
 /// An SSH agent connection, independent of its transport (named pipe, socket, test stream).
-pub type DynAgent = russh::keys::agent::client::AgentClient<
-    Box<dyn russh::keys::agent::client::AgentStream + Send + Unpin + 'static>,
->;
+pub type DynAgent = russh::keys::agent::client::AgentClient<Box<dyn russh::keys::agent::client::AgentStream + Send + Unpin + 'static>>;
 
 /// How to authenticate: with a private key, or with a key held by an agent.
 // Lives only while connecting, so the size difference between the variants does not matter.
@@ -72,9 +68,7 @@ pub(crate) const AGENT_SIGN_TIMEOUT: Duration = Duration::from_secs(120);
 /// "cancelled" arrives first.
 pub(crate) const SIGNER_TIMEOUT: Duration = Duration::from_secs(130);
 
-pub(crate) async fn agent_identities(
-    agent: &mut DynAgent,
-) -> Result<Vec<russh::keys::agent::AgentIdentity>, SshError> {
+pub(crate) async fn agent_identities(agent: &mut DynAgent) -> Result<Vec<russh::keys::agent::AgentIdentity>, SshError> {
     tokio::time::timeout(AGENT_REQUEST_TIMEOUT, agent.request_identities())
         .await
         .map_err(|_| SshError::AgentUnavailable("no answer".into()))?
@@ -222,11 +216,7 @@ pub enum SshError {
     #[error("the server refused the remote forwarding")]
     ForwardRefused,
     #[error("jump host {host_name}: {error}")]
-    Hop {
-        index: usize,
-        host_name: String,
-        error: Box<SshError>,
-    },
+    Hop { index: usize, host_name: String, error: Box<SshError> },
 }
 
 impl From<&SshError> for Disconnect {
@@ -273,19 +263,13 @@ struct ClientHandler {
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(
-        &mut self,
-        server_key: &PublicKeyOrCertificate,
-    ) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, server_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         let key_data = match server_key {
             PublicKeyOrCertificate::PublicKey { key, .. } => key.key_data(),
             PublicKeyOrCertificate::Certificate(cert) => cert.public_key(),
         };
         let fingerprint = key_data.fingerprint(HashAlg::Sha256).to_string();
-        let trusted = self
-            .verifier
-            .verify(&self.host_name, &self.address, self.port, &fingerprint)
-            .await;
+        let trusted = self.verifier.verify(&self.host_name, &self.address, self.port, &fingerprint).await;
         if !trusted {
             self.rejected.store(true, Ordering::SeqCst);
         }
@@ -326,8 +310,7 @@ impl client::Handler for ClientHandler {
         reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let Some(target) = tunnel::remote_target(&self.remotes, connected_address, connected_port)
-        else {
+        let Some(target) = tunnel::remote_target(&self.remotes, connected_address, connected_port) else {
             return Ok(());
         };
         if target.count().load(std::sync::atomic::Ordering::SeqCst) >= MAX_TUNNEL_CONNECTIONS {
@@ -342,12 +325,7 @@ impl client::Handler for ClientHandler {
 
 /// Runs a command on its own channel and returns at most `limit` bytes of its output; gives up
 /// after a few seconds.
-async fn exec_on(
-    handle: &client::Handle<ClientHandler>,
-    command: &str,
-    input: Option<&[u8]>,
-    limit: usize,
-) -> Result<Vec<u8>, SshError> {
+async fn exec_on(handle: &client::Handle<ClientHandler>, command: &str, input: Option<&[u8]>, limit: usize) -> Result<Vec<u8>, SshError> {
     let run = async {
         let mut channel = handle.channel_open_session().await.map_err(protocol)?;
         channel.exec(true, command).await.map_err(protocol)?;
@@ -372,9 +350,7 @@ async fn exec_on(
         let _ = channel.close().await;
         Ok(out)
     };
-    tokio::time::timeout(EXEC_TIMEOUT, run)
-        .await
-        .map_err(|_| SshError::Timeout)?
+    tokio::time::timeout(EXEC_TIMEOUT, run).await.map_err(|_| SshError::Timeout)?
 }
 
 /// What a command run with [`Session::run`] gave back.
@@ -390,11 +366,7 @@ pub struct RunOutput {
 
 /// Runs a command to its end: output and errors together (up to `limit` bytes, the rest is
 /// read and dropped) and the exit status. No time limit of its own; the caller sets one.
-async fn run_on(
-    handle: &client::Handle<ClientHandler>,
-    command: &str,
-    limit: usize,
-) -> Result<RunOutput, SshError> {
+async fn run_on(handle: &client::Handle<ClientHandler>, command: &str, limit: usize) -> Result<RunOutput, SshError> {
     let mut channel = handle.channel_open_session().await.map_err(protocol)?;
     channel.exec(true, command).await.map_err(protocol)?;
     let mut result = RunOutput::default();
@@ -403,9 +375,7 @@ async fn run_on(
         if data.len() > room {
             result.truncated = true;
         }
-        result
-            .output
-            .extend_from_slice(&data[..data.len().min(room)]);
+        result.output.extend_from_slice(&data[..data.len().min(room)]);
     };
     while let Some(msg) = channel.wait().await {
         match msg {
@@ -449,33 +419,14 @@ pub struct ShellWriter {
 /// The client settings for every hop: keep-alive, and russh's default algorithms, which put the
 /// post-quantum key exchange `mlkem768x25519-sha256` first.
 pub fn client_config() -> client::Config {
-    client::Config {
-        keepalive_interval: Some(KEEPALIVE_INTERVAL),
-        keepalive_max: KEEPALIVE_MAX,
-        ..Default::default()
-    }
+    client::Config { keepalive_interval: Some(KEEPALIVE_INTERVAL), keepalive_max: KEEPALIVE_MAX, ..Default::default() }
 }
 
 /// Connects to one host directly.
-pub async fn connect(
-    params: ConnectParams,
-    verifier: Arc<dyn HostKeyVerifier>,
-    prompter: Arc<dyn AuthPrompter>,
-) -> Result<Session, SshError> {
-    let hop = Hop {
-        host_name: params.address.clone(),
-        address: params.address,
-        port: params.port,
-        username: params.username,
-        auth: params.auth,
-    };
+pub async fn connect(params: ConnectParams, verifier: Arc<dyn HostKeyVerifier>, prompter: Arc<dyn AuthPrompter>) -> Result<Session, SshError> {
+    let hop = Hop { host_name: params.address.clone(), address: params.address, port: params.port, username: params.username, auth: params.auth };
     connect_route(
-        RouteParams {
-            hops: vec![hop],
-            proxy: None,
-            options: SessionOptions::default(),
-            connect_timeout: CONNECT_TIMEOUT,
-        },
+        RouteParams { hops: vec![hop], proxy: None, options: SessionOptions::default(), connect_timeout: CONNECT_TIMEOUT },
         verifier,
         prompter,
     )
@@ -485,17 +436,9 @@ pub async fn connect(
 /// Connects along a route: the first hop over TCP or the proxy, each further hop through a
 /// `direct-tcpip` channel of the one before. Each hop checks its own host key and signs in with
 /// its own credentials. A failure at a jump host comes as [`SshError::Hop`].
-pub async fn connect_route(
-    params: RouteParams,
-    verifier: Arc<dyn HostKeyVerifier>,
-    prompter: Arc<dyn AuthPrompter>,
-) -> Result<Session, SshError> {
+pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifier>, prompter: Arc<dyn AuthPrompter>) -> Result<Session, SshError> {
     let config = Arc::new(client_config());
-    let last = params
-        .hops
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| SshError::Connect("no host to connect to".into()))?;
+    let last = params.hops.len().checked_sub(1).ok_or_else(|| SshError::Connect("no host to connect to".into()))?;
     let timeout = params.connect_timeout;
     let mut connected: Vec<client::Handle<ClientHandler>> = Vec::new();
     let mut certificate_expired = false;
@@ -503,27 +446,12 @@ pub async fn connect_route(
     for (index, hop) in params.hops.into_iter().enumerate() {
         let host_name = hop.host_name.clone();
         let wrap = |error: SshError| {
-            if index < last {
-                SshError::Hop {
-                    index,
-                    host_name: host_name.clone(),
-                    error: Box::new(error),
-                }
-            } else {
-                error
-            }
+            if index < last { SshError::Hop { index, host_name: host_name.clone(), error: Box::new(error) } } else { error }
         };
         let stream: Box<dyn Io> = match connected.last() {
-            None => proxy::open(params.proxy.as_ref(), &hop.address, hop.port, timeout)
-                .await
-                .map_err(wrap)?,
+            None => proxy::open(params.proxy.as_ref(), &hop.address, hop.port, timeout).await.map_err(wrap)?,
             Some(before) => {
-                let opened = before.channel_open_direct_tcpip(
-                    hop.address.clone(),
-                    u32::from(hop.port),
-                    "127.0.0.1",
-                    0,
-                );
+                let opened = before.channel_open_direct_tcpip(hop.address.clone(), u32::from(hop.port), "127.0.0.1", 0);
                 let channel = tokio::time::timeout(timeout, opened)
                     .await
                     .map_err(|_| wrap(SshError::Connect("timed out".into())))?
@@ -533,49 +461,24 @@ pub async fn connect_route(
         };
         let rejected = Arc::new(AtomicBool::new(false));
         let handler = ClientHandler {
-            agent: if index == last {
-                params.options.agent_forwarding.clone()
-            } else {
-                None
-            },
+            agent: if index == last { params.options.agent_forwarding.clone() } else { None },
             host_name: hop.host_name.clone(),
             address: hop.address.clone(),
             port: hop.port,
             verifier: verifier.clone(),
             rejected: rejected.clone(),
             // Only the target forwards ports for us.
-            remotes: if index == last {
-                remotes.clone()
-            } else {
-                tunnel::Remotes::default()
-            },
+            remotes: if index == last { remotes.clone() } else { tunnel::Remotes::default() },
         };
         let mut handle = client::connect_stream(config.clone(), stream, handler)
             .await
-            .map_err(|e| {
-                wrap(if rejected.load(Ordering::SeqCst) {
-                    SshError::HostKeyRejected
-                } else {
-                    SshError::Connect(e.to_string())
-                })
-            })?;
+            .map_err(|e| wrap(if rejected.load(Ordering::SeqCst) { SshError::HostKeyRejected } else { SshError::Connect(e.to_string()) }))?;
         let mut credentials = hop.auth;
-        certificate_expired = credentials
-            .certificate
-            .as_ref()
-            .is_some_and(|c| !certificate_valid_now(c));
+        certificate_expired = credentials.certificate.as_ref().is_some_and(|c| !certificate_valid_now(c));
         if verifier.first_contact(&hop.address, hop.port) {
             credentials.password = None;
         }
-        auth::authenticate(
-            &mut handle,
-            &hop.username,
-            &hop.host_name,
-            credentials,
-            prompter.as_ref(),
-        )
-        .await
-        .map_err(wrap)?;
+        auth::authenticate(&mut handle, &hop.username, &hop.host_name, credentials, prompter.as_ref()).await.map_err(wrap)?;
         connected.push(handle);
     }
     let handle = connected.pop().expect("at least one hop");
@@ -592,60 +495,21 @@ pub async fn connect_route(
 impl Session {
     /// Listens on `bind_address:bind_port` here; connections reach `target_host:target_port`
     /// as seen from the server (`ssh -L`).
-    pub async fn forward_local(
-        &self,
-        bind_address: &str,
-        bind_port: u16,
-        target_host: &str,
-        target_port: u16,
-    ) -> Result<Tunnel, SshError> {
+    pub async fn forward_local(&self, bind_address: &str, bind_port: u16, target_host: &str, target_port: u16) -> Result<Tunnel, SshError> {
         let target = Some((target_host.to_owned(), target_port));
-        tunnel::listen(
-            self.handle.clone(),
-            self.jumps.clone(),
-            bind_address,
-            bind_port,
-            target,
-        )
-        .await
+        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, target).await
     }
 
     /// A SOCKS5 proxy on `bind_address:bind_port` here; each connection asks for its own target
     /// (`ssh -D`).
-    pub async fn forward_dynamic(
-        &self,
-        bind_address: &str,
-        bind_port: u16,
-    ) -> Result<Tunnel, SshError> {
-        tunnel::listen(
-            self.handle.clone(),
-            self.jumps.clone(),
-            bind_address,
-            bind_port,
-            None,
-        )
-        .await
+    pub async fn forward_dynamic(&self, bind_address: &str, bind_port: u16) -> Result<Tunnel, SshError> {
+        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, None).await
     }
 
     /// The server listens on `bind_address:bind_port`; connections reach
     /// `target_host:target_port` as seen from here (`ssh -R`).
-    pub async fn forward_remote(
-        &self,
-        bind_address: &str,
-        bind_port: u16,
-        target_host: &str,
-        target_port: u16,
-    ) -> Result<Tunnel, SshError> {
-        tunnel::remote(
-            self.handle.clone(),
-            self.jumps.clone(),
-            self.remotes.clone(),
-            bind_address,
-            bind_port,
-            target_host,
-            target_port,
-        )
-        .await
+    pub async fn forward_remote(&self, bind_address: &str, bind_port: u16, target_host: &str, target_port: u16) -> Result<Tunnel, SshError> {
+        tunnel::remote(self.handle.clone(), self.jumps.clone(), self.remotes.clone(), bind_address, bind_port, target_host, target_port).await
     }
 
     /// Completes once the connection to the target or to a jump host is gone.
@@ -679,15 +543,9 @@ impl Session {
     /// Opens a shell with a terminal of type `term` (`TERM` on the server).
     pub async fn open_shell(&self, cols: u32, rows: u32, term: &str) -> Result<Shell, SshError> {
         let channel = self.handle.channel_open_session().await.map_err(protocol)?;
-        channel
-            .request_pty(false, term, cols, rows, 0, 0, &[])
-            .await
-            .map_err(protocol)?;
+        channel.request_pty(false, term, cols, rows, 0, 0, &[]).await.map_err(protocol)?;
         for (name, value) in self.env.iter() {
-            channel
-                .set_env(false, name.as_str(), value.as_str())
-                .await
-                .map_err(protocol)?;
+            channel.set_env(false, name.as_str(), value.as_str()).await.map_err(protocol)?;
         }
         if self.forward_agent {
             channel.agent_forward(false).await.map_err(protocol)?;
@@ -714,33 +572,17 @@ impl Session {
                     _ => {}
                 }
             }
-            let reason = if exit_status.is_some() || closed {
-                Disconnect::Exited(exit_status)
-            } else {
-                Disconnect::Lost("connection closed".into())
-            };
+            let reason = if exit_status.is_some() || closed { Disconnect::Exited(exit_status) } else { Disconnect::Lost("connection closed".into()) };
             let _ = tx.send(ShellEvent::Ended(reason)).await;
         });
 
-        Ok(Shell {
-            events: rx,
-            writer: ShellWriter {
-                channel: Arc::new(write),
-                session: self.handle.clone(),
-                _jumps: self.jumps.clone(),
-            },
-        })
+        Ok(Shell { events: rx, writer: ShellWriter { channel: Arc::new(write), session: self.handle.clone(), _jumps: self.jumps.clone() } })
     }
 
     pub async fn disconnect(self) {
-        let _ = self
-            .handle
-            .disconnect(russh::Disconnect::ByApplication, "", "en")
-            .await;
+        let _ = self.handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
         for jump in self.jumps.iter().rev() {
-            let _ = jump
-                .disconnect(russh::Disconnect::ByApplication, "", "en")
-                .await;
+            let _ = jump.disconnect(russh::Disconnect::ByApplication, "", "en").await;
         }
     }
 }
@@ -762,12 +604,7 @@ impl Shell {
 impl ShellWriter {
     /// Runs a command on its own channel of the same connection, beside the shell (for path
     /// completion), with `input` on its standard input; at most `limit` bytes of output.
-    pub async fn exec(
-        &self,
-        command: &str,
-        input: Option<&[u8]>,
-        limit: usize,
-    ) -> Result<Vec<u8>, SshError> {
+    pub async fn exec(&self, command: &str, input: Option<&[u8]>, limit: usize) -> Result<Vec<u8>, SshError> {
         exec_on(&self.session, command, input, limit).await
     }
 
@@ -776,9 +613,6 @@ impl ShellWriter {
     }
 
     pub async fn resize(&self, cols: u32, rows: u32) -> Result<(), SshError> {
-        self.channel
-            .window_change(cols, rows, 0, 0)
-            .await
-            .map_err(protocol)
+        self.channel.window_change(cols, rows, 0, 0).await.map_err(protocol)
     }
 }

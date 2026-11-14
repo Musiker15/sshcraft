@@ -3,9 +3,7 @@ use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey};
 use sshcraft_ssh::testing::{TestAuth, TestServer, agent_opener};
-use sshcraft_ssh::{
-    Auth, Hop, HostKeyVerifier, NoPrompter, RouteParams, SessionOptions, connect_route,
-};
+use sshcraft_ssh::{Auth, Hop, HostKeyVerifier, NoPrompter, RouteParams, SessionOptions, connect_route};
 use zeroize::Zeroizing;
 
 struct Trust;
@@ -18,11 +16,7 @@ impl HostKeyVerifier for Trust {
 }
 
 async fn server() -> TestServer {
-    TestServer::start_with(TestAuth {
-        password: Some("pw".into()),
-        ..Default::default()
-    })
-    .await
+    TestServer::start_with(TestAuth { password: Some("pw".into()), ..Default::default() }).await
 }
 
 fn hop(name: &str, port: u16) -> Hop {
@@ -31,11 +25,7 @@ fn hop(name: &str, port: u16) -> Hop {
         address: "127.0.0.1".into(),
         port,
         username: "tester".into(),
-        auth: Auth {
-            key: None,
-            password: Some(Zeroizing::new("pw".into())),
-            certificate: None,
-        },
+        auth: Auth { key: None, password: Some(Zeroizing::new("pw".into())), certificate: None },
     }
 }
 
@@ -50,27 +40,15 @@ async fn forwarded(server: &TestServer) -> Option<usize> {
         if let Some(result) = server.agent_attempt() {
             return result;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the server never tried the agent"
-        );
+        assert!(tokio::time::Instant::now() < deadline, "the server never tried the agent");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
 async fn open(hops: Vec<Hop>, options: SessionOptions) -> sshcraft_ssh::Session {
-    connect_route(
-        RouteParams {
-            hops,
-            proxy: None,
-            options,
-            connect_timeout: Duration::from_secs(10),
-        },
-        Arc::new(Trust),
-        Arc::new(NoPrompter),
-    )
-    .await
-    .unwrap()
+    connect_route(RouteParams { hops, proxy: None, options, connect_timeout: Duration::from_secs(10) }, Arc::new(Trust), Arc::new(NoPrompter))
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -78,13 +56,7 @@ async fn env_vars_reach_server() {
     let s = server().await;
     let session = open(
         vec![hop("t", s.port)],
-        SessionOptions {
-            env: vec![
-                ("LANG".into(), "de_DE.UTF-8".into()),
-                ("APP_MODE".into(), "test".into()),
-            ],
-            ..Default::default()
-        },
+        SessionOptions { env: vec![("LANG".into(), "de_DE.UTF-8".into()), ("APP_MODE".into(), "test".into())], ..Default::default() },
     )
     .await;
     let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
@@ -93,26 +65,13 @@ async fn env_vars_reach_server() {
         assert!(tokio::time::Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(
-        s.received_env(),
-        vec![
-            ("LANG".to_owned(), "de_DE.UTF-8".to_owned()),
-            ("APP_MODE".to_owned(), "test".to_owned()),
-        ]
-    );
+    assert_eq!(s.received_env(), vec![("LANG".to_owned(), "de_DE.UTF-8".to_owned()), ("APP_MODE".to_owned(), "test".to_owned()),]);
 }
 
 #[tokio::test]
 async fn forwarded_agent_lists_keys() {
     let s = server().await;
-    let session = open(
-        vec![hop("t", s.port)],
-        SessionOptions {
-            agent_forwarding: Some(agent_opener(&[agent_key()])),
-            ..Default::default()
-        },
-    )
-    .await;
+    let session = open(vec![hop("t", s.port)], SessionOptions { agent_forwarding: Some(agent_opener(&[agent_key()])), ..Default::default() }).await;
     let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();
     assert_eq!(forwarded(&s).await, Some(1));
 }
@@ -131,10 +90,7 @@ async fn jump_host_cannot_open_agent_channel() {
     let target = server().await;
     let session = open(
         vec![hop("jump", jump.port), hop("target", target.port)],
-        SessionOptions {
-            agent_forwarding: Some(agent_opener(&[agent_key()])),
-            ..Default::default()
-        },
+        SessionOptions { agent_forwarding: Some(agent_opener(&[agent_key()])), ..Default::default() },
     )
     .await;
     let _shell = session.open_shell(80, 24, "xterm-256color").await.unwrap();

@@ -40,10 +40,7 @@ struct Shared {
 
 impl Shared {
     fn from(dev: Dev) -> Self {
-        Self {
-            store: Arc::new(dev.store),
-            vault: Arc::new(dev.vault),
-        }
+        Self { store: Arc::new(dev.store), vault: Arc::new(dev.vault) }
     }
 
     fn server(&self) -> ServerId {
@@ -52,12 +49,7 @@ impl Shared {
 
     fn start(&self) -> (SyncRuntime, mpsc::UnboundedReceiver<Seen>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let runtime = SyncRuntime::start(
-            self.store.clone(),
-            self.vault.clone(),
-            self.server(),
-            Arc::new(Watcher(tx)),
-        );
+        let runtime = SyncRuntime::start(self.store.clone(), self.vault.clone(), self.server(), Arc::new(Watcher(tx)));
         (runtime, rx)
     }
 
@@ -71,14 +63,7 @@ impl Shared {
     }
 
     fn host_names(&self) -> Vec<String> {
-        self.store
-            .lock()
-            .unwrap()
-            .list_hosts()
-            .unwrap()
-            .into_iter()
-            .map(|h| h.name)
-            .collect()
+        self.store.lock().unwrap().list_hosts().unwrap().into_iter().map(|h| h.name).collect()
     }
 }
 
@@ -125,12 +110,7 @@ async fn server_restart_reconnects() {
     let (rb, mut seen_b) = b.start();
     wait_for(&mut seen_b, |s| *s == Seen::Status(SyncStatus::Idle), 5).await;
     server.stop().await;
-    wait_for(
-        &mut seen_b,
-        |s| matches!(s, Seen::Status(SyncStatus::Offline { .. })),
-        5,
-    )
-    .await;
+    wait_for(&mut seen_b, |s| matches!(s, Seen::Status(SyncStatus::Offline { .. })), 5).await;
     server.restart().await;
     wait_for(&mut seen_b, |s| *s == Seen::Status(SyncStatus::Idle), 15).await;
 
@@ -150,9 +130,7 @@ async fn revocation_ends_the_runtime() {
     wait_for(&mut seen_b, |s| *s == Seen::Status(SyncStatus::Idle), 5).await;
     let target = b.store.lock().unwrap().servers().unwrap()[0].device_id;
     let mut engine = Engine::load(&a.store, &a.vault, a.server()).await.unwrap();
-    revoke_device(&mut engine, &a.store, &a.vault, target, 10)
-        .await
-        .unwrap();
+    revoke_device(&mut engine, &a.store, &a.vault, target, 10).await.unwrap();
     wait_for(&mut seen_b, |s| *s == Seen::Status(SyncStatus::Revoked), 5).await;
     assert!(b.store.lock().unwrap().servers().unwrap()[0].revoked);
     rb.stop();

@@ -15,9 +15,7 @@ use zeroize::Zeroizing;
 
 use crate::ProtoError;
 use crate::devicelog::DeviceSet;
-use crate::encoding::{
-    DOMAIN_ENVELOPE_INFO, DOMAIN_KEY_CHECK, DOMAIN_MANIFEST, b64, signing_bytes,
-};
+use crate::encoding::{DOMAIN_ENVELOPE_INFO, DOMAIN_KEY_CHECK, DOMAIN_MANIFEST, b64, signing_bytes};
 use crate::identity::{AccountPublic, DeviceCertificate, DeviceKeys};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -72,74 +70,38 @@ pub struct KeyEnvelope {
 }
 
 fn envelope_aad(area_id: AreaId, key_version: u32, device_id: Uuid) -> Vec<u8> {
-    signing_bytes(
-        DOMAIN_ENVELOPE_INFO,
-        &[
-            area_id.0.as_bytes(),
-            &key_version.to_be_bytes(),
-            device_id.as_bytes(),
-        ],
-    )
+    signing_bytes(DOMAIN_ENVELOPE_INFO, &[area_id.0.as_bytes(), &key_version.to_be_bytes(), device_id.as_bytes()])
 }
 
-pub fn seal_area_key(
-    key: &AreaKey,
-    area_id: AreaId,
-    key_version: u32,
-    recipient: &DeviceCertificate,
-) -> Result<KeyEnvelope, ProtoError> {
-    let public = <X25519HkdfSha256 as Kem>::PublicKey::from_bytes(&recipient.keys.hpke)
-        .map_err(|_| ProtoError::Malformed("device hpke key".into()))?;
+pub fn seal_area_key(key: &AreaKey, area_id: AreaId, key_version: u32, recipient: &DeviceCertificate) -> Result<KeyEnvelope, ProtoError> {
+    let public =
+        <X25519HkdfSha256 as Kem>::PublicKey::from_bytes(&recipient.keys.hpke).map_err(|_| ProtoError::Malformed("device hpke key".into()))?;
     let aad = envelope_aad(area_id, key_version, recipient.device_id);
-    let (encapped, ciphertext) =
-        hpke::single_shot_seal::<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>(
-            &OpModeS::Base,
-            &public,
-            DOMAIN_ENVELOPE_INFO.as_bytes(),
-            key.bytes(),
-            &aad,
-        )
-        .map_err(|_| ProtoError::Malformed("hpke seal failed".into()))?;
-    Ok(KeyEnvelope {
-        area_id,
-        key_version,
-        device_id: recipient.device_id,
-        encapped: encapped.to_bytes().to_vec(),
-        ciphertext,
-    })
+    let (encapped, ciphertext) = hpke::single_shot_seal::<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>(
+        &OpModeS::Base,
+        &public,
+        DOMAIN_ENVELOPE_INFO.as_bytes(),
+        key.bytes(),
+        &aad,
+    )
+    .map_err(|_| ProtoError::Malformed("hpke seal failed".into()))?;
+    Ok(KeyEnvelope { area_id, key_version, device_id: recipient.device_id, encapped: encapped.to_bytes().to_vec(), ciphertext })
 }
 
 /// Commitment to an area key, kept in the signed manifest. Envelopes are not authenticated
 /// (anyone with a device's public key can seal one), so this is what ties a key to the owner.
 pub fn key_commitment(area_id: AreaId, key_version: u32, key: &AreaKey) -> [u8; 32] {
     use sha2::{Digest, Sha256};
-    Sha256::digest(signing_bytes(
-        DOMAIN_KEY_CHECK,
-        &[
-            area_id.0.as_bytes(),
-            &key_version.to_be_bytes(),
-            key.bytes(),
-        ],
-    ))
-    .into()
+    Sha256::digest(signing_bytes(DOMAIN_KEY_CHECK, &[area_id.0.as_bytes(), &key_version.to_be_bytes(), key.bytes()])).into()
 }
 
 /// Opens an envelope for this device and checks the key against the owner's commitment in
 /// `manifest`, which the caller must already have verified with [`AreaManifest::verify`].
-pub fn open_area_key(
-    envelope: &KeyEnvelope,
-    device_id: Uuid,
-    keys: &DeviceKeys,
-    manifest: &AreaManifest,
-) -> Result<AreaKey, ProtoError> {
-    if envelope.device_id != device_id
-        || envelope.area_id != manifest.area_id
-        || envelope.key_version != manifest.key_version
-    {
+pub fn open_area_key(envelope: &KeyEnvelope, device_id: Uuid, keys: &DeviceKeys, manifest: &AreaManifest) -> Result<AreaKey, ProtoError> {
+    if envelope.device_id != device_id || envelope.area_id != manifest.area_id || envelope.key_version != manifest.key_version {
         return Err(ProtoError::NotAllowed);
     }
-    let encapped = <X25519HkdfSha256 as Kem>::EncappedKey::from_bytes(&envelope.encapped)
-        .map_err(|_| ProtoError::Decrypt)?;
+    let encapped = <X25519HkdfSha256 as Kem>::EncappedKey::from_bytes(&envelope.encapped).map_err(|_| ProtoError::Decrypt)?;
     let aad = envelope_aad(envelope.area_id, envelope.key_version, envelope.device_id);
     let plain = Zeroizing::new(
         hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, X25519HkdfSha256>(
@@ -252,11 +214,7 @@ impl AreaManifest {
     }
 
     pub fn can_write(&self, account: &AccountPublic) -> bool {
-        *account == self.owner
-            || self
-                .members
-                .iter()
-                .any(|m| m.account == *account && m.role == Role::Write)
+        *account == self.owner || self.members.iter().any(|m| m.account == *account && m.role == Role::Write)
     }
 
     /// For [`VersionTracker`](crate::record::VersionTracker).

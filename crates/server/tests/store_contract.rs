@@ -19,10 +19,7 @@ pub struct Fresh {
 
 async fn fresh_sqlite() -> Option<Fresh> {
     let (store, dir) = common::fresh_sqlite().await;
-    Some(Fresh {
-        store,
-        _guard: Box::new(dir),
-    })
+    Some(Fresh { store, _guard: Box::new(dir) })
 }
 
 macro_rules! contract_tests {
@@ -72,63 +69,31 @@ async fn fresh_postgres() -> Option<Fresh> {
         eprintln!("skipped: SSHCRAFT_TEST_POSTGRES_URL not set");
         return None;
     };
-    let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
-        .await
-        .expect("connect to the test server");
+    let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls).await.expect("connect to the test server");
     tokio::spawn(connection);
     let name = format!("sshcraft_test_{}", Uuid::new_v4().simple());
-    client
-        .batch_execute(&format!("CREATE DATABASE {name}"))
-        .await
-        .expect("create test database");
+    client.batch_execute(&format!("CREATE DATABASE {name}")).await.expect("create test database");
     let (base, query) = match url.split_once('?') {
         Some((base, query)) => (base, format!("?{query}")),
         None => (url.as_str(), String::new()),
     };
     let (server, _) = base.rsplit_once('/').expect("database in url");
-    let store = sshcraft_server_lib::store::open(&format!("{server}/{name}{query}"))
-        .await
-        .expect("open postgres store");
-    Some(Fresh {
-        store,
-        _guard: Box::new(()),
-    })
+    let store = sshcraft_server_lib::store::open(&format!("{server}/{name}{query}")).await.expect("open postgres store");
+    Some(Fresh { store, _guard: Box::new(()) })
 }
 
 all_contract_tests!(sqlite, super::fresh_sqlite);
 all_contract_tests!(postgres, super::fresh_postgres);
 
-fn manifest(
-    owner: &Person,
-    area: AreaId,
-    version: u64,
-    key_version: u32,
-    members: Vec<Member>,
-) -> (AreaManifest, AreaKey) {
+fn manifest(owner: &Person, area: AreaId, version: u64, key_version: u32, members: Vec<Member>) -> (AreaManifest, AreaKey) {
     let key = AreaKey::generate();
-    let m = AreaManifest::sign(
-        area,
-        version,
-        key_version,
-        &key,
-        owner.public(),
-        members,
-        owner.devices[0].id,
-        &owner.devices[0].keys,
-    );
+    let m = AreaManifest::sign(area, version, key_version, &key, owner.public(), members, owner.devices[0].id, &owner.devices[0].keys);
     (m, key)
 }
 
 fn record(by: &Person, area: AreaId, record_id: Uuid, version: u64, key: &AreaKey) -> SealedRecord {
     SealedRecord::seal(
-        RecordHeader {
-            record_id,
-            area_id: area,
-            version,
-            key_version: 1,
-            author_account: by.public(),
-            author_device: by.devices[0].id,
-        },
+        RecordHeader { record_id, area_id: area, version, key_version: 1, author_account: by.public(), author_device: by.devices[0].id },
         b"body",
         key,
         &by.devices[0].keys,
@@ -152,42 +117,14 @@ async fn email_is_unique_after_normalization(store: Arc<dyn Store>) {
     a.create_in(store.as_ref()).await;
     let mut b = Person::new("bob");
     b.email = "ALICE@example.org".into();
-    let err = store
-        .create_account(
-            &b.row(),
-            &b.email_norm(),
-            &b.log.entries[0],
-            &b.devices[0].cert,
-        )
-        .await
-        .unwrap_err();
+    let err = store.create_account(&b.row(), &b.email_norm(), &b.log.entries[0], &b.devices[0].cert).await.unwrap_err();
     assert_eq!(err, StoreError::EmailTaken);
-    let err = store
-        .create_account(
-            &a.row(),
-            "other@example.org",
-            &a.log.entries[0],
-            &a.devices[0].cert,
-        )
-        .await
-        .unwrap_err();
+    let err = store.create_account(&a.row(), "other@example.org", &a.log.entries[0], &a.devices[0].cert).await.unwrap_err();
     assert_eq!(err, StoreError::AccountExists);
     let c = Person::new("carol");
-    let err = store
-        .create_account(
-            &c.row(),
-            &c.email_norm(),
-            &c.log.entries[0],
-            &a.devices[0].cert,
-        )
-        .await
-        .unwrap_err();
+    let err = store.create_account(&c.row(), &c.email_norm(), &c.log.entries[0], &a.devices[0].cert).await.unwrap_err();
     assert_eq!(err, StoreError::DeviceIdTaken);
-    let found = store
-        .account_by_email("alice@example.org")
-        .await
-        .unwrap()
-        .unwrap();
+    let found = store.account_by_email("alice@example.org").await.unwrap().unwrap();
     assert_eq!(found.account, a.public());
     assert_eq!(store.list_accounts().await.unwrap().len(), 1);
 }
@@ -196,14 +133,8 @@ async fn append_log_is_compare_and_swap(store: Arc<dyn Store>) {
     let mut a = Person::new("alice");
     a.create_in(store.as_ref()).await;
     let (i, entry) = a.add_device();
-    let changes = DeviceChanges {
-        added: vec![a.devices[i].cert.clone()],
-        revoked: vec![],
-    };
-    let err = store
-        .append_log(&a.public(), 5, std::slice::from_ref(&entry), &changes)
-        .await
-        .unwrap_err();
+    let changes = DeviceChanges { added: vec![a.devices[i].cert.clone()], revoked: vec![] };
+    let err = store.append_log(&a.public(), 5, std::slice::from_ref(&entry), &changes).await.unwrap_err();
     assert_eq!(err, StoreError::Conflict { current: 1 });
     let account = a.public();
     let (r1, r2) = tokio::join!(
@@ -211,10 +142,7 @@ async fn append_log_is_compare_and_swap(store: Arc<dyn Store>) {
         store.append_log(&account, 1, std::slice::from_ref(&entry), &changes),
     );
     assert_eq!([r1.is_ok(), r2.is_ok()].iter().filter(|ok| **ok).count(), 1);
-    assert!(matches!(
-        r1.err().or(r2.err()),
-        Some(StoreError::Conflict { current: 2 })
-    ));
+    assert!(matches!(r1.err().or(r2.err()), Some(StoreError::Conflict { current: 2 })));
     assert_eq!(store.device_log(&account).await.unwrap(), a.log);
     let devices = store.devices_of(&account).await.unwrap();
     assert_eq!(devices.len(), 2);
@@ -225,29 +153,14 @@ async fn revoking_in_the_log_ends_sessions(store: Arc<dyn Store>) {
     let mut a = Person::new("alice");
     a.create_in(store.as_ref()).await;
     let (i, entry) = a.add_device();
-    let add = DeviceChanges {
-        added: vec![a.devices[i].cert.clone()],
-        revoked: vec![],
-    };
-    store
-        .append_log(&a.public(), 1, &[entry], &add)
-        .await
-        .unwrap();
+    let add = DeviceChanges { added: vec![a.devices[i].cert.clone()], revoked: vec![] };
+    store.append_log(&a.public(), 1, &[entry], &add).await.unwrap();
     let target = a.devices[1].id;
-    store
-        .create_session([7; 32], target, &a.public(), 100)
-        .await
-        .unwrap();
+    store.create_session([7; 32], target, &a.public(), 100).await.unwrap();
     assert!(store.session([7; 32]).await.unwrap().is_some());
     let revoke = a.revoke_by_device(0, 1);
-    let changes = DeviceChanges {
-        added: vec![],
-        revoked: vec![target],
-    };
-    store
-        .append_log(&a.public(), 2, &[revoke], &changes)
-        .await
-        .unwrap();
+    let changes = DeviceChanges { added: vec![], revoked: vec![target] };
+    store.append_log(&a.public(), 2, &[revoke], &changes).await.unwrap();
     assert_eq!(store.session([7; 32]).await.unwrap(), None);
     let row = store.device(target).await.unwrap().unwrap();
     assert!(!row.active);
@@ -258,18 +171,12 @@ async fn locking_and_blocking_end_sessions(store: Arc<dyn Store>) {
     let a = Person::new("alice");
     a.create_in(store.as_ref()).await;
     let id = a.devices[0].id;
-    store
-        .create_session([1; 32], id, &a.public(), 100)
-        .await
-        .unwrap();
+    store.create_session([1; 32], id, &a.public(), 100).await.unwrap();
     store.set_locked(&a.public(), true).await.unwrap();
     assert!(store.account(&a.public()).await.unwrap().unwrap().locked);
     assert_eq!(store.session([1; 32]).await.unwrap(), None);
     store.set_locked(&a.public(), false).await.unwrap();
-    store
-        .create_session([2; 32], id, &a.public(), 100)
-        .await
-        .unwrap();
+    store.create_session([2; 32], id, &a.public(), 100).await.unwrap();
     store.set_admin_blocked(id, true).await.unwrap();
     assert!(store.device(id).await.unwrap().unwrap().admin_blocked);
     assert_eq!(store.session([2; 32]).await.unwrap(), None);
@@ -280,14 +187,8 @@ async fn locking_and_blocking_end_sessions(store: Arc<dyn Store>) {
     store.touch_device(id, 50).await.unwrap();
     assert_eq!(store.device(id).await.unwrap().unwrap().last_seen, Some(50));
     let stranger = Person::new("nobody");
-    assert_eq!(
-        store.set_locked(&stranger.public(), true).await,
-        Err(StoreError::NotFound)
-    );
-    assert_eq!(
-        store.set_admin_blocked(Uuid::new_v4(), true).await,
-        Err(StoreError::NotFound)
-    );
+    assert_eq!(store.set_locked(&stranger.public(), true).await, Err(StoreError::NotFound));
+    assert_eq!(store.set_admin_blocked(Uuid::new_v4(), true).await, Err(StoreError::NotFound));
 }
 
 async fn manifest_versions(store: Arc<dyn Store>) {
@@ -295,34 +196,19 @@ async fn manifest_versions(store: Arc<dyn Store>) {
     a.create_in(store.as_ref()).await;
     let area = AreaId(Uuid::new_v4());
     let (v2, _) = manifest(&a, area, 2, 1, vec![]);
-    assert_eq!(
-        store.put_manifest(&a.public(), &v2, None).await,
-        Err(StoreError::Conflict { current: 0 })
-    );
+    assert_eq!(store.put_manifest(&a.public(), &v2, None).await, Err(StoreError::Conflict { current: 0 }));
     let (v1, _) = manifest(&a, area, 1, 1, vec![]);
     store.put_manifest(&a.public(), &v1, None).await.unwrap();
     assert_eq!(store.area(area).await.unwrap().unwrap().manifest, v1);
-    assert_eq!(
-        store.put_manifest(&a.public(), &v1, None).await,
-        Err(StoreError::Conflict { current: 1 })
-    );
+    assert_eq!(store.put_manifest(&a.public(), &v1, None).await, Err(StoreError::Conflict { current: 1 }));
     let (v3, _) = manifest(&a, area, 3, 1, vec![]);
-    assert_eq!(
-        store.put_manifest(&a.public(), &v3, Some(1)).await,
-        Err(StoreError::Conflict { current: 1 })
-    );
+    assert_eq!(store.put_manifest(&a.public(), &v3, Some(1)).await, Err(StoreError::Conflict { current: 1 }));
     let (v2a, _) = manifest(&a, area, 2, 1, vec![]);
     let (v2b, _) = manifest(&a, area, 2, 1, vec![]);
     let owner = a.public();
-    let (r1, r2) = tokio::join!(
-        store.put_manifest(&owner, &v2a, Some(1)),
-        store.put_manifest(&owner, &v2b, Some(1)),
-    );
+    let (r1, r2) = tokio::join!(store.put_manifest(&owner, &v2a, Some(1)), store.put_manifest(&owner, &v2b, Some(1)),);
     assert_eq!([r1.is_ok(), r2.is_ok()].iter().filter(|ok| **ok).count(), 1);
-    assert!(matches!(
-        r1.err().or(r2.err()),
-        Some(StoreError::Conflict { current: 2 })
-    ));
+    assert!(matches!(r1.err().or(r2.err()), Some(StoreError::Conflict { current: 2 })));
     store.delete_area(area).await.unwrap();
     assert_eq!(store.area(area).await.unwrap(), None);
     assert_eq!(store.delete_area(area).await, Err(StoreError::NotFound));
@@ -334,22 +220,13 @@ async fn members_index_follows_the_manifest(store: Arc<dyn Store>) {
     a.create_in(store.as_ref()).await;
     b.create_in(store.as_ref()).await;
     let area = AreaId(Uuid::new_v4());
-    let member = Member {
-        account: b.public(),
-        role: Role::Read,
-    };
+    let member = Member { account: b.public(), role: Role::Read };
     let (v1, _) = manifest(&a, area, 1, 1, vec![member]);
     store.put_manifest(&a.public(), &v1, None).await.unwrap();
     assert_eq!(store.areas_of(&b.public()).await.unwrap().len(), 1);
     assert_eq!(store.areas_of(&a.public()).await.unwrap().len(), 1);
-    assert_eq!(
-        store.area_peers(&a.public()).await.unwrap(),
-        vec![b.public()]
-    );
-    assert_eq!(
-        store.area_peers(&b.public()).await.unwrap(),
-        vec![a.public()]
-    );
+    assert_eq!(store.area_peers(&a.public()).await.unwrap(), vec![b.public()]);
+    assert_eq!(store.area_peers(&b.public()).await.unwrap(), vec![a.public()]);
     let (v2, _) = manifest(&a, area, 2, 1, vec![]);
     store.put_manifest(&a.public(), &v2, Some(1)).await.unwrap();
     assert!(store.areas_of(&b.public()).await.unwrap().is_empty());
@@ -363,15 +240,9 @@ async fn higher_key_version_drops_old_envelopes(store: Arc<dyn Store>) {
     let (v1, key) = manifest(&a, area, 1, 1, vec![]);
     store.put_manifest(&a.public(), &v1, None).await.unwrap();
     let envelope = seal_area_key(&key, area, 1, &a.devices[0].cert).unwrap();
-    store
-        .put_envelopes(area, std::slice::from_ref(&envelope))
-        .await
-        .unwrap();
+    store.put_envelopes(area, std::slice::from_ref(&envelope)).await.unwrap();
     let device = a.devices[0].id;
-    assert_eq!(
-        store.envelope_for(area, device).await.unwrap(),
-        Some(envelope)
-    );
+    assert_eq!(store.envelope_for(area, device).await.unwrap(), Some(envelope));
     let (v2, _) = manifest(&a, area, 2, 2, vec![]);
     store.put_manifest(&a.public(), &v2, Some(1)).await.unwrap();
     assert_eq!(store.envelope_for(area, device).await.unwrap(), None);
@@ -386,35 +257,17 @@ async fn records_are_compare_and_swap_and_numbered(store: Arc<dyn Store>) {
     assert_eq!(store.put_record(&missing).await, Err(StoreError::NotFound));
     store.put_manifest(&a.public(), &v1, None).await.unwrap();
     let id = Uuid::new_v4();
-    assert_eq!(
-        store.put_record(&record(&a, area, id, 2, &key)).await,
-        Err(StoreError::Conflict { current: 0 })
-    );
-    assert_eq!(
-        store.put_record(&record(&a, area, id, 1, &key)).await,
-        Ok(1)
-    );
-    assert_eq!(
-        store.put_record(&record(&a, area, id, 2, &key)).await,
-        Ok(2)
-    );
-    assert_eq!(
-        store.put_record(&record(&a, area, id, 4, &key)).await,
-        Err(StoreError::Conflict { current: 2 })
-    );
+    assert_eq!(store.put_record(&record(&a, area, id, 2, &key)).await, Err(StoreError::Conflict { current: 0 }));
+    assert_eq!(store.put_record(&record(&a, area, id, 1, &key)).await, Ok(1));
+    assert_eq!(store.put_record(&record(&a, area, id, 2, &key)).await, Ok(2));
+    assert_eq!(store.put_record(&record(&a, area, id, 4, &key)).await, Err(StoreError::Conflict { current: 2 }));
     let (third_a, third_b) = (record(&a, area, id, 3, &key), record(&a, area, id, 3, &key));
     let (r1, r2) = tokio::join!(store.put_record(&third_a), store.put_record(&third_b));
     assert_eq!([r1.is_ok(), r2.is_ok()].iter().filter(|ok| **ok).count(), 1);
     assert_eq!(r1.clone().ok().or(r2.clone().ok()), Some(3));
-    assert!(matches!(
-        r1.err().or(r2.err()),
-        Some(StoreError::Conflict { current: 3 })
-    ));
+    assert!(matches!(r1.err().or(r2.err()), Some(StoreError::Conflict { current: 3 })));
     let other = Uuid::new_v4();
-    assert_eq!(
-        store.put_record(&record(&a, area, other, 1, &key)).await,
-        Ok(4)
-    );
+    assert_eq!(store.put_record(&record(&a, area, other, 1, &key)).await, Ok(4));
     // A record keeps only its latest write, so `id` now sits at seq 3.
     let since = store.records_since(area, 1, 10).await.unwrap();
     assert_eq!(since.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![3, 4]);
@@ -436,20 +289,8 @@ async fn account_deletion_follows_the_plan(store: Arc<dyn Store>) {
     let shared = AreaId(Uuid::new_v4());
     let read_only = AreaId(Uuid::new_v4());
     let personal = AreaId(Uuid::new_v4());
-    let both = vec![
-        Member {
-            account: r.public(),
-            role: Role::Read,
-        },
-        Member {
-            account: w.public(),
-            role: Role::Write,
-        },
-    ];
-    let reader_only = vec![Member {
-        account: r.public(),
-        role: Role::Read,
-    }];
+    let both = vec![Member { account: r.public(), role: Role::Read }, Member { account: w.public(), role: Role::Write }];
+    let reader_only = vec![Member { account: r.public(), role: Role::Read }];
     for (area, members) in [(shared, both), (read_only, reader_only), (personal, vec![])] {
         let (m, _) = manifest(&a, area, 1, 1, members);
         store.put_manifest(&a.public(), &m, None).await.unwrap();
@@ -471,24 +312,15 @@ async fn account_deletion_follows_the_plan(store: Arc<dyn Store>) {
     assert_eq!(store.area(read_only).await.unwrap(), None);
     assert_eq!(store.area(personal).await.unwrap(), None);
     assert_eq!(store.areas_of(&r.public()).await.unwrap().len(), 1);
-    assert_eq!(
-        store.delete_account(&a.public()).await,
-        Err(StoreError::NotFound)
-    );
+    assert_eq!(store.delete_account(&a.public()).await, Err(StoreError::NotFound));
 }
 
 async fn sessions_expire(store: Arc<dyn Store>) {
     let a = Person::new("alice");
     a.create_in(store.as_ref()).await;
     let id = a.devices[0].id;
-    store
-        .create_session([1; 32], id, &a.public(), 100)
-        .await
-        .unwrap();
-    store
-        .create_session([2; 32], id, &a.public(), 200)
-        .await
-        .unwrap();
+    store.create_session([1; 32], id, &a.public(), 100).await.unwrap();
+    store.create_session([2; 32], id, &a.public(), 200).await.unwrap();
     assert_eq!(store.delete_expired_sessions(150).await.unwrap(), 1);
     assert_eq!(store.session([1; 32]).await.unwrap(), None);
     let left = store.session([2; 32]).await.unwrap().unwrap();
@@ -496,29 +328,15 @@ async fn sessions_expire(store: Arc<dyn Store>) {
 }
 
 async fn heir_must_still_have_an_open_account(store: Arc<dyn Store>) {
-    let (a, b, c, d) = (
-        Person::new("alice"),
-        Person::new("bob"),
-        Person::new("carol"),
-        Person::new("dave"),
-    );
+    let (a, b, c, d) = (Person::new("alice"), Person::new("bob"), Person::new("carol"), Person::new("dave"));
     for p in [&a, &b, &c, &d] {
         p.create_in(store.as_ref()).await;
     }
     let area = AreaId(Uuid::new_v4());
     let members = vec![
-        Member {
-            account: b.public(),
-            role: Role::Write,
-        },
-        Member {
-            account: d.public(),
-            role: Role::Write,
-        },
-        Member {
-            account: c.public(),
-            role: Role::Write,
-        },
+        Member { account: b.public(), role: Role::Write },
+        Member { account: d.public(), role: Role::Write },
+        Member { account: c.public(), role: Role::Write },
     ];
     let (m, _) = manifest(&a, area, 1, 1, members);
     store.put_manifest(&a.public(), &m, None).await.unwrap();
@@ -538,60 +356,27 @@ async fn deleted_account_cannot_register_again(store: Arc<dyn Store>) {
     again.devices.clear();
     again.log.entries.clear();
     again.add_device();
-    let err = store
-        .create_account(
-            &again.row(),
-            &again.email_norm(),
-            &again.log.entries[0],
-            &again.devices[0].cert,
-        )
-        .await
-        .unwrap_err();
+    let err = store.create_account(&again.row(), &again.email_norm(), &again.log.entries[0], &again.devices[0].cert).await.unwrap_err();
     assert_eq!(err, StoreError::AccountExists);
 }
 
 async fn record_writes_need_the_write_role_and_current_key(store: Arc<dyn Store>) {
-    let (a, w, r, s) = (
-        Person::new("alice"),
-        Person::new("wendy"),
-        Person::new("rita"),
-        Person::new("sam"),
-    );
+    let (a, w, r, s) = (Person::new("alice"), Person::new("wendy"), Person::new("rita"), Person::new("sam"));
     for p in [&a, &w, &r, &s] {
         p.create_in(store.as_ref()).await;
     }
     let area = AreaId(Uuid::new_v4());
-    let members = vec![
-        Member {
-            account: w.public(),
-            role: Role::Write,
-        },
-        Member {
-            account: r.public(),
-            role: Role::Read,
-        },
-    ];
+    let members = vec![Member { account: w.public(), role: Role::Write }, Member { account: r.public(), role: Role::Read }];
     let (m, key) = manifest(&a, area, 1, 1, members);
     store.put_manifest(&a.public(), &m, None).await.unwrap();
     for stranger in [&r, &s] {
-        let err = store
-            .put_record(&record(stranger, area, Uuid::new_v4(), 1, &key))
-            .await
-            .unwrap_err();
+        let err = store.put_record(&record(stranger, area, Uuid::new_v4(), 1, &key)).await.unwrap_err();
         assert_eq!(err, StoreError::NotAllowed);
     }
-    assert!(
-        store
-            .put_record(&record(&w, area, Uuid::new_v4(), 1, &key))
-            .await
-            .is_ok()
-    );
+    assert!(store.put_record(&record(&w, area, Uuid::new_v4(), 1, &key)).await.is_ok());
     let mut stale = record(&a, area, Uuid::new_v4(), 1, &key);
     stale.header.key_version = 2;
-    assert_eq!(
-        store.put_record(&stale).await,
-        Err(StoreError::WrongKeyVersion { current: 1 })
-    );
+    assert_eq!(store.put_record(&stale).await, Err(StoreError::WrongKeyVersion { current: 1 }));
 }
 
 async fn envelopes_need_the_current_key_version(store: Arc<dyn Store>) {
@@ -601,10 +386,7 @@ async fn envelopes_need_the_current_key_version(store: Arc<dyn Store>) {
     let (m, key) = manifest(&a, area, 1, 1, vec![]);
     store.put_manifest(&a.public(), &m, None).await.unwrap();
     let old = seal_area_key(&key, area, 0, &a.devices[0].cert).unwrap();
-    assert_eq!(
-        store.put_envelopes(area, &[old]).await,
-        Err(StoreError::WrongKeyVersion { current: 1 })
-    );
+    assert_eq!(store.put_envelopes(area, &[old]).await, Err(StoreError::WrongKeyVersion { current: 1 }));
 }
 
 async fn manifest_cannot_change_the_owner(store: Arc<dyn Store>) {
@@ -615,9 +397,6 @@ async fn manifest_cannot_change_the_owner(store: Arc<dyn Store>) {
     let (v1, _) = manifest(&a, area, 1, 1, vec![]);
     store.put_manifest(&a.public(), &v1, None).await.unwrap();
     let (v2, _) = manifest(&b, area, 2, 1, vec![]);
-    assert_eq!(
-        store.put_manifest(&b.public(), &v2, Some(1)).await,
-        Err(StoreError::NotAllowed)
-    );
+    assert_eq!(store.put_manifest(&b.public(), &v2, Some(1)).await, Err(StoreError::NotAllowed));
     assert_eq!(store.area(area).await.unwrap().unwrap().owner, a.public());
 }

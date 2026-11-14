@@ -17,13 +17,7 @@ fn host(key: Option<KeyRef>) -> Host {
         id: HostId::new(),
         name: "web".into(),
         group_id: None,
-        settings: ConnectionSettings {
-            address: Some("10.0.0.1".into()),
-            port: None,
-            username: Some("root".into()),
-            key,
-            ..Default::default()
-        },
+        settings: ConnectionSettings { address: Some("10.0.0.1".into()), port: None, username: Some("root".into()), key, ..Default::default() },
         location: None,
         tags: Vec::new(),
         os: None,
@@ -53,10 +47,7 @@ fn key_body_carries_the_private_key_and_is_zeroized() {
     let (store, vault) = setup();
     let info = vault.generate_ed25519(&store, "deploy").unwrap();
     let item = local_item(&store, &vault, ItemKind::Key, &info.id.0.to_string(), 1).unwrap();
-    let ItemBody::Key {
-        id, name, openssh, ..
-    } = &item.body
-    else {
+    let ItemBody::Key { id, name, openssh, .. } = &item.body else {
         panic!("expected a key");
     };
     let _: &Zeroizing<String> = openssh;
@@ -68,10 +59,7 @@ fn key_body_carries_the_private_key_and_is_zeroized() {
     let server = ServerId::new();
     apply(&other, &other_vault, server, &item).unwrap();
     let record = other.key_record(info.id).unwrap().unwrap();
-    assert_eq!(
-        (record.location, record.fingerprint.clone()),
-        (Some(server), info.fingerprint)
-    );
+    assert_eq!((record.location, record.fingerprint.clone()), (Some(server), info.fingerprint));
 }
 
 #[test]
@@ -79,13 +67,7 @@ fn apply_deleted_removes_the_item() {
     let (store, vault) = setup();
     let h = host(None);
     store.upsert_host(&h).unwrap();
-    let item = SyncItem {
-        modified_at: 5,
-        body: ItemBody::Deleted {
-            item_kind: ItemKind::Host,
-            item_id: h.id.0.to_string(),
-        },
-    };
+    let item = SyncItem { modified_at: 5, body: ItemBody::Deleted { item_kind: ItemKind::Host, item_id: h.id.0.to_string() } };
     apply(&store, &vault, ServerId::new(), &item).unwrap();
     assert!(store.list_hosts().unwrap().is_empty());
 }
@@ -107,16 +89,7 @@ fn apply_host_with_unknown_key_keeps_the_reference() {
     let unknown = KeyId::new();
     let h = host(Some(KeyRef::Stored { id: unknown }));
     let server = ServerId::new();
-    apply(
-        &store,
-        &vault,
-        server,
-        &SyncItem {
-            modified_at: 1,
-            body: ItemBody::Host { host: h.clone() },
-        },
-    )
-    .unwrap();
+    apply(&store, &vault, server, &SyncItem { modified_at: 1, body: ItemBody::Host { host: h.clone() } }).unwrap();
     let stored = store.list_hosts().unwrap().pop().unwrap();
     assert_eq!(stored.settings.key, Some(KeyRef::Stored { id: unknown }));
     assert_eq!(stored.location, Some(server));
@@ -132,37 +105,20 @@ fn newer_breaks_ties_for_the_server() {
 #[test]
 fn decode_rejects_garbage() {
     assert!(matches!(decode(b"not json"), Err(SyncError::Proto(_))));
-    assert!(matches!(
-        decode(br#"{"modified_at":1,"body":{"kind":"spaceship"}}"#),
-        Err(SyncError::Proto(_))
-    ));
+    assert!(matches!(decode(br#"{"modified_at":1,"body":{"kind":"spaceship"}}"#), Err(SyncError::Proto(_))));
 }
 
 #[test]
 fn remote_deletion_never_removes_a_device_key() {
     let store = sshcraft_store::store::Store::open_in_memory().unwrap();
-    let vault = sshcraft_store::vault::Vault::unlock(
-        &store,
-        Box::new(sshcraft_store::vault::MemoryMasterKey::default()),
-    )
-    .unwrap();
-    let key =
-        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let vault = sshcraft_store::vault::Vault::unlock(&store, Box::new(sshcraft_store::vault::MemoryMasterKey::default())).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
     let info = vault.store_device_key(&store, "hello", &key).unwrap();
     let item = sshcraft_sync::items::SyncItem {
-        body: sshcraft_sync::items::ItemBody::Deleted {
-            item_kind: sshcraft_store::store::ItemKind::Key,
-            item_id: info.id.0.to_string(),
-        },
+        body: sshcraft_sync::items::ItemBody::Deleted { item_kind: sshcraft_store::store::ItemKind::Key, item_id: info.id.0.to_string() },
         modified_at: 1,
     };
-    sshcraft_sync::items::apply(
-        &store,
-        &vault,
-        sshcraft_model::model::ServerId::new(),
-        &item,
-    )
-    .unwrap();
+    sshcraft_sync::items::apply(&store, &vault, sshcraft_model::model::ServerId::new(), &item).unwrap();
     assert!(store.key_record(info.id).unwrap().is_some());
 }
 

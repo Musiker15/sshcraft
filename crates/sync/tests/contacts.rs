@@ -18,10 +18,7 @@ async fn new_recipient_shows_the_safety_number() {
     assert_eq!(found.safety_number, safety_number(&account(&b)));
     assert_eq!(found.known, KnownState::New);
     let server_id = a.row().id;
-    assert_eq!(
-        require_confirmed(&a.store, server_id, &account(&b)),
-        Err(SyncError::ContactUnconfirmed)
-    );
+    assert_eq!(require_confirmed(&a.store, server_id, &account(&b)), Err(SyncError::ContactUnconfirmed));
     confirm(&a.store, server_id, "b@example.org", &account(&b)).unwrap();
     require_confirmed(&a.store, server_id, &account(&b)).unwrap();
     let again = find(&e, &a.store, "b@example.org").await.unwrap();
@@ -40,28 +37,12 @@ async fn changed_key_is_reported_and_not_trusted() {
     find(&e, &a.store, "b@example.org").await.unwrap();
     confirm(&a.store, server_id, "b@example.org", &account(&b)).unwrap();
     // A taken-over server answers the lookup for B's e-mail with another account.
-    server_sql(
-        &server,
-        "UPDATE accounts SET email_norm = 'moved@example.org' WHERE account = ?1",
-        [account(&b).0.to_vec()],
-    );
-    server_sql(
-        &server,
-        "UPDATE accounts SET email_norm = 'b@example.org' WHERE account = ?1",
-        [account(&c).0.to_vec()],
-    );
+    server_sql(&server, "UPDATE accounts SET email_norm = 'moved@example.org' WHERE account = ?1", [account(&b).0.to_vec()]);
+    server_sql(&server, "UPDATE accounts SET email_norm = 'b@example.org' WHERE account = ?1", [account(&c).0.to_vec()]);
     let found = find(&e, &a.store, "b@example.org").await.unwrap();
     assert_eq!(found.account, account(&c));
-    assert_eq!(
-        found.known,
-        KnownState::Changed {
-            previous_safety_number: safety_number(&account(&b))
-        }
-    );
-    assert_eq!(
-        require_confirmed(&a.store, server_id, &account(&c)),
-        Err(SyncError::ContactUnconfirmed)
-    );
+    assert_eq!(found.known, KnownState::Changed { previous_safety_number: safety_number(&account(&b)) });
+    assert_eq!(require_confirmed(&a.store, server_id, &account(&c)), Err(SyncError::ContactUnconfirmed));
     // The known key stays what it was until the user accepts the new one.
     require_confirmed(&a.store, server_id, &account(&b)).unwrap();
     let still = find(&e, &a.store, "b@example.org").await.unwrap();
@@ -76,10 +57,7 @@ async fn sharing_with_oneself_is_refused() {
     let a = Dev::new();
     create(&server, &a, "a@example.org").await;
     let e = engine(&a).await;
-    assert_eq!(
-        find(&e, &a.store, "a@example.org").await.unwrap_err(),
-        SyncError::NotAllowed
-    );
+    assert_eq!(find(&e, &a.store, "a@example.org").await.unwrap_err(), SyncError::NotAllowed);
 }
 
 #[tokio::test]

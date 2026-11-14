@@ -4,14 +4,7 @@ use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, Ke
 use uuid::Uuid;
 
 fn group(name: &str) -> Group {
-    Group {
-        id: GroupId::new(),
-        name: name.into(),
-        defaults: ConnectionSettings::default(),
-        location: None,
-        parent_id: None,
-        tags: Vec::new(),
-    }
+    Group { id: GroupId::new(), name: name.into(), defaults: ConnectionSettings::default(), location: None, parent_id: None, tags: Vec::new() }
 }
 
 fn host(name: &str, group_id: Option<GroupId>) -> Host {
@@ -49,13 +42,7 @@ fn server(store: &Store) -> ServerId {
 }
 
 fn location_of_host(store: &Store, id: HostId) -> Option<ServerId> {
-    store
-        .list_hosts()
-        .unwrap()
-        .into_iter()
-        .find(|h| h.id == id)
-        .unwrap()
-        .location
+    store.list_hosts().unwrap().into_iter().find(|h| h.id == id).unwrap().location
 }
 
 #[test]
@@ -70,21 +57,14 @@ fn migration_from_v2_keeps_data() {
         conn.pragma_update(None, "user_version", 2).unwrap();
         conn.execute(
             "INSERT INTO hosts (id, name, group_id, settings) VALUES (?1, ?2, NULL, ?3)",
-            rusqlite::params![
-                h.id.0.to_string(),
-                h.name,
-                serde_json::to_string(&h.settings).unwrap()
-            ],
+            rusqlite::params![h.id.0.to_string(), h.name, serde_json::to_string(&h.settings).unwrap()],
         )
         .unwrap();
     }
     let store = Store::open(&path).unwrap();
     let hosts = store.list_hosts().unwrap();
     assert_eq!(hosts, vec![h]);
-    let version: i64 = store
-        .conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .unwrap();
+    let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(version, crate::store::SCHEMA_VERSION);
 }
 
@@ -98,9 +78,7 @@ fn group_move_takes_its_hosts() {
     store.upsert_group(&g).unwrap();
     store.upsert_host(&inside).unwrap();
     store.upsert_host(&outside).unwrap();
-    store
-        .set_location(ItemKind::Group, &g.id.0.to_string(), Some(s))
-        .unwrap();
+    store.set_location(ItemKind::Group, &g.id.0.to_string(), Some(s)).unwrap();
     assert_eq!(store.list_groups().unwrap()[0].location, Some(s));
     assert_eq!(location_of_host(&store, inside.id), Some(s));
     assert_eq!(location_of_host(&store, outside.id), None);
@@ -114,9 +92,7 @@ fn grouped_host_cannot_move_alone() {
     let h = host("root", Some(g.id));
     store.upsert_group(&g).unwrap();
     store.upsert_host(&h).unwrap();
-    let err = store
-        .set_location(ItemKind::Host, &h.id.0.to_string(), Some(s))
-        .unwrap_err();
+    let err = store.set_location(ItemKind::Host, &h.id.0.to_string(), Some(s)).unwrap_err();
     assert!(matches!(err, StoreError::Malformed(_)));
     assert_eq!(location_of_host(&store, h.id), None);
 }
@@ -127,9 +103,7 @@ fn saving_keeps_the_location() {
     let s = server(&store);
     let mut h = host("root", None);
     store.upsert_host(&h).unwrap();
-    store
-        .set_location(ItemKind::Host, &h.id.0.to_string(), Some(s))
-        .unwrap();
+    store.set_location(ItemKind::Host, &h.id.0.to_string(), Some(s)).unwrap();
     // The form sends the host back without a location; saving must not move it.
     h.name = "renamed".into();
     h.location = None;
@@ -153,12 +127,8 @@ fn remove_server_keeps_items_local() {
     let s = server(&store);
     let h = host("root", None);
     store.upsert_host(&h).unwrap();
-    store
-        .set_location(ItemKind::Host, &h.id.0.to_string(), Some(s))
-        .unwrap();
-    store
-        .queue(s, ItemKind::Host, &h.id.0.to_string(), 5)
-        .unwrap();
+    store.set_location(ItemKind::Host, &h.id.0.to_string(), Some(s)).unwrap();
+    store.queue(s, ItemKind::Host, &h.id.0.to_string(), 5).unwrap();
     store.remove_server(s).unwrap();
     assert!(store.servers().unwrap().is_empty());
     assert_eq!(location_of_host(&store, h.id), None);
@@ -172,55 +142,23 @@ fn outbox_dedupes_per_item() {
     store.queue(s, ItemKind::Host, "a", 1).unwrap();
     store.queue(s, ItemKind::Host, "a", 2).unwrap();
     store.queue(s, ItemKind::Group, "a", 3).unwrap();
-    assert_eq!(
-        store.queued_at(s, ItemKind::Host, "a").unwrap(),
-        Some(2),
-        "latest change counts"
-    );
-    assert_eq!(
-        store.outbox(s).unwrap(),
-        vec![
-            (ItemKind::Host, "a".to_owned()),
-            (ItemKind::Group, "a".to_owned())
-        ]
-    );
+    assert_eq!(store.queued_at(s, ItemKind::Host, "a").unwrap(), Some(2), "latest change counts");
+    assert_eq!(store.outbox(s).unwrap(), vec![(ItemKind::Host, "a".to_owned()), (ItemKind::Group, "a".to_owned())]);
     store.dequeue(s, ItemKind::Host, "a").unwrap();
-    assert_eq!(
-        store.outbox(s).unwrap(),
-        vec![(ItemKind::Group, "a".to_owned())]
-    );
+    assert_eq!(store.outbox(s).unwrap(), vec![(ItemKind::Group, "a".to_owned())]);
 }
 
 #[test]
 fn record_entry_unique_per_item() {
     let store = Store::open_in_memory().unwrap();
     let s = server(&store);
-    let first = RecordEntry {
-        record_id: Uuid::new_v4(),
-        area_id: Uuid::new_v4(),
-        version: 1,
-        modified_at: 10,
-    };
-    store
-        .put_record_entry(s, &first, ItemKind::Host, "h")
-        .unwrap();
-    let second = RecordEntry {
-        version: 2,
-        modified_at: 20,
-        ..first.clone()
-    };
-    store
-        .put_record_entry(s, &second, ItemKind::Host, "h")
-        .unwrap();
-    assert_eq!(
-        store.record_entry(s, ItemKind::Host, "h").unwrap(),
-        Some(second)
-    );
+    let first = RecordEntry { record_id: Uuid::new_v4(), area_id: Uuid::new_v4(), version: 1, modified_at: 10 };
+    store.put_record_entry(s, &first, ItemKind::Host, "h").unwrap();
+    let second = RecordEntry { version: 2, modified_at: 20, ..first.clone() };
+    store.put_record_entry(s, &second, ItemKind::Host, "h").unwrap();
+    assert_eq!(store.record_entry(s, ItemKind::Host, "h").unwrap(), Some(second));
     assert_eq!(store.record_entry(s, ItemKind::Group, "h").unwrap(), None);
-    assert_eq!(
-        store.item_for_record(s, first.record_id).unwrap(),
-        Some((ItemKind::Host, "h".to_owned()))
-    );
+    assert_eq!(store.item_for_record(s, first.record_id).unwrap(), Some((ItemKind::Host, "h".to_owned())));
 }
 
 #[test]
@@ -239,10 +177,7 @@ fn server_state_and_flags_persist() {
     store.put_area(s, area, "{\"m\":2}", "{\"e\":2}").unwrap();
     let areas = store.areas(s).unwrap();
     assert_eq!(areas.len(), 1);
-    assert_eq!(
-        (areas[0].manifest.as_str(), areas[0].cursor),
-        ("{\"m\":2}", 9)
-    );
+    assert_eq!((areas[0].manifest.as_str(), areas[0].cursor), ("{\"m\":2}", 9));
 }
 
 #[test]
@@ -264,9 +199,7 @@ fn key_location_follows_set_location() {
             certificate: None,
         })
         .unwrap();
-    store
-        .set_location(ItemKind::Key, &id.0.to_string(), Some(s))
-        .unwrap();
+    store.set_location(ItemKind::Key, &id.0.to_string(), Some(s)).unwrap();
     assert_eq!(store.key_record(id).unwrap().unwrap().location, Some(s));
 }
 
@@ -276,9 +209,7 @@ fn host_takes_its_groups_location() {
     let s = server(&store);
     let g = group("srv");
     store.upsert_group(&g).unwrap();
-    store
-        .set_location(ItemKind::Group, &g.id.0.to_string(), Some(s))
-        .unwrap();
+    store.set_location(ItemKind::Group, &g.id.0.to_string(), Some(s)).unwrap();
     // New host in a synced group, sent without a location by the form.
     let h = host("new", Some(g.id));
     store.upsert_host(&h).unwrap();
@@ -321,17 +252,11 @@ fn turning_key_sync_on_refetches_from_the_start() {
 fn device_key_cannot_move_to_server() {
     let store = Store::open_in_memory().unwrap();
     let server = server(&store);
-    let vault =
-        crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default()))
-            .unwrap();
-    let key =
-        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let vault = crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default())).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
     let info = vault.store_device_key(&store, "hello", &key).unwrap();
     let id = info.id.0.to_string();
-    assert!(matches!(
-        store.set_location(ItemKind::Key, &id, Some(server)),
-        Err(StoreError::DeviceBound)
-    ));
+    assert!(matches!(store.set_location(ItemKind::Key, &id, Some(server)), Err(StoreError::DeviceBound)));
     assert_eq!(store.location_of(ItemKind::Key, &id).unwrap(), None);
     // Back to "only on this device" is fine.
     store.set_location(ItemKind::Key, &id, None).unwrap();

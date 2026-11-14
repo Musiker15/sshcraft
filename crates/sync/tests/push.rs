@@ -7,9 +7,7 @@ use sshcraft_sync::SyncError;
 use sshcraft_sync::engine::{Engine, record_local_change};
 
 async fn engine(dev: &Dev) -> Engine {
-    Engine::load(&dev.store, &dev.vault, dev.row().id)
-        .await
-        .unwrap()
+    Engine::load(&dev.store, &dev.vault, dev.row().id).await.unwrap()
 }
 
 async fn sync(dev: &Dev, now: i64) {
@@ -70,10 +68,7 @@ async fn offline_change_stays_queued() {
     let mut e = engine(&a).await;
     server.stop().await;
     rename(&a, &host, "offline", 200);
-    assert!(matches!(
-        e.push(&a.store, &a.vault, 200).await,
-        Err(SyncError::Network(_))
-    ));
+    assert!(matches!(e.push(&a.store, &a.vault, 200).await, Err(SyncError::Network(_))));
     assert_eq!(outbox_len(&a), 1);
     server.restart().await;
     sync(&a, 300).await;
@@ -124,42 +119,19 @@ async fn keys_only_sync_when_enabled() {
     let key = {
         let store = a.store.lock().unwrap();
         let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
-        store
-            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_id))
-            .unwrap();
+        store.set_location(ItemKind::Key, &info.id.0.to_string(), Some(server_id)).unwrap();
         record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 500).unwrap();
         info
     };
     let mut e = engine(&a).await;
-    assert_eq!(
-        e.push(&a.store, &a.vault, 500).await.unwrap(),
-        0,
-        "key sync is off"
-    );
-    assert!(
-        a.store
-            .lock()
-            .unwrap()
-            .outbox(server_id)
-            .unwrap()
-            .is_empty()
-    );
+    assert_eq!(e.push(&a.store, &a.vault, 500).await.unwrap(), 0, "key sync is off");
+    assert!(a.store.lock().unwrap().outbox(server_id).unwrap().is_empty());
 
     for dev in [&a, &b] {
         let id = dev.row().id;
-        dev.store
-            .lock()
-            .unwrap()
-            .update_server_flags(id, true, true)
-            .unwrap();
+        dev.store.lock().unwrap().update_server_flags(id, true, true).unwrap();
     }
-    record_local_change(
-        &a.store.lock().unwrap(),
-        ItemKind::Key,
-        &key.id.0.to_string(),
-        600,
-    )
-    .unwrap();
+    record_local_change(&a.store.lock().unwrap(), ItemKind::Key, &key.id.0.to_string(), 600).unwrap();
     assert_eq!(e.push(&a.store, &a.vault, 600).await.unwrap(), 1);
     sync(&b, 700).await;
     let got = b.store.lock().unwrap().key_record(key.id).unwrap().unwrap();
@@ -179,19 +151,13 @@ async fn moving_an_item_off_the_server_deletes_it_there() {
     {
         let store = a.store.lock().unwrap();
         record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 500).unwrap();
-        store
-            .set_location(ItemKind::Host, &host.id.0.to_string(), None)
-            .unwrap();
+        store.set_location(ItemKind::Host, &host.id.0.to_string(), None).unwrap();
     }
     sync(&a, 600).await;
     sync(&b, 600).await;
     sync(&a, 700).await;
     assert!(b.hosts().is_empty(), "gone from the server");
-    assert_eq!(
-        name_on(&a),
-        vec!["web"],
-        "still on the device that moved it"
-    );
+    assert_eq!(name_on(&a), vec!["web"], "still on the device that moved it");
 }
 
 #[tokio::test]
@@ -243,58 +209,25 @@ async fn enabling_key_sync_fetches_keys_skipped_before() {
     let server = TestServer::start().await;
     let (a, b, _) = pair(&server).await;
     let a_id = a.row().id;
-    a.store
-        .lock()
-        .unwrap()
-        .update_server_flags(a_id, true, true)
-        .unwrap();
+    a.store.lock().unwrap().update_server_flags(a_id, true, true).unwrap();
     let key = {
         let store = a.store.lock().unwrap();
         let info = a.vault.generate_ed25519(&store, "deploy").unwrap();
-        store
-            .set_location(ItemKind::Key, &info.id.0.to_string(), Some(a_id))
-            .unwrap();
+        store.set_location(ItemKind::Key, &info.id.0.to_string(), Some(a_id)).unwrap();
         record_local_change(&store, ItemKind::Key, &info.id.0.to_string(), 500).unwrap();
         info
     };
     sync(&a, 500).await;
     sync(&b, 500).await;
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .key_record(key.id)
-            .unwrap()
-            .is_none(),
-        "key sync is off on B"
-    );
+    assert!(b.store.lock().unwrap().key_record(key.id).unwrap().is_none(), "key sync is off on B");
     let b_id = b.row().id;
-    b.store
-        .lock()
-        .unwrap()
-        .update_server_flags(b_id, true, true)
-        .unwrap();
+    b.store.lock().unwrap().update_server_flags(b_id, true, true).unwrap();
     sync(&b, 600).await;
-    assert!(
-        b.store
-            .lock()
-            .unwrap()
-            .key_record(key.id)
-            .unwrap()
-            .is_some()
-    );
+    assert!(b.store.lock().unwrap().key_record(key.id).unwrap().is_some());
 }
 
 fn server_of(dev: &Dev, server: &TestServer) -> ServerId {
-    dev.store
-        .lock()
-        .unwrap()
-        .servers()
-        .unwrap()
-        .into_iter()
-        .find(|r| r.origin == server.origin)
-        .unwrap()
-        .id
+    dev.store.lock().unwrap().servers().unwrap().into_iter().find(|r| r.origin == server.origin).unwrap().id
 }
 
 async fn sync_on(dev: &Dev, server: ServerId) {
