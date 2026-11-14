@@ -66,8 +66,37 @@ named by its id or by a name only one host has.
 | Import or generate keys | Ask |
 | Share and change shares | Blocked |
 | Manage devices and sync servers | Blocked |
+| Port forwarding | Blocked |
+| Session logs | Blocked |
+| Workspace templates | Blocked |
+| Snippets | Blocked |
+
+The last four came with the rebuild and start blocked, as every kind added later does. On the
+first start of the rebuilt SSHCraft, *Share* and *Sync* go back to *Blocked* once: the Tauri
+version had no agent action for them, so an earlier "allowed" must not start to work silently.
+
+These commands are reachable for agents; every other command (settings, agent rights, secrets,
+imports, accounts, answers to questions) never is:
+
+| Kind | Commands |
+|---|---|
+| View | `host.list`, `group.list`, `key.list`, `host.info` |
+| Connect | `host.exec`, `session.open`, `session.send`, `session.read`, `session.close` |
+| Create and change | `host.save`, `group.save` (only name, group, address, port, user, key, tags) |
+| Delete | `host.delete`, `group.delete`, `key.delete` |
+| Keys | `key.generate`, `key.import` |
+| Port forwarding | `forward.start`, `forward.stop`, `forward.status` |
+| Session logs | `log.list`, `log.read`, `log.search`, `log.mark_add`, `log.mark_remove`, `log.delete` |
+| Workspace templates | `workspace.list`, `workspace.save`, `workspace.delete` |
+| Snippets | `snippet.list`, `snippet.save`, `snippet.delete` |
+| Sharing | `share.find_recipient`, `share.items`, `share.list`, `share.set_grants`, `share.end`, `share.of_items` |
+| Sync | `sync.servers`, `sync.set_server`, `sync.server_logs`, `device.list` |
 
 - **Allowed** runs at once, **Blocked** is refused.
+- Reading within a kind (a status, a list, a session log, a search) runs at *Ask* without a
+  question and without a log entry; *Blocked* still blocks it.
+- **No window, no yes.** A question needs the SSHCraft window. While no window listens, *Ask*
+  is answered no at once ("no SSHCraft window to ask in"); there is no headless mode.
 - **Ask** opens a window in SSHCraft with the agent, the action, the target and, for commands, the
   command. Only that window answers, never the agent's chat. Without an answer within two
   minutes it counts as *Deny*; an agent that disconnects takes its question back.
@@ -85,8 +114,8 @@ named by its id or by a name only one host has.
   be moved by an agent.
 - After the user's answer SSHCraft checks the request again; if the host was hidden or changed
   meanwhile, it does not run.
-- Settings, the agents' rights included, are out of reach for agents. Sharing and sync have no
-  agent actions in this version.
+- Settings, the agents' rights included, are out of reach for agents. A session log, snippet,
+  workspace template or share that belongs to a hidden host or group is unknown to agents.
 
 ## Hiding hosts and groups
 

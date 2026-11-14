@@ -5,6 +5,11 @@ The decisions that carry SSHCraft, newest first. The reasoning is in the design 
 
 | Date | Decision |
 |---|---|
+| 2026-11-14 | `Share` and `Sync` are set back to "deny" once (marker `migration.agent_categories`): before R2 no agent action used them, so a stored "allow" must not start to work silently. Categories added after R2 start at "deny". |
+| 2026-11-14 | The engine refuses to open while the Tauri version runs; it is recognized by its agent pipe `sshcraft-agent-<SID>` of the same user. No new service may use that prefix. |
+| 2026-11-14 | Device settings go to `config.toml` (craft-settings); data that belongs to the account or must stay sealed stays in the database. |
+| 2026-11-14 | `Caller` names the user, an agent or the control channel, each agent and control call with the id of its connection; sessions belong to their connection and end with it. |
+| 2026-11-14 | `Session::execute` is async: commands that talk to servers or wait for the user do not block a thread. |
 | 2026-11-14 | Licences: `deny.toml` allows exactly the list of the house rules, which now includes Unicode-3.0 (the ICU crates of url and idna); four crates outside the list have a named exception (foldhash Zlib, option-ext MPL-2.0, webpki-roots and webpki-root-certs CDLA-Permissive-2.0). |
 | 2026-11-14 | Database client as a separate sister app after V1; it reaches server databases through a tunnel SSHCraft opens for it. |
 | 2026-11-14 | `fido` is the one crate that may use `unsafe` (WebAuthn and Windows Hello through the Windows API). |

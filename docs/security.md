@@ -73,8 +73,10 @@ What a server prints may not reach beyond the terminal on its own:
 
 ## One instance
 
-Only one SSHCraft runs at a time. A second start brings the open window to the front and exits,
-so the local database and the key vault are never opened twice.
+Only one SSHCraft runs at a time. The engine takes an exclusive lock on the data folder before it
+opens the database or the vault, and refuses to open while the Tauri version of the same user
+runs, so the local database, the key vault and the device's sync keys are never used by two
+processes. (From R4 on, a second start brings the open window to the front.)
 
 ## Keys
 
@@ -118,5 +120,10 @@ switched on is refused. See [connections.md](connections.md).
 - No action returns key material, passwords or account keys; answers that look like key
   material are blocked. Rights per kind of action (allow, ask, block), questions only in
   SSHCraft's window, hidden hosts answered as unknown, a sealed log of every action.
+- The gate is part of the engine: every call that is not the user's (an agent or the control
+  channel) passes it in `Session::execute`, so no transport can go around it. A command without
+  an agent category is refused and logged.
+- The engine's journal of commands never holds the value of a secret parameter, at any depth;
+  typed keys and answers to sign-in questions are not journaled at all.
 - An agent with its own shell runs as the same user and can bypass SSHCraft (`pass-cli`, files).
   Details in [agents.md](agents.md).
