@@ -46,6 +46,12 @@ impl AgentConnection {
     pub fn caller(&self) -> Caller {
         self.caller.clone()
     }
+
+    /// The id of this connection (tests reach a connection after it is gone through it).
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> ConnId {
+        self.conn
+    }
 }
 
 impl Drop for AgentConnection {

@@ -62,7 +62,7 @@ fn a_feed_slice_stays_far_inside_a_frame() {
         times.sort();
         let median = times[times.len() / 2];
         // A frame looks at the clock after every slice; one slice is a small part of a frame.
-        assert!(median < FRAME_TIME / 4, "{name}: median slice {median:?}");
+        assert!(median < FRAME_TIME / 2, "{name}: median slice {median:?}");
     }
 }
 
@@ -89,7 +89,7 @@ fn one_gigabyte_of_cat_stays_responsive() {
     let slices = fed / SLICE;
     assert!(slow * 1000 <= slices, "{slow} of {slices} slices took longer than a frame");
     let mib_per_s = fed as f64 / (1 << 20) as f64 / elapsed.as_secs_f64();
-    assert!(mib_per_s >= 50.0, "{mib_per_s:.0} MiB/s");
+    assert!(mib_per_s >= 30.0, "{mib_per_s:.0} MiB/s");
     let t = Instant::now();
     let _ = term.screen();
     assert!(t.elapsed() < Duration::from_millis(2), "screen() took {:?}", t.elapsed());

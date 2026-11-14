@@ -373,3 +373,50 @@ async fn a_panic_in_the_agent_gate_becomes_internal_and_the_next_call_works() {
     assert_eq!(err, EngineError::Internal { id: "test.agent_panic".into() });
     session.execute(conn.caller(), "host.list", json!({})).await.unwrap();
 }
+
+/// R2 review: `execute` assumed the caller polls it inside the engine's tokio runtime.
+#[test]
+fn execute_works_without_a_tokio_context() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let session = {
+        let _inside = runtime.enter();
+        open(dir.path())
+    };
+    let s = session.clone();
+    // A plain thread with an executor that is not tokio: the egui frame loop in R4.
+    let result = std::thread::spawn(move || futures::executor::block_on(s.execute(Caller::User, "local.shells", json!({})))).join().unwrap();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+/// R2 review: snippet content, comments and commands stayed in the in-memory journal.
+#[tokio::test]
+async fn the_journal_keeps_no_snippet_comment_or_command_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    for key in ["content", "command", "text"] {
+        let params = json!({ "keep": "visible", "deep": { key: "S3CRET" } });
+        session.execute(Caller::User, "test.echo", params).await.unwrap();
+    }
+    let text = serde_json::to_string(&session.journal()).unwrap();
+    assert!(!text.contains("S3CRET"), "{text}");
+    assert!(text.contains("visible"));
+}
+
+/// R2 review: a session an agent opened while its connection went away stayed open.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_opened_for_a_gone_connection_is_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let (_server, host) = crate::testing::trusted_test_host(&session).await;
+    let opened = session
+        .execute(Caller::User, "session.open", json!({ "target": { "kind": "host", "host_id": host }, "cols": 80, "rows": 24 }))
+        .await
+        .unwrap();
+    let id: crate::SessionId = serde_json::from_value(opened["session"].clone()).unwrap();
+    let conn = session.control_connection();
+    let gone = conn.id();
+    drop(conn);
+    session.own_agent_session(gone, id, host);
+    assert_eq!(session.unacknowledged(id), None, "the session is closed");
+}

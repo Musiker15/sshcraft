@@ -83,6 +83,10 @@ impl GateView {
     }
 
     /// A session log recorded on a hidden host is hidden.
+    pub fn log_known(&self, id: LogId) -> bool {
+        self.logs.iter().any(|(log, _)| *log == id)
+    }
+
     pub fn log_hidden(&self, id: LogId) -> bool {
         self.logs.iter().any(|(log, host)| *log == id && host.is_some_and(|h| self.host_id_hidden(h)))
     }

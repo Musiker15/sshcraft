@@ -302,8 +302,23 @@ impl Session {
     }
 
     /// Runs command `id` for `caller`. A command that panics becomes [`EngineError::Internal`];
-    /// the engine goes on.
+    /// the engine goes on. The command runs on the engine's runtime, so any executor may await
+    /// this (the window's frame loop is not tokio); dropping the future cancels the command, as
+    /// an agent that goes away takes its question back.
     pub async fn execute(&self, caller: Caller, id: &str, params: Value) -> Result<Value, EngineError> {
+        let session = self.clone();
+        let name = id.to_string();
+        let task = AbortOnDrop(self.0.runtime.spawn(async move { session.execute_here(caller, &name, params).await }));
+        match task.await {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::error!(command = id, "a command task ended without a result: {e}");
+                Err(EngineError::Internal { id: id.to_string() })
+            }
+        }
+    }
+
+    async fn execute_here(&self, caller: Caller, id: &str, params: Value) -> Result<Value, EngineError> {
         let spec = cmd::find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         let params = if params.is_null() { Value::Object(serde_json::Map::new()) } else { params };
         if journal::depth(&params, MAX_PARAM_DEPTH) > MAX_PARAM_DEPTH {
@@ -369,9 +384,18 @@ impl Session {
         self.lock_connections().get(&conn).cloned()
     }
 
+    /// Gives session `id` to connection `conn`; when the connection went away meanwhile, the
+    /// session is closed at once instead of staying open until the engine stops.
     pub(crate) fn own_agent_session(&self, conn: ConnId, id: SessionId, host: sshcraft_model::model::HostId) {
-        if let Some(connection) = self.lock_connections().get_mut(&conn) {
-            connection.sessions.insert(id, host);
+        let owned = match self.lock_connections().get_mut(&conn) {
+            Some(connection) => {
+                connection.sessions.insert(id, host);
+                true
+            }
+            None => false,
+        };
+        if !owned && !self.agent_sessions().close(self.sessions(), id) {
+            self.sessions().close(id);
         }
     }
 
@@ -485,4 +509,21 @@ fn settings_reader(settings: &Arc<Mutex<craft_settings::SettingsStore<settings::
 /// Milliseconds since 1970; 0 if the clock is before that.
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)).unwrap_or(0)
+}
+
+/// A task that is cancelled when the future awaiting it is dropped.
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> std::future::Future for AbortOnDrop<T> {
+    type Output = Result<T, tokio::task::JoinError>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }

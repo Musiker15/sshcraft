@@ -550,6 +550,14 @@ async fn a_dropped_question_is_logged_as_cancelled() {
     let conn = w.conn();
     let pending = call(&w, &conn, "host.exec", exec("web", "uptime"));
     assert!(tokio::time::timeout(Duration::from_millis(50), pending).await.is_err());
+    // The command runs as a task of the engine: dropping the call cancels it, and the task
+    // writes its entry as it ends.
+    for _ in 0..100 {
+        if !w.outcomes().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(w.outcomes(), vec![AgentOutcome::Cancelled]);
 }
 
@@ -954,7 +962,24 @@ async fn reading_logs_and_snippets_follows_the_level_and_is_logged() {
     w.set(AgentCategory::Snippets, AgentLevel::Ask);
     let conn = w.conn();
     let window = Err(EngineError::Denied("no SSHCraft window to ask in".into()));
-    assert_eq!(call(&w, &conn, "log.read", json!({ "id": Uuid::new_v4() })).await, window);
+    // A log on a visible host: an unknown one is refused before the level, like a hidden one.
+    let log = sshcraft_model::model::LogId(Uuid::new_v4());
+    {
+        use sshcraft_store::session_log::{self, LogKind, LogMeta};
+        let meta = LogMeta {
+            id: log,
+            title: "web".into(),
+            kind: LogKind::Ssh,
+            host_id: Some(w.web.id),
+            started_at: 1,
+            ended_at: None,
+            size: 0,
+            truncated: false,
+            marks: Vec::new(),
+        };
+        session_log::create(&w.session.vault().unwrap(), &w.session.store(), &meta).unwrap();
+    }
+    assert_eq!(call(&w, &conn, "log.read", json!({ "id": log })).await, window);
     assert_eq!(call(&w, &conn, "log.search", json!({ "query": "x" })).await, window);
     assert_eq!(call(&w, &conn, "snippet.list", Value::Null).await, window);
     // A list of logs (titles, times) needs no question.
@@ -964,4 +989,41 @@ async fn reading_logs_and_snippets_follows_the_level_and_is_logged() {
     let actions: Vec<String> = w.log().into_iter().map(|e| e.action).collect();
     assert!(actions.contains(&"log.search".to_owned()), "{actions:?}");
     assert!(!actions.contains(&"log.list".to_owned()), "{actions:?}");
+}
+
+/// R2 review: a hidden log and an unknown one answered with different errors, so an agent could
+/// tell that a hidden one exists.
+#[tokio::test]
+async fn hidden_and_unknown_logs_answer_alike() {
+    use sshcraft_store::session_log::{self, LogKind, LogMeta};
+    let w = world(None).await;
+    w.set(AgentCategory::Logs, AgentLevel::Allow);
+    let conn = w.conn();
+    let hidden = sshcraft_model::model::LogId(Uuid::new_v4());
+    {
+        let vault = w.session.vault().unwrap();
+        let store = w.session.store();
+        let meta = LogMeta {
+            id: hidden,
+            title: "db".into(),
+            kind: LogKind::Ssh,
+            host_id: Some(w.db.id),
+            started_at: 1,
+            ended_at: None,
+            size: 0,
+            truncated: false,
+            marks: Vec::new(),
+        };
+        session_log::create(&vault, &store, &meta).unwrap();
+    }
+    let unknown = sshcraft_model::model::LogId(Uuid::new_v4());
+    for command in ["log.read", "log.mark_remove"] {
+        let a = call(&w, &conn, command, json!({ "id": hidden, "mark": Uuid::new_v4() })).await.unwrap_err();
+        let b = call(&w, &conn, command, json!({ "id": unknown, "mark": Uuid::new_v4() })).await.unwrap_err();
+        assert_eq!(a.to_string(), b.to_string(), "{command}");
+        assert_eq!(std::mem::discriminant(&a), std::mem::discriminant(&b), "{command}");
+    }
+    let a = call(&w, &conn, "log.delete", json!({ "ids": [hidden] })).await.unwrap_err();
+    let b = call(&w, &conn, "log.delete", json!({ "ids": [unknown] })).await.unwrap_err();
+    assert_eq!(a.to_string(), b.to_string(), "log.delete");
 }

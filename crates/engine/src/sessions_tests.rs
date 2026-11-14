@@ -600,6 +600,14 @@ async fn host_session_uses_terminal_type_setting() {
     let sink = Arc::new(RecordingSink::default());
     f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
     sink.wait_for(connected).await;
+    // The client reports "connected" once its requests are sent; the server may record the pty
+    // request a moment later.
+    for _ in 0..200 {
+        if !f.server.requested_terms().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     assert_eq!(f.server.requested_terms(), vec!["linux".to_owned()]);
 }
 
