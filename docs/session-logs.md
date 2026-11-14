@@ -1,5 +1,7 @@
 # Session logs
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 SSHCraft can record what a terminal shows: SSH sessions, the local terminal and serial
 connections. Recordings are kept sealed on the device, can carry bookmarks and comments, can be
 searched, exported and deleted, are removed after a time you choose and can sync with your own

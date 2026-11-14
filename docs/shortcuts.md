@@ -1,5 +1,7 @@
 # Keyboard shortcuts
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 Shortcuts that work everywhere in SSHCraft. Inside a terminal only combinations with
 Ctrl+Shift (without Alt) or Ctrl+Tab are taken, so every key the shell needs (Ctrl+W, Ctrl+K,
 Ctrl+R, Ctrl+C, Alt+..., AltGr) reaches the server unchanged.

@@ -1,5 +1,7 @@
 # Connections
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 How SSHCraft signs in and how it reaches a host: passwords, keyboard-interactive, identities,
 jump hosts, proxies, agent forwarding and environment variables, plus the two terminals that are
 not SSH (a local shell and a serial port).

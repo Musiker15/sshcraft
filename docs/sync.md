@@ -1,5 +1,7 @@
 # Sync on the device
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 How the SSHCraft app keeps hosts, groups and keys in step through your own sync servers. The
 server side is described in [server.md](server.md) and [server-api.md](server-api.md), the
 formats and checks in [protocol.md](protocol.md).

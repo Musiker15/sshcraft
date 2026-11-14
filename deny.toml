@@ -15,6 +15,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "Apache-2.0",
+    "Unicode-3.0",
     "OFL-1.1",
     "Ubuntu-font-1.0",
     "Bitstream-Vera",
@@ -23,93 +24,6 @@ allow = [
     "CC-BY-SA-4.0",
     "LicenseRef-Public-Domain",
 ]
-
-# Unicode data and the ICU4X crates that use it, reached through url and idna (reqwest) and the
-# Unicode tables of the parser crates. Unicode-3.0 is a permissive licence for Unicode data;
-# pdfcraft and gridcraft carry it as well (gridcraft NOTICE, pdfcraft deny.toml).
-[[licenses.exceptions]]
-crate = "icu_collections"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "icu_locale_core"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "icu_normalizer"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "icu_normalizer_data"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "icu_properties"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "icu_properties_data"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "icu_provider"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "litemap"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "potential_utf"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "tinystr"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "unicode-ident"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "unicode-normalization"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "unicode-properties"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "writeable"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "yoke"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "yoke-derive"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "zerofrom"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "zerofrom-derive"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "zerotrie"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "zerovec"
-allow = ["Unicode-3.0"]
-
-[[licenses.exceptions]]
-crate = "zerovec-derive"
-allow = ["Unicode-3.0"]
 
 # foldhash: a hasher in the hashbrown tree; Zlib is a permissive licence.
 [[licenses.exceptions]]

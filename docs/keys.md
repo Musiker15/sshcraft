@@ -1,5 +1,7 @@
 # Keys
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 What kinds of keys SSHCraft holds, how their passphrase is kept, how certificates are used, how a
 public key gets onto a server, and what FIDO2 security keys and Windows Hello keys are.
 

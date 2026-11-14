@@ -1,18 +1,41 @@
 # Security notes for the desktop app
 
-## Content Security Policy
+The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+How to report a vulnerability is in [SECURITY.md](../SECURITY.md).
 
-The window runs under this policy (see `app/src-tauri/tauri.conf.json`):
+## Rules against the weaknesses of other clients
 
-```
-default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;
-font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none';
-form-action 'none'; frame-ancestors 'none'
-```
+A comparison with other SSH clients (the German
+[`superpowers/specs/2026-11-14-sshcraft-marktvergleich.md`](superpowers/specs/2026-11-14-sshcraft-marktvergleich.md),
+section 4) found the weaknesses below; these rules keep them out of SSHCraft. Each gets a test
+where it can have one.
 
-`style-src` allows inline styles because the terminal library xterm.js creates `<style>`
-elements at run time for its colour theme and character sizes. A nonce cannot cover elements
-created after the page has loaded. Scripts stay limited to the app's own files.
+1. **No shell string from foreign data.** File names, paths, host names and server output never go
+   into a command line a shell evaluates; local programs start with argument lists. (Code
+   execution bugs in Tabby and Electerm.)
+2. **Links never run anything.** `ssh://` and other links at most open the connection dialog with
+   checked fields. (`tabby://run`, Electerm's deep-link code execution.)
+3. **Escape sequences are bounded.** OSC 52 may only write, never read, and only after consent per
+   host; file transfer over the terminal (ZMODEM, trzsz) never starts by itself; queries whose
+   answer could inject input are off. (Tabby's ZMODEM auto-start, Electerm's clipboard leak.)
+4. **Paths from the network are normalized and bounded** before they touch anything local.
+   (Path traversal in Tabby's SFTP.)
+5. **Nothing is left on a server** unless the user asks for it. (iTerm2, CVE-2025-22275.)
+6. **No telemetry.** From F2 on, every connection SSHCraft makes by itself is listed in the
+   settings; an update check runs only after consent. (Warp, Wave.)
+7. **Cryptography only from reviewed libraries**, signatures with deterministic nonces; F1 adds a
+   strict-kex test. (PuTTY CVE-2024-31497, Terrapin CVE-2023-48795.)
+8. **Agent interfaces without HTTP**, a token on every connection, rights per action. (Electerm's
+   MCP server.)
+9. **Performance budgets as tests:** 1 GB of output must not freeze the interface; a memory budget
+   per session and for the idle app. (Electron clients.)
+10. **Local data stays authoritative:** sync never deletes locally without a tombstone; from F2 on
+    there is a trash and an encrypted backup file. (Termius vaults that emptied after updates.)
+11. **Accessibility:** egui with AccessKit, the terminal readable as linear text by screen readers.
+12. **Supply chain:** one official download address, signed packages through winget, Homebrew and
+    Flathub, checksums, an SBOM; reproducible builds as a goal. (Xshell backdoor, fake PuTTY
+    downloads.)
+13. **Every security bug gets a test that failed before the fix.** (Tabby's incomplete fix.)
 
 ## Terminal output
 
@@ -23,7 +46,7 @@ What a server prints may not reach beyond the terminal on its own:
 - **Links:** only `http` and `https` links open, only on Ctrl+click, and Rust checks the link
   again (`open_link`) before the system opens it. `file:`, `javascript:` and other schemes are
   refused. The window has no opener permission of its own.
-- **Broadcast:** answers xterm.js gives to the server by itself (cursor position, device
+- **Broadcast:** answers the terminal gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
 
 ## Port forwarding
@@ -89,8 +112,9 @@ switched on is refused. See [connections.md](connections.md).
 
 ## AI agents
 
-- Agents reach SSHCraft only through the local pipe of the current user (access list for that
-  user, no remote clients, first instance; the `sshcraft` tool checks the server's user).
+- From R6 on, agents reach SSHCraft only over loopback, with a token made at every start and kept
+  in a file only the current user can read; it is off until the user allows agents. Until R6 there
+  is no agent connection on `main`.
 - No action returns key material, passwords or account keys; answers that look like key
   material are blocked. Rights per kind of action (allow, ask, block), questions only in
   SSHCraft's window, hidden hosts answered as unknown, a sealed log of every action.
