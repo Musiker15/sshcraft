@@ -21,6 +21,7 @@ sshcraft-local = { path = "crates/local" }
 sshcraft-sync = { path = "crates/sync" }
 sshcraft-fido = { path = "crates/fido" }
 sshcraft-server-lib = { path = "crates/server" }
+sshcraft-engine = { path = "crates/engine" }
 
 # foundation
 serde = { version = "1.0.229", features = ["derive"] }
@@ -29,6 +30,7 @@ thiserror = "2.0.21"
 uuid = { version = "1.29.2", features = ["v4", "serde"] }
 tokio = { version = "1.54.1", features = ["full"] }
 async-trait = "0.1.92"
+strum = { version = "0.28.0", features = ["derive"] }
 futures = "0.3.34"
 directories = "6.0.0"
 tracing = "0.1.44"
@@ -37,6 +39,11 @@ clap = { version = "4.6.7", features = ["derive", "env"] }
 csv = "1.4.0"
 data-encoding = "2.11.1"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+wait-timeout = "0.2.1"
+sys-locale = "0.3.2"
+url = "2.5.8"
+winreg = "0.56.0"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 
 # ssh and storage
 russh = "0.65.1"
@@ -62,6 +69,9 @@ deadpool-postgres = "0.14.2"
 tokio-tungstenite = "0.30.0"
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.5"
+
+# craft-libs: the shared libraries of the Craft apps, all from one pinned revision.
+craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032", version = "0.1.0" }
 
 # tests
 tempfile = "3.27.0"

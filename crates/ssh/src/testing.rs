@@ -1,8 +1,8 @@
 //! An in-process SSH server for tests. Accepts one client key, a password and rounds of
 //! keyboard-interactive questions, as [`TestAuth`] says, and records what clients sent.
 //!
-//! The shell echoes every input chunk, except two commands sent as their own chunk:
-//! `exit\n` ends the shell with exit status 0, `flood\n` sends [`flood_pattern`].
+//! The shell echoes every input chunk (unless [`TestAuth::quiet`]), except two commands sent as
+//! their own chunk: `exit\n` ends the shell with exit status 0, `flood\n` sends [`flood_pattern`].
 
 // Test helpers, built only with the `testing` feature: a failing setup ends the test that uses
 // it, which is how a test reports.
@@ -48,6 +48,9 @@ pub struct TestAuth {
     pub refuse_sha1_rsa: bool,
     /// Turns down `tcpip-forward` and `direct-tcpip`, as `AllowTcpForwarding no` does.
     pub refuse_forwarding: bool,
+    /// The shell echoes nothing (`exit` and `flood` still work), as with a password typed at
+    /// a prompt.
+    pub quiet: bool,
 }
 
 /// A user certificate for `key`, signed by `ca`, for `principal`, valid in the given window.
@@ -552,6 +555,7 @@ impl server::Handler for Handler {
                     }
                 });
             }
+            _ if self.auth.quiet => {}
             other => session.data(channel, other.to_vec())?,
         }
         Ok(())
