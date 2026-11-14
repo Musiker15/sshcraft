@@ -232,3 +232,66 @@ async fn data_commands_announce_changes() {
     session.execute(Caller::User, "host.list", json!({})).await.unwrap();
     assert!(events.try_recv().is_err(), "a read sent an event");
 }
+
+/// No answer of a key command carries a private key or a passphrase; nor does the journal.
+#[tokio::test]
+async fn key_commands_never_return_private_material() {
+    use russh::keys::ssh_key::LineEnding;
+    use russh::keys::{Algorithm, PrivateKey};
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let pass = "PASS-PHRASE-4711";
+    let text = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap().to_openssh(LineEnding::LF).unwrap();
+    let imported = session.execute(Caller::User, "key.import", json!({ "name": "imported", "text": text.as_str() })).await.unwrap();
+    let id = imported["id"].clone();
+    let mut answers = vec![imported];
+    let spec = json!({ "type": "ed25519" });
+    answers.push(session.execute(Caller::User, "key.generate", json!({ "name": "made", "spec": spec, "passphrase": pass })).await.unwrap());
+    answers.push(session.execute(Caller::User, "key.protect", json!({ "id": id, "passphrase": pass })).await.unwrap());
+    answers.push(session.execute(Caller::User, "key.remember_passphrase", json!({ "id": id, "passphrase": pass })).await.unwrap());
+    let list = session.execute(Caller::User, "key.list", json!({})).await.unwrap();
+    assert_eq!(list.as_array().map(Vec::len), Some(2), "{list}");
+    answers.push(list);
+    answers.push(serde_json::to_value(session.journal()).unwrap());
+    for answer in answers {
+        let shown = answer.to_string();
+        for secret in ["PRIVATE KEY", "PuTTY-User-Key-File", pass] {
+            assert!(!shown.contains(secret), "{secret} in {shown}");
+        }
+    }
+}
+
+/// Without the vault every key command that needs it is disabled, with a reason; the list of
+/// keys still works.
+#[tokio::test]
+async fn locked_vault_disables_key_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let store = Store::open(&dir.path().join("sshcraft.db")).unwrap();
+        let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
+        vault.generate_ed25519(&store, "k").unwrap();
+    }
+    let (session, _) = Session::open(SessionConfig::for_tests(dir.path())).unwrap();
+    // A fixed list: dropping `needs_vault` from one of these must turn this test red.
+    let needing = [
+        "key.import",
+        "key.generate",
+        "key.create_security",
+        "key.attach_certificate",
+        "key.detach_certificate",
+        "key.remember_passphrase",
+        "key.protect",
+        "key.passcli_import",
+    ];
+    for id in needing {
+        match session.execute(Caller::User, id, json!({})).await {
+            Err(EngineError::Disabled { reason, .. }) => assert!(reason.contains("vault"), "{id}: {reason}"),
+            other => panic!("{id}: {other:?}"),
+        }
+    }
+    let keys = session.execute(Caller::User, "key.list", json!({})).await.unwrap();
+    assert_eq!(keys.as_array().map(Vec::len), Some(1));
+    let status = session.execute(Caller::User, "vault.status", json!({})).await.unwrap();
+    assert_eq!(status["ok"], json!(false));
+    assert_eq!(status["code"], json!("master_key_missing"));
+}

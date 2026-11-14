@@ -10,6 +10,7 @@ pub mod error;
 pub mod events;
 pub mod gate;
 pub mod journal;
+pub mod passcli;
 pub mod settings;
 pub mod sync;
 #[cfg(any(test, feature = "testing"))]
@@ -53,6 +54,8 @@ pub struct SessionConfig {
     pub event_capacity: usize,
     /// Where `config.toml` lives (`Location::Auto` in the app, `Memory` in tests).
     pub settings: craft_settings::Location,
+    /// Finds Proton Pass's `pass-cli` (`passcli::locate_installed` in the app).
+    pub pass_cli: passcli::LocatePassCli,
 }
 
 /// What happened while opening.
@@ -86,8 +89,11 @@ struct Inner {
     runtime: tokio::runtime::Handle,
     #[allow(dead_code)]
     presence: Arc<dyn sshcraft_fido::presence::UserPresence>,
-    #[allow(dead_code)]
     security: Option<Arc<dyn sshcraft_fido::Authenticator>>,
+    pass_cli: passcli::LocatePassCli,
+    /// Set once Windows Hello turned out not to be set up on this PC (from R2.6, by the
+    /// sessions' key gate).
+    hello_missing: std::sync::atomic::AtomicBool,
     #[allow(dead_code)]
     confirm_timeout: Duration,
     /// Held for the life of the engine: no other process opens the same data.
@@ -132,6 +138,8 @@ impl Session {
             runtime: config.runtime,
             presence: config.presence,
             security: config.security,
+            pass_cli: config.pass_cli,
+            hello_missing: std::sync::atomic::AtomicBool::new(false),
             confirm_timeout: config.confirm_timeout,
             _lock: lock,
         };
@@ -219,6 +227,24 @@ impl Session {
         for server in servers {
             self.0.events.send(EngineEvent::DataChanged { server: Some(*server) });
         }
+    }
+
+    pub(crate) fn security(&self) -> Option<Arc<dyn sshcraft_fido::Authenticator>> {
+        self.0.security.clone()
+    }
+
+    pub(crate) fn pass_cli(&self) -> Option<Arc<dyn passcli::PassCli>> {
+        (self.0.pass_cli)()
+    }
+
+    /// Whether Windows Hello turned out not to be set up on this PC.
+    pub(crate) fn hello_missing(&self) -> bool {
+        self.0.hello_missing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The store behind its lock, for work that runs off the async threads.
+    pub(crate) fn shared_store(&self) -> Arc<Mutex<Store>> {
+        self.0.store.clone()
     }
 
     pub(crate) fn vault_state(&self) -> Result<(), ErrorCode> {

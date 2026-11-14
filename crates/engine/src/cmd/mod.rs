@@ -59,8 +59,10 @@ pub fn needs_vault(session: &Session) -> Result<(), String> {
 pub mod group;
 pub mod host;
 pub mod identity;
+pub mod key;
 pub mod password;
 pub mod settings;
+pub mod vault;
 
 /// The error type of the commands moved from the Tauri version.
 pub(crate) type CommandError = EngineError;
@@ -70,6 +72,16 @@ pub(crate) type CommandResult<T> = Result<T, EngineError>;
 pub(crate) fn sync_run(f: impl FnOnce() -> Result<Value, EngineError> + Send + 'static) -> BoxFuture<'static, Result<Value, EngineError>> {
     use futures::FutureExt;
     async move { f() }.boxed()
+}
+
+/// Runs blocking work (bcrypt, key generation, a child process) on tokio's blocking threads, so
+/// the async threads stay free. A panic there becomes [`EngineError::Internal`].
+pub(crate) fn blocking_run(
+    id: &'static str,
+    f: impl FnOnce() -> Result<Value, EngineError> + Send + 'static,
+) -> BoxFuture<'static, Result<Value, EngineError>> {
+    use futures::FutureExt;
+    async move { tokio::task::spawn_blocking(f).await.map_err(|_| EngineError::Internal { id: id.to_string() })? }.boxed()
 }
 
 /// A command that changes something: it goes into the journal.
@@ -102,6 +114,8 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(host::specs());
         specs.extend(identity::specs());
         specs.extend(password::specs());
+        specs.extend(key::specs());
+        specs.extend(vault::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         specs
