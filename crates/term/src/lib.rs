@@ -7,6 +7,7 @@
 //! [`limits::MAX_CELLS`], and the queue of answers and notices has a limit.
 
 mod filter;
+pub mod input;
 pub mod limits;
 mod listener;
 mod marks;
@@ -179,6 +180,11 @@ impl Terminal {
     /// Scrollback lines this terminal keeps at its current size.
     pub fn effective_scrollback(&self) -> usize {
         scrollback_for(self.size, self.config.scrollback)
+    }
+
+    /// The input modes programs switched on (cursor keys, paste, mouse, focus).
+    pub fn modes(&self) -> TermModes {
+        screen::modes(*self.term.mode())
     }
 
     pub fn screen(&self) -> Screen {
