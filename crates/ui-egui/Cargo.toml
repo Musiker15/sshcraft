@@ -9,11 +9,19 @@ publish = false
 
 [dependencies]
 sshcraft-term = { workspace = true }
+sshcraft-engine = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 egui_system_font_provider = { workspace = true }
 fontique = { workspace = true }
 
 [dev-dependencies]
+sshcraft-engine = { workspace = true, features = ["testing"] }
+sshcraft-ssh = { workspace = true, features = ["testing"] }
+eframe = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+data-encoding = { workspace = true }
 egui_kittest = { workspace = true, features = ["wgpu"] }
 image = { workspace = true, features = ["png"] }
 

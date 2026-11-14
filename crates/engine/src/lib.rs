@@ -273,6 +273,12 @@ impl Session {
         self.0.terminals.lock().unwrap_or_else(PoisonError::into_inner).insert(stream.id(), stream);
     }
 
+    /// The output of session `id` its terminal has not acknowledged yet; `None` for an unknown
+    /// session.
+    pub fn unacknowledged(&self, id: SessionId) -> Option<usize> {
+        self.0.sessions.unacknowledged(id)
+    }
+
     pub(crate) fn sessions(&self) -> &sessions::SessionManager {
         &self.0.sessions
     }

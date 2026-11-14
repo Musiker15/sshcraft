@@ -59,6 +59,16 @@ impl TerminalStream {
         self.receiver.try_recv().ok()
     }
 
+    /// Nothing is waiting in the stream right now.
+    pub fn is_empty(&self) -> bool {
+        self.receiver.is_empty()
+    }
+
+    /// The session is closed and everything it sent was taken.
+    pub fn is_closed(&self) -> bool {
+        self.receiver.is_closed() && self.receiver.is_empty()
+    }
+
     /// The interface has shown `bytes` more output bytes: the session may read on.
     pub fn ack(&self, bytes: usize) {
         self.flow.ack(bytes);

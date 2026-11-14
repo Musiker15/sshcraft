@@ -6,6 +6,7 @@
 //! - `assets`: every asset attributed, no font files (`assets.rs`)
 //! - `deny`: licences, bans, sources and advisories through cargo-deny (`deny.toml`)
 //! - `wasm`: the crates that must build for the browser do
+//! - `perf`: the performance budgets of the terminal, in a release build (`crates/term/tests/budgets.rs`)
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -28,6 +29,7 @@ const CI: &[(&str, Step)] = &[
     ("assets", cmd_assets),
     ("deny", cmd_deny),
     ("wasm", cmd_wasm),
+    ("perf", cmd_perf),
 ];
 
 fn main() -> ExitCode {
@@ -170,4 +172,11 @@ fn cmd_wasm() -> Result<(), String> {
         c.args(["-p", package]);
     }
     run(c, "cargo check --target wasm32-unknown-unknown")
+}
+
+/// Budgets are about the optimized program; a debug build would measure something else.
+fn cmd_perf() -> Result<(), String> {
+    let mut c = cargo();
+    c.args(["test", "--release", "-p", "sshcraft-term", "--test", "budgets"]);
+    run(c, "cargo test --release -p sshcraft-term --test budgets")
 }

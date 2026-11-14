@@ -6,6 +6,7 @@ mod keys;
 pub mod layout;
 pub mod paint;
 pub mod palette;
+pub mod pump;
 mod view;
 
 pub use fonts::install_terminal_font;

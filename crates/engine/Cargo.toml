@@ -9,7 +9,7 @@ publish = false
 
 [features]
 # SessionConfig::for_tests and the fakes, for the interface (R4) and the MCP tests (R6).
-testing = ["sshcraft-store/testing", "sshcraft-fido/testing", "sshcraft-ssh/testing"]
+testing = ["sshcraft-store/testing", "sshcraft-fido/testing", "sshcraft-ssh/testing", "dep:rand"]
 
 [dependencies]
 sshcraft-model = { workspace = true }
@@ -43,6 +43,10 @@ data-encoding = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 # PuTTY keeps its sessions in the registry.
 winreg = { workspace = true }
+
+[dependencies.rand]
+workspace = true
+optional = true
 
 [dev-dependencies]
 sshcraft-server-lib = { workspace = true }

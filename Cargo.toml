@@ -90,6 +90,7 @@ craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "cebc8
 
 # tests
 tempfile = "3.27.0"
+memory-stats = "1.2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
