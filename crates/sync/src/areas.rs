@@ -305,6 +305,8 @@ async fn finish(engine: &Engine, store: &Mutex<Store>, vault: &Vault, mut pendin
         let (set, mut log) = engine.own_devices(store).await?;
         if set.get_active(target).is_some() {
             log.append_revoke_by_device(engine.device_id(), &engine.keys, target, now);
+            // Cannot fail: append_revoke_by_device has just added an entry.
+            #[allow(clippy::expect_used)]
             let entry = log.entries.last().cloned().expect("just appended");
             let appended = engine.client().append_log(&engine.account, &[entry], false).await;
             engine.revoked_check(store, appended)?;

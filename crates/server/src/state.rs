@@ -80,6 +80,8 @@ impl Default for Challenges {
 }
 
 impl Challenges {
+    // Cannot fail: HMAC takes a key of any length.
+    #[allow(clippy::expect_used)]
     fn mac(&self) -> Hmac<Sha256> {
         <Hmac<Sha256> as KeyInit>::new_from_slice(&self.secret).expect("any key length")
     }

@@ -55,6 +55,9 @@ impl AccountKey {
     /// The recovery device of this account: an ordinary device whose keys follow from the
     /// account key. Area keys are sealed to it like to every device, so whoever holds the account
     /// key can open them again on a new device even when no other device is left.
+    // Both expects cannot fail: 64 bytes is a valid HKDF-SHA256 output length, and any 32 bytes
+    // are an X25519 key (AGENTS.md, "Never crash": provably infallible).
+    #[allow(clippy::expect_used)]
     pub fn recovery_device(&self) -> (Uuid, DeviceKeys) {
         let seed = Zeroizing::new(self.signing.to_bytes());
         let mut okm = Zeroizing::new([0u8; 64]);
@@ -175,6 +178,8 @@ impl DeviceKeys {
         Ok(Self { signing: SigningKey::from_bytes(&seed), hpke })
     }
 
+    // Cannot fail: every constructor of DeviceKeys validates the HPKE key bytes first.
+    #[allow(clippy::expect_used)]
     pub(crate) fn hpke_private(&self) -> <X25519HkdfSha256 as Kem>::PrivateKey {
         <X25519HkdfSha256 as Kem>::PrivateKey::from_bytes(&self.hpke[..]).expect("validated when the keys were created")
     }

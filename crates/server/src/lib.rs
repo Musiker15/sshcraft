@@ -3,6 +3,8 @@
 //! The server stores accounts, device logs, areas, key envelopes and sealed records and pushes
 //! change notices to connected devices. It never sees a private key or a plaintext record.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 pub mod admin;
 pub mod auth;
 pub mod config;

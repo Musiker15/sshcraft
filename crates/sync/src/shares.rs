@@ -38,6 +38,8 @@ pub fn share_info_record_id(area: Uuid) -> Uuid {
     copy_id(area, area)
 }
 
+// Cannot fail: a struct of strings, numbers and lists always serializes to JSON.
+#[allow(clippy::expect_used)]
 pub fn encode_share_info(info: &ShareInfo) -> Vec<u8> {
     serde_json::to_vec(&ShareInfoBody { share_info: info.clone() }).expect("share info serializes")
 }
@@ -73,6 +75,8 @@ struct KeyAssignmentBody {
     key_assignment: KeyAssignment,
 }
 
+// Cannot fail: a struct of strings, numbers and lists always serializes to JSON.
+#[allow(clippy::expect_used)]
 pub(crate) fn encode_key_assignment(assignment: &KeyAssignment) -> Vec<u8> {
     serde_json::to_vec(&KeyAssignmentBody { key_assignment: assignment.clone() }).expect("key assignment serializes")
 }
@@ -426,7 +430,10 @@ pub async fn share(
     )?;
     let server = engine.server;
     if kind == ShareKind::GroupAll {
-        let group = group.expect("a group share has a group");
+        // plan() returns a group with every group share; without one there is nothing to share.
+        let Some(group) = group else {
+            return not_allowed();
+        };
         {
             let guard = lock(store)?;
             let group_id = group.id.0.to_string();

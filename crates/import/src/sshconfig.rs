@@ -64,7 +64,10 @@ pub fn parse(text: &str) -> ParsedConfig {
             }
             "include" => skipped.push(line.to_owned()),
             _ => {
-                let block = blocks.last_mut().expect("there is always a block");
+                // There is always a block (the one before the first Host line).
+                let Some(block) = blocks.last_mut() else {
+                    continue;
+                };
                 if !block.skip {
                     block.entries.push((keyword, unquote(value)));
                 }

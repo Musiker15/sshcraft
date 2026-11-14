@@ -2,6 +2,8 @@
 //! answers, verify the server's host key through the caller, run an interactive shell and stream
 //! its raw output bytes.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -481,7 +483,11 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
         auth::authenticate(&mut handle, &hop.username, &hop.host_name, credentials, prompter.as_ref()).await.map_err(wrap)?;
         connected.push(handle);
     }
-    let handle = connected.pop().expect("at least one hop");
+    // The route always ends at the target, so there is a last hop; an empty route is an error,
+    // not a crash.
+    let Some(handle) = connected.pop() else {
+        return Err(SshError::Connect("no host to connect to".into()));
+    };
     Ok(Session {
         handle: Arc::new(handle),
         env: Arc::new(params.options.env),

@@ -198,6 +198,8 @@ pub async fn join_account(store: &Mutex<Store>, vault: &Vault, input: JoinAccoun
     let device_id = Uuid::new_v4();
     let cert = DeviceCertificate::issue(&account, device_id, keys.public(), input.device_name.trim(), &input.platform, now);
     log.append_add(&account, cert.clone(), now);
+    // Cannot fail: append_add has just added an entry.
+    #[allow(clippy::expect_used)]
     let entry = log.entries.last().cloned().expect("just appended");
     recovery_client.append_log(&account.public(), &[entry], false).await?;
 

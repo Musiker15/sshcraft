@@ -3,6 +3,8 @@
 //! Pure library: no I/O, no clock, no database. The client and the server share these types;
 //! the server only ever sees headers (ids, versions, public keys) and ciphertext.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 pub mod area;
 pub mod devicelog;
 pub mod encoding;

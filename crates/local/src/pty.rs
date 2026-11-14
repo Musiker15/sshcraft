@@ -2,7 +2,7 @@
 //! or a shell of the user's choosing; elsewhere the login shell.
 
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
@@ -114,7 +114,7 @@ struct Pty {
 impl Drop for Pty {
     fn drop(&mut self) {
         // The tab is gone: the shell goes with it.
-        let _ = self.killer.lock().expect("killer lock").kill();
+        let _ = self.killer.lock().unwrap_or_else(PoisonError::into_inner).kill();
     }
 }
 
@@ -126,7 +126,7 @@ pub struct LocalWriter {
 
 impl LocalWriter {
     pub fn write(&self, data: &[u8]) -> Result<(), LocalError> {
-        let mut slot = self.pty.writer.lock().expect("writer lock");
+        let mut slot = self.pty.writer.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(writer) = slot.as_mut() else {
             return Err(LocalError::Io("the shell has ended".into()));
         };
@@ -140,11 +140,11 @@ impl LocalWriter {
 
     /// Ends the shell now, even while other clones (a write under way) still live.
     pub fn close(&self) {
-        let _ = self.pty.killer.lock().expect("killer lock").kill();
+        let _ = self.pty.killer.lock().unwrap_or_else(PoisonError::into_inner).kill();
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), LocalError> {
-        match &*self.pty.master.lock().expect("master lock") {
+        match &*self.pty.master.lock().unwrap_or_else(PoisonError::into_inner) {
             Some(master) => master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| LocalError::Io(e.to_string())),
             None => Ok(()),
         }
@@ -209,13 +209,13 @@ pub fn spawn(
         let exit = exit.clone();
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|status| status.exit_code());
-            *exit.lock().expect("exit lock") = Some(code);
+            *exit.lock().unwrap_or_else(PoisonError::into_inner) = Some(code);
             ended.store(true, std::sync::atomic::Ordering::SeqCst);
             // A write under way holds the writer; it drops it itself when done.
             if let Ok(mut slot) = writer.try_lock() {
                 slot.take();
             }
-            master.lock().expect("master lock").take();
+            master.lock().unwrap_or_else(PoisonError::into_inner).take();
         });
     }
     std::thread::spawn(move || {
@@ -233,7 +233,7 @@ pub fn spawn(
         // The reader can end a moment before the waiter has the code.
         let mut code = None;
         for _ in 0..200 {
-            if let Some(c) = *exit.lock().expect("exit lock") {
+            if let Some(c) = *exit.lock().unwrap_or_else(PoisonError::into_inner) {
                 code = Some(c);
                 break;
             }
@@ -252,6 +252,45 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stands in for the shell's killer: there is no shell in these tests.
+    #[derive(Debug)]
+    struct NoShell;
+
+    impl ChildKiller for NoShell {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(NoShell)
+        }
+    }
+
+    fn poison<T>(lock: &Mutex<T>) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = lock.lock();
+            panic!("a thread dies while it holds the lock");
+        }));
+        assert!(lock.is_poisoned());
+    }
+
+    /// A thread that panicked while holding the writer, the terminal or the killer must not
+    /// take the next write, resize, close or the closing tab down.
+    #[test]
+    fn poisoned_writer_lock_does_not_panic() {
+        let writer: Shared<Box<dyn Write + Send>> = Arc::new(Mutex::new(Some(Box::new(Vec::<u8>::new()))));
+        let master: Shared<Box<dyn MasterPty + Send>> = Arc::new(Mutex::new(None));
+        let local = LocalWriter {
+            pty: Arc::new(Pty { writer: writer.clone(), ended: Arc::default(), master: master.clone(), killer: Mutex::new(Box::new(NoShell)) }),
+        };
+        poison(&writer);
+        poison(&master);
+        poison(&local.pty.killer);
+        assert!(local.write(b"ls\r").is_ok());
+        assert!(local.resize(80, 24).is_ok());
+        local.close();
+        drop(local);
+    }
 
     #[test]
     fn only_local_absolute_directories_are_used() {

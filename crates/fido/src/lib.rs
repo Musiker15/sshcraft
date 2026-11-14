@@ -5,6 +5,8 @@
 //! and, if the key wants it, the user (PIN, fingerprint, face). [`Authenticator`] is that
 //! authenticator: WebAuthn on Windows (`webauthn`), a software one in tests (`soft`).
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 use std::sync::Arc;
 
 use russh::keys::ssh_key::private::{self, KeypairData};
@@ -14,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use sshcraft_ssh::{KeySigner, SshError};
 
 pub mod cose;
+pub mod presence;
 pub mod signature;
 #[cfg(feature = "testing")]
 pub mod soft;

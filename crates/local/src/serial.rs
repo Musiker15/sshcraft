@@ -1,7 +1,7 @@
 //! A serial port as a terminal: baud rate, data bits, stop bits, parity and flow control.
 
-use std::io::Read;
-use std::sync::{Arc, Mutex};
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -173,12 +173,12 @@ pub(crate) fn pump<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<She
 /// and the reader notices the closed tab.
 #[derive(Clone)]
 pub struct SerialWriter {
-    port: Arc<Mutex<serial2::SerialPort>>,
+    port: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
 impl SerialWriter {
     pub fn write(&self, data: &[u8]) -> Result<(), SerialError> {
-        let port = self.port.lock().expect("port lock");
+        let mut port = self.port.lock().unwrap_or_else(PoisonError::into_inner);
         port.write_all(data).and_then(|()| port.flush()).map_err(|e| SerialError::Open(e.to_string()))
     }
 }
@@ -200,7 +200,7 @@ pub fn open(settings: &SerialSettings) -> Result<(SerialWriter, mpsc::Receiver<S
     let reader = port.try_clone().map_err(|e| SerialError::Open(e.to_string()))?;
     let (tx, rx) = mpsc::channel(EVENT_BUFFER);
     std::thread::spawn(move || pump(reader, tx));
-    Ok((SerialWriter { port: Arc::new(Mutex::new(port)) }, rx))
+    Ok((SerialWriter { port: Arc::new(Mutex::new(Box::new(port) as Box<dyn Write + Send>)) }, rx))
 }
 
 #[cfg(test)]
@@ -334,6 +334,18 @@ mod tests {
             let settings = port(SerialSettings { stop_bits: stop, ..SerialSettings::default() });
             assert_eq!(to_serial2(&settings), Err(SerialError::Invalid("stop_bits")), "{stop}");
         }
+    }
+
+    /// A writer thread that panicked while holding the port must not take the next write down.
+    #[test]
+    fn poisoned_port_lock_does_not_panic() {
+        let writer = SerialWriter { port: Arc::new(Mutex::new(Box::new(Vec::<u8>::new()) as Box<dyn Write + Send>)) };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = writer.port.lock();
+            panic!("a writer dies while it holds the port");
+        }));
+        assert!(writer.port.is_poisoned());
+        assert!(writer.write(b"AT\r").is_ok());
     }
 
     #[test]

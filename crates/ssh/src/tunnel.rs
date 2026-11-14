@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use russh::client;
@@ -77,7 +77,7 @@ impl Drop for Tunnel {
             accept.abort();
         }
         if let Some(remote) = self.remote.take() {
-            remote.remotes.lock().expect("remotes lock").remove(&remote.key);
+            remote.remotes.lock().unwrap_or_else(PoisonError::into_inner).remove(&remote.key);
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
                 runtime.spawn(async move {
                     let (address, port) = remote.key;
@@ -232,11 +232,11 @@ pub(crate) async fn remote(
     let entry = RemoteTarget { host: target_host.to_owned(), port: target_port, count: count.clone(), stop };
     let mut key = (bind_address.to_owned(), u32::from(bind_port));
     // Registered first: the server may send a connection right after it agreed.
-    remotes.lock().expect("remotes lock").insert(key.clone(), entry.clone());
+    remotes.lock().unwrap_or_else(PoisonError::into_inner).insert(key.clone(), entry.clone());
     let port = match handle.tcpip_forward(bind_address, u32::from(bind_port)).await {
         Ok(port) => port,
         Err(e) => {
-            remotes.lock().expect("remotes lock").remove(&key);
+            remotes.lock().unwrap_or_else(PoisonError::into_inner).remove(&key);
             return Err(match e {
                 russh::Error::RequestDenied => SshError::ForwardRefused,
                 other => protocol(other),
@@ -244,7 +244,7 @@ pub(crate) async fn remote(
         }
     };
     if port != 0 && port != key.1 {
-        let mut map = remotes.lock().expect("remotes lock");
+        let mut map = remotes.lock().unwrap_or_else(PoisonError::into_inner);
         map.remove(&key);
         key.1 = port;
         map.insert(key.clone(), entry);
@@ -267,7 +267,7 @@ pub(crate) async fn remote(
 /// A `forwarded-tcpip` channel from the server: the target registered for its address and port
 /// (or, when the server names the address differently, the only one on that port).
 pub(crate) fn remote_target(remotes: &Remotes, address: &str, port: u32) -> Option<RemoteTarget> {
-    let map = remotes.lock().expect("remotes lock");
+    let map = remotes.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(target) = map.get(&(address.to_owned(), port)) {
         return Some(target.clone());
     }
@@ -305,7 +305,22 @@ impl RemoteTarget {
 
 #[cfg(test)]
 mod tests {
-    use super::unbracket;
+    use super::{Remotes, remote_target, unbracket};
+
+    /// A task that panicked while holding the table of remote forwardings must not take the
+    /// next lookup down: the lookup goes on with the table as it is.
+    #[test]
+    fn poisoned_remotes_lock_does_not_panic() {
+        let remotes: Remotes = Remotes::default();
+        let held = remotes.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock();
+            panic!("a task dies while it holds the remotes");
+        })
+        .join();
+        assert!(remotes.is_poisoned());
+        assert!(remote_target(&remotes, "127.0.0.1", 2222).is_none());
+    }
 
     #[test]
     fn brackets_come_off() {

@@ -1,6 +1,10 @@
 //! A software authenticator for tests: real P-256 and Ed25519 keys, signed the way a token
 //! signs (`authenticator data || SHA-256(client data)`).
 
+// Test helpers, built only with the `testing` feature: a failing setup ends the test that uses
+// it, which is how a test reports.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 

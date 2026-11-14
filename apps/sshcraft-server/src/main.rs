@@ -1,5 +1,7 @@
 //! `sshcraft-server`: the sync server and its operator commands.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 use clap::{Parser, Subcommand};
 use sshcraft_server_lib::admin;
 use sshcraft_server_lib::config::ServeConfig;
@@ -96,40 +98,51 @@ async fn main() -> ExitCode {
     }
 }
 
+/// The operator commands, which work on the database directly.
+enum Admin {
+    Users(Users),
+    Devices(Devices),
+    ApiKey(ApiKey),
+}
+
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    if let Command::Serve { listen, public_origin } = cli.command {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
-            .init();
-        let config = ServeConfig { listen, database_url: cli.database_url, public_origin, ..ServeConfig::default() };
-        sshcraft_server_lib::serve(config, shutdown_signal()).await?;
-        return Ok(());
-    }
-    if let Command::Health { mut listen } = cli.command {
-        // A server listening on all interfaces is reached through the loopback address.
-        if listen.ip().is_unspecified() {
-            listen.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+    let action = match cli.command {
+        Command::Serve { listen, public_origin } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
+                .init();
+            let config = ServeConfig { listen, database_url: cli.database_url, public_origin, ..ServeConfig::default() };
+            sshcraft_server_lib::serve(config, shutdown_signal()).await?;
+            return Ok(());
         }
-        sshcraft_server_lib::health(listen).await?;
-        return Ok(());
-    }
+        Command::Health { mut listen } => {
+            // A server listening on all interfaces is reached through the loopback address.
+            if listen.ip().is_unspecified() {
+                listen.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+            }
+            sshcraft_server_lib::health(listen).await?;
+            return Ok(());
+        }
+        Command::Users { action } => Admin::Users(action),
+        Command::Devices { action } => Admin::Devices(action),
+        Command::ApiKey { action } => Admin::ApiKey(action),
+    };
     let store = sshcraft_server_lib::store::open(&cli.database_url).await?;
     let store = store.as_ref();
     let out = &mut std::io::stdout().lock();
-    match cli.command {
-        Command::Users { action } => match action {
+    match action {
+        Admin::Users(action) => match action {
             Users::List => admin::users_list(store, out).await?,
             Users::Lock { email } => admin::users_lock(store, &email, true, out).await?,
             Users::Unlock { email } => admin::users_lock(store, &email, false, out).await?,
             Users::Delete { email, yes } => admin::users_delete(store, &email, yes, out).await?,
         },
-        Command::Devices { action } => match action {
+        Admin::Devices(action) => match action {
             Devices::List { email } => admin::devices_list(store, &email, out).await?,
             Devices::Block { email, device_id } => admin::devices_block(store, &email, device_id, true, out).await?,
             Devices::Unblock { email, device_id } => admin::devices_block(store, &email, device_id, false, out).await?,
         },
-        Command::Serve { .. } | Command::Health { .. } => unreachable!("handled above"),
-        Command::ApiKey { action } => match action {
+        Admin::ApiKey(action) => match action {
             ApiKey::Show => admin::api_key_show(store, out).await?,
             ApiKey::Rotate => admin::api_key_rotate(store, out).await?,
         },

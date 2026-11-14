@@ -3,6 +3,8 @@
 //! Everything that leaves the device is sealed with `sshcraft-proto`; everything that comes back
 //! is verified before it touches the local store.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 pub mod account;
 pub mod areas;
 pub mod client;

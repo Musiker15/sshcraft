@@ -4,6 +4,10 @@
 //! The shell echoes every input chunk, except two commands sent as their own chunk:
 //! `exit\n` ends the shell with exit status 0, `flood\n` sends [`flood_pattern`].
 
+// Test helpers, built only with the `testing` feature: a failing setup ends the test that uses
+// it, which is how a test reports.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 

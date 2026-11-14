@@ -63,6 +63,9 @@ impl SealedRecord {
         signing_bytes(DOMAIN_RECORD, &[&header.aad(), nonce, ciphertext])
     }
 
+    // Cannot fail: XChaCha20-Poly1305 refuses only plaintexts beyond about 256 GiB, which no
+    // record in memory reaches.
+    #[allow(clippy::expect_used)]
     pub fn seal(header: RecordHeader, body: &[u8], key: &AreaKey, keys: &DeviceKeys) -> Self {
         let mut nonce = [0u8; 24];
         rand::rng().fill(&mut nonce[..]);
