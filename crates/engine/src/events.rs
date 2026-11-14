@@ -26,6 +26,8 @@ pub enum EngineEvent {
     HostKeyPrompt(crate::prompts::HostKeyPrompt),
     /// A sign-in question (password, code, passphrase); answer with `prompt.auth`.
     AuthPrompt(crate::prompts::AuthPrompt),
+    /// Whether an agent's action may run; answer with `prompt.agent`.
+    AgentPrompt(crate::gate::confirm::AgentPrompt),
     /// A prompt was answered elsewhere, timed out or its session went away.
     PromptWithdrawn {
         prompt_id: u64,

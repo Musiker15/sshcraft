@@ -56,6 +56,7 @@ pub fn needs_vault(session: &Session) -> Result<(), String> {
     session.vault_state().map_err(|code| format!("the vault is not available ({})", <&'static str>::from(code)))
 }
 
+pub mod agent;
 pub mod group;
 pub mod host;
 pub mod identity;
@@ -122,8 +123,12 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(session::specs());
         specs.extend(prompt::specs());
         specs.extend(local::specs());
+        specs.extend(agent::specs());
         #[cfg(test)]
         specs.extend(test_commands());
+        for spec in &mut specs {
+            spec.agent = crate::gate::access::access_for(spec.id);
+        }
         specs
     })
 }

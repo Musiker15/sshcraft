@@ -18,7 +18,24 @@ pub fn specs() -> Vec<CommandSpec> {
             ..command("prompt.auth", "Answer a sign-in question", "{ prompt_id, answers: list of text, or null to cancel }", run_auth)
         },
         query("prompt.list", "Open questions", "none", run_list),
+        command("prompt.agent", "Answer a question about an agent's action", "{ prompt_id, allow }", run_agent),
     ]
+}
+
+#[derive(Deserialize)]
+struct AgentParams {
+    prompt_id: u64,
+    allow: bool,
+}
+
+fn run_agent(ctx: Ctx, params: Value) -> Out {
+    sync_run(move || {
+        let AgentParams { prompt_id, allow } = parse("prompt.agent", params)?;
+        if !ctx.session.prompts().answer_agent(prompt_id, allow) {
+            return Err(CommandError::NotFound(format!("agent question {prompt_id}")));
+        }
+        Ok(Value::Null)
+    })
 }
 
 #[derive(Deserialize)]

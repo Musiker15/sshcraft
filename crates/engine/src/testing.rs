@@ -102,6 +102,7 @@ impl SessionConfig {
             settings: craft_settings::Location::Memory,
             pass_cli: Arc::new(|| None),
             agent: Arc::new(TestAgents { keys: Vec::new(), reachable: false }),
+            confirmer: None,
         }
     }
 }

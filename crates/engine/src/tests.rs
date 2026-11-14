@@ -81,12 +81,12 @@ async fn deep_params_are_refused() {
 }
 
 #[tokio::test]
-async fn agents_are_refused_until_the_gate() {
+async fn a_caller_without_an_open_connection_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let session = open(dir.path());
     for caller in [agent(), Caller::Control { conn: ConnId(2) }] {
-        let err = session.execute(caller, "test.echo", json!({})).await.unwrap_err();
-        assert!(matches!(err, EngineError::Denied(_)), "{err:?}");
+        let err = session.execute(caller, "host.list", json!({})).await.unwrap_err();
+        assert_eq!(err, EngineError::Denied("unknown connection".into()));
     }
 }
 
@@ -131,8 +131,9 @@ fn adversarial() -> Vec<Value> {
 async fn every_command_survives_empty_params() {
     let dir = tempfile::tempdir().unwrap();
     let session = open(dir.path());
+    let conn = session.agent_connection("claude-code", Via::Mcp).unwrap();
     for spec in command_specs().iter().filter(|s| s.id != "test.panic") {
-        for caller in [Caller::User, agent()] {
+        for caller in [Caller::User, conn.caller()] {
             let result = session.execute(caller, spec.id, json!({})).await;
             assert!(!matches!(result, Err(EngineError::Internal { .. })), "{} panicked", spec.id);
         }
@@ -143,9 +144,10 @@ async fn every_command_survives_empty_params() {
 async fn every_command_survives_adversarial_params() {
     let dir = tempfile::tempdir().unwrap();
     let session = open(dir.path());
+    let conn = session.agent_connection("claude-code", Via::Mcp).unwrap();
     for spec in command_specs().iter().filter(|s| s.id != "test.panic") {
         for params in adversarial() {
-            for caller in [Caller::User, agent()] {
+            for caller in [Caller::User, conn.caller()] {
                 let result = session.execute(caller, spec.id, params.clone()).await;
                 assert!(!matches!(result, Err(EngineError::Internal { .. })), "{} panicked", spec.id);
             }

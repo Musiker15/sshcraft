@@ -1,9 +1,19 @@
-//! A snapshot of what the gate decides on: the agent policy and the hosts, groups and keys.
+//! A snapshot of what the gate decides on: the agent policy and the hosts, groups and keys. Hidden
+//! hosts and groups (also behind a jump host) are unknown to agents.
 
-use sshcraft_model::model::{Group, Host};
+use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, KeyRef, group_chain};
 use sshcraft_store::agent::AgentPolicy;
+use sshcraft_store::store::Store;
+use uuid::Uuid;
 
-use super::wire::KeyView;
+use super::access::{Refusal, invalid, not_found};
+use super::wire::{GroupView, HostView, KeyView, is_bidi_control};
+use crate::error::{EngineError, ErrorCode};
+
+/// Jump hosts followed when checking a route.
+pub const MAX_HOPS: usize = 16;
+/// Longest host, group or key name an agent may give.
+pub const MAX_NAME: usize = 100;
 
 #[derive(Debug, Clone, Default)]
 pub struct GateView {
@@ -11,4 +21,140 @@ pub struct GateView {
     pub hosts: Vec<Host>,
     pub groups: Vec<Group>,
     pub keys: Vec<KeyView>,
+}
+
+impl GateView {
+    /// Reads the policy, hosts, groups and keys. Without a readable policy nothing runs: hidden
+    /// hosts must not show because the list broke.
+    pub fn load(store: &Store) -> Result<Self, EngineError> {
+        let policy =
+            AgentPolicy::load_checked(store).map_err(|e| EngineError::failed(ErrorCode::Store, format!("the agent settings cannot be read: {e}")))?;
+        let keys = sshcraft_store::vault::list_keys(store)?
+            .into_iter()
+            .map(|info| KeyView { id: info.id.0, name: info.name, kind: info.algorithm, fingerprint: info.fingerprint })
+            .collect();
+        Ok(Self { policy, hosts: store.list_hosts()?, groups: store.list_groups()?, keys })
+    }
+
+    fn group_chain(&self, group: Option<GroupId>) -> Vec<Group> {
+        group.map(|g| group_chain(&self.groups, g)).unwrap_or_default()
+    }
+
+    /// The jump hosts a host uses: its own list, else the nearest group's.
+    fn jumps(&self, host: &Host) -> Vec<HostId> {
+        host.settings
+            .jump_hosts
+            .clone()
+            .or_else(|| self.group_chain(host.group_id).iter().find_map(|g| g.defaults.jump_hosts.clone()))
+            .unwrap_or_default()
+    }
+
+    /// Hidden itself, through a group, or through a hidden host on its route.
+    pub fn host_hidden(&self, host: &Host) -> bool {
+        let mut seen = vec![host.id];
+        let mut next = vec![host.clone()];
+        while let Some(h) = next.pop() {
+            if self.policy.host_hidden(&self.groups, &h) {
+                return true;
+            }
+            for jump in self.jumps(&h) {
+                if seen.contains(&jump) || seen.len() > MAX_HOPS {
+                    continue;
+                }
+                seen.push(jump);
+                if let Some(j) = self.hosts.iter().find(|x| x.id == jump) {
+                    next.push(j.clone());
+                }
+            }
+        }
+        false
+    }
+
+    pub fn group_hidden(&self, group: GroupId) -> bool {
+        self.policy.group_hidden(&self.groups, group)
+    }
+
+    /// Whether anything below `group` (groups at any depth, their hosts) is hidden.
+    pub fn subtree_hidden(&self, group: GroupId) -> bool {
+        let below: Vec<GroupId> =
+            self.groups.iter().filter(|g| group_chain(&self.groups, g.id).iter().any(|c| c.id == group)).map(|g| g.id).collect();
+        below.iter().any(|g| self.policy.hidden.contains(&g.0))
+            || self.hosts.iter().any(|h| h.group_id.is_some_and(|hg| below.contains(&hg)) && self.host_hidden(h))
+    }
+
+    /// A visible host by id or by a name only one visible host has.
+    pub fn host(&self, reference: &str) -> Result<Host, Refusal> {
+        let matches: Vec<&Host> = self.hosts.iter().filter(|h| h.id.0.to_string() == reference || h.name == reference).collect();
+        let visible: Vec<&Host> = matches.iter().copied().filter(|h| !self.host_hidden(h)).collect();
+        match visible.as_slice() {
+            [one] => Ok((*one).clone()),
+            [] => Err(not_found("host", !matches.is_empty())),
+            _ => Err(invalid("more than one host has this name, use its id")),
+        }
+    }
+
+    /// A visible group by id or by a name only one visible group has.
+    pub fn group(&self, reference: &str) -> Result<Group, Refusal> {
+        let matches: Vec<&Group> = self.groups.iter().filter(|g| g.id.0.to_string() == reference || g.name == reference).collect();
+        let visible: Vec<&Group> = matches.iter().copied().filter(|g| !self.group_hidden(g.id)).collect();
+        match visible.as_slice() {
+            [one] => Ok((*one).clone()),
+            [] => Err(not_found("group", !matches.is_empty())),
+            _ => Err(invalid("more than one group has this name, use its id")),
+        }
+    }
+
+    pub fn visible_group_id(&self, id: Option<Uuid>) -> Result<Option<GroupId>, Refusal> {
+        match id {
+            None => Ok(None),
+            Some(id) => self.group(&id.to_string()).map(|g| Some(g.id)),
+        }
+    }
+
+    /// Whether a host here, with its groups, signs in with something stored.
+    pub fn carries_sign_in(&self, host: &Host) -> bool {
+        signs_in_with_stored(&host.settings) || self.group_chain(host.group_id).iter().any(|g| signs_in_with_stored(&g.defaults))
+    }
+
+    /// The hosts agents may see.
+    pub fn visible_hosts(&self) -> Vec<HostView> {
+        self.hosts.iter().filter(|h| !self.host_hidden(h)).map(host_view).collect()
+    }
+
+    /// The groups agents may see.
+    pub fn visible_groups(&self) -> Vec<GroupView> {
+        self.groups.iter().filter(|g| !self.group_hidden(g.id)).map(group_view).collect()
+    }
+}
+
+/// Whether these settings sign in with something stored: a password (also a proxy's), an
+/// identity, or agent forwarding.
+pub fn signs_in_with_stored(settings: &ConnectionSettings) -> bool {
+    !settings.password_ids().is_empty() || settings.identity.is_some() || settings.agent_forwarding == Some(true)
+}
+
+/// A name an agent may give: not blank, at most [`MAX_NAME`] characters, no control or bidi
+/// characters.
+pub fn name_ok(name: &str) -> bool {
+    !name.trim().is_empty() && name.chars().count() <= MAX_NAME && !name.chars().any(|c| c.is_control() || is_bidi_control(c))
+}
+
+pub fn host_view(host: &Host) -> HostView {
+    HostView {
+        id: host.id.0,
+        name: host.name.clone(),
+        group: host.group_id.map(|g| g.0),
+        address: host.settings.address.clone(),
+        port: host.settings.port,
+        username: host.settings.username.clone(),
+        key: match &host.settings.key {
+            Some(KeyRef::Stored { id }) => Some(id.0),
+            _ => None,
+        },
+        tags: host.tags.clone(),
+    }
+}
+
+pub fn group_view(group: &Group) -> GroupView {
+    GroupView { id: group.id.0, name: group.name.clone(), parent: group.parent_id.map(|g| g.0) }
 }

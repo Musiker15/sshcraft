@@ -52,7 +52,10 @@ where
 
 /// A host to create (no `id`) or change. On a change only the fields that are there change: a
 /// missing field keeps its value, `null` clears it.
+/// Any other field (jump hosts, identity, password, proxy, agent forwarding) is refused: an
+/// agent changes only what is listed here.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HostInput {
     #[serde(default)]
     pub id: Option<Uuid>,
@@ -81,6 +84,7 @@ pub struct GroupView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GroupInput {
     #[serde(default)]
     pub id: Option<Uuid>,

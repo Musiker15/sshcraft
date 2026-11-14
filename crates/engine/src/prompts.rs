@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 use zeroize::Zeroizing;
 
 use crate::events::{EngineEvent, EventBus};
+pub use crate::gate::confirm::AgentPrompt;
 use crate::sessions::HostKeyPrompter;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -41,6 +42,7 @@ pub struct AuthPrompt {
 pub enum OpenPrompt {
     HostKey(HostKeyPrompt),
     Auth(AuthPrompt),
+    Agent(AgentPrompt),
 }
 
 impl OpenPrompt {
@@ -48,6 +50,7 @@ impl OpenPrompt {
         match self {
             Self::HostKey(p) => p.prompt_id,
             Self::Auth(p) => p.prompt_id,
+            Self::Agent(p) => p.prompt_id,
         }
     }
 }
@@ -58,6 +61,8 @@ pub trait PromptEmitter: Send + Sync + 'static {
     fn asked(&self, prompt: &HostKeyPrompt) -> bool;
     /// Shows a sign-in question; `false` if it could not be delivered.
     fn asked_auth(&self, prompt: &AuthPrompt) -> bool;
+    /// Shows a question about an agent's action; `false` if it could not be delivered.
+    fn asked_agent(&self, prompt: &AgentPrompt) -> bool;
     /// Takes back a question nobody waits for anymore (ids are unique across both kinds).
     fn withdrawn(&self, prompt_id: u64);
 }
@@ -83,6 +88,14 @@ impl PromptEmitter for BusEmitter {
         true
     }
 
+    fn asked_agent(&self, prompt: &AgentPrompt) -> bool {
+        if !self.0.has_subscribers() {
+            return false;
+        }
+        self.0.send(EngineEvent::AgentPrompt(prompt.clone()));
+        true
+    }
+
     fn withdrawn(&self, prompt_id: u64) {
         self.0.send(EngineEvent::PromptWithdrawn { prompt_id });
     }
@@ -93,6 +106,7 @@ type Answers = Option<Vec<Zeroizing<String>>>;
 enum Answer {
     HostKey(oneshot::Sender<bool>),
     Auth(oneshot::Sender<Answers>),
+    Agent(oneshot::Sender<bool>),
 }
 
 struct Pending {
@@ -190,6 +204,36 @@ impl<E: PromptEmitter> PromptRegistry<E> {
         }
     }
 
+    /// Answers a question about an agent's action; returns whether one with this id was open.
+    pub fn answer_agent(&self, prompt_id: u64, allow: bool) -> bool {
+        match self.take(prompt_id) {
+            Some(Pending { answer: Answer::Agent(tx), .. }) => {
+                let _ = tx.send(allow);
+                true
+            }
+            Some(other) => {
+                self.put_back(prompt_id, other);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Asks whether an agent's action may run. `prompt.prompt_id` is replaced with a new id.
+    /// Not delivered (no window) or dropped unanswered counts as no.
+    pub async fn ask_agent(&self, mut prompt: AgentPrompt) -> bool {
+        let prompt_id = self.next_id();
+        prompt.prompt_id = prompt_id;
+        let (tx, rx) = oneshot::channel();
+        self.put_back(prompt_id, Pending { prompt: OpenPrompt::Agent(prompt.clone()), answer: Answer::Agent(tx) });
+        if !self.emitter.asked_agent(&prompt) {
+            self.take(prompt_id);
+            return false;
+        }
+        let _withdraw = Withdraw { registry: self, prompt_id };
+        rx.await.unwrap_or(false)
+    }
+
     pub async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
         let prompt_id = self.next_id();
         let (tx, rx) = oneshot::channel();
@@ -259,6 +303,10 @@ pub(crate) mod tests {
         }
         fn asked_auth(&self, prompt: &AuthPrompt) -> bool {
             self.auth.lock().unwrap().push(prompt.clone());
+            true
+        }
+        fn asked_agent(&self, prompt: &AgentPrompt) -> bool {
+            self.asked.lock().unwrap().push(prompt.prompt_id);
             true
         }
         fn withdrawn(&self, prompt_id: u64) {

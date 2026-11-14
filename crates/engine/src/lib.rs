@@ -39,6 +39,7 @@ pub use caller::{AgentName, Caller, ConnId, Via};
 pub use cmd::{CommandInfo, CommandSpec};
 pub use error::{EngineError, ErrorCode, ErrorKind};
 pub use events::{EngineEvent, EventBus, UiRequest};
+pub use gate::{AgentConnection, AgentPrompt, Confirmer};
 pub use journal::JournalEntry;
 pub use sessions::{AgentConnector, EndReason, SessionId, SessionStatus, SessionTarget, WindowsAgent};
 pub use terminal::{TermEvent, TerminalStream};
@@ -67,6 +68,9 @@ pub struct SessionConfig {
     pub pass_cli: passcli::LocatePassCli,
     /// The SSH agent: the Proton Pass pipe ([`WindowsAgent`]) in the app.
     pub agent: Arc<dyn AgentConnector>,
+    /// Answers questions about agents' actions in tests. `None` (the app): the question goes to
+    /// the window through the event bus, and without a window the answer is no.
+    pub confirmer: Option<Arc<dyn gate::Confirmer>>,
 }
 
 /// What happened while opening.
@@ -106,7 +110,10 @@ struct Inner {
     terminals: Mutex<HashMap<SessionId, TerminalStream>>,
     /// Work started by [`Session::start`]; stopped with the engine.
     background: Mutex<Vec<tokio::task::JoinHandle<()>>>,
-    #[allow(dead_code)]
+    /// Open connections of agents and the control channel, with the sessions each opened.
+    connections: Mutex<HashMap<ConnId, gate::Connection>>,
+    next_conn: std::sync::atomic::AtomicU64,
+    confirmer: Option<Arc<dyn gate::Confirmer>>,
     confirm_timeout: Duration,
     /// Held for the life of the engine: no other process opens the same data.
     _lock: sshcraft_platform::DataLock,
@@ -140,6 +147,7 @@ impl Session {
             other => EngineError::failed(ErrorCode::Io, other),
         })?;
         let store = Store::open(&config.data_dir.join("sshcraft.db"))?;
+        gate::reset_categories_once(&store)?;
         let vault = Vault::unlock(&store, config.master_key).map(Arc::new).map_err(|e| error::vault_code(&e));
         let (mut prefs, load) = craft_settings::SettingsStore::<settings::EngineSettings>::open(config.settings);
         let takeover = settings::take_over(&store, &mut prefs, &load, now_ms());
@@ -181,6 +189,9 @@ impl Session {
             agent_sessions: agent_sessions::AgentSessions::default(),
             terminals: Mutex::new(HashMap::new()),
             background: Mutex::new(Vec::new()),
+            connections: Mutex::new(HashMap::new()),
+            next_conn: std::sync::atomic::AtomicU64::new(1),
+            confirmer: config.confirmer,
             confirm_timeout: config.confirm_timeout,
             _lock: lock,
         };
@@ -276,23 +287,77 @@ impl Session {
         if journal::depth(&params, MAX_PARAM_DEPTH) > MAX_PARAM_DEPTH {
             return Err(EngineError::bad_params(id, format!("parameters nest deeper than {MAX_PARAM_DEPTH} levels")));
         }
-        if !caller.is_user() {
-            return Err(EngineError::Denied("agents are not served yet".to_string()));
-        }
-        (spec.enabled)(self).map_err(|reason| EngineError::Disabled { id: id.to_string(), reason })?;
         let journal_params = spec.journal.then(|| params.clone());
-        let ctx = Ctx { session: self.clone(), caller: caller.clone() };
-        let result = match AssertUnwindSafe((spec.run)(ctx, params)).catch_unwind().await {
-            Ok(result) => result,
-            Err(_) => {
-                tracing::error!(command = id, "command panicked; the engine goes on");
-                Err(EngineError::Internal { id: id.to_string() })
-            }
+        let result = if caller.is_user() {
+            (spec.enabled)(self).map_err(|reason| EngineError::Disabled { id: id.to_string(), reason })?;
+            let ctx = Ctx { session: self.clone(), caller: caller.clone() };
+            self.run_spec(spec, ctx, params).await
+        } else {
+            gate::run_for_agent(self, spec, caller.clone(), params).await
         };
         if let (Ok(_), Some(params)) = (&result, journal_params) {
             self.lock_journal().push(caller.label(), id, &params);
         }
         result
+    }
+
+    /// Runs a command body; a panic becomes [`EngineError::Internal`].
+    pub(crate) async fn run_spec(&self, spec: &'static CommandSpec, ctx: Ctx, params: Value) -> Result<Value, EngineError> {
+        match AssertUnwindSafe((spec.run)(ctx, params)).catch_unwind().await {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::error!(command = spec.id, "command panicked; the engine goes on");
+                Err(EngineError::Internal { id: spec.id.to_string() })
+            }
+        }
+    }
+
+    /// A new connection of the agent `name`, reached `via` MCP, the launcher or the CLI. Its calls
+    /// go through the agent gate; dropping it closes the sessions it opened.
+    pub fn agent_connection(&self, name: &str, via: Via) -> Result<gate::AgentConnection, EngineError> {
+        let name =
+            AgentName::new(name).ok_or_else(|| EngineError::bad_params("agent", "agent name: 1 to 64 characters, no control or bidi characters"))?;
+        Ok(self.new_connection(Some((name, via))))
+    }
+
+    /// A new connection of the control channel, checked like an agent named `control`.
+    pub fn control_connection(&self) -> gate::AgentConnection {
+        self.new_connection(None)
+    }
+
+    fn new_connection(&self, name: Option<(AgentName, Via)>) -> gate::AgentConnection {
+        let conn = ConnId(self.0.next_conn.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+        self.lock_connections().insert(conn, gate::Connection { conn: Some(conn), sessions: Default::default() });
+        gate::AgentConnection::new(conn, name, Arc::downgrade(&self.0))
+    }
+
+    fn lock_connections(&self) -> MutexGuard<'_, HashMap<ConnId, gate::Connection>> {
+        self.0.connections.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// What a connection holds right now; `None` for one that is not open.
+    pub(crate) fn connection(&self, conn: ConnId) -> Option<gate::Connection> {
+        self.lock_connections().get(&conn).cloned()
+    }
+
+    pub(crate) fn own_agent_session(&self, conn: ConnId, id: SessionId, host: sshcraft_model::model::HostId) {
+        if let Some(connection) = self.lock_connections().get_mut(&conn) {
+            connection.sessions.insert(id, host);
+        }
+    }
+
+    pub(crate) fn forget_agent_session(&self, conn: ConnId, id: SessionId) {
+        if let Some(connection) = self.lock_connections().get_mut(&conn) {
+            connection.sessions.remove(&id);
+        }
+    }
+
+    pub(crate) fn confirmer(&self) -> Option<Arc<dyn gate::Confirmer>> {
+        self.0.confirmer.clone()
+    }
+
+    pub(crate) fn confirm_timeout(&self) -> Duration {
+        self.0.confirm_timeout
     }
 
     /// Every command with its documentation.
