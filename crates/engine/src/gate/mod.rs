@@ -129,7 +129,14 @@ impl Drop for LogGuard {
 /// The view, with the sessions of the connection whose host went away or became hidden closed.
 fn load(session: &Session, conn: ConnId, category: AgentCategory) -> Result<(GateView, Connection), EngineError> {
     let vault = session.vault().ok();
-    let view = GateView::load_for(&session.store(), vault.as_deref(), category)?;
+    let mut view = GateView::load_for(&session.store(), vault.as_deref(), category)?;
+    if category == AgentCategory::Share {
+        // Listing shares takes the store's lock itself: done after the view released it.
+        let servers = session.store().servers()?;
+        for server in servers {
+            view.shares.extend(sshcraft_sync::shares::list(&session.shared_store(), server.id).map_err(crate::sync::sync_error)?);
+        }
+    }
     let mut connection = session.connection(conn).ok_or_else(|| EngineError::Denied("unknown connection".to_string()))?;
     let gone: Vec<SessionId> = connection
         .sessions

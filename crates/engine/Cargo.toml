@@ -17,6 +17,7 @@ sshcraft-store = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-fido = { workspace = true }
 sshcraft-ssh = { workspace = true }
+sshcraft-import = { workspace = true }
 sshcraft-local = { workspace = true }
 sshcraft-sync = { workspace = true }
 sshcraft-proto = { workspace = true }
@@ -36,9 +37,15 @@ wait-timeout = { workspace = true }
 sys-locale = { workspace = true }
 chrono = { workspace = true }
 url = { workspace = true }
+directories = { workspace = true }
 data-encoding = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+# PuTTY keeps its sessions in the registry.
+winreg = { workspace = true }
+
 [dev-dependencies]
+sshcraft-server-lib = { workspace = true }
 sshcraft-engine = { path = ".", features = ["testing"] }
 tempfile = { workspace = true }
 zeroize = { workspace = true }

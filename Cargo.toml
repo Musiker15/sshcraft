@@ -42,6 +42,7 @@ qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 wait-timeout = "0.2.1"
 sys-locale = "0.3.2"
 url = "2.5.8"
+winreg = "0.56.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 
 # ssh and storage

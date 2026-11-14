@@ -31,9 +31,26 @@ pub struct GateView {
     pub snippets: Vec<Snippet>,
     /// Each session log and the host it recorded, loaded for the `Logs` category.
     pub logs: Vec<(LogId, Option<HostId>)>,
+    /// The shares of every server, loaded for the `Share` category.
+    pub shares: Vec<sshcraft_sync::shares::ShareView>,
 }
 
 impl GateView {
+    /// Whether the group with this id (written as text) is hidden; an unknown one is not.
+    pub fn group_text_hidden(&self, id: &str) -> bool {
+        Uuid::parse_str(id).is_ok_and(|id| self.groups.iter().any(|g| g.id.0 == id) && self.group_hidden(GroupId(id)))
+    }
+
+    /// Whether the host with this id (written as text) is hidden; an unknown one is not.
+    pub fn host_text_hidden(&self, id: &str) -> bool {
+        Uuid::parse_str(id).is_ok_and(|id| self.host_id_hidden(HostId(id)))
+    }
+
+    /// A share of a hidden group or with a hidden host is hidden as a whole.
+    pub fn share_hidden(&self, group: Option<&str>, hosts: &[String]) -> bool {
+        group.is_some_and(|g| self.group_text_hidden(g)) || hosts.iter().any(|h| self.host_text_hidden(h))
+    }
+
     /// [`GateView::load`], plus what the category's rules look at.
     pub fn load_for(store: &Store, vault: Option<&Vault>, category: AgentCategory) -> Result<Self, EngineError> {
         let mut view = Self::load(store)?;

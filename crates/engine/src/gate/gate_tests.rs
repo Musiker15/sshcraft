@@ -315,6 +315,28 @@ async fn hidden_hosts_stay_out_of_forwards_logs_workspaces_and_snippets(w: &Worl
     let snippet = json!({ "id": Uuid::new_v4(), "name": "vacuum", "content": "vacuumdb", "default_targets": [db.id] });
     user("snippet.save", json!({ "snippet": snippet })).await.unwrap();
     assert_eq!(call(w, conn, "snippet.list", Value::Null).await.unwrap(), json!([]));
+    // Shares (R2.9): sharing `db` is refused before anything goes to a server, and a share that
+    // holds it is left out of what an agent lists.
+    w.set(AgentCategory::Share, AgentLevel::Allow);
+    let r = call(
+        w,
+        conn,
+        "share.items",
+        json!({ "server": Uuid::new_v4(), "what": { "kind": "host", "host": db.id }, "grants": [], "with_keys": false }),
+    )
+    .await;
+    assert!(is_not_found(&r), "{r:?}");
+    let view = super::GateView::load(&w.session.store()).unwrap();
+    let list = super::access::access_for("share.list").unwrap();
+    let resolved = super::Resolved { params: json!({}), target: String::new(), detail: String::new() };
+    let shares = json!([
+        { "area": Uuid::new_v4(), "group": null, "hosts": [db.id.0.to_string()] },
+        { "area": Uuid::new_v4(), "group": w.prod.id.0.to_string(), "hosts": [] },
+        { "area": Uuid::new_v4(), "group": null, "hosts": [w.web.id.0.to_string()] },
+    ]);
+    let shown = (list.present)(&view, &resolved, shares);
+    assert_eq!(shown.as_array().unwrap().len(), 1, "{shown}");
+    assert_eq!(shown[0]["hosts"][0], w.web.id.0.to_string());
 }
 
 #[tokio::test]
@@ -360,6 +382,23 @@ async fn log_export_without_path_asks_only_the_user() {
     // And the helper itself refuses every caller but the user.
     let ctx = crate::Ctx { session: w.session.clone(), caller: control.caller() };
     assert!(matches!(crate::cmd::dialog_or_error(&ctx, "saveLog", &params), Err(EngineError::BadParams { .. })));
+    // The same for the export and the imports that need a file (R2.9): the user is asked, no
+    // file is written or read.
+    let home_files = |dir: &std::path::Path| std::fs::read_dir(dir).map(|d| d.count()).unwrap_or(0);
+    let before = home_files(w._dir.path());
+    for (id, params, dialog) in [
+        ("host.export", json!({ "format": "csv", "filter": {} }), "exportHosts"),
+        ("import.known_hosts", json!({}), "importKnownHosts"),
+        ("import.scan_keys", json!({}), "scanKeys"),
+        ("import.key_file", json!({}), "importKeyFile"),
+    ] {
+        let r = w.session.execute(Caller::User, id, params.clone()).await;
+        assert_eq!(r, Ok(json!({ "dialog": dialog })), "{id}");
+        for conn in [&w.conn(), &control] {
+            assert!(is_denied(&call(&w, conn, id, params.clone()).await), "{id}");
+        }
+    }
+    assert_eq!(home_files(w._dir.path()), before);
 }
 
 #[tokio::test]

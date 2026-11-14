@@ -229,13 +229,16 @@ impl Session {
         }));
     }
 
-    /// Cleans up what a stopped SSHCraft left (unfinished session logs, logs past their
-    /// retention, here and at their sync server) and from then on deletes expired logs every
-    /// hour. Call once after [`Session::open`], inside the runtime or not.
+    /// Starts sync with every server that has it on, cleans up what a stopped SSHCraft left
+    /// (unfinished session logs, logs past their retention, here and at their sync server) and
+    /// from then on deletes expired logs every hour. Call once after [`Session::open`], inside
+    /// the runtime or not.
     pub fn start(&self) {
+        let _runtime = self.0.runtime.enter();
         let Ok(vault) = self.0.vault.clone() else {
             return;
         };
+        self.0.sync.start_all();
         let days = self.settings().get().logs.log_retention_days;
         if let Ok(servers) = recording::housekeeping(&self.0.store, &vault, days, now_ms(), true) {
             self.0.sync.nudge(&servers);

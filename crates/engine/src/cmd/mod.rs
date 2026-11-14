@@ -61,6 +61,7 @@ pub mod forward;
 pub mod group;
 pub mod host;
 pub mod identity;
+pub mod import;
 pub mod key;
 pub mod link;
 pub mod local;
@@ -69,7 +70,9 @@ pub mod password;
 pub mod prompt;
 pub mod session;
 pub mod settings;
+pub mod share;
 pub mod snippet;
+pub mod sync;
 pub mod vault;
 pub mod workspace;
 
@@ -145,6 +148,9 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(snippet::specs());
         specs.extend(log::specs());
         specs.extend(link::specs());
+        specs.extend(import::specs());
+        specs.extend(sync::specs());
+        specs.extend(share::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         for spec in &mut specs {

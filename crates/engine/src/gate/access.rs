@@ -591,9 +591,114 @@ pub fn access_for(id: &str) -> Option<&'static AgentAccess> {
         "log.mark_remove" => &LOG_MARK_REMOVE,
         "log.delete" => &LOG_DELETE,
         "log.search" => &LOG_SEARCH,
+        "sync.servers" => &SYNC_SERVERS,
+        "sync.set_server" => &SYNC_SET_SERVER,
+        "sync.server_logs" => &SYNC_SERVER_LOGS,
+        "device.list" => &DEVICE_LIST,
+        "share.find_recipient" => &SHARE_FIND_RECIPIENT,
+        "share.items" => &SHARE_ITEMS,
+        "share.list" => &SHARE_LIST,
+        "share.set_grants" => &SHARE_SET_GRANTS,
+        "share.end" => &SHARE_END,
+        "share.of_items" => &SHARE_OF_ITEMS,
         _ => return None,
     })
 }
+
+// ---- Sync and Share ----
+
+/// Parameters that name nothing an agent could not see: passed on as they are.
+fn resolve_pass(_: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let target = ["id", "server"].iter().find_map(|k| value.get(*k).and_then(Value::as_str)).unwrap_or_default().to_owned();
+    Ok(plain(value, target, String::new()))
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ShareWhatRef {
+    GroupAll { group: Uuid },
+    Selection { group: Uuid, hosts: Vec<Uuid> },
+    Host { host: Uuid },
+}
+
+#[derive(Deserialize)]
+struct ShareItemsInput {
+    what: ShareWhatRef,
+}
+
+/// What is shared must be something agents see.
+fn resolve_share_items(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let ShareItemsInput { what } = params(value.clone())?;
+    let target = match what {
+        ShareWhatRef::GroupAll { group } => view.group(&group.to_string())?.name,
+        ShareWhatRef::Selection { group, hosts } => {
+            for host in &hosts {
+                view.host(&host.to_string())?;
+            }
+            view.group(&group.to_string())?.name
+        }
+        ShareWhatRef::Host { host } => host_target(&view.host(&host.to_string())?),
+    };
+    Ok(plain(value, target, String::new()))
+}
+
+#[derive(Deserialize)]
+struct AreaInput {
+    area: Uuid,
+}
+
+/// A share with something hidden in it is unknown to agents.
+fn resolve_share_area(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let AreaInput { area } = params(value.clone())?;
+    if view.shares.iter().any(|s| s.area == area && view.share_hidden(s.group.as_deref(), &s.hosts)) {
+        return Err(not_found("share", true).on(&area.to_string()));
+    }
+    Ok(plain(value, area.to_string(), String::new()))
+}
+
+fn present_shares(view: &GateView, _: &Resolved, value: Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .filter(|s| {
+                    let group = s.get("group").and_then(Value::as_str);
+                    let hosts: Vec<String> = s
+                        .get("hosts")
+                        .and_then(Value::as_array)
+                        .map(|h| h.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+                        .unwrap_or_default();
+                    !view.share_hidden(group, &hosts)
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn present_item_shares(view: &GateView, _: &Resolved, value: Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .filter(|i| !i.get("id").and_then(Value::as_str).is_some_and(|id| view.host_text_hidden(id) || view.group_text_hidden(id)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+pub static SYNC_SERVERS: AgentAccess = read(AgentCategory::Sync, resolve_nothing, identity);
+pub static SYNC_SET_SERVER: AgentAccess = access(AgentCategory::Sync, resolve_pass, present_nothing);
+pub static SYNC_SERVER_LOGS: AgentAccess = access(AgentCategory::Sync, resolve_pass, present_nothing);
+pub static DEVICE_LIST: AgentAccess = read(AgentCategory::Sync, resolve_pass, identity);
+
+pub static SHARE_FIND_RECIPIENT: AgentAccess = access(AgentCategory::Share, resolve_pass, identity);
+pub static SHARE_ITEMS: AgentAccess = access(AgentCategory::Share, resolve_share_items, identity);
+pub static SHARE_LIST: AgentAccess = read(AgentCategory::Share, resolve_pass, present_shares);
+pub static SHARE_SET_GRANTS: AgentAccess = access(AgentCategory::Share, resolve_share_area, identity);
+pub static SHARE_END: AgentAccess = access(AgentCategory::Share, resolve_share_area, identity);
+pub static SHARE_OF_ITEMS: AgentAccess = read(AgentCategory::Share, resolve_nothing, present_item_shares);
 
 // ---- Forward ----
 

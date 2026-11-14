@@ -18,6 +18,72 @@ fn open(dir: &std::path::Path) -> Session {
     Session::open(SessionConfig::for_tests(dir)).unwrap().0
 }
 
+/// A sync server in this process on a free local port, with SQLite in `dir`; its origin and API
+/// key. It runs until the returned sender is dropped.
+async fn sync_server(dir: &std::path::Path) -> (String, String, tokio::sync::oneshot::Sender<()>) {
+    let database_url = format!("sqlite://{}", dir.join("server.db").display());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let origin = format!("http://127.0.0.1:{}", addr.port());
+    let config = sshcraft_server_lib::config::ServeConfig {
+        listen: addr,
+        database_url: database_url.clone(),
+        public_origin: origin.clone(),
+        ws_recheck: std::time::Duration::from_millis(200),
+    };
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = sshcraft_server_lib::serve_on(listener, config, async {
+            let _ = stopped.await;
+        })
+        .await;
+    });
+    for _ in 0..100 {
+        if sshcraft_server_lib::health(addr).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let api_key = sshcraft_server_lib::store::open(&database_url).await.unwrap().api_key().await.unwrap().0;
+    (origin, api_key, stop)
+}
+
+#[tokio::test]
+async fn starting_the_engine_reports_sync_status() {
+    let server_dir = tempfile::tempdir().unwrap();
+    let (origin, api_key, _stop) = sync_server(server_dir.path()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    // The account is set up without starting sync, as it is after a restart.
+    let input = sshcraft_sync::account::NewAccount {
+        server_name: "home".into(),
+        origin,
+        api_key,
+        name: "Alice".into(),
+        email: "alice@example.org".into(),
+        device_name: "laptop".into(),
+        platform: "windows".into(),
+    };
+    sshcraft_sync::account::create_account(&session.shared_store(), &session.vault().unwrap(), input, 1).await.unwrap();
+    let mut events = session.subscribe();
+    session.start();
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(20), events.recv()).await.expect("no sync status after start") {
+            Ok(crate::EngineEvent::SyncStatus { .. }) => break,
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    // Without a server nothing connects and nothing is reported.
+    let other_dir = tempfile::tempdir().unwrap();
+    let other = open(other_dir.path());
+    let mut events = other.subscribe();
+    other.start();
+    let quiet = tokio::time::timeout(std::time::Duration::from_millis(300), events.recv()).await;
+    assert!(quiet.is_err(), "{quiet:?}");
+}
+
 fn agent() -> Caller {
     Caller::Agent { name: AgentName::new("claude-code").unwrap(), via: Via::Mcp, conn: ConnId(1) }
 }
