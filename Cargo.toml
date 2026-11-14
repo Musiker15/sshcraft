@@ -21,6 +21,7 @@ sshcraft-local = { path = "crates/local" }
 sshcraft-sync = { path = "crates/sync" }
 sshcraft-fido = { path = "crates/fido" }
 sshcraft-server-lib = { path = "crates/server" }
+sshcraft-engine = { path = "crates/engine" }
 
 # foundation
 serde = { version = "1.0.229", features = ["derive"] }
@@ -29,6 +30,7 @@ thiserror = "2.0.21"
 uuid = { version = "1.29.2", features = ["v4", "serde"] }
 tokio = { version = "1.54.1", features = ["full"] }
 async-trait = "0.1.92"
+strum = { version = "0.28.0", features = ["derive"] }
 futures = "0.3.34"
 directories = "6.0.0"
 tracing = "0.1.44"

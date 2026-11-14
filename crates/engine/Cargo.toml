@@ -1,0 +1,35 @@
+[package]
+name = "sshcraft-engine"
+description = "The SSHCraft engine: every action is a command behind Session::execute"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# SessionConfig::for_tests and the fakes, for the interface (R4) and the MCP tests (R6).
+testing = ["sshcraft-store/testing", "sshcraft-fido/testing"]
+
+[dependencies]
+sshcraft-model = { workspace = true }
+sshcraft-store = { workspace = true }
+sshcraft-platform = { workspace = true }
+sshcraft-fido = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+strum = { workspace = true }
+
+[dev-dependencies]
+sshcraft-engine = { path = ".", features = ["testing"] }
+tempfile = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true

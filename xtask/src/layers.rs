@@ -15,7 +15,7 @@ pub enum Class {
 }
 
 /// The layer table. Names are package names without the `sshcraft-` prefix. Later layers:
-/// engine 5, ui-egui 6, mcp 6, term 2.
+/// ui-egui 6, mcp 6, term 2.
 pub const TABLE: &[(&str, Class)] = &[
     ("proto", Class::Layer(0)),
     ("platform", Class::Layer(0)),
@@ -27,6 +27,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("sync", Class::Layer(3)),
     ("server-lib", Class::Layer(3)),
     ("fido", Class::Layer(4)),
+    ("engine", Class::Layer(5)),
     // The sync server program (apps/sshcraft-server).
     ("server", Class::Exempt),
     ("xtask", Class::Exempt),
@@ -159,6 +160,11 @@ mod tests {
             krate("server", &["server-lib", "clap"]),
             krate("xtask", &["serde_json"]),
         ]
+    }
+
+    #[test]
+    fn engine_is_layer_five() {
+        assert_eq!(super::classify("engine"), Some(super::Class::Layer(5)));
     }
 
     #[test]
