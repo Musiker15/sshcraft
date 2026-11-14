@@ -82,7 +82,7 @@ reads `config.toml`.
 - **Widget.** `TerminalView` takes keys, IME composition and commit, paste, the mouse
   (selection, wheel, reports to programs that ask, Ctrl+click on links) and returns the bytes
   for the session; it never sends anything itself. Screen readers read the visible text.
-- **Pump.** `Pump::frame` feeds 64 KiB slices of a session's output until 4 MiB or 6 ms per
+- **Pump.** `Pump::frame` feeds 32 KiB slices of a session's output until 4 MiB or 6 ms per
   frame and acknowledges exactly what it fed, so a flood keeps the window responsive and the
   engine reads the server on only as the terminal catches up.
 - **Budgets.** `cargo xtask perf` runs `crates/term/tests/budgets.rs` in a release build: a

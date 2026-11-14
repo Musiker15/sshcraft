@@ -17,7 +17,7 @@ pub const FRAME_BYTE_BUDGET: usize = 4 * 1024 * 1024;
 /// Most time one frame feeds for (measured in R3.1: 1 MiB takes up to 8.8 ms for CJK output).
 pub const FRAME_TIME_BUDGET: Duration = Duration::from_millis(6);
 /// The bytes fed between two looks at the clock.
-pub const FEED_SLICE: usize = 64 * 1024;
+pub const FEED_SLICE: usize = 32 * 1024;
 
 /// How much one frame may feed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

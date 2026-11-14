@@ -20,7 +20,7 @@ fn in_use() -> usize {
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 /// The slice the window's pump feeds between two looks at the clock (`FEED_SLICE` in ui-egui).
-const SLICE: usize = 64 * 1024;
+const SLICE: usize = 32 * 1024;
 /// The time a frame may feed (`FRAME_TIME_BUDGET` in ui-egui).
 const FRAME_TIME: Duration = Duration::from_millis(6);
 
@@ -63,7 +63,7 @@ fn a_feed_slice_stays_far_inside_a_frame() {
         let median = times[times.len() / 2];
         // The pump looks at the clock after every slice, so a slice must fit in a frame budget:
         // then a frame ends at most one slice late. (CI runners are several times slower than a
-        // desktop: 4.7 ms for CJK there, 0.5 ms here.)
+        // desktop: 4.7 ms for 64 KiB of CJK there, 0.5 ms here.)
         assert!(median < FRAME_TIME, "{name}: median slice {median:?}");
     }
 }
