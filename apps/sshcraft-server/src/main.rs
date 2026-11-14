@@ -175,24 +175,25 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command};
-    use clap::Parser;
+    use super::Cli;
+    use clap::CommandFactory;
+
+    /// The default of one option, read from the command definition so that environment
+    /// variables an operator set on this machine do not change the result.
+    fn default_of(command: &clap::Command, id: &str) -> String {
+        let arg = command.get_arguments().find(|a| a.get_id() == id).unwrap();
+        arg.get_default_values().iter().map(|v| v.to_string_lossy().into_owned()).collect()
+    }
 
     /// Operators and the Docker image rely on these defaults; moving the program must not
     /// change them.
     #[test]
     fn cli_defaults_are_unchanged() {
-        let cli = Cli::try_parse_from(["sshcraft-server", "serve", "--public-origin", "https://x"]).unwrap();
-        assert_eq!(cli.database_url, "sqlite://sshcraft.db");
-        let Command::Serve { listen, public_origin } = cli.command else {
-            panic!("serve expected");
-        };
-        assert_eq!(listen.to_string(), "127.0.0.1:8470");
-        assert_eq!(public_origin, "https://x");
-        let cli = Cli::try_parse_from(["sshcraft-server", "health"]).unwrap();
-        let Command::Health { listen } = cli.command else {
-            panic!("health expected");
-        };
-        assert_eq!(listen.to_string(), "127.0.0.1:8470");
+        let cli = Cli::command();
+        assert_eq!(default_of(&cli, "database_url"), "sqlite://sshcraft.db");
+        for sub in ["serve", "health"] {
+            let sub = cli.find_subcommand(sub).unwrap();
+            assert_eq!(default_of(sub, "listen"), "127.0.0.1:8470");
+        }
     }
 }

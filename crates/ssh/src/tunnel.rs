@@ -322,6 +322,46 @@ mod tests {
         assert!(remote_target(&remotes, "127.0.0.1", 2222).is_none());
     }
 
+    struct Trust;
+
+    #[async_trait::async_trait]
+    impl crate::HostKeyVerifier for Trust {
+        async fn verify(&self, _: &str, _: &str, _: u16, _: &str) -> bool {
+            true
+        }
+    }
+
+    /// Creating and removing a remote forwarding goes on after a task died holding the table:
+    /// the insert when the server agrees and the removal when the tunnel is dropped.
+    #[tokio::test]
+    async fn remote_forward_works_after_a_poisoned_remotes_lock() {
+        use crate::testing::{TestAuth, TestServer};
+        use russh::keys::{Algorithm, PrivateKey};
+
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let server = TestServer::start_with(TestAuth { key: Some(key.public_key().clone()), ..Default::default() }).await;
+        let params = crate::ConnectParams {
+            address: "127.0.0.1".into(),
+            port: server.port,
+            username: "tester".into(),
+            auth: crate::Auth::key(crate::Credential::Key(key)),
+        };
+        let session = crate::connect(params, std::sync::Arc::new(Trust), std::sync::Arc::new(crate::NoPrompter)).await.unwrap();
+        let held = session.remotes.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock();
+            panic!("a task dies while it holds the remotes");
+        })
+        .join();
+        assert!(session.remotes.is_poisoned());
+        let port = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+        let tunnel = session.forward_remote("127.0.0.1", port, "127.0.0.1", 9).await.unwrap();
+        assert_eq!(tunnel.bound_port(), port);
+        assert!(remote_target(&session.remotes, "127.0.0.1", u32::from(port)).is_some());
+        drop(tunnel);
+        assert!(remote_target(&session.remotes, "127.0.0.1", u32::from(port)).is_none());
+    }
+
     #[test]
     fn brackets_come_off() {
         assert_eq!(unbracket("[::1]"), "::1");

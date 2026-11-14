@@ -5,6 +5,7 @@ The decisions that carry SSHCraft, newest first. The reasoning is in the design 
 
 | Date | Decision |
 |---|---|
+| 2026-11-14 | Licences: `deny.toml` allows exactly the list of the house rules, which now includes Unicode-3.0 (the ICU crates of url and idna); four crates outside the list have a named exception (foldhash Zlib, option-ext MPL-2.0, webpki-roots and webpki-root-certs CDLA-Permissive-2.0). |
 | 2026-11-14 | Database client as a separate sister app after V1; it reaches server databases through a tunnel SSHCraft opens for it. |
 | 2026-11-14 | `fido` is the one crate that may use `unsafe` (WebAuthn and Windows Hello through the Windows API). |
 | 2026-11-14 | Agents get no headless mode: the confirmation and Windows Hello need the window, and only one process opens the database. |

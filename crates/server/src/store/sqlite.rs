@@ -13,7 +13,7 @@ use sshcraft_proto::area::{AreaId, AreaManifest, KeyEnvelope};
 use sshcraft_proto::devicelog::{DeviceLog, LogEntry};
 use sshcraft_proto::identity::{AccountPublic, DeviceCertificate};
 use sshcraft_proto::record::SealedRecord;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use uuid::Uuid;
 
 const SCHEMA_VERSION: i64 = 1;
@@ -108,7 +108,8 @@ impl SqliteStore {
     async fn read<T: Send + 'static>(&self, f: impl FnOnce(&Connection) -> Result<T, StoreError> + Send + 'static) -> Result<T, StoreError> {
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(backend)?;
+            // A panic while holding the lock rolled its transaction back; the connection is fine.
+            let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
             f(&conn)
         })
         .await
@@ -118,7 +119,7 @@ impl SqliteStore {
     async fn write<T: Send + 'static>(&self, f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError> + Send + 'static) -> Result<T, StoreError> {
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || {
-            let mut conn = conn.lock().map_err(backend)?;
+            let mut conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(backend)?;
             let value = f(&tx)?;
             tx.commit().map_err(backend)?;
@@ -710,5 +711,29 @@ impl Store for SqliteStore {
             Ok(plan)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod poison_tests {
+    use super::SqliteStore;
+    use crate::store::Store as _;
+
+    /// A request that panicked while holding the database must not leave the server answering
+    /// every later request with an error until it is restarted. The open transaction was rolled
+    /// back when the panic dropped it, so the connection is fine to use.
+    #[tokio::test]
+    async fn a_panic_while_holding_the_database_does_not_stop_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync.db");
+        let store = SqliteStore::open(path.to_str().unwrap()).await.unwrap();
+        let held = store.conn.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock();
+            panic!("a request dies while it holds the database");
+        })
+        .join();
+        assert!(store.conn.is_poisoned());
+        assert!(store.list_accounts().await.is_ok());
     }
 }

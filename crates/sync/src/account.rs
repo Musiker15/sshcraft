@@ -82,7 +82,7 @@ fn save_server(
 ) -> Result<ServerId, SyncError> {
     let id = ServerId::new();
     let sealed_device = vault.seal_secret(&device_label(id), &keys.to_bytes()[..])?;
-    let store = store.lock().map_err(|e| SyncError::Store(e.to_string()))?;
+    let store = crate::engine::lock(store)?;
     store.add_server(&ServerRow {
         id,
         name,

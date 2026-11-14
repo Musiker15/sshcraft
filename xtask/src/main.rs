@@ -31,6 +31,13 @@ const CI: &[(&str, Step)] = &[
 ];
 
 fn main() -> ExitCode {
+    // Every command works on the whole workspace, wherever it is started from.
+    if let Some(root) = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent()
+        && let Err(err) = std::env::set_current_dir(root)
+    {
+        eprintln!("xtask: cannot enter the workspace root {}: {err}", root.display());
+        return ExitCode::FAILURE;
+    }
     let arg = std::env::args().nth(1);
     let result = match arg.as_deref() {
         Some("ci") => cmd_ci(),
@@ -138,7 +145,7 @@ fn cmd_assets() -> Result<(), String> {
     }
     let files: Vec<PathBuf> =
         out.stdout.split(|b| *b == 0).filter(|name| !name.is_empty()).map(|name| PathBuf::from(String::from_utf8_lossy(name).into_owned())).collect();
-    let attribution = std::fs::read_to_string("ATTRIBUTION.md").unwrap_or_default();
+    let attribution = std::fs::read_to_string("ATTRIBUTION.md").map_err(|e| format!("ATTRIBUTION.md: {e}"))?;
     let problems = assets::check(&files, &attribution);
     if problems.is_empty() {
         eprintln!("assets: {} files checked, every asset attributed", files.len());

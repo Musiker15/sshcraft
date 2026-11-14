@@ -17,7 +17,7 @@ use sshcraft_proto::record::{Freshness, RecordHeader, SealedRecord, VersionTrack
 use sshcraft_store::store::{ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store};
 use sshcraft_store::vault::Vault;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use uuid::Uuid;
 
 /// Records fetched per request.
@@ -144,7 +144,9 @@ fn now_secs() -> i64 {
 }
 
 pub(crate) fn lock(store: &Mutex<Store>) -> Result<MutexGuard<'_, Store>, SyncError> {
-    store.lock().map_err(|e| SyncError::Store(e.to_string()))
+    // A thread that panicked while holding the store left no half-done write behind (writes run
+    // in transactions), so the store stays usable instead of failing every later call.
+    Ok(store.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
 pub(crate) fn to_json(value: &impl serde::Serialize) -> Result<String, SyncError> {

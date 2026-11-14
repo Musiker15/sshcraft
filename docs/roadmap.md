@@ -22,7 +22,7 @@ R1: the workspace, the rules, the tooling and the core crates on the Craft conve
 | R4 | Interface I: window, sidebar, tabs, command palette, tokens and themes, languages, shortcuts; hosts, groups, keys, identities, import and export, connecting |
 | R5 | Interface II: workspaces, broadcast, port forwarding, snippets and completion, session logs, sync, sharing, devices, agent settings and confirmation |
 | R6 | Control channel, MCP crate, `sshcraft-cli`, ArtCraft Launcher connection |
-| R7 | macOS, Linux, FreeBSD; packaging; CI |
+| R7 | macOS, Linux, FreeBSD; packaging; CI; `docs/superpowers/` leaves the tree, so the links to it in AGENTS.md, docs/architecture.md, docs/security.md and the parity pages move to the English docs first |
 
 ## Before the first release
 

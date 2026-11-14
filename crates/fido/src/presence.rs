@@ -23,7 +23,16 @@ pub trait UserPresence: Send + Sync + 'static {
 /// Asks Windows Hello (fingerprint, face or PIN), with the dialog owned by SSHCraft's window.
 pub struct WindowsHello {
     /// Raw handle of the main window, kept as an integer so the struct stays `Send`.
-    pub hwnd: isize,
+    hwnd: isize,
+}
+
+impl WindowsHello {
+    /// Windows Hello with its dialog owned by the window `hwnd`. Pass the handle of the app's
+    /// own top-level window; Windows checks the handle and answers a wrong one with an error,
+    /// which counts as declined.
+    pub fn new(hwnd: isize) -> Self {
+        Self { hwnd }
+    }
 }
 
 /// Something that can be called off, like a pending Windows Hello request.
@@ -103,7 +112,9 @@ fn request(
     use windows::core::{HSTRING, factory};
 
     let interop = factory::<UserConsentVerifier, IUserConsentVerifierInterop>()?;
-    // SAFETY: `hwnd` is the handle of SSHCraft's own main window, valid while the app runs.
+    // SAFETY: the call only passes the handle value to Windows, which validates it and returns
+    // an error for a handle that is not a window; no memory behind the handle is read here. The
+    // reason string lives until the call returns.
     unsafe { interop.RequestVerificationForWindowAsync(HWND(hwnd as *mut core::ffi::c_void), &HSTRING::from(reason)) }
 }
 
