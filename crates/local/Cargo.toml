@@ -12,8 +12,8 @@ tokio = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 portable-pty = "0.9.0"
-# Without libudev: ports are listed from sysfs on Linux, no system library needed to build.
-serialport = { version = "4.10.1", default-features = false }
+# BSD-2-Clause OR Apache-2.0; replaced serialport (MPL-2.0) to keep the licence list of the Craft apps.
+serial2 = "0.2.39"
 
 [dev-dependencies]
 serde_json = { workspace = true }
