@@ -11,7 +11,10 @@ repository = "https://github.com/musiker15/sshcraft"
 
 [workspace.dependencies]
 # internal
-sshcraft-core = { path = "crates/sshcraft-core" }
+sshcraft-platform = { path = "crates/platform" }
+sshcraft-model = { path = "crates/model" }
+sshcraft-store = { path = "crates/store" }
+sshcraft-import = { path = "crates/import" }
 sshcraft-proto = { path = "crates/proto" }
 sshcraft-ssh = { path = "crates/ssh" }
 sshcraft-local = { path = "crates/local" }

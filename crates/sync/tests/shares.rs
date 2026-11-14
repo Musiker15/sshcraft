@@ -1,8 +1,8 @@
 mod common;
 
 use common::{Dev, TestServer, create, engine, inject_record, member, sample_host, seal_in, sync};
-use sshcraft_core::store::{ItemKind, ShareKind};
 use sshcraft_proto::area::Role;
+use sshcraft_store::store::{ItemKind, ShareKind};
 use sshcraft_sync::areas::{create_area, set_members};
 use sshcraft_sync::engine::record_local_change;
 use sshcraft_sync::items::ItemBody;
@@ -137,9 +137,9 @@ async fn removed_member_loses_the_items() {
     assert_eq!(c.hosts().len(), 1);
 }
 
-fn sample_group(name: &str) -> sshcraft_core::model::Group {
-    sshcraft_core::model::Group {
-        id: sshcraft_core::model::GroupId::new(),
+fn sample_group(name: &str) -> sshcraft_model::model::Group {
+    sshcraft_model::model::Group {
+        id: sshcraft_model::model::GroupId::new(),
         name: name.into(),
         defaults: Default::default(),
         location: None,
@@ -151,8 +151,8 @@ fn sample_group(name: &str) -> sshcraft_core::model::Group {
 /// A shares group G with host H with B (write) and C (read); everyone has synced.
 async fn shared_group(
     server: &TestServer,
-    kind: sshcraft_core::store::ShareKind,
-) -> (Dev, Dev, Dev, Uuid, sshcraft_core::model::Host) {
+    kind: sshcraft_store::store::ShareKind,
+) -> (Dev, Dev, Dev, Uuid, sshcraft_model::model::Host) {
     let (a, b, c) = three(server).await;
     let e = engine(&a).await;
     let (manifest, _) = create_area(
@@ -206,7 +206,7 @@ async fn shared_group(
     (a, b, c, area, host)
 }
 
-fn edit_host(dev: &Dev, host: &sshcraft_core::model::Host, name: &str, at: i64) {
+fn edit_host(dev: &Dev, host: &sshcraft_model::model::Host, name: &str, at: i64) {
     let server = dev.row().id;
     let store = dev.store.lock().unwrap();
     let mut host = store
@@ -281,7 +281,7 @@ async fn selection_member_cannot_add_or_delete() {
 
 // ---------- Task 6: creating shares
 
-use sshcraft_core::model::{Group, Host, KeyRef};
+use sshcraft_model::model::{Group, Host, KeyRef};
 use sshcraft_sync::SyncError;
 use sshcraft_sync::contacts::{confirm, find};
 use sshcraft_sync::shares::{Grant, ShareWhat, share};
@@ -536,7 +536,7 @@ async fn keys_go_along_only_when_asked() {
 
 // ---------- Task 7: copies follow their original
 
-fn rename(dev: &Dev, id: sshcraft_core::model::HostId, name: &str, at: i64) {
+fn rename(dev: &Dev, id: sshcraft_model::model::HostId, name: &str, at: i64) {
     let store = dev.store.lock().unwrap();
     let mut host = store
         .list_hosts()
@@ -711,7 +711,7 @@ async fn own_host_moved_into_a_received_selection_stays() {
 async fn received_key(
     server: &TestServer,
     all_hosts: bool,
-) -> (Dev, Dev, Dev, sshcraft_core::model::KeyId) {
+) -> (Dev, Dev, Dev, sshcraft_model::model::KeyId) {
     let (a, b, c) = three(server).await;
     for dev in [&a, &b, &c] {
         let id = dev.row().id;
@@ -986,8 +986,8 @@ async fn members_ignore_additions_and_deletions_of_other_members_in_a_selection(
 fn nested_group(
     a: &Dev,
 ) -> (
-    sshcraft_core::model::Group,
-    sshcraft_core::model::Group,
+    sshcraft_model::model::Group,
+    sshcraft_model::model::Group,
     Host,
 ) {
     let server = a.row().id;

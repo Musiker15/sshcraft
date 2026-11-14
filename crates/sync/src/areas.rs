@@ -6,14 +6,14 @@ use crate::SyncError;
 use crate::engine::{Engine, PAGE, from_json, lock, to_json};
 use crate::items::{encode, local_item};
 use serde::{Deserialize, Serialize};
-use sshcraft_core::store::{RecordEntry, Store};
-use sshcraft_core::vault::Vault;
 use sshcraft_proto::area::{
     AreaId, AreaKey, AreaManifest, KeyEnvelope, Member, key_commitment, seal_area_key,
 };
 use sshcraft_proto::devicelog::{DeviceSet, LogAction};
 use sshcraft_proto::identity::{AccountPublic, DeviceCertificate};
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
+use sshcraft_store::store::{RecordEntry, Store};
+use sshcraft_store::vault::Vault;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use uuid::Uuid;

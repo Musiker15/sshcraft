@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
-use sshcraft_core::policy::{Disconnect, ShellEvent};
+use sshcraft_model::policy::{Disconnect, ShellEvent};
 use tokio::sync::mpsc;
 
 const EVENT_BUFFER: usize = 1024;

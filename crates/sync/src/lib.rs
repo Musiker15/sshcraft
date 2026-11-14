@@ -88,14 +88,14 @@ impl From<ProtoError> for SyncError {
     }
 }
 
-impl From<sshcraft_core::store::StoreError> for SyncError {
-    fn from(err: sshcraft_core::store::StoreError) -> Self {
+impl From<sshcraft_store::store::StoreError> for SyncError {
+    fn from(err: sshcraft_store::store::StoreError) -> Self {
         Self::Store(err.to_string())
     }
 }
 
-impl From<sshcraft_core::vault::VaultError> for SyncError {
-    fn from(err: sshcraft_core::vault::VaultError) -> Self {
+impl From<sshcraft_store::vault::VaultError> for SyncError {
+    fn from(err: sshcraft_store::vault::VaultError) -> Self {
         Self::Vault(err.to_string())
     }
 }

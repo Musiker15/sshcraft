@@ -1,10 +1,10 @@
 mod common;
 
 use common::{Dev, TestServer, create, engine, join, sample_host, sync};
-use sshcraft_core::model::{Group, GroupId, Host, LogId, ServerId};
-use sshcraft_core::session_log::{self, LogKind, LogMark, LogMeta, MarkKind};
-use sshcraft_core::store::ItemKind;
+use sshcraft_model::model::{Group, GroupId, Host, LogId, ServerId};
 use sshcraft_proto::area::Role;
+use sshcraft_store::session_log::{self, LogKind, LogMark, LogMeta, MarkKind};
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::contacts::{confirm, find};
 use sshcraft_sync::engine::record_local_change;
 use sshcraft_sync::logs::{delete_log, place_logs, set_sync_logs};

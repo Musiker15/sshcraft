@@ -1,10 +1,10 @@
 mod common;
 
 use common::{Dev, TestServer, create, join, sample_host};
-use sshcraft_core::model::Host;
-use sshcraft_core::store::ItemKind;
+use sshcraft_model::model::Host;
 use sshcraft_proto::area::AreaId;
 use sshcraft_proto::identity::{AccountPublic, recovery_device_id};
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::SyncError;
 use sshcraft_sync::devices::{list_devices, revoke_device};
 use sshcraft_sync::engine::{Engine, record_local_change};

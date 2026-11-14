@@ -1,10 +1,10 @@
 mod common;
 
 use common::{Dev, TestServer, create, join, sample_host, sync};
-use sshcraft_core::model::{
+use sshcraft_model::model::{
     ConnectionSettings, Directory, Host, Identity, IdentityId, PasswordId, ServerId, resolve_route,
 };
-use sshcraft_core::store::ItemKind;
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::engine::record_local_change;
 
 const SECRET: &str = "hunter2-sshcraft";
@@ -257,7 +257,7 @@ async fn protected_key_syncs_encrypted_and_stays_protected() {
             .generate(
                 &store,
                 "deploy",
-                &sshcraft_core::keytypes::KeySpec::Ed25519,
+                &sshcraft_model::keytypes::KeySpec::Ed25519,
                 Some("pw-sshcraft"),
             )
             .unwrap();
@@ -274,7 +274,7 @@ async fn protected_key_syncs_encrypted_and_stays_protected() {
     assert!(record.protected);
     assert!(matches!(
         b.vault.private_key(&store, id),
-        Err(sshcraft_core::vault::VaultError::PassphraseRequired)
+        Err(sshcraft_store::vault::VaultError::PassphraseRequired)
     ));
     let a_key = {
         let a_store = a.store.lock().unwrap();
@@ -299,7 +299,7 @@ async fn device_key_never_syncs() {
         a.vault.store_device_key(&store, "hello", &key).unwrap()
     };
     let host = host_with(ConnectionSettings {
-        key: Some(sshcraft_core::model::KeyRef::Stored { id: key.id }),
+        key: Some(sshcraft_model::model::KeyRef::Stored { id: key.id }),
         ..Default::default()
     });
     save_host(&a, &host);
@@ -356,7 +356,7 @@ async fn certificate_travels_with_key() {
     sync(&a).await;
     sync(&b).await;
     let store = b.store.lock().unwrap();
-    let cert = sshcraft_core::vault::certificate(&store, id)
+    let cert = sshcraft_store::vault::certificate(&store, id)
         .unwrap()
         .expect("certificate reached b");
     assert_eq!(cert.valid_principals(), ["deploy".to_owned()]);

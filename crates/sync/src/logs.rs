@@ -1,9 +1,9 @@
 //! Session logs in sync: they live where their host lives, in the personal area of that
 //! server, and go out part by part, the header last.
 
-use sshcraft_core::model::{LogId, ServerId};
-use sshcraft_core::session_log;
-use sshcraft_core::store::{ItemKind, Store};
+use sshcraft_model::model::{LogId, ServerId};
+use sshcraft_store::session_log;
+use sshcraft_store::store::{ItemKind, Store};
 
 use crate::SyncError;
 use crate::items::log_error;

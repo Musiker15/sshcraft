@@ -141,11 +141,11 @@ impl RawAccount {
     }
 }
 
-use sshcraft_core::model::Host;
-use sshcraft_core::store::{ServerRow, Store};
-use sshcraft_core::vault::{MemoryMasterKey, Vault};
+use sshcraft_model::model::Host;
 use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, open_area_key};
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
+use sshcraft_store::store::{ServerRow, Store};
+use sshcraft_store::vault::{MemoryMasterKey, Vault};
 use sshcraft_sync::account::{JoinAccount, NewAccount, create_account, device_keys, join_account};
 use sshcraft_sync::client::ServerClient;
 use sshcraft_sync::items::{ItemBody, SyncItem, encode};
@@ -280,10 +280,10 @@ pub async fn revoke_raw(server: &TestServer, by: &Dev, target: Uuid) {
 pub fn sample_host(name: &str) -> Host {
     Host {
         forwards: Vec::new(),
-        id: sshcraft_core::model::HostId::new(),
+        id: sshcraft_model::model::HostId::new(),
         name: name.into(),
         group_id: None,
-        settings: sshcraft_core::model::ConnectionSettings {
+        settings: sshcraft_model::model::ConnectionSettings {
             address: Some("10.0.0.1".into()),
             port: None,
             username: Some("root".into()),

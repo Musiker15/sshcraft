@@ -5,14 +5,14 @@
 use crate::SyncError;
 use crate::creds::{CredentialRefs, drop_unreferenced, keep_local, same_proxy_endpoint};
 use serde::{Deserialize, Serialize};
-use sshcraft_core::keytypes::KeyKind;
-use sshcraft_core::model::{
+use sshcraft_model::keytypes::KeyKind;
+use sshcraft_model::model::{
     Group, GroupId, Host, HostId, Identity, IdentityId, KeyId, LogId, PasswordId, ServerId,
 };
-use sshcraft_core::session_log::{self, LogError, LogMeta};
-use sshcraft_core::store::{ItemKind, Store};
-use sshcraft_core::vault::Vault;
 use sshcraft_proto::ProtoError;
+use sshcraft_store::session_log::{self, LogError, LogMeta};
+use sshcraft_store::store::{ItemKind, Store};
+use sshcraft_store::vault::Vault;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 

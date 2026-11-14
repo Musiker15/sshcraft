@@ -7,15 +7,17 @@ use crate::contacts::require_confirmed;
 use crate::engine::{Engine, from_json, lock, record_local_change};
 use crate::items::{ItemBody, SyncItem, encode, local_item};
 use serde::{Deserialize, Serialize};
-use sshcraft_core::model::{
+use sshcraft_model::model::{
     ConnectionSettings, Group, GroupId, Host, HostId, IdentityId, KeyId, KeyRef, PasswordId, Proxy,
     ServerId, flatten, group_chain,
 };
-use sshcraft_core::store::{ItemKind, RecordEntry, ShareKind, ShareRole, ShareRow, Store, copy_id};
-use sshcraft_core::vault::Vault;
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, Member, Role};
 use sshcraft_proto::identity::AccountPublic;
 use sshcraft_proto::record::{RecordHeader, SealedRecord};
+use sshcraft_store::store::{
+    ItemKind, RecordEntry, ShareKind, ShareRole, ShareRow, Store, copy_id,
+};
+use sshcraft_store::vault::Vault;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -54,15 +56,15 @@ pub struct KeyAssignment {
     pub item: String,
     pub key: Option<KeyRef>,
     #[serde(default)]
-    pub password: Option<sshcraft_core::model::PasswordId>,
+    pub password: Option<sshcraft_model::model::PasswordId>,
     #[serde(default)]
-    pub identity: Option<sshcraft_core::model::IdentityId>,
+    pub identity: Option<sshcraft_model::model::IdentityId>,
     #[serde(default)]
-    pub proxy_password: Option<sshcraft_core::model::PasswordId>,
+    pub proxy_password: Option<sshcraft_model::model::PasswordId>,
     /// The proxy the proxy password belongs to; it is applied only while the item's proxy still
     /// leads there.
     #[serde(default)]
-    pub proxy: Option<sshcraft_core::model::Proxy>,
+    pub proxy: Option<sshcraft_model::model::Proxy>,
     pub modified_at: i64,
 }
 

@@ -4,8 +4,8 @@
 //! local one points somewhere the record could not have carried it.
 
 use serde::{Deserialize, Serialize};
-use sshcraft_core::model::{ConnectionSettings, IdentityId, KeyRef, PasswordId, Proxy, ServerId};
-use sshcraft_core::store::{ItemKind, Store};
+use sshcraft_model::model::{ConnectionSettings, IdentityId, KeyRef, PasswordId, Proxy, ServerId};
+use sshcraft_store::store::{ItemKind, Store};
 use uuid::Uuid;
 
 use crate::SyncError;

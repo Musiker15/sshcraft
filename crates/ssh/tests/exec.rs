@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use russh::keys::{Algorithm, PrivateKey};
-use sshcraft_core::authorized_keys::{InstallOutcome, install_command, parse_outcome};
+use sshcraft_ssh::authorized_keys::{InstallOutcome, install_command, parse_outcome};
 use sshcraft_ssh::testing::TestServer;
 use sshcraft_ssh::{Auth, ConnectParams, Credential, HostKeyVerifier, NoPrompter, connect};
 

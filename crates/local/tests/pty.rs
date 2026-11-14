@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use sshcraft_core::policy::{Disconnect, ShellEvent};
 use sshcraft_local::pty::{ShellCommand, available_shells, spawn};
+use sshcraft_model::policy::{Disconnect, ShellEvent};
 
 fn echo_command() -> ShellCommand {
     if cfg!(windows) {

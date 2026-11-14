@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey};
-use sshcraft_core::policy::Disconnect;
+use sshcraft_model::policy::Disconnect;
 use sshcraft_ssh::testing::{TestServer, flood_pattern, spawn_agent, spawn_stalled_agent};
 use sshcraft_ssh::{
     Auth, ConnectParams, Credential, HostKeyVerifier, NoPrompter, Shell, ShellEvent, SshError,
@@ -325,8 +325,8 @@ async fn exec_returns_output() {
     let short = session.exec("cat /etc/os-release", 4).await.unwrap();
     assert_eq!(short.len(), 4);
     assert_eq!(
-        sshcraft_core::os_detect::from_output(&String::from_utf8_lossy(&out)),
-        Some(sshcraft_core::model::HostOs::Debian)
+        sshcraft_model::os_detect::from_output(&String::from_utf8_lossy(&out)),
+        Some(sshcraft_model::model::HostOs::Debian)
     );
 }
 

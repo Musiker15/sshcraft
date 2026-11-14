@@ -1,10 +1,10 @@
 mod common;
 
 use common::TestServer;
-use sshcraft_core::store::{ServerRow, Store};
-use sshcraft_core::vault::{MemoryMasterKey, Vault};
 use sshcraft_proto::ProtoError;
 use sshcraft_proto::area::{AreaKey, AreaManifest, KeyEnvelope, open_area_key};
+use sshcraft_store::store::{ServerRow, Store};
+use sshcraft_store::vault::{MemoryMasterKey, Vault};
 use sshcraft_sync::SyncError;
 use sshcraft_sync::account::{
     JoinAccount, NewAccount, account_key_qr_svg, create_account, device_keys, join_account,

@@ -1,9 +1,9 @@
 mod common;
 
 use common::{Dev, TestServer, account, create, engine, stored_area, sync};
-use sshcraft_core::model::{Group, GroupId, Host, HostId};
-use sshcraft_core::store::ItemKind;
+use sshcraft_model::model::{Group, GroupId, Host, HostId};
 use sshcraft_proto::area::{AreaId, Role};
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::SyncError;
 use sshcraft_sync::contacts::{confirm, find};
 use sshcraft_sync::engine::record_local_change;

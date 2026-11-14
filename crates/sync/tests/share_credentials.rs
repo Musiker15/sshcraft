@@ -1,12 +1,12 @@
 mod common;
 
 use common::{Dev, TestServer, account, create, engine, seal_in, sync};
-use sshcraft_core::model::{
+use sshcraft_model::model::{
     ConnectionSettings, Directory, Group, GroupId, Host, Identity, IdentityId, PasswordId, Proxy,
     ProxyEndpoint, ResolvedHost, resolve_route,
 };
-use sshcraft_core::store::ItemKind;
 use sshcraft_proto::area::Role;
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::contacts::{confirm, find};
 use sshcraft_sync::engine::record_local_change;
 use sshcraft_sync::items::ItemBody;
@@ -459,7 +459,7 @@ async fn device_key_never_shared_even_with_keys() {
         store.delete_key_record(info.id).unwrap();
         let device = a.vault.store_device_key(&store, "hello", &key).unwrap();
         let mut host = s.host.clone();
-        host.settings.key = Some(sshcraft_core::model::KeyRef::Stored { id: device.id });
+        host.settings.key = Some(sshcraft_model::model::KeyRef::Stored { id: device.id });
         store.upsert_host(&host).unwrap();
         record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 2).unwrap();
         record_local_change(&store, ItemKind::Key, &device.id.0.to_string(), 2).unwrap();

@@ -5,14 +5,14 @@ use crate::SyncError;
 use crate::client::ServerClient;
 use qrcode::render::svg;
 use qrcode::{EcLevel, QrCode};
-use sshcraft_core::model::ServerId;
-use sshcraft_core::store::{ServerRow, Store};
-use sshcraft_core::vault::Vault;
+use sshcraft_model::model::ServerId;
 use sshcraft_proto::area::{
     AreaId, AreaKey, AreaManifest, KeyEnvelope, open_area_key, seal_area_key,
 };
 use sshcraft_proto::devicelog::DeviceLog;
 use sshcraft_proto::identity::{AccountKey, DeviceCertificate, DeviceKeys, RECOVERY_PLATFORM};
+use sshcraft_store::store::{ServerRow, Store};
+use sshcraft_store::vault::Vault;
 use std::sync::Mutex;
 use uuid::Uuid;
 use zeroize::Zeroizing;

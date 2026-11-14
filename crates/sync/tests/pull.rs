@@ -104,7 +104,7 @@ async fn revoked_device_stops_and_keeps_its_data() {
 
 #[tokio::test]
 async fn a_record_that_cannot_apply_yet_is_tried_again() {
-    use sshcraft_core::model::{ConnectionSettings, Group, GroupId};
+    use sshcraft_model::model::{ConnectionSettings, Group, GroupId};
     use sshcraft_proto::record::{RecordHeader, SealedRecord};
     use sshcraft_sync::items::{ItemBody, SyncItem, encode};
     let server = TestServer::start().await;

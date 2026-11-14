@@ -1,6 +1,6 @@
-use sshcraft_core::model::{ConnectionSettings, Host, HostId, KeyId, KeyRef, ServerId};
-use sshcraft_core::store::{ItemKind, Store};
-use sshcraft_core::vault::{MemoryMasterKey, Vault};
+use sshcraft_model::model::{ConnectionSettings, Host, HostId, KeyId, KeyRef, ServerId};
+use sshcraft_store::store::{ItemKind, Store};
+use sshcraft_store::vault::{MemoryMasterKey, Vault};
 use sshcraft_sync::SyncError;
 use sshcraft_sync::items::{ItemBody, SyncItem, apply, decode, encode, local_item, newer};
 use zeroize::Zeroizing;
@@ -140,10 +140,10 @@ fn decode_rejects_garbage() {
 
 #[test]
 fn remote_deletion_never_removes_a_device_key() {
-    let store = sshcraft_core::store::Store::open_in_memory().unwrap();
-    let vault = sshcraft_core::vault::Vault::unlock(
+    let store = sshcraft_store::store::Store::open_in_memory().unwrap();
+    let vault = sshcraft_store::vault::Vault::unlock(
         &store,
-        Box::new(sshcraft_core::vault::MemoryMasterKey::default()),
+        Box::new(sshcraft_store::vault::MemoryMasterKey::default()),
     )
     .unwrap();
     let key =
@@ -151,19 +151,24 @@ fn remote_deletion_never_removes_a_device_key() {
     let info = vault.store_device_key(&store, "hello", &key).unwrap();
     let item = sshcraft_sync::items::SyncItem {
         body: sshcraft_sync::items::ItemBody::Deleted {
-            item_kind: sshcraft_core::store::ItemKind::Key,
+            item_kind: sshcraft_store::store::ItemKind::Key,
             item_id: info.id.0.to_string(),
         },
         modified_at: 1,
     };
-    sshcraft_sync::items::apply(&store, &vault, sshcraft_core::model::ServerId::new(), &item)
-        .unwrap();
+    sshcraft_sync::items::apply(
+        &store,
+        &vault,
+        sshcraft_model::model::ServerId::new(),
+        &item,
+    )
+    .unwrap();
     assert!(store.key_record(info.id).unwrap().is_some());
 }
 
 #[test]
 fn host_item_carries_forwards() {
-    use sshcraft_core::forward::{ForwardId, ForwardKind, ForwardRule};
+    use sshcraft_model::forward::{ForwardId, ForwardKind, ForwardRule};
     let (store, vault) = setup();
     let mut h = host(None);
     h.forwards = vec![ForwardRule {

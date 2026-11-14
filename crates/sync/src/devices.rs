@@ -3,10 +3,10 @@
 use crate::SyncError;
 use crate::engine::Engine;
 use serde::Serialize;
-use sshcraft_core::store::Store;
-use sshcraft_core::vault::Vault;
 use sshcraft_proto::devicelog::LogAction;
 use sshcraft_proto::identity::is_recovery;
+use sshcraft_store::store::Store;
+use sshcraft_store::vault::Vault;
 use std::sync::Mutex;
 use uuid::Uuid;
 

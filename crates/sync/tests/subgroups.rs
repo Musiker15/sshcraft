@@ -1,13 +1,13 @@
 mod common;
 
 use common::{Dev, TestServer, create, engine, join, sync};
-use sshcraft_core::model::{
+use sshcraft_model::model::{
     ConnectionSettings, Group, GroupId, Host, HostId, group_chain, resolve,
 };
-use sshcraft_core::store::ItemKind;
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::engine::{record_group_hosts, record_local_change};
 
-fn group(name: &str, parent: Option<GroupId>, server: sshcraft_core::model::ServerId) -> Group {
+fn group(name: &str, parent: Option<GroupId>, server: sshcraft_model::model::ServerId) -> Group {
     Group {
         id: GroupId::new(),
         name: name.into(),
@@ -56,14 +56,14 @@ async fn subgroups_reach_other_devices() {
         name: "h".into(),
         group_id: Some(bottom.id),
         settings: ConnectionSettings {
-            key: Some(sshcraft_core::model::KeyRef::Agent {
+            key: Some(sshcraft_model::model::KeyRef::Agent {
                 fingerprint: "SHA256:x".into(),
             }),
             ..Default::default()
         },
         location: Some(s),
         tags: vec!["prod".into()],
-        os: Some(sshcraft_core::model::HostOs::Debian),
+        os: Some(sshcraft_model::model::HostOs::Debian),
     };
     {
         let store = x.store.lock().unwrap();
@@ -77,7 +77,7 @@ async fn subgroups_reach_other_devices() {
     assert_eq!(chain.len(), 3);
     let on_y = y.hosts().pop().unwrap();
     assert_eq!(on_y.tags, vec!["prod".to_owned()]);
-    assert_eq!(on_y.os, Some(sshcraft_core::model::HostOs::Debian));
+    assert_eq!(on_y.os, Some(sshcraft_model::model::HostOs::Debian));
     let refs: Vec<&Group> = chain.iter().collect();
     let resolved = resolve(&on_y, &refs, &[]).unwrap();
     assert_eq!(

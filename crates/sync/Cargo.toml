@@ -8,7 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 sshcraft-proto = { workspace = true }
-sshcraft-core = { workspace = true }
+sshcraft-model = { workspace = true }
+sshcraft-store = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -27,7 +28,7 @@ rand = { workspace = true }
 sshcraft-server = { workspace = true }
 tempfile = { workspace = true }
 rusqlite = { workspace = true }
-sshcraft-core = { workspace = true, features = ["testing"] }
+sshcraft-store = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

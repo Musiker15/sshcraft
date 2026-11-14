@@ -8,9 +8,9 @@
 use crate::SyncError;
 use crate::engine::{Engine, lock};
 use serde::Serialize;
-use sshcraft_core::model::ServerId;
-use sshcraft_core::store::{Contact, Store};
+use sshcraft_model::model::ServerId;
 use sshcraft_proto::identity::{AccountPublic, safety_number};
+use sshcraft_store::store::{Contact, Store};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

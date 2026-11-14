@@ -9,12 +9,13 @@ use std::time::Duration;
 use russh::client::{self, Msg};
 use russh::keys::{HashAlg, PrivateKey, PublicKeyOrCertificate};
 use russh::{ChannelMsg, ChannelWriteHalf};
-use sshcraft_core::policy::Disconnect;
+use sshcraft_model::policy::Disconnect;
 use tokio::sync::mpsc;
 
 #[cfg(windows)]
 pub mod agent;
 mod auth;
+pub mod authorized_keys;
 mod proxy;
 pub mod socks;
 mod tunnel;
@@ -255,7 +256,7 @@ pub(crate) fn protocol(e: impl std::fmt::Display) -> SshError {
     SshError::Protocol(e.to_string())
 }
 
-pub use sshcraft_core::policy::ShellEvent;
+pub use sshcraft_model::policy::ShellEvent;
 
 struct ClientHandler {
     /// Set on the target when forwarding is on; jump hosts never get the agent.

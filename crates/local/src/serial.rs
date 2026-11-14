@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use sshcraft_core::policy::{Disconnect, ShellEvent};
+use sshcraft_model::policy::{Disconnect, ShellEvent};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,7 +224,7 @@ pub fn open(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sshcraft_core::policy::Disconnect;
+    use sshcraft_model::policy::Disconnect;
     use std::collections::VecDeque;
 
     #[test]

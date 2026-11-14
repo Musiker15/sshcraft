@@ -1,9 +1,9 @@
 mod common;
 
 use common::{Dev, TestServer, create, join, sample_host};
-use sshcraft_core::model::ServerId;
-use sshcraft_core::store::{ItemKind, Store};
-use sshcraft_core::vault::Vault;
+use sshcraft_model::model::ServerId;
+use sshcraft_store::store::{ItemKind, Store};
+use sshcraft_store::vault::Vault;
 use sshcraft_sync::devices::revoke_device;
 use sshcraft_sync::engine::{Engine, record_local_change};
 use sshcraft_sync::runtime::{SyncObserver, SyncRuntime, SyncStatus};

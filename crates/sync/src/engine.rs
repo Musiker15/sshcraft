@@ -12,15 +12,15 @@ use crate::shares::{
     KeyAssignment, ShareInfo, copy_item, decode_key_assignment, decode_share_info,
     encode_key_assignment, share_info_record_id,
 };
-use sshcraft_core::model::ServerId;
-use sshcraft_core::store::{
-    ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
-};
-use sshcraft_core::vault::Vault;
+use sshcraft_model::model::ServerId;
 use sshcraft_proto::area::{AreaId, AreaKey, AreaManifest, KeyEnvelope, Role, open_area_key};
 use sshcraft_proto::devicelog::{DeviceLog, DeviceSet, LogHead};
 use sshcraft_proto::identity::{AccountPublic, DeviceKeys};
 use sshcraft_proto::record::{Freshness, RecordHeader, SealedRecord, VersionTracker};
+use sshcraft_store::store::{
+    ItemKind, RecordEntry, ServerRow, ShareKind, ShareRole, ShareRow, Store,
+};
+use sshcraft_store::vault::Vault;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
@@ -66,7 +66,7 @@ pub fn record_local_change(
     if kind == ItemKind::Identity
         && let Ok(uuid) = Uuid::parse_str(id)
     {
-        let identity = Some(sshcraft_core::model::IdentityId(uuid));
+        let identity = Some(sshcraft_model::model::IdentityId(uuid));
         for group in store.list_groups()? {
             if group.defaults.identity == identity {
                 queue_group_copies(store, server, &group.id.0.to_string(), now_ms)?;
@@ -95,7 +95,7 @@ fn queue_group_copies(
     }
     if let Ok(uuid) = Uuid::parse_str(id) {
         let mut tree: Vec<String> = store
-            .subgroups(sshcraft_core::model::GroupId(uuid))?
+            .subgroups(sshcraft_model::model::GroupId(uuid))?
             .iter()
             .map(|g| g.0.to_string())
             .collect();
@@ -124,7 +124,7 @@ fn queue_group_copies(
 pub fn record_group_hosts(store: &Store, group_id: &str, now_ms: i64) -> Result<(), SyncError> {
     let id = Uuid::parse_str(group_id).map_err(|e| SyncError::Store(e.to_string()))?;
     let mut groups = vec![group_id.to_owned()];
-    for sub in store.subgroups(sshcraft_core::model::GroupId(id))? {
+    for sub in store.subgroups(sshcraft_model::model::GroupId(id))? {
         let sub = sub.0.to_string();
         record_local_change(store, ItemKind::Group, &sub, now_ms)?;
         groups.push(sub);
@@ -895,7 +895,7 @@ impl Engine {
         modified_at: i64,
     ) -> Result<(), SyncError> {
         let item = Uuid::parse_str(id).map_err(|e| SyncError::Store(e.to_string()))?;
-        let record_id = sshcraft_core::store::copy_id(personal, item);
+        let record_id = sshcraft_store::store::copy_id(personal, item);
         let setting = self.assignment_setting(record_id);
         let mut version = lock(store)?
             .get_setting(&setting)?
@@ -1052,8 +1052,11 @@ impl Engine {
                 ItemKind::Group => (
                     2,
                     Uuid::parse_str(id).map_or(0, |u| {
-                        sshcraft_core::model::group_chain(&groups, sshcraft_core::model::GroupId(u))
-                            .len()
+                        sshcraft_model::model::group_chain(
+                            &groups,
+                            sshcraft_model::model::GroupId(u),
+                        )
+                        .len()
                     }),
                 ),
                 ItemKind::Host => (3, 0),
@@ -1358,7 +1361,7 @@ impl Engine {
         {
             let is_root = |id: &str| share.group_id.as_deref() == Some(id);
             let outside =
-                |group: Option<sshcraft_core::model::GroupId>| -> Result<bool, SyncError> {
+                |group: Option<sshcraft_model::model::GroupId>| -> Result<bool, SyncError> {
                     Ok(match group {
                         Some(g) => {
                             store.effective_area(self.server, ItemKind::Group, &g.0.to_string())?
@@ -1513,7 +1516,7 @@ fn find_original(
     };
     let Some(original) = ids
         .into_iter()
-        .find(|id| sshcraft_core::store::copy_id(area, *id).to_string() == copy)
+        .find(|id| sshcraft_store::store::copy_id(area, *id).to_string() == copy)
     else {
         return Ok(None);
     };
@@ -1533,7 +1536,7 @@ fn take_into_original(
     area: Uuid,
     item: &SyncItem,
 ) -> Result<bool, SyncError> {
-    use sshcraft_core::model::{KeyId, KeyRef, Proxy};
+    use sshcraft_model::model::{KeyId, KeyRef, Proxy};
     let (kind, copy) = item.item();
     let Some(original) = find_original(store, server, area, kind, &copy)? else {
         return Ok(false);
@@ -1603,7 +1606,7 @@ fn take_into_original(
                             .iter()
                             .map(|j| {
                                 Ok(back(ItemKind::Host, j.0)?
-                                    .map_or(*j, sshcraft_core::model::HostId))
+                                    .map_or(*j, sshcraft_model::model::HostId))
                             })
                             .collect::<Result<Vec<_>, SyncError>>()?,
                     ),
@@ -1720,7 +1723,7 @@ fn refusal(
 fn settle_cycle(
     store: &Store,
     server: ServerId,
-    group: &sshcraft_core::model::Group,
+    group: &sshcraft_model::model::Group,
     modified_at: i64,
 ) -> Result<bool, SyncError> {
     let Some(parent) = group.parent_id else {
@@ -1730,7 +1733,7 @@ fn settle_cycle(
         return Ok(false);
     }
     let groups = store.list_groups()?;
-    let above = sshcraft_core::model::group_chain(&groups, parent);
+    let above = sshcraft_model::model::group_chain(&groups, parent);
     let Some(closing) = above.iter().find(|g| g.parent_id == Some(group.id)) else {
         return Ok(true);
     };
@@ -1770,25 +1773,25 @@ fn skippable(err: &SyncError) -> bool {
 fn remove_item(store: &Store, kind: ItemKind, id: &str) -> Result<(), SyncError> {
     let uuid = Uuid::parse_str(id).map_err(|e| SyncError::Store(e.to_string()))?;
     match kind {
-        ItemKind::Group => store.delete_group(sshcraft_core::model::GroupId(uuid))?,
-        ItemKind::Host => store.delete_host(sshcraft_core::model::HostId(uuid))?,
+        ItemKind::Group => store.delete_group(sshcraft_model::model::GroupId(uuid))?,
+        ItemKind::Host => store.delete_host(sshcraft_model::model::HostId(uuid))?,
         ItemKind::Key => {
-            let id = sshcraft_core::model::KeyId(uuid);
+            let id = sshcraft_model::model::KeyId(uuid);
             if !store
                 .key_record(id)?
-                .is_some_and(|r| r.kind == sshcraft_core::keytypes::KeyKind::Device)
+                .is_some_and(|r| r.kind == sshcraft_model::keytypes::KeyKind::Device)
             {
                 store.delete_key_record(id)?;
             }
         }
-        ItemKind::Identity => store.delete_identity(sshcraft_core::model::IdentityId(uuid))?,
-        ItemKind::Password => store.delete_password(sshcraft_core::model::PasswordId(uuid))?,
+        ItemKind::Identity => store.delete_identity(sshcraft_model::model::IdentityId(uuid))?,
+        ItemKind::Password => store.delete_password(sshcraft_model::model::PasswordId(uuid))?,
         ItemKind::Log => {
-            sshcraft_core::session_log::delete(store, sshcraft_core::model::LogId(uuid))
+            sshcraft_store::session_log::delete(store, sshcraft_model::model::LogId(uuid))
                 .map_err(crate::items::log_error)?
         }
         ItemKind::LogChunk => {
-            sshcraft_core::session_log::delete_chunk(store, id).map_err(crate::items::log_error)?
+            sshcraft_store::session_log::delete_chunk(store, id).map_err(crate::items::log_error)?
         }
     }
     Ok(())

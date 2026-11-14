@@ -163,7 +163,7 @@ async fn items_last_written_by_a_revoked_device_survive_the_rotation() {
         store.upsert_host(&host).unwrap();
         sshcraft_sync::engine::record_local_change(
             &store,
-            sshcraft_core::store::ItemKind::Host,
+            sshcraft_store::store::ItemKind::Host,
             &host.id.0.to_string(),
             5,
         )
@@ -186,7 +186,7 @@ async fn items_last_written_by_a_revoked_device_survive_the_rotation() {
 
 #[tokio::test]
 async fn one_lock_per_server() {
-    use sshcraft_core::model::ServerId;
+    use sshcraft_model::model::ServerId;
     use sshcraft_sync::engine::server_lock;
     let (one, other) = (ServerId::new(), ServerId::new());
     assert!(std::sync::Arc::ptr_eq(&server_lock(one), &server_lock(one)));

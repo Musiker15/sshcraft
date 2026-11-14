@@ -1,8 +1,8 @@
 mod common;
 
 use common::{Dev, TestServer, create, join, sample_host};
-use sshcraft_core::model::{Host, ServerId};
-use sshcraft_core::store::ItemKind;
+use sshcraft_model::model::{Host, ServerId};
+use sshcraft_store::store::ItemKind;
 use sshcraft_sync::SyncError;
 use sshcraft_sync::engine::{Engine, record_local_change};
 
@@ -196,7 +196,7 @@ async fn moving_an_item_off_the_server_deletes_it_there() {
 
 #[tokio::test]
 async fn renaming_a_group_keeps_a_newer_host_edit() {
-    use sshcraft_core::model::{ConnectionSettings, Group, GroupId};
+    use sshcraft_model::model::{ConnectionSettings, Group, GroupId};
     let server = TestServer::start().await;
     let (a, b) = (Dev::new(), Dev::new());
     let export = create(&server, &a, "a@example.org").await;
@@ -351,7 +351,7 @@ async fn moving_between_two_servers_keeps_the_item_on_a_device_with_both() {
 
 #[tokio::test]
 async fn unsynced_key_assignments_stay_per_device() {
-    use sshcraft_core::model::KeyRef;
+    use sshcraft_model::model::KeyRef;
     let server = TestServer::start().await;
     let (a, b, host) = pair(&server).await;
     // Key sync is off: each device assigns a key of its own to the same host.

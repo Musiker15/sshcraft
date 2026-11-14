@@ -5,9 +5,9 @@
 use crate::SyncError;
 use crate::engine::Engine;
 use futures::StreamExt;
-use sshcraft_core::model::ServerId;
-use sshcraft_core::store::Store;
-use sshcraft_core::vault::Vault;
+use sshcraft_model::model::ServerId;
+use sshcraft_store::store::Store;
+use sshcraft_store::vault::Vault;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
