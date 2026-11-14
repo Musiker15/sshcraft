@@ -1,15 +1,19 @@
 # Gaps
 
-> **Last updated:** 2026-11-14
+> **Last updated:** 2026-11-15
 
 The ranked list of open work. Pick from the top. When work lands, remove or update its row.
 
 | Rank | Gap | Where it is planned |
 |---|---|---|
-| 1 | There is no desktop app on `main`: the engine is there (R2), the terminal and the interface are rebuilt in R3 to R5 | [roadmap.md](roadmap.md) |
+| 1 | There is no desktop app on `main`: the engine (R2) and the terminal (R3) are there, the interface is rebuilt in R4 and R5; until then `cargo run -p sshcraft-ui-egui --example terminal_window` shows a local shell | [roadmap.md](roadmap.md) |
 | 2 | Agents and the command line have no transport until the control channel and the MCP crate (R6) | R6 |
 | 3 | Only Windows is built and tested; macOS, Linux and FreeBSD follow | R7 |
 | 4 | The agent confirmation is a prompt on the event bus; the window that answers it comes in R5 | R5 |
+| 4a | OSC 52: the terminal reports a clipboard write; asking per host before it reaches the clipboard needs the window | R4 |
+| 4b | Ctrl+Shift+C and Ctrl+Shift+V, and every other terminal shortcut, wait for the keymap | R4 |
+| 4c | The scrollback length is fixed at 10 000 lines; a setting for it, and the memory budget of the empty app as a test | R4, R5 |
+| 4d | Ligatures come from the font alone (Cascadia Code has them, the default Cascadia Mono not); a switch to turn them off in a font that has them | R5 |
 | 5 | No reconnect with backoff, no ProxyCommand, no host key management | F1 |
 | 6 | No trash, no versions, no backup file | F2 |
 | 7 | No SFTP | S1 |

@@ -54,6 +54,8 @@ What a server prints may not reach beyond the terminal on its own:
   sequence that never ends.
 - **File transfer** over the terminal (ZMODEM, trzsz) never starts: the terminal does not speak
   either protocol.
+- **Paste:** pasted text cannot end the bracketed paste early: the bracket sequences are removed
+  from it, again and again, before it is sent.
 - **Broadcast:** answers the terminal gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
 

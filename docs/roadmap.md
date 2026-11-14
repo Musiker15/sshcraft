@@ -10,7 +10,9 @@ sections 13 and 16, and the market comparison
 
 ## Current focus
 
-R3: the terminal. R1 (workspace, rules, tooling, core crates) and R2 (the engine: 102 commands
+R4: the interface. R3 (the terminal: `term` on `alacritty_terminal`, the egui renderer and widget,
+the output pump with flow control, performance budgets) is done, as are R1 (workspace, rules,
+tooling, core crates) and R2 (the engine: 102 commands
 behind `Session::execute`, the agent gate, terminal sessions, forwarding, recording, settings in
 `config.toml`, a command sequence fuzz) are done.
 
