@@ -1,8 +1,10 @@
 //! Integration tests of the terminal: what a server sends and what the terminal shows.
 
 mod fuzz;
+mod history;
 mod rules;
 mod screen;
+mod search;
 
 use sshcraft_term::{Screen, TermConfig, TermSize, Terminal};
 

@@ -206,6 +206,7 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
     let offset = i32::try_from(content.display_offset).unwrap_or(i32::MAX);
     let mut cells = vec![CellView::default(); cols.saturating_mul(rows)];
     let mut links = Vec::new();
+    let range = content.selection;
     for indexed in content.display_iter {
         let Ok(row) = usize::try_from(indexed.point.line.0.saturating_add(offset)) else { continue };
         let col = indexed.point.column.0;
@@ -214,8 +215,24 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
             && let Some(slot) = cells.get_mut(row * cols + col)
         {
             *slot = cell_view(indexed.cell, &mut links);
+            if range.is_some_and(|r| r.contains(indexed.point)) {
+                slot.flags |= CellFlags::SELECTED;
+            }
         }
     }
+    let selection = range.and_then(|r| {
+        let last_row = i32::try_from(rows.saturating_sub(1)).unwrap_or(0);
+        let start_row = r.start.line.0.saturating_add(offset);
+        let end_row = r.end.line.0.saturating_add(offset);
+        if end_row < 0 || start_row > last_row {
+            return None;
+        }
+        let last_col = cols.saturating_sub(1);
+        let start = if start_row < 0 { (0, 0) } else { (r.start.column.0.min(last_col), start_row) };
+        let end = if end_row > last_row { (last_col, last_row) } else { (r.end.column.0.min(last_col), end_row) };
+        let point = |(c, row): (usize, i32)| (u16::try_from(c).unwrap_or(0), u16::try_from(row).unwrap_or(0));
+        Some(SelectionView { start: point(start), end: point(end), block: r.is_block })
+    });
     let cursor_row = content.cursor.point.line.0.saturating_add(offset);
     let shape = match content.cursor.shape {
         ansi::CursorShape::Beam => Some(CursorShape::Beam),
@@ -236,7 +253,7 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
         cells,
         cursor,
         display_offset: content.display_offset,
-        selection: None,
+        selection,
         modes: modes(content.mode),
         links,
     }

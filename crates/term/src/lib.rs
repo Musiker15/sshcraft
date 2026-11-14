@@ -9,7 +9,10 @@
 mod filter;
 pub mod limits;
 mod listener;
+mod marks;
 mod screen;
+mod search;
+mod selection;
 
 use alacritty_terminal::event::Event;
 use alacritty_terminal::grid::Dimensions;
@@ -17,6 +20,15 @@ use alacritty_terminal::term::{Config, Osc52, Term};
 use alacritty_terminal::vte::ansi::Processor;
 
 pub use screen::{CellFlags, CellView, CursorShape, CursorView, Screen, SelectionView, TermColor, TermModes};
+pub use search::{SearchError, SearchMatch, SearchQuery};
+pub use selection::{GridPoint, SelectionKind};
+
+/// Towards the history (`Up`) or towards the newest output (`Down`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+}
 
 use filter::Prefilter;
 use limits::{DEFAULT_SCROLLBACK, MAX_CELLS, MAX_CLIPBOARD_BYTES, MAX_COLS, MAX_ROWS, MAX_SCROLLBACK, MAX_TITLE_CHARS, MIN_COLS, MIN_ROWS};
@@ -116,6 +128,8 @@ pub struct Terminal {
     listener: Listener,
     size: TermSize,
     config: TermConfig,
+    /// The last match and the query it belongs to, where "next" goes on from.
+    last_match: Option<(u64, SearchMatch)>,
 }
 
 impl Terminal {
@@ -123,7 +137,16 @@ impl Terminal {
         let size = TermSize::clamped(size.cols, size.rows);
         let listener = Listener::default();
         let term = Term::new(options(size, config), &size, listener.clone());
-        Self { term, parser: Processor::new(), prefilter: Prefilter::default(), filtered: Vec::new(), listener, size, config: config.clone() }
+        Self {
+            term,
+            parser: Processor::new(),
+            prefilter: Prefilter::default(),
+            filtered: Vec::new(),
+            listener,
+            size,
+            config: config.clone(),
+            last_match: None,
+        }
     }
 
     /// Output from the session.
