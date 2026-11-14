@@ -26,6 +26,16 @@ pub enum EngineEvent {
     PromptWithdrawn {
         prompt_id: u64,
     },
+    /// The sync state of a server changed.
+    SyncStatus {
+        server: ServerId,
+        status: crate::sync::StatusView,
+    },
+    /// A sync server sent something this device could not use.
+    SyncWarning {
+        server: ServerId,
+        detail: String,
+    },
     AgentLogChanged,
     /// Windows Hello is not set up: stored keys are used without the check.
     HelloUnavailable,

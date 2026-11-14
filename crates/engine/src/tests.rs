@@ -199,3 +199,36 @@ async fn open_without_master_key_creates_none() {
     let err = session.execute(Caller::User, "test.vault", json!({})).await.unwrap_err();
     assert!(matches!(err, EngineError::Disabled { .. }), "{err:?}");
 }
+
+/// Writing commands tell the interface that data changed; reading commands do not.
+#[tokio::test]
+async fn data_commands_announce_changes() {
+    use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId};
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let mut events = session.subscribe();
+    let group =
+        Group { location: None, id: GroupId::new(), name: "eu".into(), defaults: ConnectionSettings::default(), parent_id: None, tags: Vec::new() };
+    let host = Host {
+        forwards: Vec::new(),
+        location: None,
+        id: HostId::new(),
+        name: "web".into(),
+        group_id: Some(group.id),
+        settings: ConnectionSettings { address: Some("10.0.0.1".into()), ..Default::default() },
+        tags: Vec::new(),
+        os: None,
+    };
+    let writes = [
+        ("group.save", json!({ "group": group })),
+        ("host.save", json!({ "host": host })),
+        ("identity.save", json!({ "identity": { "name": "me", "password": { "kind": "keep" } } })),
+        ("group.delete", json!({ "id": group.id })),
+    ];
+    for (id, params) in writes {
+        session.execute(Caller::User, id, params).await.unwrap();
+        assert!(matches!(events.try_recv(), Ok(crate::EngineEvent::DataChanged { .. })), "{id} sent no DataChanged");
+    }
+    session.execute(Caller::User, "host.list", json!({})).await.unwrap();
+    assert!(events.try_recv().is_err(), "a read sent an event");
+}

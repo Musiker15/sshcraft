@@ -56,7 +56,21 @@ pub fn needs_vault(session: &Session) -> Result<(), String> {
     session.vault_state().map_err(|code| format!("the vault is not available ({})", <&'static str>::from(code)))
 }
 
+pub mod group;
+pub mod host;
+pub mod identity;
+pub mod password;
 pub mod settings;
+
+/// The error type of the commands moved from the Tauri version.
+pub(crate) type CommandError = EngineError;
+pub(crate) type CommandResult<T> = Result<T, EngineError>;
+
+/// Runs a synchronous command body as the future a [`Run`] returns.
+pub(crate) fn sync_run(f: impl FnOnce() -> Result<Value, EngineError> + Send + 'static) -> BoxFuture<'static, Result<Value, EngineError>> {
+    use futures::FutureExt;
+    async move { f() }.boxed()
+}
 
 /// A command that changes something: it goes into the journal.
 pub(crate) fn command(id: &'static str, label: &'static str, params: &'static str, run: Run) -> CommandSpec {
@@ -84,6 +98,10 @@ pub fn command_specs() -> &'static [CommandSpec] {
     REGISTRY.get_or_init(|| {
         let mut specs: Vec<CommandSpec> = Vec::new();
         specs.extend(settings::specs());
+        specs.extend(group::specs());
+        specs.extend(host::specs());
+        specs.extend(identity::specs());
+        specs.extend(password::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         specs

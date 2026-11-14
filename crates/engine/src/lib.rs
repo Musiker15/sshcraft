@@ -11,6 +11,7 @@ pub mod events;
 pub mod gate;
 pub mod journal;
 pub mod settings;
+pub mod sync;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 #[cfg(test)]
@@ -75,8 +76,9 @@ pub struct Ctx {
 }
 
 struct Inner {
-    store: Mutex<Store>,
-    vault: Result<Vault, ErrorCode>,
+    store: Arc<Mutex<Store>>,
+    vault: Result<Arc<Vault>, ErrorCode>,
+    sync: sync::SyncManager,
     events: EventBus,
     journal: Mutex<journal::Journal>,
     settings: Mutex<craft_settings::SettingsStore<settings::EngineSettings>>,
@@ -108,7 +110,7 @@ impl Session {
             other => EngineError::failed(ErrorCode::Io, other),
         })?;
         let store = Store::open(&config.data_dir.join("sshcraft.db"))?;
-        let vault = Vault::unlock(&store, config.master_key).map_err(|e| error::vault_code(&e));
+        let vault = Vault::unlock(&store, config.master_key).map(Arc::new).map_err(|e| error::vault_code(&e));
         let (mut prefs, load) = craft_settings::SettingsStore::<settings::EngineSettings>::open(config.settings);
         let takeover = settings::take_over(&store, &mut prefs, &load, now_ms());
         let report = OpenReport {
@@ -117,10 +119,14 @@ impl Session {
             settings_problems: load.has_problems(),
             settings_read_only: prefs.is_read_only(),
         };
+        let events = EventBus::new(config.event_capacity);
+        let store = Arc::new(Mutex::new(store));
+        let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(sync::BusObserver(events.clone())));
         let inner = Inner {
-            store: Mutex::new(store),
+            store,
             vault,
-            events: EventBus::new(config.event_capacity),
+            sync,
+            events,
             journal: Mutex::new(journal::Journal::default()),
             settings: Mutex::new(prefs),
             runtime: config.runtime,
@@ -197,8 +203,22 @@ impl Session {
     }
 
     #[allow(dead_code)] // used by the commands from R2.4 on
-    pub(crate) fn vault(&self) -> Result<&Vault, EngineError> {
-        self.0.vault.as_ref().map_err(|code| EngineError::code(*code))
+    pub(crate) fn vault(&self) -> Result<Arc<Vault>, EngineError> {
+        self.0.vault.clone().map_err(EngineError::code)
+    }
+
+    pub(crate) fn sync(&self) -> &sync::SyncManager {
+        &self.0.sync
+    }
+
+    /// Tells the interface that data changed, once per sync server it belongs to.
+    pub(crate) fn announce(&self, servers: &[sshcraft_model::model::ServerId]) {
+        if servers.is_empty() {
+            self.0.events.send(EngineEvent::DataChanged { server: None });
+        }
+        for server in servers {
+            self.0.events.send(EngineEvent::DataChanged { server: Some(*server) });
+        }
     }
 
     pub(crate) fn vault_state(&self) -> Result<(), ErrorCode> {

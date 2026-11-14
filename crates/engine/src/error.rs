@@ -173,12 +173,30 @@ impl EngineError {
         Self::Failed { code, detail: Some(detail.to_string()) }
     }
 
+    /// The same as [`EngineError::failed`], under the name the moved commands use.
+    pub fn new(code: ErrorCode, detail: impl ToString) -> Self {
+        Self::failed(code, detail)
+    }
+
     pub fn code(code: ErrorCode) -> Self {
         Self::Failed { code, detail: None }
     }
 
     pub fn bad_params(id: &str, message: impl ToString) -> Self {
         Self::BadParams { id: id.to_string(), message: message.to_string() }
+    }
+
+    /// The failure code; [`ErrorCode::Internal`] for errors that are not a failure.
+    pub fn failure(&self) -> ErrorCode {
+        match self {
+            Self::Failed { code, .. } => *code,
+            _ => ErrorCode::Internal,
+        }
+    }
+
+    /// The technical detail, if there is one.
+    pub fn detail_text(&self) -> Option<String> {
+        self.detail()
     }
 
     pub fn kind(&self) -> ErrorKind {
