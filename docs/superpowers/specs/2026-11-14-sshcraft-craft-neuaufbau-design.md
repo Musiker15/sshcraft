@@ -168,6 +168,8 @@ hängt nur an tieferen Schichten. Nichts unter L6 hängt an egui, eframe, winit 
   (Abschnitt 9); damit fallen auch dessen `unsafe`-Blöcke weg.
 - Die Aufteilung von `sshcraft-core` ist ein Vorschlag. Bedingungen: keine Schicht greift nach
   oben, `proto` und `model` bleiben wasm-fähig, `store` liest Schema 11 ohne Migration.
+- `proto`, `model`, `ssh` und `sync` bekommen keine Abhängigkeit auf `engine`, Oberfläche oder
+  App, damit die Schwester-App für Datenbanken (Abschnitt 16.3) sie nutzen kann.
 
 ## 6. Engine: everything is a command
 
@@ -508,13 +510,34 @@ Reihenfolge als Vorschlag; Moritz kann sie umstellen.
 | F4 | Verbindungen und Ordnung | Verbindung wiederverwenden (ControlMaster); Befehle vor und nach der Verbindung (Wake-on-LAN, Port-Knocking, VPN); X11-Weiterleitung mit vorhandenem X-Server; Unix-Socket-Weiterleitung; `ssh://`-Links (öffnen nur den Verbindungsdialog); Erreichbarkeit in der Hostliste; Schnellverbinden `benutzer@host:port`; Sammelbearbeitung; Teilen mit Platzhalter für Zugangsdaten; portabler Modus; Desktop-Verknüpfung; sichere Tastatureingabe (macOS); Ressourcenleiste (Vorgabe aus) |
 | F5 | Dauerhafte Sitzungen | Sitzungen, die Netzwechsel, Ruhezustand und Neustart des Clients überleben (über tmux oder screen auf dem Server, Zustand im Tab); tmux-Steuermodus (tmux-Fenster als Tabs und Bereiche); Mosh und Eternal Terminal auf dem Desktop; Telnet |
 | F6 | Terminal-Extras | Bilder im Terminal (Sixel, Kitty Graphics, iTerm2-Protokoll); Hex-Ansicht für seriell; Hotkey- und Dropdown-Fenster; Dateien über das Terminal (trzsz, ZMODEM), nur nach Rückfrage, nie automatisch |
-| F7 | Ziele und Automatisierung | Container als Ziel (Docker, Podman, LXD, Kubernetes, Proxmox); Weiterleitung mit Startaktion (RDP, VNC, Browser über den Tunnel); Smartcards (PIV, PKCS#11); Kerberos (GSSAPI); Makros aus dem Befehls-Journal der Engine aufnehmen und abspielen; Skripte über `sshcraft-cli run --script`; dynamische Gruppen |
+| F7 | Ziele und Automatisierung | Container als Ziel (Docker, Podman, LXD, Kubernetes, Proxmox); Weiterleitung mit Startaktion (RDP, VNC, Browser oder der Datenbank-Client aus Abschnitt 16.3 über den Tunnel); Smartcards (PIV, PKCS#11); Kerberos (GSSAPI); Makros aus dem Befehls-Journal der Engine aufnehmen und abspielen; Skripte über `sshcraft-cli run --script`; dynamische Gruppen |
 
 Weiter vorgemerkt ohne Teilplan: mehrere Personen im selben Terminal, Import aus AWS,
 DigitalOcean, Azure und Hetzner, KI-Funktionen (ab Werk aus), Plugins, Notebooks, eine
 Web-Fassung mit Relay.
 
-### 16.3 Bewusst nicht
+### 16.3 Schwester-App für Datenbanken
+
+Moritz, 14.11.2026: Ein Client für Datenbanken (SQLite, MySQL, MariaDB, PostgreSQL und weitere,
+lokal oder auf Servern) wird ein **eigenes Programm**, nicht Teil von SSHCraft. Gründe: Er ist
+etwa so groß wie SSHCraft selbst, er ist eine eigene Programmart (Vorbilder wie DBeaver,
+TablePlus, DataGrip, HeidiSQL, Beekeeper) und passt damit als eigene Craft-App in die Familie,
+"Alles-in-einem" gilt im Marktvergleich als Schwäche, und SSHCraft hält die Schlüssel zu allen
+Servern, sodass jede weitere Funktion die Angriffsfläche dieses Prozesses vergrößert.
+
+- **Zeitpunkt:** nach V1 von SSHCraft, mit eigenem Entwurf und eigenem Marktvergleich; der
+  Arbeitsname steht noch aus.
+- **Tunnel über SSHCraft:** Datenbanken auf Servern erreicht die Schwester-App über einen
+  SSH-Tunnel, den die laufende SSHCraft für sie öffnet (Befehl in der Kategorie
+  Portweiterleitung, für Agents und andere Apps ab Werk "gesperrt", Rückfrage im SSHCraft-Fenster).
+  Die Schwester-App verbindet sich mit `localhost`; Schlüssel verlassen SSHCraft nie. Läuft
+  SSHCraft nicht, startet die Schwester-App sie wie `--when-closed launch`.
+- **Gemeinsamer Code:** `proto`, `model`, `ssh` und `sync` sind Bibliotheken ohne App-Bezug
+  (Abschnitt 5). Der eigene Sync-Server kann einen eigenen Bereich für Datenbank-Verbindungen
+  bekommen.
+- **In SSHCraft** kommt dafür nur die Startaktion "im Datenbank-Client öffnen" (F7).
+
+### 16.4 Bewusst nicht
 
 RDP, VNC und Spice als eigene Tabs (die Startaktion in F7 reicht), ein eigener X-Server,
 verschleiertes SSH, FTP-zu-SFTP-Brücke, FTPS, WebDAV und S3 im Dateibrowser, SFTP als
