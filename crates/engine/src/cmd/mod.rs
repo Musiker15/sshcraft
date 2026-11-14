@@ -57,16 +57,32 @@ pub fn needs_vault(session: &Session) -> Result<(), String> {
 }
 
 pub mod agent;
+pub mod forward;
 pub mod group;
 pub mod host;
 pub mod identity;
 pub mod key;
+pub mod link;
 pub mod local;
+pub mod log;
 pub mod password;
 pub mod prompt;
 pub mod session;
 pub mod settings;
+pub mod snippet;
 pub mod vault;
+pub mod workspace;
+
+/// A dialog the user fills in, for a command called without what the dialog asks (a path to
+/// save to). Only the user gets one; a program calling a command never opens a dialog and gets
+/// an error instead.
+pub(crate) fn dialog_or_error(ctx: &Ctx, name: &str, params: &Value) -> Result<Value, EngineError> {
+    if !ctx.caller.is_user() {
+        return Err(EngineError::bad_params(name, "missing path: programmatic calls never open dialogs"));
+    }
+    ctx.session.events().send(crate::events::EngineEvent::Ui(crate::events::UiRequest::Dialog { name: name.to_string(), params: params.clone() }));
+    Ok(serde_json::json!({ "dialog": name }))
+}
 
 /// The error type of the commands moved from the Tauri version.
 pub(crate) type CommandError = EngineError;
@@ -124,6 +140,11 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(prompt::specs());
         specs.extend(local::specs());
         specs.extend(agent::specs());
+        specs.extend(forward::specs());
+        specs.extend(workspace::specs());
+        specs.extend(snippet::specs());
+        specs.extend(log::specs());
+        specs.extend(link::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         for spec in &mut specs {

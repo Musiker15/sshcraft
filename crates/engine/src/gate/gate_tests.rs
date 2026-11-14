@@ -245,6 +245,121 @@ async fn hidden_hosts_are_unknown_everywhere() {
     assert!(call(&w, &conn, "group.list", Value::Null).await.unwrap().as_array().unwrap().is_empty());
     // host.info is a list and not logged; the other three are, as hidden.
     assert_eq!(w.outcomes().iter().filter(|o| **o == AgentOutcome::Hidden).count(), 3);
+    hidden_hosts_stay_out_of_forwards_logs_workspaces_and_snippets(&w, &conn).await;
+}
+
+/// The same hidden `db` in the categories that came with R2.8, all of them allowed.
+async fn hidden_hosts_stay_out_of_forwards_logs_workspaces_and_snippets(w: &World, conn: &AgentConnection) {
+    use sshcraft_model::forward::{ForwardId, ForwardKind, ForwardRule};
+    use sshcraft_store::session_log::{self, LogKind, LogMeta};
+    for category in [AgentCategory::Forward, AgentCategory::Logs, AgentCategory::Workspaces, AgentCategory::Snippets] {
+        w.set(category, AgentLevel::Allow);
+    }
+    let user = |id: &'static str, params: Value| w.session.execute(Caller::User, id, params);
+    // A rule on `db` the user started; nothing listens where it points.
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let mut db = w.stored(w.db.id).unwrap();
+    db.settings.address = Some("127.0.0.1".into());
+    db.settings.port = Some(port);
+    let rule = ForwardRule {
+        id: ForwardId::new(),
+        name: "db".into(),
+        kind: ForwardKind::Local,
+        bind_address: "127.0.0.1".into(),
+        bind_port: std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(),
+        target_host: "127.0.0.1".into(),
+        target_port: 5432,
+    };
+    db.forwards.push(rule.clone());
+    w.add_host(&db);
+    user("forward.start", json!({ "host_id": db.id, "rule_id": rule.id })).await.unwrap();
+    while user("forward.status", Value::Null).await.unwrap().as_array().unwrap().is_empty() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(call(w, conn, "forward.status", Value::Null).await.unwrap(), json!([]));
+    assert!(is_not_found(&call(w, conn, "forward.start", json!({ "host_id": db.id, "rule_id": rule.id })).await));
+    // A session log recorded on `db`.
+    {
+        let vault = w.session.vault().unwrap();
+        let store = w.session.store();
+        let meta = LogMeta {
+            id: sshcraft_model::model::LogId(Uuid::new_v4()),
+            title: "db".into(),
+            kind: LogKind::Ssh,
+            host_id: Some(db.id),
+            started_at: 1,
+            ended_at: None,
+            size: 0,
+            truncated: false,
+            marks: Vec::new(),
+        };
+        session_log::create(&vault, &store, &meta).unwrap();
+        session_log::append_chunk(&vault, &store, meta.id, 0, b"secret-db-output\r\n", 2).unwrap();
+        session_log::finish(&vault, &store, meta.id, 3, 18, false).unwrap();
+    }
+    assert_eq!(user("log.list", Value::Null).await.unwrap().as_array().unwrap().len(), 1);
+    assert_eq!(call(w, conn, "log.list", Value::Null).await.unwrap(), json!([]));
+    assert_eq!(user("log.search", json!({ "query": "secret-db" })).await.unwrap().as_array().unwrap().len(), 1);
+    assert_eq!(call(w, conn, "log.search", json!({ "query": "secret-db" })).await.unwrap(), json!([]));
+    // A workspace with a pane on `db`, a snippet that runs on it.
+    let template = json!({
+        "id": Uuid::new_v4(),
+        "name": "db work",
+        "layout": "split",
+        "col_sizes": [1.0],
+        "row_sizes": [1.0],
+        "panes": [{ "target": { "kind": "host", "host_id": db.id }, "title": "db" }],
+    });
+    user("workspace.save", json!({ "template": template })).await.unwrap();
+    assert_eq!(call(w, conn, "workspace.list", Value::Null).await.unwrap(), json!([]));
+    let snippet = json!({ "id": Uuid::new_v4(), "name": "vacuum", "content": "vacuumdb", "default_targets": [db.id] });
+    user("snippet.save", json!({ "snippet": snippet })).await.unwrap();
+    assert_eq!(call(w, conn, "snippet.list", Value::Null).await.unwrap(), json!([]));
+}
+
+#[tokio::test]
+async fn log_export_without_path_asks_only_the_user() {
+    let w = world(None).await;
+    w.set(AgentCategory::Logs, AgentLevel::Allow);
+    let mut events = w.session.subscribe();
+    let id = sshcraft_model::model::LogId(Uuid::new_v4());
+    {
+        use sshcraft_store::session_log::{self, LogKind, LogMeta};
+        let vault = w.session.vault().unwrap();
+        let store = w.session.store();
+        let meta = LogMeta {
+            id,
+            title: "web".into(),
+            kind: LogKind::Ssh,
+            host_id: None,
+            started_at: 1,
+            ended_at: None,
+            size: 0,
+            truncated: false,
+            marks: Vec::new(),
+        };
+        session_log::create(&vault, &store, &meta).unwrap();
+        session_log::append_chunk(&vault, &store, id, 0, b"ok\r\n", 2).unwrap();
+        session_log::finish(&vault, &store, id, 3, 4, false).unwrap();
+    }
+    let params = json!({ "id": id, "format": "text" });
+    let r = w.session.execute(Caller::User, "log.export", params.clone()).await.unwrap();
+    assert_eq!(r, json!({ "dialog": "saveLog" }));
+    let asked = loop {
+        if let Ok(crate::EngineEvent::Ui(crate::UiRequest::Dialog { name, params })) = events.recv().await {
+            break (name, params);
+        }
+    };
+    assert_eq!(asked.0, "saveLog");
+    assert_eq!(asked.1["name"], "web-1970-01-01.txt");
+    // Never for a program: log.export is not reachable for agents or the control channel.
+    let control = w.session.control_connection();
+    for conn in [&w.conn(), &control] {
+        assert!(is_denied(&call(&w, conn, "log.export", params.clone()).await));
+    }
+    // And the helper itself refuses every caller but the user.
+    let ctx = crate::Ctx { session: w.session.clone(), caller: control.caller() };
+    assert!(matches!(crate::cmd::dialog_or_error(&ctx, "saveLog", &params), Err(EngineError::BadParams { .. })));
 }
 
 #[tokio::test]

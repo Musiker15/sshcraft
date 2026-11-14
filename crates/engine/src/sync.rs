@@ -65,20 +65,25 @@ impl SyncObserver for StatusRecorder {
     }
 }
 
-/// Passes what the sync runtimes report on to the engine's event bus.
-pub struct BusObserver(pub crate::events::EventBus);
+/// Passes what the sync runtimes report on to the engine's event bus, and stops forwarding
+/// rules whose host or rule sync removed.
+pub struct BusObserver {
+    pub events: crate::events::EventBus,
+    pub forwards: std::sync::Arc<crate::forwards::ForwardManager>,
+}
 
 impl SyncObserver for BusObserver {
     fn status(&self, server: ServerId, status: SyncStatus) {
-        self.0.send(crate::events::EngineEvent::SyncStatus { server, status: StatusView::from(&status) });
+        self.events.send(crate::events::EngineEvent::SyncStatus { server, status: StatusView::from(&status) });
     }
 
     fn data_changed(&self, server: ServerId) {
-        self.0.send(crate::events::EngineEvent::DataChanged { server: Some(server) });
+        self.forwards.reconcile();
+        self.events.send(crate::events::EngineEvent::DataChanged { server: Some(server) });
     }
 
     fn warning(&self, server: ServerId, message: String) {
-        self.0.send(crate::events::EngineEvent::SyncWarning { server, detail: message });
+        self.events.send(crate::events::EngineEvent::SyncWarning { server, detail: message });
     }
 }
 

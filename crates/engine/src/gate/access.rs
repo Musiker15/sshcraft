@@ -26,6 +26,9 @@ pub enum AskRule {
     OwnSession,
     /// Cleaning up what the agent itself opened (closing its session) is always allowed.
     Cleanup,
+    /// Reading within the category (a status, a list, a log) needs no question; "deny" still
+    /// blocks it.
+    Read,
 }
 
 /// What running the command does to the connection's sessions.
@@ -573,9 +576,203 @@ pub fn access_for(id: &str) -> Option<&'static AgentAccess> {
         "key.delete" => &KEY_DELETE,
         "key.generate" => &KEY_GENERATE,
         "key.import" => &KEY_IMPORT,
+        "forward.start" => &FORWARD_START,
+        "forward.stop" => &FORWARD_STOP,
+        "forward.status" => &FORWARD_STATUS,
+        "workspace.list" => &WORKSPACE_LIST,
+        "workspace.save" => &WORKSPACE_SAVE,
+        "workspace.delete" => &WORKSPACE_DELETE,
+        "snippet.list" => &SNIPPET_LIST,
+        "snippet.save" => &SNIPPET_SAVE,
+        "snippet.delete" => &SNIPPET_DELETE,
+        "log.list" => &LOG_LIST,
+        "log.read" => &LOG_READ,
+        "log.mark_add" => &LOG_MARK_ADD,
+        "log.mark_remove" => &LOG_MARK_REMOVE,
+        "log.delete" => &LOG_DELETE,
+        "log.search" => &LOG_SEARCH,
         _ => return None,
     })
 }
+
+// ---- Forward ----
+
+#[derive(Deserialize)]
+struct RuleInput {
+    host_id: HostId,
+    rule_id: sshcraft_model::forward::ForwardId,
+}
+
+/// A rule of a host agents see.
+fn resolve_rule(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let RuleInput { host_id, rule_id } = params(value)?;
+    let h = view.host(&host_id.0.to_string()).map_err(|r| r.on(&host_id.0.to_string()))?;
+    let rule = h.forwards.iter().find(|r| r.id == rule_id).ok_or_else(|| not_found("rule", false).on(&h.name))?;
+    let detail = rule.name.clone();
+    Ok(plain(json!({ "host_id": host_id, "rule_id": rule_id }), host_target(&h), detail))
+}
+
+fn present_forwards(view: &GateView, _: &Resolved, value: Value) -> Value {
+    without_hidden_hosts(view, value, "host_id")
+}
+
+// ---- Workspaces ----
+
+fn present_templates(view: &GateView, _: &Resolved, _: Value) -> Value {
+    to_json(&view.templates.iter().filter(|t| !view.template_hidden(t)).collect::<Vec<_>>())
+}
+
+#[derive(Deserialize)]
+struct TemplateSave {
+    template: crate::workspaces::Template,
+}
+
+fn resolve_template_save(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let TemplateSave { template } = params(value)?;
+    let target = template.name.clone();
+    // Its panes must be on hosts agents see, and a stored one it replaces must be visible too.
+    for pane in &template.panes {
+        if let crate::workspaces::TemplateTarget::Host { host_id } = pane.target {
+            view.host(&host_id.0.to_string()).map_err(|r| r.on(&target))?;
+        }
+    }
+    if view.templates.iter().any(|t| t.id == template.id && view.template_hidden(t)) {
+        return Err(not_found("template", true).on(&target));
+    }
+    Ok(plain(json!({ "template": template }), target, String::new()))
+}
+
+#[derive(Deserialize)]
+struct UuidRef {
+    id: Uuid,
+}
+
+fn resolve_template_delete(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let UuidRef { id } = params(value)?;
+    let stored = view.templates.iter().find(|t| t.id == id);
+    if stored.is_some_and(|t| view.template_hidden(t)) {
+        return Err(not_found("template", true).on(&id.to_string()));
+    }
+    Ok(plain(json!({ "id": id }), stored.map_or_else(|| id.to_string(), |t| t.name.clone()), String::new()))
+}
+
+// ---- Snippets ----
+
+fn present_snippets(view: &GateView, _: &Resolved, _: Value) -> Value {
+    to_json(&view.snippets.iter().filter(|s| !view.snippet_hidden(s)).collect::<Vec<_>>())
+}
+
+#[derive(Deserialize)]
+struct SnippetSave {
+    snippet: sshcraft_store::snippets::Snippet,
+}
+
+fn resolve_snippet_save(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let SnippetSave { snippet } = params(value)?;
+    let target = snippet.name.clone();
+    for host in &snippet.default_targets {
+        view.host(&host.0.to_string()).map_err(|r| r.on(&target))?;
+    }
+    if view.snippets.iter().any(|s| s.id == snippet.id && view.snippet_hidden(s)) {
+        return Err(not_found("snippet", true).on(&target));
+    }
+    Ok(plain(json!({ "snippet": snippet }), target, String::new()))
+}
+
+fn resolve_snippet_delete(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let UuidRef { id } = params(value)?;
+    let stored = view.snippets.iter().find(|s| s.id.0 == id);
+    if stored.is_some_and(|s| view.snippet_hidden(s)) {
+        return Err(not_found("snippet", true).on(&id.to_string()));
+    }
+    Ok(plain(json!({ "id": id }), stored.map_or_else(|| id.to_string(), |s| s.name.clone()), String::new()))
+}
+
+// ---- Logs ----
+
+/// A log agents may see; the rest of the parameters passes as it is.
+fn visible_log(view: &GateView, value: &Value) -> Result<sshcraft_model::model::LogId, Refusal> {
+    let id = value
+        .get("id")
+        .and_then(|v| serde_json::from_value::<sshcraft_model::model::LogId>(v.clone()).ok())
+        .ok_or_else(|| invalid("id is missing"))?;
+    if view.log_hidden(id) {
+        return Err(not_found("log", true).on(&id.0.to_string()));
+    }
+    Ok(id)
+}
+
+fn resolve_log(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let id = visible_log(view, &value)?;
+    Ok(plain(value, id.0.to_string(), String::new()))
+}
+
+#[derive(Deserialize)]
+struct LogIds {
+    ids: Vec<sshcraft_model::model::LogId>,
+}
+
+fn resolve_log_delete(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let LogIds { ids } = params(value)?;
+    if let Some(hidden) = ids.iter().find(|id| view.log_hidden(**id)) {
+        return Err(not_found("log", true).on(&hidden.0.to_string()));
+    }
+    let target = ids.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(", ");
+    Ok(plain(json!({ "ids": ids }), target, String::new()))
+}
+
+#[derive(Deserialize)]
+struct SearchInput {
+    query: String,
+}
+
+fn resolve_log_search(_: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let SearchInput { query } = params(value)?;
+    Ok(plain(json!({ "query": query }), String::new(), query))
+}
+
+fn present_logs(view: &GateView, _: &Resolved, value: Value) -> Value {
+    without_hidden_hosts(view, value, "host_id")
+}
+
+fn present_hits(view: &GateView, _: &Resolved, value: Value) -> Value {
+    match value {
+        Value::Array(hits) => Value::Array(
+            hits.into_iter()
+                .filter(|hit| {
+                    !hit.get("log_id")
+                        .and_then(|v| serde_json::from_value::<sshcraft_model::model::LogId>(v.clone()).ok())
+                        .is_some_and(|id| view.log_hidden(id))
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+const fn read(category: AgentCategory, resolve: Resolve, present: Present) -> AgentAccess {
+    AgentAccess { ask: AskRule::Read, logged: false, ..access(category, resolve, present) }
+}
+
+pub static FORWARD_START: AgentAccess = access(AgentCategory::Forward, resolve_rule, present_nothing);
+pub static FORWARD_STOP: AgentAccess = access(AgentCategory::Forward, resolve_rule, present_nothing);
+pub static FORWARD_STATUS: AgentAccess = read(AgentCategory::Forward, resolve_nothing, present_forwards);
+
+pub static WORKSPACE_LIST: AgentAccess = read(AgentCategory::Workspaces, resolve_nothing, present_templates);
+pub static WORKSPACE_SAVE: AgentAccess = access(AgentCategory::Workspaces, resolve_template_save, identity);
+pub static WORKSPACE_DELETE: AgentAccess = access(AgentCategory::Workspaces, resolve_template_delete, present_nothing);
+
+pub static SNIPPET_LIST: AgentAccess = read(AgentCategory::Snippets, resolve_nothing, present_snippets);
+pub static SNIPPET_SAVE: AgentAccess = access(AgentCategory::Snippets, resolve_snippet_save, identity);
+pub static SNIPPET_DELETE: AgentAccess = access(AgentCategory::Snippets, resolve_snippet_delete, present_nothing);
+
+pub static LOG_LIST: AgentAccess = read(AgentCategory::Logs, resolve_nothing, present_logs);
+/// Log output is what a server printed: the agent's business, like `host.exec` output.
+pub static LOG_READ: AgentAccess = AgentAccess { own_data: false, ..read(AgentCategory::Logs, resolve_log, identity) };
+pub static LOG_MARK_ADD: AgentAccess = access(AgentCategory::Logs, resolve_log, identity);
+pub static LOG_MARK_REMOVE: AgentAccess = access(AgentCategory::Logs, resolve_log, identity);
+pub static LOG_DELETE: AgentAccess = access(AgentCategory::Logs, resolve_log_delete, present_nothing);
+pub static LOG_SEARCH: AgentAccess = AgentAccess { own_data: false, ..read(AgentCategory::Logs, resolve_log_search, present_hits) };
 
 /// Builds the resolve step of a later command that names a host in the field `host`: the host
 /// must be one agents see.

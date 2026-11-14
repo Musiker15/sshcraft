@@ -1310,6 +1310,9 @@ async fn install_key_reports_write_failure_and_cancelled_sign_in() {
     assert_eq!(err.0, ErrorCode::SignInCancelled);
 }
 
+#[path = "forwards_tests.rs"]
+mod forwards;
+
 #[tokio::test]
 async fn host_session_lists_a_directory() {
     let f = fixture(true).await;

@@ -84,6 +84,8 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
             Ok(s.delete_group(id)?)
         })?;
         servers.extend(drop_orphans(&ctx.session, &passwords)?);
+        // The group's hosts are gone: their rules stop forwarding.
+        ctx.session.forwards().reconcile();
         ctx.session.announce(&servers);
         Ok(Value::Null)
     })

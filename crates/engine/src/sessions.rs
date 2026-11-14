@@ -261,6 +261,10 @@ impl Context {
     pub(crate) fn store(&self) -> std::sync::MutexGuard<'_, Store> {
         self.store.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    pub(crate) fn runtime(&self) -> &tokio::runtime::Handle {
+        &self.runtime
+    }
 }
 
 /// What a [`SessionManager`] is built from.

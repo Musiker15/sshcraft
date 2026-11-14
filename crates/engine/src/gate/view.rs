@@ -1,10 +1,14 @@
 //! A snapshot of what the gate decides on: the agent policy and the hosts, groups and keys. Hidden
 //! hosts and groups (also behind a jump host) are unknown to agents.
 
-use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, KeyRef, group_chain};
-use sshcraft_store::agent::AgentPolicy;
+use sshcraft_model::model::{ConnectionSettings, Group, GroupId, Host, HostId, KeyRef, LogId, group_chain};
+use sshcraft_store::agent::{AgentCategory, AgentPolicy};
+use sshcraft_store::snippets::Snippet;
 use sshcraft_store::store::Store;
+use sshcraft_store::vault::Vault;
 use uuid::Uuid;
+
+use crate::workspaces::{Template, TemplateTarget};
 
 use super::access::{Refusal, invalid, not_found};
 use super::wire::{GroupView, HostView, KeyView, is_bidi_control};
@@ -21,9 +25,49 @@ pub struct GateView {
     pub hosts: Vec<Host>,
     pub groups: Vec<Group>,
     pub keys: Vec<KeyView>,
+    /// Workspace templates, loaded for the `Workspaces` category.
+    pub templates: Vec<Template>,
+    /// Snippets, loaded for the `Snippets` category (they need the vault).
+    pub snippets: Vec<Snippet>,
+    /// Each session log and the host it recorded, loaded for the `Logs` category.
+    pub logs: Vec<(LogId, Option<HostId>)>,
 }
 
 impl GateView {
+    /// [`GateView::load`], plus what the category's rules look at.
+    pub fn load_for(store: &Store, vault: Option<&Vault>, category: AgentCategory) -> Result<Self, EngineError> {
+        let mut view = Self::load(store)?;
+        match (category, vault) {
+            (AgentCategory::Workspaces, _) => view.templates = crate::workspaces::list(store),
+            (AgentCategory::Snippets, Some(vault)) => view.snippets = sshcraft_store::snippets::list(vault, store)?,
+            (AgentCategory::Logs, Some(vault)) => {
+                view.logs = sshcraft_store::session_log::list(vault, store)?.into_iter().map(|s| (s.meta.id, s.meta.host_id)).collect();
+            }
+            _ => {}
+        }
+        Ok(view)
+    }
+
+    /// Whether the host with this id is hidden from agents; an unknown host is not.
+    pub fn host_id_hidden(&self, id: HostId) -> bool {
+        self.hosts.iter().find(|h| h.id == id).is_some_and(|h| self.host_hidden(h))
+    }
+
+    /// A template with a pane on a hidden host is hidden as a whole.
+    pub fn template_hidden(&self, template: &Template) -> bool {
+        template.panes.iter().any(|p| matches!(p.target, TemplateTarget::Host { host_id } if self.host_id_hidden(host_id)))
+    }
+
+    /// A snippet that runs on a hidden host is hidden as a whole.
+    pub fn snippet_hidden(&self, snippet: &Snippet) -> bool {
+        snippet.default_targets.iter().any(|h| self.host_id_hidden(*h))
+    }
+
+    /// A session log recorded on a hidden host is hidden.
+    pub fn log_hidden(&self, id: LogId) -> bool {
+        self.logs.iter().any(|(log, host)| *log == id && host.is_some_and(|h| self.host_id_hidden(h)))
+    }
+
     /// Reads the policy, hosts, groups and keys. Without a readable policy nothing runs: hidden
     /// hosts must not show because the list broke.
     pub fn load(store: &Store) -> Result<Self, EngineError> {
@@ -33,7 +77,7 @@ impl GateView {
             .into_iter()
             .map(|info| KeyView { id: info.id.0, name: info.name, kind: info.algorithm, fingerprint: info.fingerprint })
             .collect();
-        Ok(Self { policy, hosts: store.list_hosts()?, groups: store.list_groups()?, keys })
+        Ok(Self { policy, hosts: store.list_hosts()?, groups: store.list_groups()?, keys, ..Self::default() })
     }
 
     fn group_chain(&self, group: Option<GroupId>) -> Vec<Group> {

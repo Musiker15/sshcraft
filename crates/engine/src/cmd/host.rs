@@ -144,6 +144,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         };
         let mut servers = checked(&ctx.session, Change::SaveHost(&host), ItemKind::Host, id, |s| Ok(s.upsert_host(&host)?))?;
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
+        // Rules removed from the host stop forwarding.
+        let rules: Vec<_> = host.forwards.iter().map(|r| r.id).collect();
+        ctx.session.forwards().keep_only(host.id, &rules);
         ctx.session.announce(&servers);
         Ok(Value::Null)
     })
@@ -163,6 +166,7 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
         // The host's commands go with it.
         let _ = sshcraft_store::history::clear(&ctx.session.store(), Some(&format!("host:{}", id.0)));
         servers.extend(drop_orphans(&ctx.session, &passwords)?);
+        ctx.session.forwards().stop_host(id);
         ctx.session.announce(&servers);
         Ok(Value::Null)
     })

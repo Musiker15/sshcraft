@@ -127,8 +127,9 @@ impl Drop for LogGuard {
 }
 
 /// The view, with the sessions of the connection whose host went away or became hidden closed.
-fn load(session: &Session, conn: ConnId) -> Result<(GateView, Connection), EngineError> {
-    let view = GateView::load(&session.store())?;
+fn load(session: &Session, conn: ConnId, category: AgentCategory) -> Result<(GateView, Connection), EngineError> {
+    let vault = session.vault().ok();
+    let view = GateView::load_for(&session.store(), vault.as_deref(), category)?;
     let mut connection = session.connection(conn).ok_or_else(|| EngineError::Denied("unknown connection".to_string()))?;
     let gone: Vec<SessionId> = connection
         .sessions
@@ -166,7 +167,7 @@ pub(crate) async fn run_for_agent(session: &Session, spec: &'static CommandSpec,
         }
     };
 
-    let (mut view, connection) = load(session, conn)?;
+    let (mut view, connection) = load(session, conn, access.category)?;
     let mut resolved = match (access.resolve)(&view, &connection, params.clone()) {
         Ok(resolved) => resolved,
         Err(refusal) => {
@@ -183,8 +184,9 @@ pub(crate) async fn run_for_agent(session: &Session, spec: &'static CommandSpec,
             return Err(EngineError::Denied("not allowed for agents".to_string()));
         }
         (_, AgentLevel::Allow) => AgentOutcome::Allowed,
-        // Writing to and reading from a session this connection opened were allowed with opening it.
-        (AskRule::OwnSession, AgentLevel::Ask) => AgentOutcome::Allowed,
+        // Writing to and reading from a session this connection opened were allowed with opening
+        // it; reading within a category needs no question either.
+        (AskRule::OwnSession | AskRule::Read, AgentLevel::Ask) => AgentOutcome::Allowed,
         (AskRule::Level, AgentLevel::Ask) => {
             let guard = LogGuard { session: session.clone(), entry: Some(who.entry(&resolved.target, &resolved.detail, AgentOutcome::Cancelled)) };
             let prompt = AgentPrompt {
@@ -209,7 +211,7 @@ pub(crate) async fn run_for_agent(session: &Session, spec: &'static CommandSpec,
                 return Err(EngineError::Denied("declined in SSHCraft".to_string()));
             }
             // The user may have changed or hidden something while the question was open.
-            let (again, connection) = load(session, conn)?;
+            let (again, connection) = load(session, conn, access.category)?;
             view = again;
             match (access.resolve)(&view, &connection, params) {
                 Ok(new) if new.target == resolved.target && new.detail == resolved.detail => resolved = new,

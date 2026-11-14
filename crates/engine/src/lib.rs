@@ -9,8 +9,10 @@ pub mod caller;
 pub mod cmd;
 pub mod error;
 pub mod events;
+pub mod forwards;
 pub mod gate;
 pub mod journal;
+pub mod links;
 pub mod listing;
 pub mod passcli;
 pub mod prompts;
@@ -23,6 +25,7 @@ pub mod terminal;
 pub mod testing;
 #[cfg(test)]
 mod tests;
+pub mod workspaces;
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
@@ -97,6 +100,8 @@ struct Inner {
     store: Arc<Mutex<Store>>,
     vault: Result<Arc<Vault>, ErrorCode>,
     sync: sync::SyncManager,
+    /// Running port forwarding rules.
+    forwards: Arc<forwards::ForwardManager>,
     events: EventBus,
     journal: Mutex<journal::Journal>,
     settings: Arc<Mutex<craft_settings::SettingsStore<settings::EngineSettings>>>,
@@ -159,7 +164,6 @@ impl Session {
         };
         let events = EventBus::new(config.event_capacity);
         let store = Arc::new(Mutex::new(store));
-        let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(sync::BusObserver(events.clone())));
         let settings = Arc::new(Mutex::new(prefs));
         let prompts = Arc::new(prompts::PromptRegistry::new(prompts::BusEmitter(events.clone())));
         let sessions = sessions::SessionManager::new(sessions::ManagerParts {
@@ -174,10 +178,15 @@ impl Session {
             runtime: config.runtime.clone(),
             delay_scale: 1.0,
         });
+        let forwards = Arc::new(forwards::ForwardManager::new(sessions.context(), Arc::new(forwards::BusSink(events.clone()))));
+        // A host or rule that sync removed (or a share that ended) stops forwarding.
+        let observer = sync::BusObserver { events: events.clone(), forwards: forwards.clone() };
+        let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(observer));
         let inner = Inner {
             store,
             vault,
             sync,
+            forwards,
             events,
             journal: Mutex::new(journal::Journal::default()),
             settings,
@@ -267,6 +276,10 @@ impl Session {
 
     pub(crate) fn prompts(&self) -> &prompts::PromptRegistry<prompts::BusEmitter> {
         &self.0.prompts
+    }
+
+    pub(crate) fn forwards(&self) -> &forwards::ForwardManager {
+        &self.0.forwards
     }
 
     pub(crate) fn agent_sessions(&self) -> &agent_sessions::AgentSessions {
