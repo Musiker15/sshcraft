@@ -59,7 +59,11 @@ Einzelheiten je Zeile: Neuaufbau-Entwurf, Abschnitte 13 und 16.
 | F4 | Verbindungen und Ordnung | ControlMaster, Befehle vor und nach der Verbindung, X11, Schnellverbinden, Sammelbearbeitung, portabler Modus | offen |
 | F5 | Dauerhafte Sitzungen | tmux-Integration, Sitzungen über Neustart hinweg, Mosh, Eternal Terminal, Telnet | offen |
 | F6 | Terminal-Extras | Bilder im Terminal, Hex-Ansicht, Dropdown-Fenster, trzsz und ZMODEM nur nach Rückfrage | offen |
-| F7 | Ziele und Automatisierung | Container, Startaktion über Tunnel, Smartcards, Kerberos, Makros, Skripte, dynamische Gruppen | offen |
+| F7 | Ziele und Automatisierung | Container, Startaktion über Tunnel (auch in den Datenbank-Client), Smartcards, Kerberos, Makros, Skripte, dynamische Gruppen | offen |
+
+**Datenbank-Client** (Moritz, 14.11.2026): wird ein eigenes Programm nach V1, kein Teilplan von
+SSHCraft. Server-Datenbanken erreicht er über einen Tunnel, den SSHCraft für ihn öffnet;
+Einzelheiten im Neuaufbau-Entwurf, Abschnitt 16.3.
 
 **Zielplattformen** (Moritz, 12.11.2026): Desktop Windows x64, x86, arm64, macOS universal,
 Linux x86_64 und aarch64, FreeBSD x86_64; mobil Android, iOS und iPadOS. Teilplan 16 ist dafür
