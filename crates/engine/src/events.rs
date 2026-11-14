@@ -22,7 +22,11 @@ pub enum EngineEvent {
     DataChanged {
         server: Option<ServerId>,
     },
-    /// A prompt was answered elsewhere or timed out.
+    /// Whether to trust a server's host key; answer with `prompt.host_key`.
+    HostKeyPrompt(crate::prompts::HostKeyPrompt),
+    /// A sign-in question (password, code, passphrase); answer with `prompt.auth`.
+    AuthPrompt(crate::prompts::AuthPrompt),
+    /// A prompt was answered elsewhere, timed out or its session went away.
     PromptWithdrawn {
         prompt_id: u64,
     },

@@ -9,7 +9,13 @@ use sshcraft_store::store::{ItemKind, Store};
 
 use super::password::{HostView, drop_passwords, host_view, keep_passwords, queue};
 use super::{CommandError, CommandResult, CommandSpec, command, parse, query, sync_run, to_value};
+use std::time::Duration;
+
+use sshcraft_store::agent::MAX_DETAIL;
+
+use crate::agent_sessions::AgentSessions;
 use crate::error::ErrorCode;
+use crate::gate::wire::{DEFAULT_EXEC_SECS, ExecResult, MAX_EXEC_SECS, MAX_OUTPUT};
 use crate::sync::{Change, note_change, now_ms, share_rights};
 use crate::{Ctx, Session};
 
@@ -23,7 +29,43 @@ pub fn specs() -> Vec<CommandSpec> {
         query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
         command("host.forget_key", "Forget the host key", "{ host_id }", run_forget_key),
         query("host.info", "Host details", "{ host: id or unique name }", run_info),
+        command("host.exec", "Run a command on a host", "{ host: id or unique name, command, timeout_secs?: 1 to 600, 60 if missing }", run_exec),
     ]
+}
+
+#[derive(Deserialize)]
+struct ExecParams {
+    host: String,
+    command: String,
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+/// Runs one command on a connection of its own (every check of a tab applies): output and
+/// errors as they came, at most [`MAX_OUTPUT`] bytes, and the exit status.
+fn run_exec(ctx: Ctx, params: Value) -> Out {
+    use futures::FutureExt;
+    async move {
+        let ExecParams { host, command, timeout_secs } = parse("host.exec", params)?;
+        let length = command.chars().count();
+        if command.trim().is_empty() || length > MAX_DETAIL {
+            return Err(CommandError::bad_params("host.exec", format!("the command must have 1 to {MAX_DETAIL} characters")));
+        }
+        let secs = timeout_secs.unwrap_or(DEFAULT_EXEC_SECS);
+        if !(1..=MAX_EXEC_SECS).contains(&secs) {
+            return Err(CommandError::bad_params("host.exec", format!("timeout_secs must be 1 to {MAX_EXEC_SECS}")));
+        }
+        let session = ctx.session;
+        let host = {
+            let hosts = session.store().list_hosts()?;
+            find_host(&hosts, &host, "host.exec")?
+        };
+        let run = AgentSessions::exec(session.sessions(), host.id, &command, MAX_OUTPUT, Duration::from_secs(secs))
+            .await
+            .map_err(|(code, detail)| CommandError::Failed { code, detail })?;
+        to_value(&ExecResult { output: String::from_utf8_lossy(&run.output).into_owned(), truncated: run.truncated, exit_status: run.exit_status })
+    }
+    .boxed()
 }
 
 /// Removes passwords nothing refers to any more and queues their removal; returns the servers.

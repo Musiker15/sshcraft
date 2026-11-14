@@ -13,6 +13,7 @@ use sshcraft_store::vault::MemoryMasterKey;
 use zeroize::Zeroizing;
 
 use crate::passcli::{PassCli, PassCliError, PassCliStatus, PassKey, ensure_ready, parse_private_key};
+use crate::sessions::AgentConnector;
 use crate::{EVENT_CAPACITY, SessionConfig};
 
 /// The JSON `pass-cli item view --output json` prints for an SSH key item.
@@ -60,6 +61,22 @@ impl PassCli for FakePassCli {
     }
 }
 
+/// Hands out in-memory agents holding `keys`, or fails like a missing Proton Pass.
+pub struct TestAgents {
+    pub keys: Vec<russh::keys::PrivateKey>,
+    pub reachable: bool,
+}
+
+#[async_trait::async_trait]
+impl AgentConnector for TestAgents {
+    async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, sshcraft_ssh::SshError> {
+        if !self.reachable {
+            return Err(sshcraft_ssh::SshError::AgentUnavailable("pipe not found".into()));
+        }
+        Ok(sshcraft_ssh::testing::spawn_agent(&self.keys, true).await)
+    }
+}
+
 /// Windows Hello that always says yes.
 pub struct AlwaysPresent;
 
@@ -84,6 +101,7 @@ impl SessionConfig {
             event_capacity: EVENT_CAPACITY,
             settings: craft_settings::Location::Memory,
             pass_cli: Arc::new(|| None),
+            agent: Arc::new(TestAgents { keys: Vec::new(), reachable: false }),
         }
     }
 }

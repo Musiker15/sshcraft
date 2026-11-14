@@ -60,7 +60,10 @@ pub mod group;
 pub mod host;
 pub mod identity;
 pub mod key;
+pub mod local;
 pub mod password;
+pub mod prompt;
+pub mod session;
 pub mod settings;
 pub mod vault;
 
@@ -116,6 +119,9 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(password::specs());
         specs.extend(key::specs());
         specs.extend(vault::specs());
+        specs.extend(session::specs());
+        specs.extend(prompt::specs());
+        specs.extend(local::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         specs

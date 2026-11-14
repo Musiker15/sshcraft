@@ -4,20 +4,27 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod agent_sessions;
 pub mod caller;
 pub mod cmd;
 pub mod error;
 pub mod events;
 pub mod gate;
 pub mod journal;
+pub mod listing;
 pub mod passcli;
+pub mod prompts;
+pub mod recording;
+pub mod sessions;
 pub mod settings;
 pub mod sync;
+pub mod terminal;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -33,6 +40,8 @@ pub use cmd::{CommandInfo, CommandSpec};
 pub use error::{EngineError, ErrorCode, ErrorKind};
 pub use events::{EngineEvent, EventBus, UiRequest};
 pub use journal::JournalEntry;
+pub use sessions::{AgentConnector, EndReason, SessionId, SessionStatus, SessionTarget, WindowsAgent};
+pub use terminal::{TermEvent, TerminalStream};
 
 /// Deepest nesting accepted in the parameters of a command.
 pub const MAX_PARAM_DEPTH: usize = 32;
@@ -56,6 +65,8 @@ pub struct SessionConfig {
     pub settings: craft_settings::Location,
     /// Finds Proton Pass's `pass-cli` (`passcli::locate_installed` in the app).
     pub pass_cli: passcli::LocatePassCli,
+    /// The SSH agent: the Proton Pass pipe ([`WindowsAgent`]) in the app.
+    pub agent: Arc<dyn AgentConnector>,
 }
 
 /// What happened while opening.
@@ -84,20 +95,33 @@ struct Inner {
     sync: sync::SyncManager,
     events: EventBus,
     journal: Mutex<journal::Journal>,
-    settings: Mutex<craft_settings::SettingsStore<settings::EngineSettings>>,
-    #[allow(dead_code)]
+    settings: Arc<Mutex<craft_settings::SettingsStore<settings::EngineSettings>>>,
     runtime: tokio::runtime::Handle,
-    #[allow(dead_code)]
-    presence: Arc<dyn sshcraft_fido::presence::UserPresence>,
     security: Option<Arc<dyn sshcraft_fido::Authenticator>>,
     pass_cli: passcli::LocatePassCli,
-    /// Set once Windows Hello turned out not to be set up on this PC (from R2.6, by the
-    /// sessions' key gate).
-    hello_missing: std::sync::atomic::AtomicBool,
+    sessions: sessions::SessionManager,
+    prompts: Arc<prompts::PromptRegistry<prompts::BusEmitter>>,
+    agent_sessions: agent_sessions::AgentSessions,
+    /// Terminal streams of the user's sessions until the interface takes them.
+    terminals: Mutex<HashMap<SessionId, TerminalStream>>,
+    /// Work started by [`Session::start`]; stopped with the engine.
+    background: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     #[allow(dead_code)]
     confirm_timeout: Duration,
     /// Held for the life of the engine: no other process opens the same data.
     _lock: sshcraft_platform::DataLock,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        for task in self.background.get_mut().unwrap_or_else(PoisonError::into_inner).drain(..) {
+            task.abort();
+        }
+        // Sessions end with the engine; their recordings are finished.
+        for id in self.sessions.ids() {
+            self.sessions.close(id);
+        }
+    }
 }
 
 /// One open SSHCraft: the store, the vault, the running sessions. Cheap to clone.
@@ -128,22 +152,120 @@ impl Session {
         let events = EventBus::new(config.event_capacity);
         let store = Arc::new(Mutex::new(store));
         let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(sync::BusObserver(events.clone())));
+        let settings = Arc::new(Mutex::new(prefs));
+        let prompts = Arc::new(prompts::PromptRegistry::new(prompts::BusEmitter(events.clone())));
+        let sessions = sessions::SessionManager::new(sessions::ManagerParts {
+            store: store.clone(),
+            vault: vault.as_ref().ok().cloned(),
+            prompter: prompts.clone(),
+            auth: prompts.clone(),
+            agent: config.agent,
+            presence: config.presence,
+            security: config.security.clone(),
+            settings: settings_reader(&settings),
+            runtime: config.runtime.clone(),
+            delay_scale: 1.0,
+        });
         let inner = Inner {
             store,
             vault,
             sync,
             events,
             journal: Mutex::new(journal::Journal::default()),
-            settings: Mutex::new(prefs),
+            settings,
             runtime: config.runtime,
-            presence: config.presence,
             security: config.security,
             pass_cli: config.pass_cli,
-            hello_missing: std::sync::atomic::AtomicBool::new(false),
+            sessions,
+            prompts,
+            agent_sessions: agent_sessions::AgentSessions::default(),
+            terminals: Mutex::new(HashMap::new()),
+            background: Mutex::new(Vec::new()),
             confirm_timeout: config.confirm_timeout,
             _lock: lock,
         };
-        Ok((Session(Arc::new(inner)), report))
+        let session = Session(Arc::new(inner));
+        session.bind_session_hooks();
+        Ok((session, report))
+    }
+
+    /// Windows Hello missing goes on the bus; an ended session log moves to where its host lives
+    /// and goes to that server.
+    fn bind_session_hooks(&self) {
+        let events = self.0.events.clone();
+        self.0.sessions.on_hello_unavailable(Box::new(move || events.send(EngineEvent::HelloUnavailable)));
+        let weak = Arc::downgrade(&self.0);
+        self.0.sessions.on_log_finished(Arc::new(move |_id| {
+            let Some(inner) = weak.upgrade() else {
+                return;
+            };
+            let placed = {
+                let store = inner.store.lock().unwrap_or_else(PoisonError::into_inner);
+                sshcraft_sync::logs::place_logs(&store, now_ms())
+            };
+            if let Ok(servers) = placed {
+                inner.sync.nudge(&servers);
+            }
+        }));
+    }
+
+    /// Cleans up what a stopped SSHCraft left (unfinished session logs, logs past their
+    /// retention, here and at their sync server) and from then on deletes expired logs every
+    /// hour. Call once after [`Session::open`], inside the runtime or not.
+    pub fn start(&self) {
+        let Ok(vault) = self.0.vault.clone() else {
+            return;
+        };
+        let days = self.settings().get().logs.log_retention_days;
+        if let Ok(servers) = recording::housekeeping(&self.0.store, &vault, days, now_ms(), true) {
+            self.0.sync.nudge(&servers);
+        }
+        let weak = Arc::downgrade(&self.0);
+        let tidy = recording::tidy_regularly(self.0.store.clone(), vault, settings_reader(&self.0.settings), move |servers| {
+            if let Some(inner) = weak.upgrade() {
+                inner.sync.nudge(servers);
+            }
+        });
+        let task = self.0.runtime.spawn(tidy);
+        self.0.background.lock().unwrap_or_else(PoisonError::into_inner).push(task);
+    }
+
+    /// Before quitting: running recordings are finished and stored, the settings written.
+    pub async fn shutdown(&self) {
+        self.0.sessions.finish_recordings();
+        let mut settings = self.settings();
+        if settings.is_dirty() && !settings.is_read_only() {
+            let _ = settings.flush();
+        }
+    }
+
+    /// The output of the user's session `id`: once per session, and never for a session an agent
+    /// opened.
+    pub fn attach_terminal(&self, id: SessionId) -> Option<TerminalStream> {
+        self.0.terminals.lock().unwrap_or_else(PoisonError::into_inner).remove(&id)
+    }
+
+    /// Keeps the stream of a session the user opened until the interface attaches it.
+    pub(crate) fn park_terminal(&self, stream: TerminalStream) {
+        self.0.terminals.lock().unwrap_or_else(PoisonError::into_inner).insert(stream.id(), stream);
+    }
+
+    pub(crate) fn sessions(&self) -> &sessions::SessionManager {
+        &self.0.sessions
+    }
+
+    pub(crate) fn prompts(&self) -> &prompts::PromptRegistry<prompts::BusEmitter> {
+        &self.0.prompts
+    }
+
+    pub(crate) fn agent_sessions(&self) -> &agent_sessions::AgentSessions {
+        &self.0.agent_sessions
+    }
+
+    /// Closes a session of any caller and drops a stream nobody attached.
+    pub(crate) fn close_session(&self, id: SessionId) {
+        self.0.sessions.close(id);
+        self.0.terminals.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
     }
 
     /// Runs command `id` for `caller`. A command that panics becomes [`EngineError::Internal`];
@@ -239,7 +361,7 @@ impl Session {
 
     /// Whether Windows Hello turned out not to be set up on this PC.
     pub(crate) fn hello_missing(&self) -> bool {
-        self.0.hello_missing.load(std::sync::atomic::Ordering::SeqCst)
+        self.0.sessions.hello_missing()
     }
 
     /// The store behind its lock, for work that runs off the async threads.
@@ -258,6 +380,12 @@ impl Session {
     fn lock_journal(&self) -> MutexGuard<'_, journal::Journal> {
         self.0.journal.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// Reads the settings as they are at the moment of the call.
+fn settings_reader(settings: &Arc<Mutex<craft_settings::SettingsStore<settings::EngineSettings>>>) -> sessions::ReadSettings {
+    let settings = settings.clone();
+    Arc::new(move || settings.lock().unwrap_or_else(PoisonError::into_inner).get().clone())
 }
 
 /// Milliseconds since 1970; 0 if the clock is before that.

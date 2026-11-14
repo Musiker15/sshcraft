@@ -9,13 +9,14 @@ publish = false
 
 [features]
 # SessionConfig::for_tests and the fakes, for the interface (R4) and the MCP tests (R6).
-testing = ["sshcraft-store/testing", "sshcraft-fido/testing"]
+testing = ["sshcraft-store/testing", "sshcraft-fido/testing", "sshcraft-ssh/testing"]
 
 [dependencies]
 sshcraft-model = { workspace = true }
 sshcraft-store = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-fido = { workspace = true }
+sshcraft-ssh = { workspace = true }
 sshcraft-local = { workspace = true }
 sshcraft-sync = { workspace = true }
 sshcraft-proto = { workspace = true }
@@ -32,12 +33,15 @@ async-trait = { workspace = true }
 strum = { workspace = true }
 russh = { workspace = true }
 wait-timeout = { workspace = true }
+sys-locale = { workspace = true }
+data-encoding = { workspace = true }
 
 [dev-dependencies]
 sshcraft-engine = { path = ".", features = ["testing"] }
 tempfile = { workspace = true }
 zeroize = { workspace = true }
 rand = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

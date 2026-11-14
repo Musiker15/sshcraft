@@ -54,7 +54,34 @@ pub fn specs() -> Vec<CommandSpec> {
         query("key.passcli_status", "Proton Pass CLI status", "none", run_passcli_status),
         query("key.passcli_list", "Keys in Proton Pass", "none", run_passcli_list),
         vault_command("key.passcli_import", "Import a key from Proton Pass", "{ share_id, item_id, name }", run_passcli_import),
+        query("key.agent_list", "Keys in the SSH agent", "none", run_agent_list),
+        command("key.install", "Install a key on a host", "{ host_id, key: { kind: stored, id } | { kind: agent, fingerprint } }", run_install),
     ]
+}
+
+/// Keys the SSH agent (Proton Pass) offers: only public facts, never key material.
+fn run_agent_list(ctx: Ctx, _: Value) -> Out {
+    async move {
+        let keys = ctx.session.sessions().agent_keys().await.map_err(|(code, detail)| CommandError::Failed { code, detail })?;
+        to_value(&keys)
+    }
+    .boxed()
+}
+
+#[derive(Deserialize)]
+struct InstallParams {
+    host_id: sshcraft_model::model::HostId,
+    key: sshcraft_model::model::KeyRef,
+}
+
+/// Puts the public half of a key into `authorized_keys` on the host.
+fn run_install(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let InstallParams { host_id, key } = parse("key.install", params)?;
+        let outcome = ctx.session.sessions().install_key(host_id, key).await.map_err(|(code, detail)| CommandError::Failed { code, detail })?;
+        to_value(&outcome)
+    }
+    .boxed()
 }
 
 fn run_list(ctx: Ctx, _: Value) -> Out {
