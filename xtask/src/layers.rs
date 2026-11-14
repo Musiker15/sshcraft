@@ -29,6 +29,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("server-lib", Class::Layer(3)),
     ("fido", Class::Layer(4)),
     ("engine", Class::Layer(5)),
+    ("ui-egui", Class::Layer(6)),
     // The sync server program (apps/sshcraft-server).
     ("server", Class::Exempt),
     ("xtask", Class::Exempt),

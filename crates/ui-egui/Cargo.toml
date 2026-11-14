@@ -1,0 +1,21 @@
+[package]
+name = "sshcraft-ui-egui"
+description = "The egui interface of SSHCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sshcraft-term = { workspace = true }
+egui = { workspace = true, features = ["default_fonts"] }
+egui_system_font_provider = { workspace = true }
+fontique = { workspace = true }
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["wgpu"] }
+image = { workspace = true, features = ["png"] }
+
+[lints]
+workspace = true
