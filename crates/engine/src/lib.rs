@@ -10,6 +10,7 @@ pub mod error;
 pub mod events;
 pub mod gate;
 pub mod journal;
+pub mod settings;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 #[cfg(test)]
@@ -49,6 +50,8 @@ pub struct SessionConfig {
     pub legacy_running: fn() -> bool,
     pub confirm_timeout: Duration,
     pub event_capacity: usize,
+    /// Where `config.toml` lives (`Location::Auto` in the app, `Memory` in tests).
+    pub settings: craft_settings::Location,
 }
 
 /// What happened while opening.
@@ -56,6 +59,12 @@ pub struct SessionConfig {
 pub struct OpenReport {
     /// Whether the vault opened; without it the commands that need it are disabled.
     pub vault: Result<(), ErrorCode>,
+    /// What happened to the settings of the Tauri version.
+    pub takeover: settings::Takeover,
+    /// `config.toml` had damaged sections, was moved aside or could not be read.
+    pub settings_problems: bool,
+    /// `config.toml` cannot be written (newer SSHCraft, folder not writable).
+    pub settings_read_only: bool,
 }
 
 /// Passed to every command run.
@@ -70,6 +79,7 @@ struct Inner {
     vault: Result<Vault, ErrorCode>,
     events: EventBus,
     journal: Mutex<journal::Journal>,
+    settings: Mutex<craft_settings::SettingsStore<settings::EngineSettings>>,
     #[allow(dead_code)]
     runtime: tokio::runtime::Handle,
     #[allow(dead_code)]
@@ -99,12 +109,20 @@ impl Session {
         })?;
         let store = Store::open(&config.data_dir.join("sshcraft.db"))?;
         let vault = Vault::unlock(&store, config.master_key).map_err(|e| error::vault_code(&e));
-        let report = OpenReport { vault: vault.as_ref().map(|_| ()).map_err(|code| *code) };
+        let (mut prefs, load) = craft_settings::SettingsStore::<settings::EngineSettings>::open(config.settings);
+        let takeover = settings::take_over(&store, &mut prefs, &load, now_ms());
+        let report = OpenReport {
+            vault: vault.as_ref().map(|_| ()).map_err(|code| *code),
+            takeover,
+            settings_problems: load.has_problems(),
+            settings_read_only: prefs.is_read_only(),
+        };
         let inner = Inner {
             store: Mutex::new(store),
             vault,
             events: EventBus::new(config.event_capacity),
             journal: Mutex::new(journal::Journal::default()),
+            settings: Mutex::new(prefs),
             runtime: config.runtime,
             presence: config.presence,
             security: config.security,
@@ -187,7 +205,16 @@ impl Session {
         self.0.vault.as_ref().map(|_| ()).map_err(|code| *code)
     }
 
+    pub(crate) fn settings(&self) -> MutexGuard<'_, craft_settings::SettingsStore<settings::EngineSettings>> {
+        self.0.settings.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn lock_journal(&self) -> MutexGuard<'_, journal::Journal> {
         self.0.journal.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// Milliseconds since 1970; 0 if the clock is before that.
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)).unwrap_or(0)
 }

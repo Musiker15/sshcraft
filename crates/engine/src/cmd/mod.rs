@@ -56,13 +56,34 @@ pub fn needs_vault(session: &Session) -> Result<(), String> {
     session.vault_state().map_err(|code| format!("the vault is not available ({})", <&'static str>::from(code)))
 }
 
+pub mod settings;
+
+/// A command that changes something: it goes into the journal.
+pub(crate) fn command(id: &'static str, label: &'static str, params: &'static str, run: Run) -> CommandSpec {
+    CommandSpec { id, label, menu: &[], shortcut: None, params, enabled: always, run, journal: true, undoable: false, agent: None }
+}
+
+/// A command that only reads: it stays out of the journal.
+pub(crate) fn query(id: &'static str, label: &'static str, params: &'static str, run: Run) -> CommandSpec {
+    CommandSpec { journal: false, ..command(id, label, params, run) }
+}
+
+/// The parameters of command `id` as `T`; anything that does not fit is `BadParams`.
+pub(crate) fn parse<T: serde::de::DeserializeOwned>(id: &str, params: Value) -> Result<T, EngineError> {
+    serde_json::from_value(params).map_err(|e| EngineError::bad_params(id, e))
+}
+
+pub(crate) fn to_value<T: Serialize>(value: &T) -> Result<Value, EngineError> {
+    serde_json::to_value(value).map_err(|e| EngineError::failed(crate::error::ErrorCode::Internal, e))
+}
+
 static REGISTRY: OnceLock<Vec<CommandSpec>> = OnceLock::new();
 
 /// Every command, built once.
 pub fn command_specs() -> &'static [CommandSpec] {
     REGISTRY.get_or_init(|| {
-        #[allow(unused_mut)]
         let mut specs: Vec<CommandSpec> = Vec::new();
+        specs.extend(settings::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         specs

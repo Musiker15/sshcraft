@@ -34,6 +34,7 @@ impl SessionConfig {
             legacy_running: || false,
             confirm_timeout: Duration::from_secs(2),
             event_capacity: EVENT_CAPACITY,
+            settings: craft_settings::Location::Memory,
         }
     }
 }
