@@ -5336,6 +5336,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcraft"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "eframe",
+ "egui",
+ "raw-window-handle",
+ "sshcraft-engine",
+ "sshcraft-fido",
+ "sshcraft-platform",
+ "sshcraft-ui-egui",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "sshcraft-engine"
 version = "0.1.0"
 dependencies = [
@@ -5582,6 +5598,7 @@ dependencies = [
 name = "sshcraft-ui-egui"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.13.2",
  "data-encoding",
  "eframe",
  "egui",
@@ -5589,12 +5606,16 @@ dependencies = [
  "egui_system_font_provider",
  "fontique",
  "image",
+ "serde",
  "serde_json",
  "sshcraft-engine",
+ "sshcraft-model",
  "sshcraft-ssh",
  "sshcraft-term",
+ "sshcraft-ui-egui",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

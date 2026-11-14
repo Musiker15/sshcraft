@@ -49,6 +49,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 bitflags = "2.13.2"
 unicode-width = "0.2.3"
 cursor-icon = "1.2.0"
+raw-window-handle = "0.6.2"
 
 # terminal
 alacritty_terminal = { version = "0.26.0", default-features = false }

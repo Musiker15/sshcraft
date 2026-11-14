@@ -32,6 +32,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-egui", Class::Layer(6)),
     // The sync server program (apps/sshcraft-server).
     ("server", Class::Exempt),
+    // The desktop app (apps/sshcraft).
+    ("sshcraft", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 
