@@ -57,6 +57,8 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# The shared libraries of the Craft apps; Cargo.toml pins an immutable revision.
+allow-git = ["https://github.com/storytold/craft-libs"]
 
 [advisories]
 yanked = "warn"

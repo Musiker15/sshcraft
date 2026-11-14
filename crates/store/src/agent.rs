@@ -30,17 +30,38 @@ pub enum AgentCategory {
     Share,
     /// Revoke devices, manage sync servers and accounts.
     Sync,
+    /// Start and stop port forwarding.
+    Forward,
+    /// Read, search and change session logs.
+    Logs,
+    /// Workspace templates.
+    Workspaces,
+    /// Snippets.
+    Snippets,
 }
 
 impl AgentCategory {
-    pub const ALL: [Self; 7] = [Self::List, Self::Connect, Self::Edit, Self::Delete, Self::Keys, Self::Share, Self::Sync];
+    pub const ALL: [Self; 11] = [
+        Self::List,
+        Self::Connect,
+        Self::Edit,
+        Self::Delete,
+        Self::Keys,
+        Self::Share,
+        Self::Sync,
+        Self::Forward,
+        Self::Logs,
+        Self::Workspaces,
+        Self::Snippets,
+    ];
 
-    /// The level on a fresh install (design, section 10).
+    /// The level on a fresh install (design, section 10). Kinds that came after the Tauri
+    /// version start denied, so no agent reaches more than before without the user's say.
     pub fn default_level(self) -> AgentLevel {
         match self {
             Self::List => AgentLevel::Allow,
             Self::Connect | Self::Edit | Self::Keys => AgentLevel::Ask,
-            Self::Delete | Self::Share | Self::Sync => AgentLevel::Deny,
+            Self::Delete | Self::Share | Self::Sync | Self::Forward | Self::Logs | Self::Workspaces | Self::Snippets => AgentLevel::Deny,
         }
     }
 }

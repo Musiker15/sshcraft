@@ -1,0 +1,70 @@
+//! The terminal stream: how the interface gets the output and the state of a session it opened.
+//! Output waits in the stream until the interface takes it; bytes it has not acknowledged count
+//! against the session's high watermark, so a tab that is never read does not let the engine read
+//! the server without end.
+
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+
+use crate::sessions::{Flow, SessionId, SessionSink, SessionStatus};
+
+/// What a session tells its terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TermEvent {
+    Data(Vec<u8>),
+    Status(SessionStatus),
+}
+
+/// Puts a session's output and state into its stream.
+pub(crate) struct StreamSink {
+    pub(crate) sender: mpsc::UnboundedSender<TermEvent>,
+}
+
+impl SessionSink for StreamSink {
+    fn data(&self, bytes: Vec<u8>) {
+        // The receiver is gone once the session is closed: nothing to deliver to.
+        let _ = self.sender.send(TermEvent::Data(bytes));
+    }
+
+    fn status(&self, status: SessionStatus) {
+        let _ = self.sender.send(TermEvent::Status(status));
+    }
+}
+
+/// The receiving end of one session's terminal. Taken once with
+/// [`crate::Session::attach_terminal`].
+pub struct TerminalStream {
+    id: SessionId,
+    receiver: mpsc::UnboundedReceiver<TermEvent>,
+    flow: Arc<Flow>,
+}
+
+impl TerminalStream {
+    pub(crate) fn new(id: SessionId, receiver: mpsc::UnboundedReceiver<TermEvent>, flow: Arc<Flow>) -> Self {
+        Self { id, receiver, flow }
+    }
+
+    pub fn id(&self) -> SessionId {
+        self.id
+    }
+
+    /// The next event; `None` once the session is closed and everything was taken.
+    pub async fn recv(&mut self) -> Option<TermEvent> {
+        self.receiver.recv().await
+    }
+
+    /// The next event if there is one, without waiting (for the interface's frame loop).
+    pub fn try_recv(&mut self) -> Option<TermEvent> {
+        self.receiver.try_recv().ok()
+    }
+
+    /// The interface has shown `bytes` more output bytes: the session may read on.
+    pub fn ack(&self, bytes: usize) {
+        self.flow.ack(bytes);
+    }
+}
+
+#[cfg(test)]
+#[path = "terminal_tests.rs"]
+mod tests;

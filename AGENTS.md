@@ -113,7 +113,10 @@ crash on hostile input is a security bug. **This outranks feature work.**
 - **Everything is a command** (from R2 on). User-visible behaviour is a command in
   `crates/engine/src/cmd/*` (id, label, menu path, shortcut, params doc, `enabled`, `run`) plus
   tests. The UI, the CLI, the control channel and MCP all call `Session::execute`. A command
-  called by a program never opens a dialog: empty params mean defaults or an error.
+  called by a program never opens a dialog: empty params mean defaults or an error. A new command
+  declares no agent access (it is missing from `gate::access::access_for`) unless a reviewer
+  agrees on a category; categories added after R2 start at deny. Command ids never change once
+  shipped: a new one goes into `crates/engine/tests/it/command_ids.txt` in the same change.
 - **Layering** is enforced by `cargo xtask layers` (`xtask/src/layers.rs`). A crate depends only
   on lower layers; nothing below L6 depends on egui, eframe, winit or rfd. A new crate goes into
   the table in the same change.
