@@ -1,0 +1,8 @@
+# Tests may panic: a failing assertion is how a test reports. Production code may not
+# (AGENTS.md, "Never crash").
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+# The same threshold as the Craft apps; `cognitive_complexity` is denied in the workspace lints.
+cognitive-complexity-threshold = 30

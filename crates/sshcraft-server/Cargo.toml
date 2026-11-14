@@ -4,6 +4,7 @@ description = "Self-hosted sync server for SSHCraft"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 sshcraft-proto = { workspace = true }
@@ -32,3 +33,6 @@ http-body-util = { workspace = true }
 tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures = { workspace = true }
+
+[lints]
+workspace = true
