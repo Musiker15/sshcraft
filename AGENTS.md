@@ -125,7 +125,7 @@ crash on hostile input is a security bug. **This outranks feature work.**
   |---|---|
   | L0 | `proto`, `platform` |
   | L1 | `model` |
-  | L2 | `store` (later `term`) |
+  | L2 | `store`, `term` |
   | L3 | `import`, `ssh`, `local`, `sync`, `server-lib` |
   | L4 | `fido` |
   | L5 | `engine` (R2) |

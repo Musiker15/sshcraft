@@ -1,0 +1,15 @@
+[package]
+name = "sshcraft-term"
+description = "Terminal emulation for SSHCraft, without a toolkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+alacritty_terminal = { workspace = true }
+bitflags = { workspace = true }
+
+[lints]
+workspace = true

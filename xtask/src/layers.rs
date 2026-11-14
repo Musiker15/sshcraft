@@ -21,6 +21,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("platform", Class::Layer(0)),
     ("model", Class::Layer(1)),
     ("store", Class::Layer(2)),
+    ("term", Class::Layer(2)),
     ("import", Class::Layer(3)),
     ("ssh", Class::Layer(3)),
     ("local", Class::Layer(3)),

@@ -22,6 +22,7 @@ sshcraft-sync = { path = "crates/sync" }
 sshcraft-fido = { path = "crates/fido" }
 sshcraft-server-lib = { path = "crates/server" }
 sshcraft-engine = { path = "crates/engine" }
+sshcraft-term = { path = "crates/term" }
 
 # foundation
 serde = { version = "1.0.229", features = ["derive"] }
@@ -44,6 +45,10 @@ sys-locale = "0.3.2"
 url = "2.5.8"
 winreg = "0.56.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+bitflags = "2.13.2"
+
+# terminal
+alacritty_terminal = { version = "0.26.0", default-features = false }
 
 # ssh and storage
 russh = "0.65.1"
