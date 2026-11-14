@@ -297,3 +297,31 @@ fn writer_may_delete_a_subgroup_in_a_group_share() {
     assert!(share_rights(&store, Change::DeleteGroup(sub.id)).unwrap());
     assert_eq!(share_rights(&store, Change::DeleteGroup(root.id)).unwrap_err().failure(), ErrorCode::ShareNotOwner);
 }
+
+#[tokio::test]
+async fn a_poisoned_store_lock_does_not_stop_sync() {
+    let (store, server) = store_with_server();
+    let vault = sshcraft_store::vault::Vault::unlock(&store, Box::new(sshcraft_store::vault::MemoryMasterKey::default())).unwrap();
+    let store = Arc::new(Mutex::new(store));
+    // A thread that died holding the store, as a command that panicked would leave it.
+    let holder = store.clone();
+    let _ = std::thread::spawn(move || {
+        let _held = holder.lock().unwrap();
+        panic!("dies holding the store");
+    })
+    .join();
+    assert!(store.is_poisoned());
+    let manager =
+        SyncManager::new(store, Some(Arc::new(vault)), Arc::new(StatusRecorder { inner: Arc::new(NoObserver), statuses: Mutex::default() }));
+    manager.start_all();
+    assert_ne!(manager.status(server), StatusView::Off, "sync did not start after the store lock was poisoned");
+    manager.stop(server);
+}
+
+struct NoObserver;
+
+impl SyncObserver for NoObserver {
+    fn status(&self, _: ServerId, _: SyncStatus) {}
+    fn data_changed(&self, _: ServerId) {}
+    fn warning(&self, _: ServerId, _: String) {}
+}

@@ -198,7 +198,7 @@ async fn every_command_survives_empty_params() {
     let dir = tempfile::tempdir().unwrap();
     let session = open(dir.path());
     let conn = session.agent_connection("claude-code", Via::Mcp).unwrap();
-    for spec in command_specs().iter().filter(|s| s.id != "test.panic") {
+    for spec in command_specs().iter().filter(|s| !["test.panic", "test.agent_panic"].contains(&s.id)) {
         for caller in [Caller::User, conn.caller()] {
             let result = session.execute(caller, spec.id, json!({})).await;
             assert!(!matches!(result, Err(EngineError::Internal { .. })), "{} panicked", spec.id);
@@ -211,7 +211,7 @@ async fn every_command_survives_adversarial_params() {
     let dir = tempfile::tempdir().unwrap();
     let session = open(dir.path());
     let conn = session.agent_connection("claude-code", Via::Mcp).unwrap();
-    for spec in command_specs().iter().filter(|s| s.id != "test.panic") {
+    for spec in command_specs().iter().filter(|s| !["test.panic", "test.agent_panic"].contains(&s.id)) {
         for params in adversarial() {
             for caller in [Caller::User, conn.caller()] {
                 let result = session.execute(caller, spec.id, params.clone()).await;
@@ -362,4 +362,14 @@ async fn locked_vault_disables_key_commands() {
     let status = session.execute(Caller::User, "vault.status", json!({})).await.unwrap();
     assert_eq!(status["ok"], json!(false));
     assert_eq!(status["code"], json!("master_key_missing"));
+}
+
+#[tokio::test]
+async fn a_panic_in_the_agent_gate_becomes_internal_and_the_next_call_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let conn = session.agent_connection("claude-code", Via::Mcp).unwrap();
+    let err = session.execute(conn.caller(), "test.agent_panic", json!({})).await.unwrap_err();
+    assert_eq!(err, EngineError::Internal { id: "test.agent_panic".into() });
+    session.execute(conn.caller(), "host.list", json!({})).await.unwrap();
 }

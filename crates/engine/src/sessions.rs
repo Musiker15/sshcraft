@@ -109,11 +109,6 @@ impl Flow {
         self.drained.notify_waiters();
     }
 
-    fn reset(&self) {
-        self.in_flight.store(0, Ordering::SeqCst);
-        self.drained.notify_waiters();
-    }
-
     async fn wait_below_watermark(&self) {
         loop {
             let drained = self.drained.notified();
@@ -672,7 +667,8 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
             Ok((writer, mut events, notice)) => {
                 *shared.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(writer.clone());
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
-                shared.flow.reset();
+                // Output from before the drop may still wait in the stream unacknowledged: it keeps
+                // counting, so a reconnect does not let the session read another watermark's worth.
                 sink.status(SessionStatus::Connected { notice });
                 if let SessionTarget::Host { host_id } = &target {
                     remember_connection(&ctx, *host_id);

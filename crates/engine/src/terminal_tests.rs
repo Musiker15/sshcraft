@@ -185,3 +185,38 @@ async fn typed_input_is_never_recorded() {
     assert!(recorded.len() >= BLOCK, "the output is recorded");
     assert!(!recorded.windows(12).any(|w| w == b"S3CRET-INPUT"), "typed input is in the log");
 }
+
+#[tokio::test]
+async fn an_unattached_terminal_stays_bounded_across_a_reconnect() {
+    let mut w = world(false, true, crate::EVENT_CAPACITY).await;
+    let id = open(&w).await;
+    let mut stream = w.session.attach_terminal(id).unwrap();
+    // 400 KiB echoed and never acknowledged: below the watermark, so the session reads on.
+    let echoed = "a".repeat(400 * 1024);
+    send(&w, id, &echoed).await;
+    let mut held = 0usize;
+    while held < echoed.len() {
+        if let TermEvent::Data(bytes) = tokio::time::timeout(Duration::from_secs(20), stream.recv()).await.unwrap().unwrap() {
+            held += bytes.len();
+        }
+    }
+    // The connection drops and comes back; the 400 KiB are still not acknowledged.
+    w.server.restart(false).await;
+    let mut connected = false;
+    while !connected {
+        match tokio::time::timeout(Duration::from_secs(30), stream.recv()).await.unwrap().unwrap() {
+            TermEvent::Data(bytes) => held += bytes.len(),
+            TermEvent::Status(SessionStatus::Connected { .. }) => connected = true,
+            TermEvent::Status(SessionStatus::Ended { .. }) => panic!("the session ended"),
+            TermEvent::Status(_) => {}
+        }
+    }
+    send(&w, id, "flood\n").await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    while let Some(event) = stream.try_recv() {
+        if let TermEvent::Data(bytes) = event {
+            held += bytes.len();
+        }
+    }
+    assert!(held <= OUTPUT_HIGH_WATERMARK + BLOCK, "{held} bytes not acknowledged");
+}

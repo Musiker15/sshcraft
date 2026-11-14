@@ -93,8 +93,14 @@ imports, accounts, answers to questions) never is:
 | Sync | `sync.servers`, `sync.set_server`, `sync.server_logs`, `device.list` |
 
 - **Allowed** runs at once, **Blocked** is refused.
-- Reading within a kind (a status, a list, a session log, a search) runs at *Ask* without a
-  question and without a log entry; *Blocked* still blocks it.
+- A list or status within a kind (`forward.status`, `log.list`, `workspace.list`, `share.list`,
+  `share.of_items`, `sync.servers`, `device.list`) runs at *Ask* without a question and without a
+  log entry; *Blocked* still blocks it. Reading a session log, searching the logs and listing
+  snippets carry content that is sealed in the vault: they follow the level and are logged.
+- The question names what changes: for sync the server and whether keys go to it, for a share
+  what is shared, to whom and whether keys go with it, for a workspace every pane and the command
+  it types, for a snippet its content. An agent cannot put a command into a local or serial pane
+  of a workspace, and cannot share a group with anything hidden below it.
 - **No window, no yes.** A question needs the SSHCraft window. While no window listens, *Ask*
   is answered no at once ("no SSHCraft window to ask in"); there is no headless mode.
 - **Ask** opens a window in SSHCraft with the agent, the action, the target and, for commands, the

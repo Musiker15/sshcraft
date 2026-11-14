@@ -860,3 +860,108 @@ async fn share_and_sync_levels_reset_once() {
     let (session, _) = Session::open(SessionConfig::for_tests(dir.path())).unwrap();
     assert_eq!(AgentPolicy::load(&session.store()).level(AgentCategory::Share), AgentLevel::Allow);
 }
+
+// ---- Fixes after the review of R2 ----
+
+/// A server row so that sync and share commands have a server to name.
+fn add_server(w: &World, name: &str) -> sshcraft_model::model::ServerId {
+    let id = sshcraft_model::model::ServerId::new();
+    w.session
+        .store()
+        .add_server(&sshcraft_store::store::ServerRow {
+            id,
+            name: name.into(),
+            origin: "https://sync.example.org".into(),
+            account: [3; 32],
+            device_id: Uuid::new_v4(),
+            sealed_device: vec![0],
+            sync_enabled: false,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn a_group_share_holding_a_hidden_host_is_refused() {
+    let w = world(None).await;
+    w.set(AgentCategory::Share, AgentLevel::Allow);
+    let team = group("team", None);
+    w.add_group(&team);
+    let secret = host("secret", Some(team.id));
+    w.add_host(&secret);
+    w.hide(secret.id.0);
+    let conn = w.conn();
+    let server = add_server(&w, "home");
+    let r = call(
+        &w,
+        &conn,
+        "share.items",
+        json!({ "server": server, "what": { "kind": "group_all", "group": team.id }, "grants": [], "with_keys": true }),
+    )
+    .await;
+    assert!(is_not_found(&r), "{r:?}");
+    assert_eq!(w.outcomes(), vec![AgentOutcome::Hidden]);
+}
+
+#[tokio::test]
+async fn questions_show_what_changes() {
+    let w = world(Some(true)).await;
+    for category in [AgentCategory::Sync, AgentCategory::Workspaces, AgentCategory::Snippets, AgentCategory::Share] {
+        w.set(category, AgentLevel::Ask);
+    }
+    let conn = w.conn();
+    let server = add_server(&w, "home");
+    call(&w, &conn, "sync.set_server", json!({ "id": server, "sync_enabled": false, "sync_keys": true })).await.unwrap();
+    let template = json!({ "id": Uuid::new_v4(), "name": "ops", "layout": "split", "col_sizes": [1.0], "row_sizes": [1.0],
+        "panes": [{ "target": { "kind": "host", "host_id": w.web.id }, "title": "web", "command": "uptime" }] });
+    call(&w, &conn, "workspace.save", json!({ "template": template })).await.unwrap();
+    call(
+        &w,
+        &conn,
+        "snippet.save",
+        json!({ "snippet": { "id": Uuid::new_v4(), "name": "clean", "content": "vacuumdb --all", "default_targets": [w.web.id] } }),
+    )
+    .await
+    .unwrap();
+    let _ =
+        call(&w, &conn, "share.items", json!({ "server": server, "what": { "kind": "host", "host": w.web.id }, "grants": [], "with_keys": true }))
+            .await;
+    let asked = w.answer.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 4, "{asked:?}");
+    assert_eq!(asked[0].target, "home");
+    assert!(asked[0].detail.contains("keys: on"), "{:?}", asked[0]);
+    assert!(asked[1].detail.contains("uptime"), "{:?}", asked[1]);
+    assert!(asked[2].detail.contains("vacuumdb --all"), "{:?}", asked[2]);
+    assert!(asked[3].detail.contains("with keys"), "{:?}", asked[3]);
+    // The sealed log keeps the same detail.
+    assert!(w.log().iter().any(|e| e.action == "sync.set_server" && e.detail.contains("keys: on")));
+    // A command typed into a local shell when the workspace opens is never an agent's to plant.
+    let local = json!({ "id": Uuid::new_v4(), "name": "local", "layout": "split", "col_sizes": [1.0], "row_sizes": [1.0],
+        "panes": [{ "target": { "kind": "local", "shell": { "program": "cmd.exe", "args": [], "label": "cmd" } }, "title": "here", "command": "del /q *" }] });
+    assert!(is_denied(&call(&w, &conn, "workspace.save", json!({ "template": local })).await));
+    assert_eq!(w.answer.asked.lock().unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn reading_logs_and_snippets_follows_the_level_and_is_logged() {
+    let w = world_with(None, Duration::from_secs(60)).await;
+    w.set(AgentCategory::Logs, AgentLevel::Ask);
+    w.set(AgentCategory::Snippets, AgentLevel::Ask);
+    let conn = w.conn();
+    let window = Err(EngineError::Denied("no SSHCraft window to ask in".into()));
+    assert_eq!(call(&w, &conn, "log.read", json!({ "id": Uuid::new_v4() })).await, window);
+    assert_eq!(call(&w, &conn, "log.search", json!({ "query": "x" })).await, window);
+    assert_eq!(call(&w, &conn, "snippet.list", Value::Null).await, window);
+    // A list of logs (titles, times) needs no question.
+    call(&w, &conn, "log.list", Value::Null).await.unwrap();
+    w.set(AgentCategory::Logs, AgentLevel::Allow);
+    call(&w, &conn, "log.search", json!({ "query": "x" })).await.unwrap();
+    let actions: Vec<String> = w.log().into_iter().map(|e| e.action).collect();
+    assert!(actions.contains(&"log.search".to_owned()), "{actions:?}");
+    assert!(!actions.contains(&"log.list".to_owned()), "{actions:?}");
+}

@@ -309,7 +309,14 @@ impl Session {
             let ctx = Ctx { session: self.clone(), caller: caller.clone() };
             self.run_spec(spec, ctx, params).await
         } else {
-            gate::run_for_agent(self, spec, caller.clone(), params).await
+            // The gate parses hostile input: a panic there is caught like one in a command body.
+            match AssertUnwindSafe(gate::run_for_agent(self, spec, caller.clone(), params)).catch_unwind().await {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::error!(command = id, "the agent gate panicked; the engine goes on");
+                    Err(EngineError::Internal { id: id.to_string() })
+                }
+            }
         };
         if let (Ok(_), Some(params)) = (&result, journal_params) {
             self.lock_journal().push(caller.label(), id, &params);

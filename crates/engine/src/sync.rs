@@ -2,7 +2,7 @@
 //! keeps local changes queued for the server their item lives at.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::Serialize;
 use sshcraft_model::model::ServerId;
@@ -50,9 +50,7 @@ struct StatusRecorder {
 
 impl SyncObserver for StatusRecorder {
     fn status(&self, server: ServerId, status: SyncStatus) {
-        if let Ok(mut map) = self.statuses.lock() {
-            map.insert(server, status.clone());
-        }
+        self.statuses.lock().unwrap_or_else(PoisonError::into_inner).insert(server, status.clone());
         self.inner.status(server, status);
     }
 
@@ -101,7 +99,7 @@ impl SyncManager {
 
     /// Starts a runtime for every server with sync on. Must run inside the async runtime.
     pub fn start_all(&self) {
-        let servers = self.store.lock().ok().and_then(|s| s.servers().ok()).unwrap_or_default();
+        let servers = self.store.lock().unwrap_or_else(PoisonError::into_inner).servers().unwrap_or_default();
         for row in servers {
             self.start(row.id);
         }
@@ -113,41 +111,42 @@ impl SyncManager {
         let Some(vault) = self.vault.clone() else {
             return;
         };
-        let wanted = self.store.lock().ok().and_then(|s| s.server(server).ok().flatten()).is_some_and(|row| row.sync_enabled && !row.revoked);
+        let wanted = self
+            .store
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .server(server)
+            .ok()
+            .flatten()
+            .is_some_and(|row| row.sync_enabled && !row.revoked);
         if !wanted {
             return;
         }
         let runtime = SyncRuntime::start(self.store.clone(), vault, server, self.observer.clone() as Arc<dyn SyncObserver>);
-        if let Ok(mut map) = self.runtimes.lock() {
-            map.insert(server, runtime);
-        }
+        self.runtimes.lock().unwrap_or_else(PoisonError::into_inner).insert(server, runtime);
     }
 
     pub fn stop(&self, server: ServerId) {
-        if let Ok(mut map) = self.runtimes.lock()
-            && let Some(runtime) = map.remove(&server)
-        {
+        let running = self.runtimes.lock().unwrap_or_else(PoisonError::into_inner).remove(&server);
+        if let Some(runtime) = running {
             runtime.stop();
         }
-        if let Ok(mut map) = self.observer.statuses.lock() {
-            map.remove(&server);
-        }
+        self.observer.statuses.lock().unwrap_or_else(PoisonError::into_inner).remove(&server);
     }
 
     /// A local change is queued for these servers: send it now.
     pub fn nudge(&self, servers: &[ServerId]) {
-        if let Ok(map) = self.runtimes.lock() {
-            for server in servers {
-                if let Some(runtime) = map.get(server) {
-                    runtime.nudge();
-                }
+        let map = self.runtimes.lock().unwrap_or_else(PoisonError::into_inner);
+        for server in servers {
+            if let Some(runtime) = map.get(server) {
+                runtime.nudge();
             }
         }
     }
 
     pub fn status(&self, server: ServerId) -> StatusView {
-        let running = self.runtimes.lock().is_ok_and(|map| map.contains_key(&server));
-        self.observer.statuses.lock().ok().and_then(|map| map.get(&server).map(StatusView::from)).unwrap_or(if running {
+        let running = self.runtimes.lock().unwrap_or_else(PoisonError::into_inner).contains_key(&server);
+        self.observer.statuses.lock().unwrap_or_else(PoisonError::into_inner).get(&server).map(StatusView::from).unwrap_or(if running {
             StatusView::Syncing
         } else {
             StatusView::Off

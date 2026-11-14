@@ -33,6 +33,8 @@ pub struct GateView {
     pub logs: Vec<(LogId, Option<HostId>)>,
     /// The shares of every server, loaded for the `Share` category.
     pub shares: Vec<sshcraft_sync::shares::ShareView>,
+    /// Sync servers by id and name, loaded for the `Sync` and `Share` categories.
+    pub servers: Vec<(sshcraft_model::model::ServerId, String)>,
 }
 
 impl GateView {

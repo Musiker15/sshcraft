@@ -130,6 +130,9 @@ impl Drop for LogGuard {
 fn load(session: &Session, conn: ConnId, category: AgentCategory) -> Result<(GateView, Connection), EngineError> {
     let vault = session.vault().ok();
     let mut view = GateView::load_for(&session.store(), vault.as_deref(), category)?;
+    if matches!(category, AgentCategory::Share | AgentCategory::Sync) {
+        view.servers = session.store().servers()?.into_iter().map(|row| (row.id, row.name)).collect();
+    }
     if category == AgentCategory::Share {
         // Listing shares takes the store's lock itself: done after the view released it.
         let servers = session.store().servers()?;

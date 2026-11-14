@@ -194,5 +194,6 @@ fn test_commands() -> Vec<CommandSpec> {
         spec("test.echo", "Echo", "any value, returned as it is", echo, always),
         spec("test.panic", "Panic", "nothing", panics, always),
         spec("test.vault", "Needs the vault", "nothing", vault, needs_vault),
+        spec("test.agent_panic", "Panics in the agent gate", "nothing", vault, always),
     ]
 }

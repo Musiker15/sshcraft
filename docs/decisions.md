@@ -5,6 +5,8 @@ The decisions that carry SSHCraft, newest first. The reasoning is in the design 
 
 | Date | Decision |
 |---|---|
+| 2026-11-14 | For agents, "Ask" exempts only lists and status from the question and the log; reading a session log, searching logs and listing snippets ask and are logged like every other action. |
+| 2026-11-14 | A `config.toml` that cannot be read is moved aside by craft-settings; the settings of the Tauri version are then taken over, since nothing of the user's is overwritten. Only a newer `config.toml` blocks the takeover. |
 | 2026-11-14 | `Share` and `Sync` are set back to "deny" once (marker `migration.agent_categories`): before R2 no agent action used them, so a stored "allow" must not start to work silently. Categories added after R2 start at "deny". |
 | 2026-11-14 | The engine refuses to open while the Tauri version runs; it is recognized by its agent pipe `sshcraft-agent-<SID>` of the same user. No new service may use that prefix. |
 | 2026-11-14 | Device settings go to `config.toml` (craft-settings); data that belongs to the account or must stay sealed stays in the database. |

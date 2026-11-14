@@ -601,16 +601,58 @@ pub fn access_for(id: &str) -> Option<&'static AgentAccess> {
         "share.set_grants" => &SHARE_SET_GRANTS,
         "share.end" => &SHARE_END,
         "share.of_items" => &SHARE_OF_ITEMS,
+        #[cfg(test)]
+        "test.agent_panic" => &TEST_AGENT_PANIC,
         _ => return None,
     })
 }
 
 // ---- Sync and Share ----
 
-/// Parameters that name nothing an agent could not see: passed on as they are.
-fn resolve_pass(_: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
-    let target = ["id", "server"].iter().find_map(|k| value.get(*k).and_then(Value::as_str)).unwrap_or_default().to_owned();
-    Ok(plain(value, target, String::new()))
+/// A sync server by its name, for the question and the log; its id when it is not known.
+fn server_name(view: &GateView, value: &Value) -> String {
+    let id = ["id", "server"].iter().find_map(|k| value.get(*k).and_then(Value::as_str)).unwrap_or_default();
+    view.servers.iter().find(|(s, _)| s.0.to_string() == id).map_or_else(|| id.to_owned(), |(_, name)| name.clone())
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value { "on" } else { "off" }
+}
+
+/// Parameters that name only a server: passed on as they are, the server named.
+fn resolve_pass(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let target = server_name(view, &value);
+    let detail = value.get("email").and_then(Value::as_str).unwrap_or_default().to_owned();
+    Ok(plain(value, target, detail))
+}
+
+#[derive(Deserialize)]
+struct SetServerInput {
+    sync_enabled: bool,
+    sync_keys: bool,
+}
+
+/// Turning key sync on sends the private keys to the server: the question says so.
+fn resolve_set_server(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let SetServerInput { sync_enabled, sync_keys } = params(value.clone())?;
+    let detail = format!("sync: {}, keys: {}", on_off(sync_enabled), on_off(sync_keys));
+    Ok(plain(value.clone(), server_name(view, &value), detail))
+}
+
+#[derive(Deserialize)]
+struct ServerLogsInput {
+    on: bool,
+}
+
+fn resolve_server_logs(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    let ServerLogsInput { on } = params(value.clone())?;
+    Ok(plain(value.clone(), server_name(view, &value), format!("session logs: {}", on_off(on))))
+}
+
+/// Who gets what, for the question about a share.
+fn grants_text(value: &Value) -> String {
+    let grants = value.get("grants").map(Value::to_string).unwrap_or_else(|| "[]".to_owned());
+    format!("grants: {grants}")
 }
 
 #[derive(Deserialize)]
@@ -626,20 +668,30 @@ struct ShareItemsInput {
     what: ShareWhatRef,
 }
 
-/// What is shared must be something agents see.
+/// What is shared must be something agents see: a whole group only when nothing below it is
+/// hidden, since sharing it takes every host at every level.
 fn resolve_share_items(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
     let ShareItemsInput { what } = params(value.clone())?;
-    let target = match what {
-        ShareWhatRef::GroupAll { group } => view.group(&group.to_string())?.name,
-        ShareWhatRef::Selection { group, hosts } => {
-            for host in &hosts {
-                view.host(&host.to_string())?;
+    let (target, what) = match what {
+        ShareWhatRef::GroupAll { group } => {
+            let g = view.group(&group.to_string())?;
+            if view.subtree_hidden(g.id) {
+                return Err(not_found("group", true).on(&g.name));
             }
-            view.group(&group.to_string())?.name
+            (g.name, "the whole group".to_owned())
         }
-        ShareWhatRef::Host { host } => host_target(&view.host(&host.to_string())?),
+        ShareWhatRef::Selection { group, hosts } => {
+            let mut names = Vec::new();
+            for host in &hosts {
+                names.push(view.host(&host.to_string())?.name);
+            }
+            (view.group(&group.to_string())?.name, format!("hosts: {}", names.join(", ")))
+        }
+        ShareWhatRef::Host { host } => (host_target(&view.host(&host.to_string())?), "one host".to_owned()),
     };
-    Ok(plain(value, target, String::new()))
+    let keys = if value.get("with_keys").and_then(Value::as_bool) == Some(true) { "with keys" } else { "without keys" };
+    let detail = format!("{what}; {}; {keys}; server: {}", grants_text(&value), server_name(view, &value));
+    Ok(plain(value, target, detail))
 }
 
 #[derive(Deserialize)]
@@ -653,7 +705,8 @@ fn resolve_share_area(view: &GateView, _: &Connection, value: Value) -> Result<R
     if view.shares.iter().any(|s| s.area == area && view.share_hidden(s.group.as_deref(), &s.hosts)) {
         return Err(not_found("share", true).on(&area.to_string()));
     }
-    Ok(plain(value, area.to_string(), String::new()))
+    let detail = if value.get("grants").is_some() { grants_text(&value) } else { "end the share".to_owned() };
+    Ok(plain(value, area.to_string(), detail))
 }
 
 fn present_shares(view: &GateView, _: &Resolved, value: Value) -> Value {
@@ -689,8 +742,8 @@ fn present_item_shares(view: &GateView, _: &Resolved, value: Value) -> Value {
 }
 
 pub static SYNC_SERVERS: AgentAccess = read(AgentCategory::Sync, resolve_nothing, identity);
-pub static SYNC_SET_SERVER: AgentAccess = access(AgentCategory::Sync, resolve_pass, present_nothing);
-pub static SYNC_SERVER_LOGS: AgentAccess = access(AgentCategory::Sync, resolve_pass, present_nothing);
+pub static SYNC_SET_SERVER: AgentAccess = access(AgentCategory::Sync, resolve_set_server, present_nothing);
+pub static SYNC_SERVER_LOGS: AgentAccess = access(AgentCategory::Sync, resolve_server_logs, present_nothing);
 pub static DEVICE_LIST: AgentAccess = read(AgentCategory::Sync, resolve_pass, identity);
 
 pub static SHARE_FIND_RECIPIENT: AgentAccess = access(AgentCategory::Share, resolve_pass, identity);
@@ -733,18 +786,29 @@ struct TemplateSave {
 }
 
 fn resolve_template_save(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
+    use crate::workspaces::TemplateTarget;
     let TemplateSave { template } = params(value)?;
     let target = template.name.clone();
     // Its panes must be on hosts agents see, and a stored one it replaces must be visible too.
+    // A command typed into a local shell or serial line when the workspace opens would run on
+    // the user's own machine: no agent plants one.
+    let mut lines = Vec::new();
     for pane in &template.panes {
-        if let crate::workspaces::TemplateTarget::Host { host_id } = pane.target {
-            view.host(&host_id.0.to_string()).map_err(|r| r.on(&target))?;
+        let command = pane.command.as_deref().unwrap_or("-");
+        match &pane.target {
+            TemplateTarget::Host { host_id } => {
+                let host = view.host(&host_id.0.to_string()).map_err(|r| r.on(&target))?;
+                lines.push(format!("{}: {command}", host.name));
+            }
+            TemplateTarget::Local { shell } if pane.command.is_none() => lines.push(format!("local {}: -", shell.label)),
+            TemplateTarget::Serial { settings } if pane.command.is_none() => lines.push(format!("serial {}: -", settings.port)),
+            _ => return Err(denied("agents cannot put a command into a local or serial pane").on(&target)),
         }
     }
     if view.templates.iter().any(|t| t.id == template.id && view.template_hidden(t)) {
         return Err(not_found("template", true).on(&target));
     }
-    Ok(plain(json!({ "template": template }), target, String::new()))
+    Ok(plain(json!({ "template": template }), target, lines.join("\n")))
 }
 
 #[derive(Deserialize)]
@@ -775,13 +839,15 @@ struct SnippetSave {
 fn resolve_snippet_save(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
     let SnippetSave { snippet } = params(value)?;
     let target = snippet.name.clone();
+    let mut hosts = Vec::new();
     for host in &snippet.default_targets {
-        view.host(&host.0.to_string()).map_err(|r| r.on(&target))?;
+        hosts.push(view.host(&host.0.to_string()).map_err(|r| r.on(&target))?.name);
     }
     if view.snippets.iter().any(|s| s.id == snippet.id && view.snippet_hidden(s)) {
         return Err(not_found("snippet", true).on(&target));
     }
-    Ok(plain(json!({ "snippet": snippet }), target, String::new()))
+    let detail: String = format!("{}\nruns on: {}", snippet.content, hosts.join(", ")).chars().take(MAX_DETAIL).collect();
+    Ok(plain(json!({ "snippet": snippet }), target, detail))
 }
 
 fn resolve_snippet_delete(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
@@ -867,17 +933,20 @@ pub static WORKSPACE_LIST: AgentAccess = read(AgentCategory::Workspaces, resolve
 pub static WORKSPACE_SAVE: AgentAccess = access(AgentCategory::Workspaces, resolve_template_save, identity);
 pub static WORKSPACE_DELETE: AgentAccess = access(AgentCategory::Workspaces, resolve_template_delete, present_nothing);
 
-pub static SNIPPET_LIST: AgentAccess = read(AgentCategory::Snippets, resolve_nothing, present_snippets);
+/// The list carries the snippets' content, which is sealed in the vault: it follows the level
+/// and is logged like any other access to sealed data.
+pub static SNIPPET_LIST: AgentAccess = access(AgentCategory::Snippets, resolve_nothing, present_snippets);
 pub static SNIPPET_SAVE: AgentAccess = access(AgentCategory::Snippets, resolve_snippet_save, identity);
 pub static SNIPPET_DELETE: AgentAccess = access(AgentCategory::Snippets, resolve_snippet_delete, present_nothing);
 
 pub static LOG_LIST: AgentAccess = read(AgentCategory::Logs, resolve_nothing, present_logs);
-/// Log output is what a server printed: the agent's business, like `host.exec` output.
-pub static LOG_READ: AgentAccess = AgentAccess { own_data: false, ..read(AgentCategory::Logs, resolve_log, identity) };
+/// Reading or searching what a terminal showed is reading a whole transcript: it follows the level
+/// and is logged. Its content is what a server printed, so it is not checked for key material.
+pub static LOG_READ: AgentAccess = AgentAccess { own_data: false, ..access(AgentCategory::Logs, resolve_log, identity) };
 pub static LOG_MARK_ADD: AgentAccess = access(AgentCategory::Logs, resolve_log, identity);
 pub static LOG_MARK_REMOVE: AgentAccess = access(AgentCategory::Logs, resolve_log, identity);
 pub static LOG_DELETE: AgentAccess = access(AgentCategory::Logs, resolve_log_delete, present_nothing);
-pub static LOG_SEARCH: AgentAccess = AgentAccess { own_data: false, ..read(AgentCategory::Logs, resolve_log_search, present_hits) };
+pub static LOG_SEARCH: AgentAccess = AgentAccess { own_data: false, ..access(AgentCategory::Logs, resolve_log_search, present_hits) };
 
 /// Builds the resolve step of a later command that names a host in the field `host`: the host
 /// must be one agents see.
@@ -896,3 +965,13 @@ pub fn without_hidden_hosts(view: &GateView, value: Value, field: &str) -> Value
         other => other,
     }
 }
+
+/// Resolving panics: for the test that the crash guard covers the agent gate too.
+#[cfg(test)]
+#[allow(clippy::panic)]
+fn resolve_panics(_: &GateView, _: &Connection, _: Value) -> Result<Resolved, Refusal> {
+    panic!("a resolve step that panics")
+}
+
+#[cfg(test)]
+static TEST_AGENT_PANIC: AgentAccess = list(resolve_panics, identity);
