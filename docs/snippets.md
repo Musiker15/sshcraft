@@ -1,5 +1,7 @@
 # Snippets, history and completion
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 Snippets, the command history and completion stay on this device. They do not sync. Snippets
 and the history are encrypted with the vault, so they need it unlocked.
 

@@ -1,62 +1,85 @@
 [workspace]
 resolver = "3"
-members = ["crates/sshcraft-core", "crates/sshcraft-agent", "crates/sshcraft-cli", "crates/sshcraft-ssh", "crates/sshcraft-proto", "crates/sshcraft-server", "crates/sshcraft-sync", "crates/sshcraft-local", "crates/sshcraft-fido", "app/src-tauri"]
+members = ["crates/*", "apps/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-only"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
 repository = "https://github.com/musiker15/sshcraft"
 
 [workspace.dependencies]
-csv = "1.4.0"
-sshcraft-core = { path = "crates/sshcraft-core" }
-sshcraft-ssh = { path = "crates/sshcraft-ssh" }
-russh = "0.65.1"
-rusqlite = { version = "0.42.0", features = ["bundled"] }
-keyring = "4.2.0"
-chacha20poly1305 = "0.11.0"
-tokio = { version = "1.54.1", features = ["full"] }
-uuid = { version = "1.29.2", features = ["v4", "serde"] }
+# internal
+sshcraft-platform = { path = "crates/platform" }
+sshcraft-model = { path = "crates/model" }
+sshcraft-store = { path = "crates/store" }
+sshcraft-import = { path = "crates/import" }
+sshcraft-proto = { path = "crates/proto" }
+sshcraft-ssh = { path = "crates/ssh" }
+sshcraft-local = { path = "crates/local" }
+sshcraft-sync = { path = "crates/sync" }
+sshcraft-fido = { path = "crates/fido" }
+sshcraft-server-lib = { path = "crates/server" }
+
+# foundation
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
-zeroize = { version = "1.9.1", features = ["serde"] }
-rand = "0.10.3"
-directories = "6.0.0"
+uuid = { version = "1.29.2", features = ["v4", "serde"] }
+tokio = { version = "1.54.1", features = ["full"] }
 async-trait = "0.1.92"
 futures = "0.3.34"
+directories = "6.0.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+csv = "1.4.0"
+data-encoding = "2.11.1"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+
+# ssh and storage
+russh = "0.65.1"
+rusqlite = { version = "0.42.0", features = ["bundled"] }
+keyring = "4.2.0"
+
+# cryptography
+chacha20poly1305 = "0.11.0"
+zeroize = { version = "1.9.1", features = ["serde"] }
+rand = "0.10.3"
 ed25519-dalek = "3.0.0"
 hpke = { version = "0.15.1", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
 sha2 = "0.11.1"
-data-encoding = "2.11.1"
-tempfile = "3.27.0"
-sshcraft-proto = { path = "crates/sshcraft-proto" }
-sshcraft-sync = { path = "crates/sshcraft-sync" }
-sshcraft-local = { path = "crates/sshcraft-local" }
-sshcraft-fido = { path = "crates/sshcraft-fido" }
-sshcraft-agent = { path = "crates/sshcraft-agent" }
-axum = { version = "0.8.9", features = ["ws"] }
-clap = { version = "4.6.7", features = ["derive", "env"] }
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 subtle = "2.6.1"
 hmac = "0.13.0"
 hkdf = "0.13.0"
+
+# network and server
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "query", "rustls", "http2"] }
-qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
-sshcraft-server = { path = "crates/sshcraft-server" }
+axum = { version = "0.8.9", features = ["ws"] }
 tokio-postgres = { version = "0.7.18", features = ["with-uuid-1"] }
 deadpool-postgres = "0.14.2"
+tokio-tungstenite = "0.30.0"
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.5"
-tokio-tungstenite = "0.30.0"
+
+# tests
+tempfile = "3.27.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"
 
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
 strip = true
 
 # Signature checks dominate the server tests; optimizing these crates keeps debug test runs fast.

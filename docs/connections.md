@@ -1,5 +1,7 @@
 # Connections
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 How SSHCraft signs in and how it reaches a host: passwords, keyboard-interactive, identities,
 jump hosts, proxies, agent forwarding and environment variables, plus the two terminals that are
 not SSH (a local shell and a serial port).
@@ -88,6 +90,8 @@ Desktop only, from the new tab page or the command palette:
 - **Serial:** port, baud rate (50 to 4 000 000), data bits (5 to 8), stop bits (1 or 2), parity
   and flow control (software XON/XOFF or hardware RTS/CTS). The last settings are remembered on
   this device. A port that disappears (an adapter pulled out) is retried like a lost connection.
+  The port list shows the port names only (`COM3`, `/dev/ttyUSB0`), without a description of
+  the USB device: the serial library (serial2) lists paths, not device details.
 
 ## Post-quantum key exchange
 

@@ -31,7 +31,7 @@ sshcraft-server serve --public-origin https://sync.example.org --database-url sq
 With Docker (the image keeps its SQLite file in the volume `/data`):
 
 ```bash
-docker build -f crates/sshcraft-server/Dockerfile -t sshcraft-server .
+docker build -f packaging/docker/Dockerfile -t sshcraft-server .
 docker run -d --name sshcraft -v sshcraft-data:/data \
   -e SSHCRAFT_PUBLIC_ORIGIN=https://sync.example.org \
   -p 127.0.0.1:8470:8470 sshcraft-server

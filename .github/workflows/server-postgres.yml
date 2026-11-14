@@ -1,0 +1,55 @@
+name: Server with PostgreSQL
+
+# The storage contract tests of the sync server against a real PostgreSQL. This job runs on its
+# own because no shared workflow in craft-common-actions offers a PostgreSQL service (AGENTS.md,
+# "CI workflows"); it moves there once one does.
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/server/**
+      - crates/proto/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/server-postgres.yml
+  pull_request:
+    paths:
+      - crates/server/**
+      - crates/proto/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/server-postgres.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Storage contract against PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Contract tests against PostgreSQL
+        env:
+          SSHCRAFT_TEST_POSTGRES_URL: postgres://postgres:test@localhost:5432/postgres
+        run: cargo test -p sshcraft-server-lib --test store_contract

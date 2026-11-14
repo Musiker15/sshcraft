@@ -1,5 +1,7 @@
 # Workspaces and terminal
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 A session tab can hold up to 16 sessions (panes). With one pane it looks like a plain tab;
 the tools at the right end of the tab strip turn it into a workspace.
 

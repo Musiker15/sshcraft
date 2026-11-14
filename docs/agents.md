@@ -1,5 +1,7 @@
 # AI agents
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps. The connection between agents and the app described below changes in R6: a loopback connection with a token per start replaces the named pipe, as the rebuild design (section 9) says.
+
 Claude Code, Codex and other AI agents can work with SSHCraft: list hosts, run commands, keep a
 shell open, add and change hosts and groups, generate and import keys. They do this through the
 `sshcraft` program that comes with the app, either as an **MCP server** (`sshcraft mcp`) or as a

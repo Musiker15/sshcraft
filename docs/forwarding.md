@@ -1,5 +1,7 @@
 # Port forwarding
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 Port forwarding rules belong to a host. They sync and are shared together with the host, and
 they go when the host is deleted. The page **Port forwarding** in the sidebar lists the rules of
 all hosts.

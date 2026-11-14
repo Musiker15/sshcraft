@@ -1,65 +1,30 @@
 name: CI
 
+# Quality gates for every push to main and every pull request (`cargo xtask ci`), through the
+# shared gate workflow of the Craft apps in craft-common-actions.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a PR branch cancels its older run; every push to main runs to the end.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  rust:
-    name: Rust prüfen
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Formatierung
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --workspace
-
-  server-postgres:
-    name: Server mit PostgreSQL prüfen
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Vertragstests gegen PostgreSQL
-        env:
-          SSHCRAFT_TEST_POSTGRES_URL: postgres://postgres:test@localhost:5432/postgres
-        run: cargo test -p sshcraft-server --test store_contract
-
-  frontend:
-    name: Oberfläche prüfen
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: app
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - run: npm ci
-      - name: Typen
-        run: npm run typecheck
-      - name: Tests
-        run: npm test
+  gate:
+    # Tracks @main so suite-wide CI fixes reach every app without a PR in each repository.
+    uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
+    with:
+      # Windows only until R7 adds macOS, Linux and FreeBSD.
+      os: '["windows-latest"]'
+      # SSHCraft builds without craft-fonts so far.
+      craft-fonts-ref: ""
+      require-craft-fonts: false
+      tools: cargo-nextest@0.9.152,cargo-deny@0.20.2
+      targets: wasm32-unknown-unknown

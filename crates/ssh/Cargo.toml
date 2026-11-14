@@ -1,0 +1,38 @@
+[package]
+name = "sshcraft-ssh"
+description = "SSH session engine for SSHCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# In-process SSH test server, used by this crate's tests and by the app's tests.
+testing = ["dep:rand", "dep:futures"]
+
+[dependencies]
+sshcraft-model = { workspace = true }
+russh = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+zeroize = { workspace = true }
+tokio-socks = "0.5.3"
+data-encoding = { workspace = true }
+rand = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+zeroize = { workspace = true }
+sshcraft-ssh = { path = ".", features = ["testing"] }
+rand = { workspace = true }
+russh = { workspace = true }
+sshcraft-model = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+[lints]
+workspace = true

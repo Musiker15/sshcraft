@@ -1,5 +1,7 @@
 # Hosts and order
 
+> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
+
 How SSHCraft keeps hosts in groups, with tags and symbols, and how hosts come in from other
 programs and go out again. Sync and sharing of all this are described in [sync.md](sync.md).
 
