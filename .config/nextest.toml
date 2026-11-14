@@ -1,0 +1,2 @@
+# cargo-nextest, run by cargo xtask test when it is installed.
+nextest-version = "0.9.152"

@@ -1,0 +1,162 @@
+# cargo-deny policy, run by `cargo xtask deny` and part of `cargo xtask ci`.
+# Dependencies follow the licence list of the Craft house rules (AGENTS.md). A licence outside
+# the list is allowed only as an exception for one named crate, with the reason it is in the tree.
+
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.9
+# The list of the house rules also names licences for fonts and art that no crate uses yet.
+unused-allowed-license = "allow"
+allow = [
+    "ISC",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Apache-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Bitstream-Vera",
+    "CC0-1.0",
+    "CC-BY-4.0",
+    "CC-BY-SA-4.0",
+    "LicenseRef-Public-Domain",
+]
+
+# Unicode data and the ICU4X crates that use it, reached through url and idna (reqwest) and the
+# Unicode tables of the parser crates. Unicode-3.0 is a permissive licence for Unicode data;
+# pdfcraft and gridcraft carry it as well (gridcraft NOTICE, pdfcraft deny.toml).
+[[licenses.exceptions]]
+crate = "icu_collections"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "icu_locale_core"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "icu_normalizer"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "icu_normalizer_data"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "icu_properties"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "icu_properties_data"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "icu_provider"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "litemap"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "potential_utf"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "tinystr"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "unicode-ident"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "unicode-normalization"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "unicode-properties"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "writeable"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "yoke"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "yoke-derive"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "zerofrom"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "zerofrom-derive"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "zerotrie"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "zerovec"
+allow = ["Unicode-3.0"]
+
+[[licenses.exceptions]]
+crate = "zerovec-derive"
+allow = ["Unicode-3.0"]
+
+# foldhash: a hasher in the hashbrown tree; Zlib is a permissive licence.
+[[licenses.exceptions]]
+crate = "foldhash"
+allow = ["Zlib"]
+
+# option-ext: through dirs-sys and directories (the data folder) and craft-libs later.
+# MPL-2.0 is file-level copyleft; SSHCraft does not modify the crate. Named in the rebuild design.
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
+
+# The Mozilla CA bundle that rustls uses to check the TLS certificate of a sync server.
+# CDLA-Permissive-2.0 is a permissive licence for data; pdfcraft carries webpki-root-certs too.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[advisories]
+yanked = "warn"
+ignore = [
+    # rsa: Marvin attack, timing of private-key operations; there is no fixed release.
+    # SSHCraft uses a private RSA key only locally to sign, so no one on the network can time
+    # it, and Ed25519 stays the default key type. Decided by the maintainer on 2026-11-14.
+    # Look again when rsa publishes a fixed version.
+    # zvariant, zbus_names, zvariant_derive: merged into zbus 6 and no longer maintained alone.
+    # They reach SSHCraft only through keyring's Linux secret-service store (secret-service 5,
+    # zbus 5); secret-service 6 for zbus 6 is a release candidate only. pdfcraft ignores the same
+    # three. Look again when keyring's secret-service store moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; Linux keyring store still on zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; Linux keyring store still on zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; Linux keyring store still on zbus 5" },
+    { id = "RUSTSEC-2023-0071", reason = "local signing only, no network timing oracle; Ed25519 is the default" },
+]
