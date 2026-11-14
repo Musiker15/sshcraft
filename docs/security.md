@@ -43,9 +43,17 @@ What a server prints may not reach beyond the terminal on its own:
 
 - **Clipboard (OSC 52):** a program may write text to the clipboard (at most 1 MiB, and only
   while the setting is on), never read it. A read request gets no answer.
-- **Links:** only `http` and `https` links open, only on Ctrl+click, and Rust checks the link
-  again (`open_link`) before the system opens it. `file:`, `javascript:` and other schemes are
-  refused. The window has no opener permission of its own.
+- **Links:** only `http` and `https` links open, only on Ctrl+click, and the engine checks the
+  link again (`link.open`) before the system opens it. `file:`, `javascript:` and other schemes
+  are refused. A link target longer than 2048 bytes is dropped.
+- **Titles:** a window title loses control and bidi characters and is cut to 256 characters.
+  Title reports (`CSI 20 t`, `CSI 21 t`) get no answer, so a server cannot make the terminal
+  type a title it chose.
+- **Long sequences:** an OSC sequence (title, clipboard, link) is held back until it ends; one
+  longer than 1.5 MiB is dropped whole, so neither memory nor a cut-off clipboard follows from a
+  sequence that never ends.
+- **File transfer** over the terminal (ZMODEM, trzsz) never starts: the terminal does not speak
+  either protocol.
 - **Broadcast:** answers the terminal gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
 

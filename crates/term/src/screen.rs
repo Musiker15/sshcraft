@@ -6,6 +6,7 @@ use alacritty_terminal::term::{Term, TermMode};
 use alacritty_terminal::vte::ansi::{self, NamedColor};
 use bitflags::bitflags;
 
+use crate::limits::MAX_LINK_BYTES;
 use crate::listener::Listener;
 
 /// The visible part of the terminal.
@@ -184,7 +185,7 @@ fn cell_view(cell: &Cell, links: &mut Vec<String>) -> CellView {
         }
         text
     };
-    let link = cell.hyperlink().and_then(|h| {
+    let link = cell.hyperlink().filter(|h| h.uri().len() <= MAX_LINK_BYTES).and_then(|h| {
         let uri = h.uri();
         let index = match links.iter().position(|l| l == uri) {
             Some(i) => i,

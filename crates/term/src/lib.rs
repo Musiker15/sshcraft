@@ -6,18 +6,20 @@
 //! passed to [`Terminal::feed`] is hostile: a size is clamped, the scrollback is bounded by
 //! [`limits::MAX_CELLS`], and the queue of answers and notices has a limit.
 
+mod filter;
 pub mod limits;
 mod listener;
 mod screen;
 
 use alacritty_terminal::event::Event;
 use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::term::{Config, Osc52, Term};
 use alacritty_terminal::vte::ansi::Processor;
 
 pub use screen::{CellFlags, CellView, CursorShape, CursorView, Screen, SelectionView, TermColor, TermModes};
 
-use limits::{DEFAULT_SCROLLBACK, MAX_CELLS, MAX_COLS, MAX_ROWS, MAX_SCROLLBACK, MIN_COLS, MIN_ROWS};
+use filter::Prefilter;
+use limits::{DEFAULT_SCROLLBACK, MAX_CELLS, MAX_CLIPBOARD_BYTES, MAX_COLS, MAX_ROWS, MAX_SCROLLBACK, MAX_TITLE_CHARS, MIN_COLS, MIN_ROWS};
 use listener::Listener;
 
 /// How a terminal is set up.
@@ -88,13 +90,29 @@ fn scrollback_for(size: TermSize, wanted: usize) -> usize {
 }
 
 fn options(size: TermSize, config: &TermConfig) -> Config {
-    Config { scrolling_history: scrollback_for(size, config.scrollback), ..Config::default() }
+    // Programs may copy into the clipboard, never paste from it: a read is never answered.
+    let osc52 = if config.clipboard_write { Osc52::OnlyCopy } else { Osc52::Disabled };
+    Config { scrolling_history: scrollback_for(size, config.scrollback), osc52, ..Config::default() }
+}
+
+/// Characters that hide or reorder text in a title.
+fn hides_text(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// A title as it may be shown: without control and bidi characters, at most
+/// [`MAX_TITLE_CHARS`] characters.
+fn clean_title(title: &str) -> String {
+    title.chars().filter(|c| !hides_text(*c)).take(MAX_TITLE_CHARS).collect()
 }
 
 /// One terminal.
 pub struct Terminal {
     term: Term<Listener>,
     parser: Processor,
+    prefilter: Prefilter,
+    /// What the prefilter lets through, reused between feeds.
+    filtered: Vec<u8>,
     listener: Listener,
     size: TermSize,
     config: TermConfig,
@@ -105,12 +123,18 @@ impl Terminal {
         let size = TermSize::clamped(size.cols, size.rows);
         let listener = Listener::default();
         let term = Term::new(options(size, config), &size, listener.clone());
-        Self { term, parser: Processor::new(), listener, size, config: config.clone() }
+        Self { term, parser: Processor::new(), prefilter: Prefilter::default(), filtered: Vec::new(), listener, size, config: config.clone() }
     }
 
     /// Output from the session.
     pub fn feed(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        self.filtered.clear();
+        self.prefilter.filter(bytes, &mut self.filtered);
+        self.parser.advance(&mut self.term, &self.filtered);
+        // A large feed must not keep its buffer for the life of the terminal.
+        if self.filtered.capacity() > 1 << 20 {
+            self.filtered = Vec::new();
+        }
     }
 
     /// Changes the size, clamped; the scrollback shrinks when the grid would pass the budget.
@@ -155,10 +179,12 @@ impl Terminal {
             .into_iter()
             .filter_map(|event| match event {
                 Event::PtyWrite(text) => Some(Notice::Reply(text.into_bytes())),
-                Event::Title(title) => Some(Notice::Title(title)),
+                Event::Title(title) => Some(Notice::Title(clean_title(&title))),
                 Event::ResetTitle => Some(Notice::ResetTitle),
                 Event::Bell => Some(Notice::Bell),
-                Event::ClipboardStore(_, text) => Some(Notice::ClipboardWrite(text)),
+                Event::ClipboardStore(_, text) if self.config.clipboard_write && text.len() <= MAX_CLIPBOARD_BYTES => {
+                    Some(Notice::ClipboardWrite(text))
+                }
                 _ => None,
             })
             .collect()
