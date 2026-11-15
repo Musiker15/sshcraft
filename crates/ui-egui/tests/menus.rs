@@ -192,3 +192,44 @@ fn the_window_buttons_work_where_the_app_draws_the_frame() {
     h.step();
     assert!(sent(&h, &ViewportCommand::Close));
 }
+
+/// Alt and `key` pressed and released as a keyboard sends them, Alt down first.
+fn alt_key(h: &mut H, key: egui::Key) {
+    let alt = egui::Modifiers::ALT;
+    for (k, pressed, m) in [(egui::Key::AltLeft, true, alt), (key, true, alt), (key, false, alt), (egui::Key::AltLeft, false, egui::Modifiers::NONE)]
+    {
+        h.input_mut().events.push(egui::Event::Key { key: k, pressed, modifiers: m, repeat: false, physical_key: None });
+    }
+    h.run_steps(3);
+}
+
+#[test]
+fn the_keyboard_stays_with_the_terminal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    // Outside a terminal Alt+F opens File, as on Windows.
+    h.run_steps(3);
+    alt_key(&mut h, egui::Key::F);
+    assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_some(), "Alt+F opens File on a page");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_none());
+
+    let (_server, id) = host(&session, "web", true);
+    h.state_mut().ui.connect_request = Some(ConnectRequest::Host(id));
+    until(&mut h, "the session", |app| !app.terminals.is_empty() && app.in_terminal());
+    // In a terminal Alt+F is the shell's (forward a word), F10 the program's, and a tap on Alt
+    // must not take the arrow keys away from it.
+    alt_key(&mut h, egui::Key::F);
+    assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_none(), "Alt+F stays with the terminal");
+    h.key_press(egui::Key::F10);
+    h.run_steps(2);
+    for (pressed, m) in [(true, egui::Modifiers::ALT), (false, egui::Modifiers::NONE)] {
+        h.input_mut().events.push(egui::Event::Key { key: egui::Key::AltLeft, pressed, modifiers: m, repeat: false, physical_key: None });
+    }
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(3);
+    assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_none(), "no menu opened from the keyboard");
+    assert!(!craft_menu::bar::is_focused(&h.ctx), "the bar did not take the keyboard");
+}

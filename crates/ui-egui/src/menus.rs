@@ -130,15 +130,40 @@ pub fn run(app: &mut SshcraftApp, command: &CommandRef) {
 pub fn bar_ui(app: &mut SshcraftApp, ui: &mut egui::Ui, max_width: f32) {
     let ctx = ui.ctx().clone();
     let bar = craft_menu::layout(&menu_bar(app), Target::current(), &layout_options()).bar;
+    // While a terminal has the keyboard, the bar sees none of it: Alt+F is the shell's (forward a
+    // word), F10 the program's, and a tap on Alt must not put the arrow keys on the bar. The mouse
+    // still opens the menus. The keys are given back unchanged for the terminal after the bar.
+    let held = (app.in_terminal() && !ctx.text_edit_focused()).then(|| {
+        ctx.input_mut(|i| {
+            let kept = (i.events.clone(), i.raw.events.clone());
+            i.events.retain(|e| !keyboard(e));
+            i.raw.events.retain(|e| !keyboard(e));
+            kept
+        })
+    });
     let chosen = craft_menu::MenuBarUi::new(&bar)
         .gate(gate(app, &ctx))
         .label(&translate)
         .id(egui::Id::unique("sshcraft-menu-bar"))
         .shrink_to_fit(max_width)
         .show(ui);
+    if let Some((events, raw)) = held {
+        ctx.input_mut(|i| {
+            i.events = events;
+            i.raw.events = raw;
+        });
+    }
     for command in chosen {
         run(app, &command);
     }
+}
+
+/// What a terminal reads from the keyboard: keys, typed text and the clipboard keys.
+fn keyboard(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) | egui::Event::Ime(_)
+    )
 }
 
 /// The native menu bar (macOS), once, from eframe's app creator. `false` when AppKit refused it:
