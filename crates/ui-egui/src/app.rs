@@ -94,6 +94,11 @@ impl SshcraftApp {
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
                 Ok(EngineEvent::PromptWithdrawn { prompt_id }) => self.prompts.withdraw(prompt_id),
+                Ok(EngineEvent::ForwardStatus(status)) => {
+                    if let Ok(value) = serde_json::to_value(&status) {
+                        self.data.forwards.insert(status.rule_id, value);
+                    }
+                }
                 Ok(EngineEvent::Ui(sshcraft_engine::UiRequest::OpenUrl { url })) => self.urls.push(url),
                 Ok(_) => {}
                 // Events were lost: fetch everything again.

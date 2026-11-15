@@ -77,6 +77,10 @@ pub struct Data {
     pub identities: Vec<IdentityRow>,
     /// Workspace templates as `workspace.list` returns them.
     pub templates: Vec<Value>,
+    /// The last state of each forwarding rule that ran, as the engine reports it.
+    pub forwards: std::collections::HashMap<sshcraft_model::forward::ForwardId, Value>,
+    /// The states of running rules were asked for once.
+    pub forwards_loaded: bool,
     pub settings: EngineSettings,
     /// What this device can make besides vault keys; asked once.
     pub security: Option<crate::pages::keys::SecuritySupport>,

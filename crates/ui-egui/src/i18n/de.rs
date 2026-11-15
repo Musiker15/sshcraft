@@ -281,6 +281,41 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Workspaces" => "Workspaces",
         "Delete workspace" => "Workspace löschen",
         "Workspace: {name}" => "Workspace: {name}",
+        // Port forwarding
+        "Stopped" => "Gestoppt",
+        "Starting…" => "Startet…",
+        "Running on port {port}, {count} connections" => "Läuft auf Port {port}, {count} Verbindungen",
+        ", {count} refused" => ", {count} abgelehnt",
+        "Reconnecting (attempt {attempt}) in {seconds} s" => "Verbindet neu (Versuch {attempt}) in {seconds} s",
+        "Failed: {detail}" => "Fehlgeschlagen: {detail}",
+        "New rule" => "Neue Regel",
+        "Edit rule" => "Regel bearbeiten",
+        "No forwarding rules yet. A rule belongs to a host and starts here." => {
+            "Noch keine Weiterleitungsregeln. Eine Regel gehört zu einem Host und startet hier."
+        }
+        "Reachable from other machines" => "Von anderen Rechnern erreichbar",
+        "Start" => "Starten",
+        "Stop" => "Stoppen",
+        "Stop the rule to change it." => "Stoppe die Regel, um sie zu ändern.",
+        "Without a rule" => "Ohne Regel",
+        "Choose a host." => "Wähle einen Host.",
+        "Choose a host" => "Host wählen",
+        "A host has at most 50 rules." => "Ein Host hat höchstens 50 Regeln.",
+        "The address has no spaces and at most 253 characters." => "Die Adresse hat keine Leerzeichen und höchstens 253 Zeichen.",
+        "Ports are 1 to 65535, and the target needs an address." => "Ports sind 1 bis 65535, und das Ziel braucht eine Adresse.",
+        "A name has at most 100 characters." => "Ein Name hat höchstens 100 Zeichen.",
+        "Kind" => "Art",
+        "Local (-L)" => "Lokal (-L)",
+        "Remote (-R)" => "Entfernt (-R)",
+        "Dynamic, SOCKS (-D)" => "Dynamisch, SOCKS (-D)",
+        "Address on the server" => "Adresse auf dem Server",
+        "Address here" => "Adresse hier",
+        "Target here" => "Ziel hier",
+        "Target from the server" => "Ziel vom Server aus",
+        "Other machines can reach this port through {address}." => "Andere Rechner erreichen diesen Port über {address}.",
+        "The SOCKS proxy asks no password: anyone who reaches the port can use it." => {
+            "Der SOCKS-Proxy fragt kein Passwort: wer den Port erreicht, kann ihn nutzen."
+        }
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

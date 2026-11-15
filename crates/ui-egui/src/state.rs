@@ -93,6 +93,8 @@ pub struct UiState {
     #[serde(skip)]
     pub shown_terminal: Option<sshcraft_engine::SessionId>,
     #[serde(skip)]
+    pub forward_form: Option<crate::pages::forwarding::ForwardForm>,
+    #[serde(skip)]
     pub template_form: Option<crate::pages::templates::TemplateForm>,
     #[serde(skip)]
     pub picker: Option<crate::session_tab::Picker>,
