@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# Template: `cargo xtask stores SHA256SUMS.txt` fills it in (docs/releasing.md, "Stores").
+# The MSI installs for the current account by default and for everyone with ALLUSERS=1
+# (packaging/windows/INSTALLATION.md). The upgrade code never changes.
+PackageIdentifier: MSKScripts.SSHCraft
+PackageVersion: {{version}}
+InstallerType: wix
+MinimumOSVersion: 10.0.17763.0
+UpgradeBehavior: install
+Commands:
+  - sshcraft
+  - sshcraft-cli
+AppsAndFeaturesEntries:
+  - UpgradeCode: '{E577A976-EE1A-4C98-96B7-D3A2EBE306CB}'
+Installers:
+  - Architecture: x64
+    Scope: user
+    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-x64.msi
+    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x64.msi}}
+  - Architecture: x64
+    Scope: machine
+    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-x64.msi
+    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x64.msi}}
+    InstallerSwitches:
+      Custom: ALLUSERS=1
+  - Architecture: x86
+    Scope: user
+    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-x86.msi
+    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x86.msi}}
+  - Architecture: x86
+    Scope: machine
+    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-x86.msi
+    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x86.msi}}
+    InstallerSwitches:
+      Custom: ALLUSERS=1
+  - Architecture: arm64
+    Scope: user
+    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-arm64.msi
+    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-arm64.msi}}
+  - Architecture: arm64
+    Scope: machine
+    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-arm64.msi
+    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-arm64.msi}}
+    InstallerSwitches:
+      Custom: ALLUSERS=1
+ManifestType: installer
+ManifestVersion: 1.10.0
