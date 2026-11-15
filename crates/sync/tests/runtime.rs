@@ -109,8 +109,12 @@ async fn server_restart_reconnects() {
     let (a, b) = pair(&server).await;
     let (rb, mut seen_b) = b.start();
     wait_for(&mut seen_b, |s| *s == Seen::Status(SyncStatus::Idle), 5).await;
+    // The client opens its event socket right after it reports idle. A socket that opens while
+    // this in-process server shuts down outlives it (a real server process takes it along), and
+    // the loss would never show: give the socket a moment first.
+    tokio::time::sleep(Duration::from_secs(1)).await;
     server.stop().await;
-    wait_for(&mut seen_b, |s| matches!(s, Seen::Status(SyncStatus::Offline { .. })), 5).await;
+    wait_for(&mut seen_b, |s| matches!(s, Seen::Status(SyncStatus::Offline { .. })), 15).await;
     server.restart().await;
     wait_for(&mut seen_b, |s| *s == Seen::Status(SyncStatus::Idle), 15).await;
 

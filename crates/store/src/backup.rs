@@ -10,7 +10,6 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
-use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sshcraft_model::keytypes::KeyKind;
 use sshcraft_model::model::{ConnectionSettings, Group, Host, Identity, IdentityId, KeyId, KeyRef, PasswordId, Proxy, ServerId};
@@ -158,10 +157,8 @@ pub fn create(store: &Store, vault: &Vault, passphrase: &str, now: i64) -> Resul
     counts.host_keys = content.host_keys.len();
 
     let plain = Zeroizing::new(serde_json::to_vec(&content).map_err(|e| StoreError::Malformed(e.to_string()))?);
-    let mut salt = [0u8; 16];
-    let mut nonce = [0u8; 24];
-    rand::rng().fill(&mut salt[..]);
-    rand::rng().fill(&mut nonce[..]);
+    let salt: [u8; 16] = rand::random();
+    let nonce: [u8; 24] = rand::random();
     let header = Header { kdf: "argon2id".into(), memory_kib: KDF_MEMORY_KIB, passes: KDF_PASSES, salt: b64(&salt), nonce: b64(&nonce) };
     let header_line = serde_json::to_string(&header).map_err(|e| StoreError::Malformed(e.to_string()))?;
     let key = derive(passphrase, &salt, header.memory_kib, header.passes)?;

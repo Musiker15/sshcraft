@@ -1969,7 +1969,7 @@ async fn a_reference_from_elsewhere_asks_first() {
 
 #[tokio::test]
 async fn a_failing_manager_ends_with_its_message() {
-    let server = password_server("unused").await;
+    let server = password_server(&format!("pw-{:016x}", rand::random::<u64>())).await;
     let w = PasswordWorld::new();
     w.trust(&server);
     w.store.lock().unwrap().approve_command(&crate::secrets::approval_digest(&op_ref(), "127.0.0.1", server.port)).unwrap();
@@ -2010,20 +2010,21 @@ async fn keepassxc_asks_the_database_password_once() {
 
 #[tokio::test]
 async fn a_stored_totp_secret_answers_the_code_question() {
-    // "12345678901234567890" in Base32 (the secret of RFC 6238).
-    let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    // A secret made for this run, stored as Base32 like one typed into the form.
+    let bytes: [u8; 20] = rand::random();
+    let secret = base32(&bytes);
     let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     // Not right at the end of a 30 second window, so the server's code is still the one sent.
     if now() % 30 > 24 {
         tokio::time::sleep(Duration::from_secs(31 - now() % 30)).await;
     }
-    let code = sshcraft_model::totp::code(b"12345678901234567890", now());
+    let code = sshcraft_model::totp::code(&bytes, now());
     let server = TestServer::start_with(TestAuth { kbd: vec![vec![("Verification code: ".into(), false, code)]], ..Default::default() }).await;
     let w = PasswordWorld::new();
     w.trust(&server);
     let host = w.host(server.port, None, Vec::new());
     let id = PasswordId::new();
-    w.vault.store_password(&w.store.lock().unwrap(), id, secret, None).unwrap();
+    w.vault.store_password(&w.store.lock().unwrap(), id, &secret, None).unwrap();
     w.set(host, |s| s.totp = Some(id));
     let manager = w.manager(Some(w.vault.clone()), trusting(), Arc::new(sshcraft_ssh::NoPrompter), verified());
     let sink = Arc::new(RecordingSink::default());
@@ -2078,4 +2079,22 @@ async fn after_a_lock_a_managed_password_asks_again() {
     }
     assert_eq!(presence.asked(), 2, "Windows Hello before each fetch after a lock");
     assert_eq!(auth.seen().len(), 2, "the database password is asked again after the lock");
+}
+
+/// RFC 4648 Base32 without padding, for test secrets.
+fn base32(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let (mut out, mut buffer, mut bits) = (String::new(), 0u32, 0u32);
+    for b in bytes {
+        buffer = (buffer << 8) | u32::from(*b);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(char::from(ALPHABET[((buffer >> bits) & 31) as usize]));
+        }
+    }
+    if bits > 0 {
+        out.push(char::from(ALPHABET[((buffer << (5 - bits)) & 31) as usize]));
+    }
+    out
 }

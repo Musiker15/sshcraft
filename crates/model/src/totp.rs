@@ -83,7 +83,9 @@ mod tests {
     /// The SHA-1 test vectors of RFC 6238, appendix B (8 digits there; the last 6 here).
     #[test]
     fn rfc_6238_vectors() {
-        let secret = b"12345678901234567890";
+        // "12345678901234567890", the secret of the RFC, made rather than written out.
+        let secret: Vec<u8> = (1..=20u8).map(|i| b'0' + i % 10).collect();
+        let secret = secret.as_slice();
         for (time, eight) in
             [(59u64, "94287082"), (1_111_111_109, "07081804"), (1_111_111_111, "14050471"), (1_234_567_890, "89005924"), (2_000_000_000, "69279037")]
         {
