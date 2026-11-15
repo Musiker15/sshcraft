@@ -108,6 +108,15 @@ fn a_clipboard_host_can_be_removed() {
     assert!(h.query_by_label("web").is_some(), "the host is listed by name");
     h.get_by_label("Remove").click();
     until(&mut h, "the removed host", |app| app.data.settings.terminal.clipboard_hosts.is_empty());
-    let saved = run("settings.get", json!({}));
-    assert!(saved["terminal"].get("clipboard_hosts").is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)), "{saved}");
+    // The page shows the change at once; the engine has it once its save ran.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let saved = run("settings.get", json!({}));
+        if saved["terminal"].get("clipboard_hosts").is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the engine kept the host: {saved}");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
 }
