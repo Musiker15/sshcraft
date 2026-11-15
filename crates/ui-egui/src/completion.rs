@@ -25,8 +25,9 @@ pub struct Suggestion {
     pub kind: &'static str,
 }
 
-/// The suggestions for `line`, most useful first.
-pub fn suggest(line: &str, history: &[String], snippets: &[SnippetRow], paths: &[String]) -> Vec<Suggestion> {
+/// The suggestions for `line`, most useful first. `bracketed`: the shell takes pastes as such
+/// (a snippet of several lines is offered only then).
+pub fn suggest(line: &str, history: &[String], snippets: &[SnippetRow], paths: &[String], bracketed: bool) -> Vec<Suggestion> {
     if line.chars().count() < MIN_CHARS || line.ends_with('\n') {
         return Vec::new();
     }
@@ -45,10 +46,10 @@ pub fn suggest(line: &str, history: &[String], snippets: &[SnippetRow], paths: &
     for s in snippets {
         if let Some(rest) = s.content.strip_prefix(line).filter(|r| !r.is_empty() && !s.content.contains('\n')) {
             push(Suggestion { label: s.content.clone(), insert: rest.as_bytes().to_vec(), kind: "snippet" }, &mut out);
-        } else if s.name.to_lowercase().starts_with(&lower) {
-            // Found by its name: the line goes, the snippet comes.
+        } else if s.name.to_lowercase().starts_with(&lower) && (bracketed || !s.content.contains(['\n', '\r'])) {
+            // Found by its name: the line goes, the snippet comes as a paste, so nothing runs.
             let mut insert = vec![0x7f; line.chars().count()];
-            insert.extend_from_slice(s.content.as_bytes());
+            insert.extend(crate::pages::snippets::paste_bytes(&s.content, bracketed, false));
             push(Suggestion { label: s.name.clone(), insert, kind: "snippet" }, &mut out);
         }
     }

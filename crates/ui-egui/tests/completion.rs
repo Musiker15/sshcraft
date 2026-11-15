@@ -13,8 +13,8 @@ fn snippet(name: &str, content: &str) -> SnippetRow {
 #[test]
 fn suggestions_start_at_two_characters() {
     let history = vec!["git status".to_string()];
-    assert!(suggest("g", &history, &[], &[]).is_empty());
-    let found = suggest("gi", &history, &[], &[]);
+    assert!(suggest("g", &history, &[], &[], false).is_empty());
+    let found = suggest("gi", &history, &[], &[], false);
     assert_eq!(found.first().map(|s| s.insert.as_slice()), Some(b"t status".as_slice()), "only the missing rest");
 }
 
@@ -23,7 +23,7 @@ fn history_comes_before_snippets_before_paths() {
     let history = vec!["docker ps".to_string()];
     let snippets = [snippet("deploy", "docker compose up -d")];
     let paths = vec!["/docs".to_string()];
-    let found = suggest("do", &history, &snippets, &paths);
+    let found = suggest("do", &history, &snippets, &paths, false);
     let kinds: Vec<&str> = found.iter().map(|s| s.kind).collect();
     assert_eq!(kinds, ["history", "snippet"], "{found:?}");
     let shown: Vec<&str> = found.iter().map(|s| s.label.as_str()).collect();
@@ -33,11 +33,24 @@ fn history_comes_before_snippets_before_paths() {
 #[test]
 fn a_snippet_by_name_replaces_the_line() {
     let snippets = [snippet("restart-app", "sudo systemctl restart app")];
-    let found: Vec<Suggestion> = suggest("resta", &[], &snippets, &[]);
+    let found: Vec<Suggestion> = suggest("resta", &[], &snippets, &[], false);
     let by_name = found.iter().find(|s| s.kind == "snippet").expect("found by its name");
     let mut expected = vec![0x7f; 5];
     expected.extend_from_slice(b"sudo systemctl restart app");
     assert_eq!(by_name.insert, expected, "the line is erased, then the snippet pasted");
+}
+
+#[test]
+fn a_snippet_by_name_is_pasted_and_never_runs() {
+    let snippets = [snippet("two-steps", "cd /srv\nrm -rf cache"), snippet("tabbed", "ls\t-la")];
+    let multi = |bracketed| suggest("two", &[], &snippets, &[], bracketed).into_iter().find(|s| s.label == "two-steps");
+    assert!(multi(false).is_none(), "several lines are not offered where the shell cannot take a paste");
+    let pasted = multi(true).expect("offered as a paste").insert;
+    let body: Vec<u8> = pasted.iter().copied().skip_while(|b| *b == 0x7f).collect();
+    assert!(body.starts_with(b"\x1b[200~") && body.ends_with(b"\x1b[201~"), "{body:?}");
+    assert!(!body.contains(&b'\r'), "no Enter runs a line");
+    let tabbed = suggest("tab", &[], &snippets, &[], false).into_iter().find(|s| s.label == "tabbed").unwrap().insert;
+    assert!(!tabbed.contains(&b'\t'), "a Tab would start the shell's completion");
 }
 
 #[test]

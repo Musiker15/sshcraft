@@ -758,7 +758,8 @@ fn update_suggestions(app: &mut SshcraftApp, id: SessionId) {
         }
     }
     let Some(tab) = app.terminals.get_mut(&id) else { return };
-    tab.suggestions = crate::completion::suggest(&line, &tab.history, &snippets, &paths);
+    let bracketed = tab.term.modes().contains(sshcraft_term::TermModes::BRACKETED_PASTE);
+    tab.suggestions = crate::completion::suggest(&line, &tab.history, &snippets, &paths, bracketed);
 }
 
 /// The list under the cursor.
