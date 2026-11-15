@@ -22,6 +22,9 @@ host.info
 host.list
 host.recent
 host.save
+hostkey.export
+hostkey.list
+hostkey.remove
 identity.delete
 identity.list
 identity.save
@@ -66,6 +69,7 @@ prompt.agent
 prompt.auth
 prompt.host_key
 prompt.list
+prompt.proxy_command
 serial.last
 serial.ports
 serial.remember
@@ -89,6 +93,8 @@ share.set_grants
 snippet.delete
 snippet.list
 snippet.save
+sshconfig.refresh
+sshconfig.write
 sync.create_account
 sync.join_account
 sync.remove_server

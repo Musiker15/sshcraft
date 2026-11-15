@@ -52,9 +52,10 @@ straight to a sync server.
 
 Limits on purpose:
 
-- Host keys from `known_hosts` never replace a key SSHCraft already stores for that host: the
-  stored one was confirmed when connecting, a file can be stale or planted. Hashed host names
-  and `@cert-authority` or `@revoked` lines are skipped.
+- Host keys from `known_hosts` never add to or replace the keys SSHCraft already stores for that
+  host: the stored ones were confirmed when connecting, a file can be stale or planted. A host
+  new to SSHCraft takes all its keys from the file. Hashed host names and `@cert-authority` or
+  `@revoked` lines are skipped. *Keys › Known hosts* also writes a `known_hosts` file.
 - Passwords stored by MobaXterm or SecureCRT are never read.
 - Files over 10 MiB are refused; broken lines are skipped and listed, never the whole import.
 - Key files named in a session (PuTTY, SecureCRT) are pointed out; import them under *Keys*.

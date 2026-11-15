@@ -11,6 +11,8 @@ use serde::Serialize;
 use sshcraft_model::forward::{ForwardId, ForwardKind, ForwardRule};
 use sshcraft_model::model::HostId;
 use sshcraft_model::policy::{Disconnect, next_reconnect_delay};
+
+use crate::waker::PING_TIMEOUT;
 use sshcraft_ssh::{SshError, Tunnel};
 use tokio::task::JoinHandle;
 
@@ -240,6 +242,7 @@ async fn run(ctx: Arc<Context>, reporter: Arc<Reporter>, key: RuleKey, generatio
     let opened = OpenedKeys::default();
     let mut attempt = 0u32;
     let mut ever_running = false;
+    let mut wake = ctx.wake.subscribe();
     loop {
         report(ForwardState::Starting);
         let started = async {
@@ -262,10 +265,17 @@ async fn run(ctx: Arc<Context>, reporter: Arc<Reporter>, key: RuleKey, generatio
                 report(shown.clone());
                 let closed = session.closed();
                 tokio::pin!(closed);
+                let prober = session.prober();
                 let mut tick = tokio::time::interval(COUNT_INTERVAL);
                 loop {
                     tokio::select! {
                         () = &mut closed => break,
+                        woke = wake.recv() => {
+                            if crate::sessions::woke_up(&woke) && !prober.alive(PING_TIMEOUT.mul_f32(ctx.delay_scale)).await {
+                                prober.close().await;
+                                break;
+                            }
+                        }
                         _ = tick.tick() => {
                             let now = running(&tunnel);
                             if now != shown {
@@ -299,10 +309,11 @@ async fn run(ctx: Arc<Context>, reporter: Arc<Reporter>, key: RuleKey, generatio
         }
         attempt += 1;
         let lost = Disconnect::Lost("connection closed".into());
-        match next_reconnect_delay(&lost, attempt) {
+        // A tunnel is a standing service: it tries again for as long as it is on.
+        match next_reconnect_delay(&lost, attempt, None) {
             Some(delay) => {
                 report(ForwardState::Reconnecting { attempt, delay_secs: delay.as_secs() });
-                tokio::time::sleep(delay.mul_f32(ctx.delay_scale)).await;
+                crate::sessions::wait_or_wake(delay.mul_f32(ctx.delay_scale), &mut wake).await;
             }
             None => {
                 report(ForwardState::Failed { code: Some(ErrorCode::Network), detail: None });

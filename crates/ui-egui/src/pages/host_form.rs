@@ -105,14 +105,22 @@ pub struct HostForm {
     pub tags: String,
     pub port: String,
     pub error: Option<String>,
+    /// The proxy as the form opened; a command that differs at save was entered here.
+    pub opened_proxy: Option<Proxy>,
 }
 
 impl HostForm {
     pub fn new(host: Host, editing: bool, has_password: bool) -> Self {
         let tags = host.tags.join(", ");
         let port = host.settings.port.map(|p| p.to_string()).unwrap_or_default();
-        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None }
+        let opened_proxy = host.settings.proxy.clone();
+        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
     }
+}
+
+/// Whether the user entered a proxy command in this form (it is new or changed).
+fn entered_command(opened: &Option<Proxy>, now: &Option<Proxy>) -> bool {
+    matches!(now, Some(Proxy::Command { .. })) && opened != now
 }
 
 /// A group being created or edited.
@@ -126,6 +134,7 @@ pub struct GroupForm {
     pub tags: String,
     pub port: String,
     pub error: Option<String>,
+    pub opened_proxy: Option<Proxy>,
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -261,6 +270,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                 Some(Proxy::Direct) => 1,
                 Some(Proxy::Http(_)) => 2,
                 Some(Proxy::Socks5(_)) => 3,
+                Some(Proxy::Command { .. }) => 4,
             };
             let mut chosen = kind;
             ui.horizontal(|ui| {
@@ -268,6 +278,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                 ui.radio_value(&mut chosen, 1, tr("Direct"));
                 ui.radio_value(&mut chosen, 2, "HTTP");
                 ui.radio_value(&mut chosen, 3, "SOCKS5");
+                ui.radio_value(&mut chosen, 4, tr("Command"));
             });
             if chosen != kind {
                 let endpoint = || ProxyEndpoint { address: String::new(), port: 1080, username: None, password: None };
@@ -275,6 +286,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                     1 => Some(Proxy::Direct),
                     2 => Some(Proxy::Http(endpoint())),
                     3 => Some(Proxy::Socks5(endpoint())),
+                    4 => Some(Proxy::Command { argv: Vec::new() }),
                     _ => None,
                 };
             }
@@ -283,6 +295,9 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                     ui.add(egui::TextEdit::singleline(&mut e.address).hint_text(tr("Proxy address")).desired_width(180.0));
                     ui.add(egui::DragValue::new(&mut e.port).range(1..=65535));
                 });
+            }
+            if let Some(Proxy::Command { argv }) = &mut s.proxy {
+                proxy_command_field(ui, argv, own_host);
             }
         });
         ui.end_row();
@@ -311,6 +326,48 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
         });
         ui.end_row();
     });
+}
+
+/// The proxy command as one line. It is kept as typed while it does not split; the arguments
+/// change only when it does.
+fn proxy_command_field(ui: &mut Ui, argv: &mut Vec<String>, host: Option<HostId>) {
+    use sshcraft_model::proxy_command;
+    let id = egui::Id::unique("sshcraft-proxy-command").with(host);
+    // A line kept from another form (it splits into other arguments) starts over.
+    let mut line = ui
+        .data(|d| d.get_temp::<String>(id))
+        .filter(|line| proxy_command::split(line).map_or(true, |words| words == *argv))
+        .unwrap_or_else(|| proxy_command::join(argv));
+    let edit = ui
+        .horizontal(|ui| {
+            let label = ui.label(tr("Proxy command"));
+            ui.add(egui::TextEdit::singleline(&mut line).hint_text("ssh -W %h:%p bastion").font(egui::TextStyle::Monospace).desired_width(320.0))
+                .labelled_by(label.id)
+        })
+        .inner;
+    let parsed = proxy_command::split(&line);
+    if edit.changed()
+        && let Ok(words) = &parsed
+    {
+        argv.clone_from(words);
+    }
+    match parsed {
+        Err(proxy_command::ProxyCommandError::Empty) => {}
+        Err(e) => {
+            let text = match e {
+                proxy_command::ProxyCommandError::ShellSyntax(c) => {
+                    trf("This needs a shell ({sign}); SSHCraft runs the command without one", &[("sign", &c.escape_default().to_string())])
+                }
+                proxy_command::ProxyCommandError::TooLong => tr("the proxy command is too long").to_owned(),
+                _ => tr("a quote or a backslash is not closed").to_owned(),
+            };
+            ui.colored_label(ui.visuals().error_fg_color, text);
+        }
+        Ok(_) => {
+            ui.label(egui::RichText::new(tr("Runs without a shell. %h, %p, %r and %n stand for address, port, user and name.")).small());
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(id, line));
 }
 
 fn password_field(ui: &mut Ui, password: &mut String, has_password: bool, remove: &mut bool) {
@@ -425,7 +482,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "host.save",
-                    json!({ "host": form.host }),
+                    json!({ "host": form.host, "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy) }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
@@ -519,7 +576,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "group.save",
-                    json!({ "group": form.group }),
+                    json!({ "group": form.group, "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy) }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
@@ -551,6 +608,7 @@ impl GroupForm {
     pub fn new(group: Group, editing: bool, has_password: bool) -> Self {
         let tags = group.tags.join(", ");
         let port = group.defaults.port.map(|p| p.to_string()).unwrap_or_default();
-        Self { group, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None }
+        let opened_proxy = group.defaults.proxy.clone();
+        Self { group, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
     }
 }

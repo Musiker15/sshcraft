@@ -136,12 +136,21 @@ pub enum HostView {
     List,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct General {
     pub language: LanguageSetting,
     /// The desktop draws the title bar instead of the app's own bar; read when the app starts.
     pub system_title_bar: bool,
+    /// Keep the host keys a server announces after sign-in (OpenSSH `UpdateHostKeys`): new
+    /// ones once the server proved it holds them, and drop the ones it no longer has.
+    pub update_host_keys: bool,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,7 +198,13 @@ pub struct Terminal {
     /// The shell a local terminal starts; none means the system default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_shell: Option<ShellCommand>,
+    /// How often a terminal tries to reconnect after its connection dropped, within
+    /// [`RECONNECT_ATTEMPTS`]; 0 turns reconnecting off. Port forwarding always tries again.
+    pub reconnect_attempts: u32,
 }
+
+/// The allowed range of `terminal.reconnect_attempts`.
+pub const RECONNECT_ATTEMPTS: std::ops::RangeInclusive<u32> = 0..=100;
 
 impl Default for Terminal {
     fn default() -> Self {
@@ -201,6 +216,7 @@ impl Default for Terminal {
             history: true,
             autocomplete: true,
             local_shell: None,
+            reconnect_attempts: 10,
         }
     }
 }
@@ -237,6 +253,9 @@ pub struct Integrations {
     pub allow_agent_control: bool,
     /// The loopback port agents connect on; 0 takes any free port.
     pub agent_port: u16,
+    /// The hosts of `~/.ssh/config` (and the files it includes) are kept in SSHCraft and follow
+    /// the file when it changes. Off until the user turns it on.
+    pub ssh_config_live: bool,
 }
 
 /// Everything in `config.toml`.
@@ -275,6 +294,7 @@ impl EngineSettings {
         self.terminal.clipboard_hosts.retain(|h| seen.insert(*h));
         self.terminal.clipboard_hosts.truncate(MAX_CLIPBOARD_HOSTS);
         self.terminal.scrollback = self.terminal.scrollback.clamp(*SCROLLBACK.start(), *SCROLLBACK.end());
+        self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

@@ -41,8 +41,9 @@ sync or a share.
 - Each running rule opens its own SSH connection to its host, the same way a terminal does:
   jump hosts, proxy, keys, saved or asked passphrase, Windows Hello. A question (host key,
   password) shows up like for a terminal; stopping the rule takes it back.
-- After the connection is lost, the rule reconnects like a terminal (up to 5 attempts) and
-  listens again. A remote rule whose port the server still holds from the lost connection is
+- After the connection is lost, the rule reconnects with the same waits as a terminal (see
+  [connections.md](connections.md#reconnecting)), without a limit, and listens again; after
+  sleep or a network change it checks the connection at once. A remote rule whose port the server still holds from the lost connection is
   retried the same way until the server lets go.
 - At the first start, a local port that is already taken, an address that cannot be used, or a
   server that refuses the remote forwarding (`AllowTcpForwarding no`) ends the rule with that

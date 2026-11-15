@@ -33,6 +33,11 @@ pub enum PromptKind {
         instructions: String,
         lines: Vec<(String, bool)>,
     },
+    /// A proxy command that was not set on this device, waiting for the user's yes or no.
+    ProxyCommand {
+        host_name: String,
+        command: String,
+    },
     /// An AI agent's action waiting for the user's yes or no.
     Agent {
         agent: String,
@@ -100,11 +105,12 @@ impl PromptView {
                     .unwrap_or_default(),
             },
             "agent" => PromptKind::Agent { agent: text("agent"), action: text("action"), target: text("target"), detail: text("detail") },
+            "proxy_command" => PromptKind::ProxyCommand { host_name: text("host_name"), command: text("command") },
             _ => return None,
         };
         let answers = match &kind {
             PromptKind::Auth { lines, .. } => vec![String::new(); lines.len()],
-            PromptKind::HostKey { .. } | PromptKind::Agent { .. } => Vec::new(),
+            PromptKind::HostKey { .. } | PromptKind::Agent { .. } | PromptKind::ProxyCommand { .. } => Vec::new(),
         };
         let session = v.get("session").and_then(|s| serde_json::from_value(s.clone()).ok());
         Some(Self { id, session, kind, answers })
@@ -195,6 +201,7 @@ pub fn refresh(app: &mut SshcraftApp) {
 
 enum Answer {
     Agent(bool),
+    ProxyCommand(bool),
     HostKey(bool),
     Auth(Option<Vec<String>>),
 }
@@ -267,6 +274,28 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                     }
                     if answer_button(ui, ready, tr("Accept")) {
                         answer = Some(Answer::HostKey(true));
+                    }
+                });
+            }
+            PromptKind::ProxyCommand { host_name, command } => {
+                ui.heading(tr("Run a program to connect?"));
+                ui.add_space(6.0);
+                ui.label(trf(
+                    "{host} connects through this program on your computer. It was not set up on this device (it came with sync, a share or an agent, or it changed). Allow it only if you know it.",
+                    &[("host", &visible(host_name))],
+                ));
+                ui.add_space(6.0);
+                if let Some(warning) = command_warning(command) {
+                    ui.label(egui::RichText::new(warning).color(tokens.warning));
+                }
+                ui.label(egui::RichText::new(crate::widgets::visible_lines(command)).monospace().color(tokens.text_strong));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if answer_button(ui, ready, tr("Cancel")) {
+                        answer = Some(Answer::ProxyCommand(false));
+                    }
+                    if answer_button(ui, ready, tr("Allow on this device")) {
+                        answer = Some(Answer::ProxyCommand(true));
                     }
                 });
             }
@@ -345,6 +374,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     app.prompts.withdraw(id);
     match answer {
         Answer::Agent(allow) => app.run_reported("prompt.agent", json!({ "prompt_id": id, "allow": allow })),
+        Answer::ProxyCommand(allow) => app.run_reported("prompt.proxy_command", json!({ "prompt_id": id, "allow": allow })),
         Answer::HostKey(accept) => app.run_reported("prompt.host_key", json!({ "prompt_id": id, "accept": accept })),
         Answer::Auth(answers) => app.run_reported("prompt.auth", json!({ "prompt_id": id, "answers": answers })),
     }

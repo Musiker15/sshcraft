@@ -219,3 +219,26 @@ fn long_addresses_and_tags_stay_in_their_space() {
         assert!(node.rect().width() <= 400.0, "{:?}", node.rect());
     }
 }
+
+/// A proxy command is typed as one line and kept as arguments (the engine tests that saving it
+/// here approves it on this device).
+#[test]
+fn the_host_form_offers_a_proxy_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let id = add_host(&session, "behind", None, &[]);
+    h.run_steps(3);
+    hosts::edit_host(h.state_mut(), id);
+    h.run_steps(2);
+    h.get_by_label("Command").click();
+    h.run_steps(2);
+    h.get_by_label("Proxy command").click();
+    h.run_steps(1);
+    h.get_by_label("Proxy command").type_text("ssh -W %h:%p 'my bastion'");
+    h.run_steps(2);
+    h.get_by_label("Save").click();
+    let want = vec!["ssh".to_string(), "-W".into(), "%h:%p".into(), "my bastion".into()];
+    until(&mut h, "the saved command", |app| {
+        app.data.hosts.iter().any(|r| r.host.settings.proxy == Some(sshcraft_model::model::Proxy::Command { argv: want.clone() }))
+    });
+}

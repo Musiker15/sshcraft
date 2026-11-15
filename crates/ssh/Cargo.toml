@@ -34,5 +34,11 @@ sshcraft-model = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 
+# A stand-in for `nc` in the proxy command tests.
+[[bin]]
+name = "sshcraft-pipe-test"
+path = "src/bin/sshcraft-pipe-test.rs"
+required-features = ["testing"]
+
 [lints]
 workspace = true

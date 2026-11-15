@@ -50,11 +50,14 @@ fn run_list(ctx: Ctx, _: Value) -> Out {
 #[derive(Deserialize)]
 struct SaveParams {
     group: Group,
+    /// As for `host.save`: the user entered the proxy command in this save.
+    #[serde(default)]
+    approve_command: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut group } = parse("group.save", params)?;
+        let SaveParams { mut group, approve_command } = parse("group.save", params)?;
         let id = group.id.0.to_string();
         let orphans = {
             let store = ctx.session.store();
@@ -62,6 +65,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
             keep_passwords(stored.as_ref().map(|g| &g.defaults), &mut group.defaults)
         };
         let mut servers = checked(&ctx.session, Change::SaveGroup(&group), ItemKind::Group, id, |s| Ok(s.upsert_group(&group)?))?;
+        if approve_command {
+            super::host::approve_commands(&ctx, [&group.defaults])?;
+        }
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
         ctx.session.announce(&servers);
         Ok(Value::Null)

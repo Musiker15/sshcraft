@@ -113,6 +113,9 @@ pub struct Data {
     /// What this device can make besides vault keys; asked once.
     pub security: Option<crate::pages::keys::SecuritySupport>,
     pub security_loading: bool,
+    /// The known host keys; `None` until loaded, and again after data changed.
+    pub host_keys: Option<Vec<crate::pages::known_hosts::KnownKey>>,
+    pub host_keys_loading: bool,
     /// What to fetch again; set by the engine's events, cleared when the fetch starts.
     pub dirty: Refresh,
     /// What is being fetched now, so a burst of changes starts one fetch each.

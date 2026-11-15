@@ -1,9 +1,11 @@
 //! Reads OpenSSH client config files (`~/.ssh/config`) to import hosts.
 //!
 //! Follows OpenSSH's rule that the first value found for a keyword wins, walking the blocks
-//! from top to bottom. `Include` and `Match` are not followed and are reported instead.
+//! from top to bottom. `Include` is followed by [`parse_tree`]; `Match` is not followed and is
+//! reported instead.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use sshcraft_model::model::{ConnectionSettings, EnvVar, KeyRef};
 
@@ -23,70 +25,260 @@ pub struct ConfigHost {
     pub forward_agent: Option<bool>,
     /// The variables of `SetEnv`.
     pub set_env: Vec<EnvVar>,
+    /// `ProxyCommand` as arguments, when it needs no shell.
+    pub proxy_command: Option<Vec<String>>,
+    /// The file of the first `Host` line naming this alias (only with [`parse_tree`]).
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ParsedConfig {
     pub hosts: Vec<ConfigHost>,
-    /// `Include` and `Match` lines that were not followed.
+    /// `Include` and `Match` lines that were not followed, and files that could not be read.
     pub skipped: Vec<String>,
+    /// The files that were read, so a change to any of them can be noticed.
+    pub files: Vec<PathBuf>,
 }
 
 pub use crate::import::{ImportCandidate, ImportWarning, KeyNote};
 
 struct Block {
+    /// Index into the files read; the block came from that file.
+    file: usize,
+    /// The patterns of the `Host` lines an `Include` stood under: an included block applies
+    /// only to hosts all of them match too (OpenSSH evaluates the included lines only there).
+    guards: Vec<Vec<String>>,
     patterns: Vec<String>,
     /// `Match` blocks are skipped, together with everything inside them.
     skip: bool,
     entries: Vec<(String, String)>,
 }
 
-pub fn parse(text: &str) -> ParsedConfig {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    // Lines before the first `Host` apply to every host.
-    let mut blocks = vec![Block { patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }];
-    let mut skipped = Vec::new();
+/// How deep `Include` may nest (as in OpenSSH).
+pub const MAX_INCLUDE_DEPTH: usize = 16;
+/// The most files read for one configuration.
+pub const MAX_CONFIG_FILES: usize = 256;
+/// The largest file read.
+pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+/// The most bytes read for one configuration, over all files.
+pub const MAX_CONFIG_TOTAL: usize = 4 * 1024 * 1024;
+/// The most `Host` and `Match` blocks read; further ones are skipped and reported.
+pub const MAX_CONFIG_BLOCKS: usize = 10_000;
+/// The most hosts taken from one configuration.
+pub const MAX_CONFIG_HOSTS: usize = 2_000;
 
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+/// Where configuration files come from: the disk, or memory in tests.
+pub trait ConfigFs {
+    fn read(&self, path: &Path) -> Option<String>;
+    /// The files matching a pattern with `*` or `?` in its last part, sorted.
+    fn glob(&self, pattern: &Path) -> Vec<PathBuf>;
+}
+
+/// The files on disk.
+pub struct RealFs;
+
+impl ConfigFs for RealFs {
+    fn read(&self, path: &Path) -> Option<String> {
+        use std::io::Read;
+        let file = std::fs::File::open(path).ok()?;
+        if file.metadata().ok()?.len() > MAX_CONFIG_BYTES {
+            return None;
         }
-        let (keyword, value) = split_keyword(line);
-        if keyword.is_empty() {
-            continue;
+        let mut text = String::new();
+        file.take(MAX_CONFIG_BYTES).read_to_string(&mut text).ok()?;
+        Some(text)
+    }
+
+    fn glob(&self, pattern: &Path) -> Vec<PathBuf> {
+        let (Some(dir), Some(name)) = (pattern.parent(), pattern.file_name().and_then(|n| n.to_str())) else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut found: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            // As in glob(3): `*` does not match a leading dot (backups and temporary files).
+            .filter(|e| e.file_name().to_str().is_some_and(|n| (name.starts_with('.') || !n.starts_with('.')) && glob_matches(name, n)))
+            .map(|e| e.path())
+            .collect();
+        found.sort();
+        found
+    }
+}
+
+/// Whether `text` matches a pattern with `*` and `?` (as in `Host` lines and `Include`).
+pub fn glob_matches(pattern: &str, text: &str) -> bool {
+    glob(pattern, text)
+}
+
+/// What the reading has gathered so far.
+struct Reading {
+    blocks: Vec<Block>,
+    skipped: Vec<String>,
+    files: Vec<PathBuf>,
+    /// The guards for blocks read now (inside an `Include` under a `Host`).
+    guards: Vec<Vec<String>>,
+    /// Bytes read so far over all files.
+    bytes: usize,
+}
+
+impl Reading {
+    fn new() -> Self {
+        // Lines before the first `Host` apply to every host.
+        Self {
+            blocks: vec![Block { file: 0, guards: Vec::new(), patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }],
+            skipped: Vec::new(),
+            files: Vec::new(),
+            guards: Vec::new(),
+            bytes: 0,
         }
-        match keyword.as_str() {
-            "host" => blocks.push(Block { patterns: split_args(value), skip: false, entries: Vec::new() }),
-            "match" => {
-                skipped.push(line.to_owned());
-                blocks.push(Block { patterns: Vec::new(), skip: true, entries: Vec::new() });
+    }
+
+    /// Reads one file's lines; `include` handles an `Include` line's arguments.
+    fn lines(&mut self, text: &str, include: &mut dyn FnMut(&mut Self, &str, &str)) {
+        let file = self.files.len().saturating_sub(1);
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+        for raw in text.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
             }
-            "include" => skipped.push(line.to_owned()),
-            _ => {
-                // There is always a block (the one before the first Host line).
-                let Some(block) = blocks.last_mut() else {
-                    continue;
-                };
-                if !block.skip {
-                    block.entries.push((keyword, unquote(value)));
+            let (keyword, value) = split_keyword(line);
+            if keyword.is_empty() {
+                continue;
+            }
+            match keyword.as_str() {
+                "host" | "match" if self.blocks.len() >= MAX_CONFIG_BLOCKS => {
+                    if !self.skipped.iter().any(|s| s.starts_with("too many blocks")) {
+                        self.skipped.push(format!("too many blocks, stopped at {MAX_CONFIG_BLOCKS}"));
+                    }
+                    // Everything after it is skipped with it.
+                    self.blocks.push(Block { file, guards: Vec::new(), patterns: Vec::new(), skip: true, entries: Vec::new() });
+                    return;
+                }
+                "host" => {
+                    self.blocks.push(Block { file, guards: self.guards.clone(), patterns: split_args(value), skip: false, entries: Vec::new() })
+                }
+                "match" => {
+                    self.skipped.push(line.to_owned());
+                    self.blocks.push(Block { file, guards: self.guards.clone(), patterns: Vec::new(), skip: true, entries: Vec::new() });
+                }
+                // An Include inside a skipped Match block is skipped with it.
+                "include" if self.blocks.last().is_some_and(|b| b.skip) => {}
+                "include" => include(self, line, value),
+                _ => {
+                    // There is always a block (the one before the first Host line).
+                    let Some(block) = self.blocks.last_mut() else {
+                        continue;
+                    };
+                    if !block.skip {
+                        block.entries.push((keyword, unquote(value)));
+                    }
                 }
             }
         }
     }
 
-    let mut aliases: Vec<String> = Vec::new();
-    for block in &blocks[1..] {
-        for pattern in &block.patterns {
-            let concrete = !pattern.contains(['*', '?']) && !pattern.starts_with('!');
-            if concrete && !aliases.contains(pattern) {
-                aliases.push(pattern.clone());
+    fn finish(mut self) -> ParsedConfig {
+        let mut aliases: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for block in self.blocks.iter().skip(1).filter(|b| !b.skip) {
+            for pattern in &block.patterns {
+                let concrete = !pattern.contains(['*', '?']) && !pattern.starts_with('!');
+                if concrete && guards_match(&block.guards, pattern) && seen.insert(pattern.clone()) {
+                    aliases.push(pattern.clone());
+                }
             }
         }
+        if aliases.len() > MAX_CONFIG_HOSTS {
+            self.skipped.push(format!("more than {MAX_CONFIG_HOSTS} hosts, the rest is not taken"));
+            aliases.truncate(MAX_CONFIG_HOSTS);
+        }
+        let hosts = aliases
+            .into_iter()
+            .map(|alias| {
+                let mut host = collect(&self.blocks, alias);
+                host.file = self.blocks.iter().skip(1).find(|b| b.patterns.contains(&host.alias)).and_then(|b| self.files.get(b.file)).cloned();
+                host
+            })
+            .collect();
+        ParsedConfig { hosts, skipped: self.skipped, files: self.files }
     }
+}
 
-    let hosts = aliases.into_iter().map(|alias| collect(&blocks, alias)).collect();
-    ParsedConfig { hosts, skipped }
+/// Reads one configuration text; `Include` lines are not followed and are reported.
+pub fn parse(text: &str) -> ParsedConfig {
+    let mut reading = Reading::new();
+    reading.lines(text, &mut |reading, line, _| reading.skipped.push(line.to_owned()));
+    reading.finish()
+}
+
+/// Reads `root` (the user's `~/.ssh/config`) and the files it includes, as OpenSSH does: an
+/// `Include` stands for the included lines where it is, relative paths are in `~/.ssh`,
+/// patterns match in sorted order. Nesting, the number of files and their size are bounded.
+pub fn parse_tree(fs: &dyn ConfigFs, root: &Path, home: &Path) -> ParsedConfig {
+    let mut reading = Reading::new();
+    read_file(fs, root, home, 0, &mut reading);
+    reading.finish()
+}
+
+fn read_file(fs: &dyn ConfigFs, path: &Path, home: &Path, depth: usize, reading: &mut Reading) {
+    if reading.files.len() >= MAX_CONFIG_FILES {
+        if !reading.skipped.iter().any(|s| s.starts_with("too many")) {
+            reading.skipped.push(format!("too many included files, stopped at {MAX_CONFIG_FILES}"));
+        }
+        return;
+    }
+    let Some(text) = fs.read(path) else {
+        reading.skipped.push(format!("cannot read {}", path.display()));
+        return;
+    };
+    if reading.bytes.saturating_add(text.len()) > MAX_CONFIG_TOTAL {
+        reading.skipped.push(format!("{} is past the {MAX_CONFIG_TOTAL} bytes read in all", path.display()));
+        return;
+    }
+    reading.bytes += text.len();
+    reading.files.push(path.to_path_buf());
+    reading.lines(&text, &mut |reading, line, value| {
+        if depth >= MAX_INCLUDE_DEPTH {
+            reading.skipped.push(format!("{line}: includes nest too deep"));
+            return;
+        }
+        // The block the Include stands in: under a Host, the included lines apply only to the
+        // hosts it matches, and the lines after the Include belong to it again.
+        let (parent_file, parent_patterns, parent_skip, under_host) = match reading.blocks.last() {
+            Some(b) => (b.file, b.patterns.clone(), b.skip, reading.blocks.len() > 1),
+            None => (0, vec!["*".to_owned()], false, false),
+        };
+        let parent_guards = reading.blocks.last().map(|b| b.guards.clone()).unwrap_or_default();
+        if under_host {
+            reading.guards.push(parent_patterns.clone());
+        }
+        for arg in split_args(value) {
+            let target = if let Some(rest) = arg.strip_prefix("~/") {
+                home.join(rest)
+            } else if Path::new(&arg).is_absolute() {
+                PathBuf::from(&arg)
+            } else {
+                home.join(".ssh").join(&arg)
+            };
+            let paths = if arg.contains(['*', '?']) { fs.glob(&target) } else { vec![target] };
+            for p in paths {
+                read_file(fs, &p, home, depth + 1, reading);
+            }
+        }
+        if under_host {
+            reading.guards.pop();
+        }
+        reading.blocks.push(Block { file: parent_file, guards: parent_guards, patterns: parent_patterns, skip: parent_skip, entries: Vec::new() });
+    });
+}
+
+/// Whether a name matches every guard (the `Host` lines its `Include` stood under).
+fn guards_match(guards: &[Vec<String>], alias: &str) -> bool {
+    guards.iter().all(|patterns| patterns_match(patterns, alias))
 }
 
 fn collect(blocks: &[Block], alias: String) -> ConfigHost {
@@ -100,6 +292,8 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
         jump: Vec::new(),
         forward_agent: None,
         set_env: Vec::new(),
+        proxy_command: None,
+        file: None,
     };
     let mut env_seen = false;
     let mut port_seen = false;
@@ -126,6 +320,7 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
                             host.jump = value.split(',').map(str::trim).filter(|hop| !hop.is_empty()).map(str::to_owned).collect();
                             "ProxyJump"
                         } else {
+                            host.proxy_command = sshcraft_model::proxy_command::split(value).ok();
                             "ProxyCommand"
                         };
                         host.proxies.push(format!("{name} {value}"));
@@ -150,8 +345,12 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
 }
 
 fn applies(block: &Block, alias: &str) -> bool {
+    guards_match(&block.guards, alias) && patterns_match(&block.patterns, alias)
+}
+
+fn patterns_match(patterns: &[String], alias: &str) -> bool {
     let mut matched = false;
-    for pattern in &block.patterns {
+    for pattern in patterns {
         if let Some(negated) = pattern.strip_prefix('!') {
             if glob(negated, alias) {
                 return false;
@@ -189,7 +388,7 @@ fn glob(pattern: &str, text: &str) -> bool {
 }
 
 /// Splits `Keyword value`, `Keyword=value` and `Keyword = value`; the keyword is lowercased.
-fn split_keyword(line: &str) -> (String, &str) {
+pub(crate) fn split_keyword(line: &str) -> (String, &str) {
     let end = line.find(|c: char| c.is_whitespace() || c == '=').unwrap_or(line.len());
     let keyword = line[..end].to_lowercase();
     let rest = line[end..].trim_start();
@@ -198,7 +397,7 @@ fn split_keyword(line: &str) -> (String, &str) {
 }
 
 /// Splits whitespace-separated arguments, keeping quoted parts together.
-fn split_args(value: &str) -> Vec<String> {
+pub(crate) fn split_args(value: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
@@ -318,6 +517,7 @@ pub fn plan_import(
                 h.proxies
                     .iter()
                     .filter(|directive| !(jumps_known && directive.starts_with("ProxyJump ")))
+                    .filter(|directive| !(h.proxy_command.is_some() && directive.starts_with("ProxyCommand ")))
                     .map(|directive| ImportWarning::ProxyIgnored { directive: directive.clone() }),
             );
             let grouped = per_address[&address] >= 2;
@@ -344,6 +544,7 @@ pub fn plan_import(
                     key,
                     agent_forwarding: h.forward_agent,
                     env: h.set_env.clone(),
+                    proxy: h.proxy_command.clone().map(|argv| sshcraft_model::model::Proxy::Command { argv }),
                     ..Default::default()
                 },
                 jump_aliases: if jumps_known { h.jump.clone() } else { Vec::new() },

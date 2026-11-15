@@ -7,6 +7,7 @@ pub mod hosts;
 pub mod import_export;
 pub mod key_sources;
 pub mod keys;
+pub mod known_hosts;
 pub mod logs;
 pub mod settings;
 pub mod sharing;

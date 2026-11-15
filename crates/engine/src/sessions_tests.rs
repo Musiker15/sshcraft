@@ -83,6 +83,11 @@ impl HostKeyPrompter for FixedPrompter {
         self.asked.fetch_add(1, Ordering::SeqCst);
         self.answer
     }
+
+    async fn ask_command(&self, _: &str, _: &str) -> bool {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.answer
+    }
 }
 
 struct Fixture {
@@ -1585,4 +1590,301 @@ mod agents {
         assert!(!read.output.is_empty());
         agents.close(&f.manager, id);
     }
+}
+
+// ---------- proxy commands run only after approval on this device
+
+/// A program that does not exist: starting it fails, which shows it was started.
+fn missing_program() -> Vec<String> {
+    vec!["sshcraft-no-such-program".into(), "%h".into(), "%p".into()]
+}
+
+async fn command_session(w: &PasswordWorld, server: &TestServer, pw: &str, argv: Vec<String>, answer: bool) -> (Vec<SessionStatus>, usize) {
+    let host = w.host(server.port, Some(pw), Vec::new());
+    w.set(host, |s| s.proxy = Some(sshcraft_model::model::Proxy::Command { argv }));
+    let prompter = Arc::new(FixedPrompter { answer, asked: AtomicUsize::new(0) });
+    let manager = w.manager(Some(w.vault.clone()), prompter.clone(), Arc::new(sshcraft_ssh::NoPrompter), verified());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    (sink.statuses(), prompter.asked.load(Ordering::SeqCst))
+}
+
+#[tokio::test]
+async fn a_synced_proxy_command_asks_before_it_runs() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let digest = sshcraft_store::store::command_digest(&missing_program());
+    // Said no: nothing starts, nothing is kept.
+    let (statuses, asked) = command_session(&w, &server, &pw, missing_program(), false).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
+    assert!(!w.store.lock().unwrap().command_approved(&digest).unwrap());
+    // Said yes: the program is started (and fails, it does not exist) and the answer is kept.
+    let (statuses, asked) = command_session(&w, &server, &pw, missing_program(), true).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyFailed));
+    assert!(w.store.lock().unwrap().command_approved(&digest).unwrap());
+}
+
+#[tokio::test]
+async fn an_approved_proxy_command_runs_without_asking() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    w.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&missing_program())).unwrap();
+    let (statuses, asked) = command_session(&w, &server, &pw, missing_program(), false).await;
+    assert_eq!(asked, 0);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyFailed));
+}
+
+#[tokio::test]
+async fn a_changed_command_asks_again() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    w.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&missing_program())).unwrap();
+    let mut changed = missing_program();
+    changed.push("--extra".into());
+    let (statuses, asked) = command_session(&w, &server, &pw, changed, false).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
+}
+
+// ---------- reconnect after sleep and network changes
+
+impl Fixture {
+    fn manager_scaled(&self, delay_scale: f32) -> SessionManager {
+        test_manager(
+            self.store.clone(),
+            Some(self.vault.clone()),
+            self.prompter.clone(),
+            Arc::new(sshcraft_ssh::NoPrompter),
+            Arc::new(TestAgents { keys: vec![self.key.clone()], reachable: true }),
+            Arc::new(FakePresence::new(&[Presence::Verified])),
+            delay_scale,
+        )
+    }
+
+    fn set_port(&self, port: u16) {
+        let store = self.store.lock().unwrap();
+        let mut h = store.list_hosts().unwrap().into_iter().find(|h| h.id == self.host_id).unwrap();
+        h.settings.port = Some(port);
+        store.upsert_host(&h).unwrap();
+    }
+}
+
+/// A TCP relay in front of the test server whose open connections can be frozen: they stay
+/// open but nothing passes any more, like a connection after sleep or on a network that is gone.
+struct FreezingRelay {
+    port: u16,
+    /// Connections numbered below this are frozen.
+    frozen_below: Arc<std::sync::atomic::AtomicU64>,
+    opened: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl FreezingRelay {
+    async fn start(target: u16) -> Self {
+        use std::sync::atomic::AtomicU64;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let frozen_below = Arc::new(AtomicU64::new(0));
+        let opened = Arc::new(AtomicU64::new(0));
+        let (frozen, count) = (frozen_below.clone(), opened.clone());
+        tokio::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                let number = count.fetch_add(1, Ordering::SeqCst);
+                let server = tokio::net::TcpStream::connect(("127.0.0.1", target)).await.unwrap();
+                let (cr, cw) = client.into_split();
+                let (sr, sw) = server.into_split();
+                for (mut from, mut to) in [
+                    (Box::new(cr) as Box<dyn tokio::io::AsyncRead + Send + Unpin>, Box::new(sw) as Box<dyn tokio::io::AsyncWrite + Send + Unpin>),
+                    (Box::new(sr), Box::new(cw)),
+                ] {
+                    let frozen = frozen.clone();
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                        let mut buf = [0u8; 16 * 1024];
+                        loop {
+                            let Ok(n) = from.read(&mut buf).await else { return };
+                            if n == 0 {
+                                return;
+                            }
+                            if number < frozen.load(Ordering::SeqCst) {
+                                // Swallow everything, keep the socket open.
+                                std::future::pending::<()>().await;
+                            }
+                            if to.write_all(&buf[..n]).await.is_err() {
+                                return;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        Self { port, frozen_below, opened }
+    }
+
+    fn freeze_open_connections(&self) {
+        self.frozen_below.store(self.opened.load(Ordering::SeqCst), Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn a_dead_connection_is_found_after_wake() {
+    let f = fixture(true).await;
+    let relay = FreezingRelay::start(f.server.port).await;
+    f.set_port(relay.port);
+    let manager = f.manager_scaled(0.01);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    relay.freeze_open_connections();
+    manager.wake(crate::waker::WakeEvent::Resumed);
+    // Found dead within the ping time (50 ms here), not after the 45 s of keep-alive, and
+    // connected again through a new connection.
+    tokio::time::timeout(Duration::from_secs(10), sink.wait_for(|s| connected_count(s) == 2)).await.expect("reconnected after the wake event");
+}
+
+#[tokio::test]
+async fn a_live_connection_stays_after_wake() {
+    let f = fixture(true).await;
+    let manager = f.manager_scaled(0.01);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    manager.wake(crate::waker::WakeEvent::NetworkChanged);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(connected_count(&sink.statuses()), 1);
+    assert!(!sink.statuses().iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. })));
+}
+
+#[tokio::test]
+async fn a_wake_event_retries_a_waiting_reconnect_at_once() {
+    let mut f = fixture(true).await;
+    // Unscaled: the first reconnect would wait a full second, the second two.
+    let manager = f.manager_scaled(100.0);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.server.restart(false).await;
+    sink.wait_for(|s| s.iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. }))).await;
+    manager.wake(crate::waker::WakeEvent::Resumed);
+    tokio::time::timeout(Duration::from_secs(10), sink.wait_for(|s| connected_count(s) == 2)).await.expect("retried at once");
+}
+
+#[tokio::test]
+async fn zero_reconnect_attempts_end_at_once() {
+    let mut f = fixture(true).await;
+    let manager = SessionManager::new(ManagerParts {
+        store: f.store.clone(),
+        vault: Some(f.vault.clone()),
+        prompter: f.prompter.clone(),
+        auth: Arc::new(sshcraft_ssh::NoPrompter),
+        agent: Arc::new(TestAgents { keys: vec![f.key.clone()], reachable: true }),
+        presence: Arc::new(FakePresence::new(&[Presence::Verified])),
+        security: None,
+        settings: Arc::new(|| {
+            let mut s = crate::settings::EngineSettings::default();
+            s.terminal.reconnect_attempts = 0;
+            s
+        }),
+        runtime: tokio::runtime::Handle::current(),
+        delay_scale: 0.01,
+    });
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.server.restart(false).await;
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::Lost));
+    assert!(!sink.statuses().iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. })));
+}
+
+// ---------- host keys kept whole, and UpdateHostKeys
+
+#[tokio::test]
+async fn the_first_key_is_stored_whole() {
+    let f = fixture(true).await;
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    let keys = f.store.lock().unwrap().host_keys("127.0.0.1", f.server.port).unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].fingerprint, f.server.host_fingerprint);
+    assert_eq!(keys[0].algorithm.as_deref(), Some("ssh-ed25519"));
+    assert!(keys[0].public_key.as_deref().is_some_and(|k| k.starts_with("AAAA")));
+    assert!(keys[0].added_at > 0);
+}
+
+#[tokio::test]
+async fn a_key_known_by_fingerprint_gains_its_key_on_connect() {
+    let f = fixture(true).await;
+    f.store.lock().unwrap().set_known_host("127.0.0.1", f.server.port, &f.server.host_fingerprint).unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    assert_eq!(f.prompter.asked.load(Ordering::SeqCst), 0);
+    let keys = f.store.lock().unwrap().host_keys("127.0.0.1", f.server.port).unwrap();
+    assert_eq!(keys[0].algorithm.as_deref(), Some("ssh-ed25519"));
+}
+
+fn verifier_on(store: Arc<Mutex<Store>>, update_keys: bool) -> StoreVerifier {
+    let (_alive, abandoned) = tokio::sync::watch::channel(());
+    StoreVerifier {
+        session: None,
+        store,
+        prompter: Arc::new(FixedPrompter { answer: false, asked: AtomicUsize::new(0) }),
+        mismatch: Mutex::new(None),
+        first: Mutex::new(Vec::new()),
+        abandoned,
+        update_keys,
+    }
+}
+
+fn presented(name: &str) -> sshcraft_ssh::hostkeys::PresentedKey {
+    sshcraft_ssh::hostkeys::PresentedKey { algorithm: "ssh-ed25519".into(), public_key: format!("AAAA{name}"), fingerprint: format!("SHA256:{name}") }
+}
+
+fn fingerprints(store: &Mutex<Store>) -> Vec<String> {
+    store.lock().unwrap().host_keys("h", 22).unwrap().into_iter().map(|k| k.fingerprint).collect()
+}
+
+#[test]
+fn keys_no_longer_announced_are_removed_and_new_ones_proven_first() {
+    use sshcraft_ssh::hostkeys::AnnounceAction;
+    let store = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:used").unwrap();
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:old").unwrap();
+    let v = verifier_on(store.clone(), true);
+    let keys = [presented("used"), presented("new")];
+    assert_eq!(v.announced("h", 22, "SHA256:used", &keys), AnnounceAction::Prove(vec![presented("new")]));
+    // Not proven: nothing is added (the old key still goes, the server no longer names it).
+    v.apply("h", 22, "SHA256:used", &keys, &[]);
+    assert!(!fingerprints(&store).contains(&"SHA256:new".to_string()));
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:old").unwrap();
+    v.apply("h", 22, "SHA256:used", &keys, &[presented("new")]);
+    let mut now = fingerprints(&store);
+    now.sort();
+    assert_eq!(now, vec!["SHA256:new", "SHA256:used"]);
+    // Only going away: applied without proof.
+    assert_eq!(v.announced("h", 22, "SHA256:used", &[presented("used")]), AnnounceAction::Apply);
+}
+
+#[test]
+fn update_host_keys_off_changes_nothing() {
+    use sshcraft_ssh::hostkeys::AnnounceAction;
+    let store = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:used").unwrap();
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:old").unwrap();
+    let v = verifier_on(store.clone(), false);
+    let keys = [presented("used"), presented("new")];
+    assert_eq!(v.announced("h", 22, "SHA256:used", &keys), AnnounceAction::Ignore);
+    v.apply("h", 22, "SHA256:used", &keys, &[presented("new")]);
+    assert_eq!(fingerprints(&store).len(), 2);
+    assert!(!fingerprints(&store).contains(&"SHA256:new".to_string()));
 }

@@ -10,8 +10,8 @@ comparison with other clients, both in the history at [`docs/superpowers/specs/`
 
 The rebuild (R1 to R7) is done: SSHCraft builds and tests on Windows, Linux and macOS in CI and
 on FreeBSD in a VM, has the integrated title bar and menus of the Craft apps, the fonts from
-craft-fonts, and packages for every platform ([releasing.md](releasing.md)). Next is F1, then F2
-and the first release (V1), which Moritz starts.
+craft-fonts, and packages for every platform ([releasing.md](releasing.md)). F1 (connection and
+configuration) is done; next is F2, then the first release (V1), which Moritz starts.
 
 ## The rebuild
 

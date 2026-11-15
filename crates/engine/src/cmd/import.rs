@@ -186,7 +186,7 @@ fn expand(path: &str) -> PathBuf {
 }
 
 /// SHA256 fingerprint of the public key that belongs to an `IdentityFile` entry.
-fn fingerprint_of(identity_file: &str) -> Option<String> {
+pub(crate) fn fingerprint_of(identity_file: &str) -> Option<String> {
     let path = expand(identity_file);
     let public = if path.extension().is_some_and(|e| e == "pub") {
         path
@@ -201,13 +201,10 @@ fn fingerprint_of(identity_file: &str) -> Option<String> {
 }
 
 async fn ssh_config_preview(session: &Session) -> Result<SshConfigPreview, CommandError> {
-    let path = home().map(|h| h.join(".ssh").join("config")).ok_or_else(|| CommandError::failed(ErrorCode::Io, "no home directory"))?;
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(CommandError::failed(ErrorCode::Io, e)),
-    };
-    let parsed = sshconfig::parse(&text);
+    let home = home().ok_or_else(|| CommandError::failed(ErrorCode::Io, "no home directory"))?;
+    let path = home.join(".ssh").join("config");
+    // No file is no hosts, not an error; included files that cannot be read are reported.
+    let parsed = if path.exists() { sshconfig::parse_tree(&sshconfig::RealFs, &path, &home) } else { sshconfig::ParsedConfig::default() };
     // Fingerprints the agent holds, `None` if it cannot be reached or asked.
     let agent: Option<Vec<String>> = session.sessions().agent_keys().await.ok().map(|keys| keys.into_iter().map(|k| k.fingerprint).collect());
     Ok(SshConfigPreview { candidates: sshconfig::plan_import(&parsed.hosts, &fingerprint_of, agent.as_deref()), skipped: parsed.skipped })
@@ -274,6 +271,7 @@ struct ApplyParams {
 fn run_apply(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let ApplyParams { candidates, location } = parse("import.apply", params)?;
+        // Candidates may come from someone else's export: their proxy commands ask first.
         let (outcome, servers) = apply_and_queue(&ctx.session.store(), &candidates, location)?;
         ctx.session.sync().nudge(&servers);
         ctx.session.announce(&servers);
@@ -369,6 +367,7 @@ fn run_ssh_config_apply(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let SshConfigApplyParams { candidates } = parse("import.ssh_config_apply", params)?;
         let created = apply_import(&ctx.session.store(), &candidates, None)?.created;
+        super::host::approve_commands(&ctx, candidates.iter().flat_map(|c| [&c.settings, &c.group_defaults]))?;
         ctx.session.announce(&[]);
         Ok(json!({ "created": created }))
     })

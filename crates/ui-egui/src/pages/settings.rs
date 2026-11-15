@@ -112,6 +112,24 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.checkbox(&mut system, tr("Use system title bar"));
     ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
     save(app, |s| s.general.system_title_bar = system);
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("Host keys")).strong());
+    let mut update = app.data.settings.general.update_host_keys;
+    ui.checkbox(&mut update, tr("Take new host keys a server announces"));
+    ui.label(
+        egui::RichText::new(tr("After sign-in a server may name all its host keys. New ones are kept once the server proved it holds them, and keys it no longer has are dropped (UpdateHostKeys)."))
+            .weak(),
+    );
+    save(app, |s| s.general.update_host_keys = update);
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new("~/.ssh/config").strong());
+    let mut live = app.data.settings.integrations.ssh_config_live;
+    ui.checkbox(&mut live, tr("Keep the hosts of ~/.ssh/config in step"));
+    ui.label(
+        egui::RichText::new(tr("Its hosts and the files it includes appear in the group ~/.ssh/config and follow the file when it changes. A host that leaves the file stays here. Writing back happens only from a host's menu."))
+            .weak(),
+    );
+    save(app, |s| s.integrations.ssh_config_live = live);
 }
 
 fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
@@ -202,6 +220,15 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut t.scrollback).range(sshcraft_engine::settings::SCROLLBACK).speed(100.0));
             ui.label(egui::RichText::new(tr("lines, for new tabs")).color(tokens.text_dim));
+        });
+        ui.end_row();
+        ui.label(tr("Reconnect"));
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut t.reconnect_attempts).range(sshcraft_engine::settings::RECONNECT_ATTEMPTS));
+            ui.label(
+                egui::RichText::new(tr("attempts after a dropped connection, waiting up to a minute between them; 0 turns it off"))
+                    .color(tokens.text_dim),
+            );
         });
         ui.end_row();
         ui.label(tr("History"));

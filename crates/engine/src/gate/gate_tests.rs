@@ -1040,3 +1040,57 @@ async fn an_agent_cannot_change_the_consent() {
     let now = w.session.execute(Caller::User, "settings.get", json!({})).await.unwrap();
     assert_eq!(now["integrations"]["allow_agent_control"], false);
 }
+
+/// An agent can neither set nor change a proxy command (it would run a program on this
+/// computer); the user can, and what the user saves runs without asking again.
+#[tokio::test]
+async fn agents_cannot_set_a_proxy_command() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let conn = w.conn();
+    let argv = json!(["nc", "%h", "%p"]);
+    let digest = sshcraft_store::store::command_digest(&["nc".into(), "%h".into(), "%p".into()]);
+    let r = call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "proxy": { "kind": "command", "argv": argv } } })).await;
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(w.stored(w.web.id).unwrap().settings.proxy, None);
+    assert!(!w.session.store().command_approved(&digest).unwrap());
+    // The same change from the user is saved and approved on this device.
+    let mut web = w.stored(w.web.id).unwrap();
+    web.settings.proxy = Some(sshcraft_model::model::Proxy::Command { argv: vec!["nc".into(), "%h".into(), "%p".into()] });
+    // Saved by the user without entering it (a rename, a rule, a move): still not approved.
+    w.session.execute(Caller::User, "host.save", json!({ "host": web })).await.unwrap();
+    assert!(!w.session.store().command_approved(&digest).unwrap());
+    // Entered in the form: approved on this device.
+    w.session.execute(Caller::User, "host.save", json!({ "host": web, "approve_command": true })).await.unwrap();
+    assert!(w.session.store().command_approved(&digest).unwrap());
+}
+
+/// Someone else's export brings a proxy command: importing it does not approve it.
+#[tokio::test]
+async fn an_imported_proxy_command_is_not_approved() {
+    let w = world(None).await;
+    let argv: Vec<String> = vec!["sh".into(), "-c".into(), "x".into()];
+    let candidate = json!({ "name": "imported", "settings": { "address": "10.0.0.9", "proxy": { "kind": "command", "argv": argv } } });
+    w.session.execute(Caller::User, "import.apply", json!({ "candidates": [candidate] })).await.unwrap();
+    assert!(!w.session.store().command_approved(&sshcraft_store::store::command_digest(&argv)).unwrap());
+}
+
+/// A group runs an approved proxy command with `%h`: an agent cannot put a host of its choosing
+/// under it (the address would go to the program), nor move one there.
+#[tokio::test]
+async fn agents_cannot_aim_a_proxy_command() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let mut gw = group("gw", None);
+    gw.defaults.proxy = Some(sshcraft_model::model::Proxy::Command { argv: vec!["nc".into(), "%h".into(), "%p".into()] });
+    w.add_group(&gw);
+    let conn = w.conn();
+    let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gw.id.0, "address": "-e/bin/sh" } })).await;
+    assert!(is_denied(&r), "{r:?}");
+    let r = call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "group": gw.id.0 } })).await;
+    assert!(is_denied(&r), "{r:?}");
+    // Counter-check: the same move into a plain group is allowed.
+    let plain = group("plain", None);
+    w.add_group(&plain);
+    call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "group": plain.id.0 } })).await.unwrap();
+}

@@ -13,6 +13,8 @@ use sshcraft_fido::{Attachment, Authenticator, SkSigner};
 use sshcraft_model::keytypes::KeyKind;
 use sshcraft_model::model::{Directory, HostId, KeyId, KeyRef, PasswordId, Proxy, ProxyEndpoint, ResolveError, ResolvedHost, Route, resolve_route};
 use sshcraft_model::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
+
+use crate::waker::{PING_TIMEOUT, WakeEvent};
 use sshcraft_ssh::authorized_keys::{InstallOutcome, install_command, parse_outcome};
 use sshcraft_ssh::{
     Auth, AuthPromptLine, AuthPrompter, AuthRequest, Credential, Hop, HostKeyVerifier, ProxyConfig, ProxyTarget, RouteParams, SessionOptions,
@@ -81,6 +83,11 @@ pub trait SessionSink: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait HostKeyPrompter: Send + Sync + 'static {
     async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
+
+    /// Whether a proxy command that is not approved on this device may run.
+    async fn ask_command(&self, _host_name: &str, _command: &str) -> bool {
+        false
+    }
 }
 
 /// The UI may hold this many unacknowledged output bytes before SSHCraft stops reading from
@@ -245,6 +252,8 @@ pub(crate) struct Context {
     settings: Mutex<ReadSettings>,
     /// Where sessions run, also when `open` is called from a thread outside the runtime.
     runtime: tokio::runtime::Handle,
+    /// Tells sessions and forwards that the computer woke up or its network changed.
+    pub(crate) wake: tokio::sync::broadcast::Sender<WakeEvent>,
 }
 
 impl Context {
@@ -396,9 +405,16 @@ impl SessionManager {
                 log_finished: Mutex::new(None),
                 settings: Mutex::new(parts.settings),
                 runtime: parts.runtime,
+                wake: tokio::sync::broadcast::channel(16).0,
             }),
             sessions: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Checks every connection now and retries every waiting reconnect: the computer woke up or
+    /// its network changed.
+    pub fn wake(&self, event: WakeEvent) {
+        let _ = self.ctx.wake.send(event);
     }
 
     fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<SessionId, Live>> {
@@ -662,10 +678,11 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let mut attempt = 0u32;
     let mut ever_connected = false;
     let opened = OpenedKeys::default();
+    let mut wake = ctx.wake.subscribe();
     loop {
         sink.status(SessionStatus::Connecting);
         let reason = match connect_target(&ctx, &target, &shared.size, &opened).await {
-            Ok((writer, mut events, notice)) => {
+            Ok((writer, mut events, notice, prober)) => {
                 *shared.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(writer.clone());
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
                 // Output from before the drop may still wait in the stream unacknowledged: it keeps
@@ -679,7 +696,21 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                 let mut reason = Disconnect::Lost("connection closed".into());
                 loop {
                     shared.flow.wait_below_watermark().await;
-                    match events.recv().await {
+                    let event = tokio::select! {
+                        event = events.recv() => event,
+                        woke = wake.recv() => {
+                            if woke_up(&woke)
+                                && let Some(prober) = &prober
+                                && !prober.alive(PING_TIMEOUT.mul_f32(ctx.delay_scale)).await
+                            {
+                                prober.close().await;
+                                reason = Disconnect::Lost("no answer after the computer woke up or the network changed".into());
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+                    match event {
                         Some(ShellEvent::Data(bytes)) => {
                             shared.flow.add(bytes.len());
                             sink.data(bytes);
@@ -708,12 +739,12 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
         // A local shell that ended is not started again.
         let retry = match &target {
             SessionTarget::Local { .. } => None,
-            _ => next_reconnect_delay(&reason, attempt),
+            _ => next_reconnect_delay(&reason, attempt, Some(ctx.settings().terminal.reconnect_attempts)),
         };
         match retry {
             Some(delay) => {
                 sink.status(SessionStatus::Reconnecting { attempt, delay_secs: delay.as_secs() });
-                tokio::time::sleep(delay.mul_f32(ctx.delay_scale)).await;
+                wait_or_wake(delay.mul_f32(ctx.delay_scale), &mut wake).await;
             }
             None => {
                 let (reason, code, detail) = match reason {
@@ -988,7 +1019,28 @@ fn failure(e: SshError, verifier: &StoreVerifier) -> Failure {
     }
 }
 
-type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>);
+/// Whether a wake event arrived (a missed one counts too); a closed channel never wakes.
+pub(crate) fn woke_up(received: &Result<WakeEvent, tokio::sync::broadcast::error::RecvError>) -> bool {
+    !matches!(received, Err(tokio::sync::broadcast::error::RecvError::Closed))
+}
+
+/// Waits before the next reconnect attempt, or less when the computer woke up or the network
+/// changed: then the attempt is worth making now.
+pub(crate) async fn wait_or_wake(delay: std::time::Duration, wake: &mut tokio::sync::broadcast::Receiver<WakeEvent>) {
+    let sleep = tokio::time::sleep(delay);
+    tokio::pin!(sleep);
+    tokio::select! {
+        () = &mut sleep => {}
+        woke = wake.recv() => {
+            // Closed: nobody will wake us, so the delay is waited out.
+            if !woke_up(&woke) {
+                sleep.await;
+            }
+        }
+    }
+}
+
+type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>, Option<sshcraft_ssh::Prober>);
 
 async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
     match target {
@@ -998,14 +1050,14 @@ async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32
             let term = ctx.settings().terminal.terminal_type;
             let (writer, events) = sshcraft_local::pty::spawn(shell, to_u16(cols), to_u16(rows), &term, cwd.as_deref().map(std::path::Path::new))
                 .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
-            Ok((Arc::new(writer), events, None))
+            Ok((Arc::new(writer), events, None, None))
         }
         SessionTarget::Serial { settings } => {
             settings.validate().map_err(|e| end_error(ErrorCode::SerialFailed, Some(e.to_string())))?;
             // A port that is gone may come back (an adapter plugged in again): retried like a
             // lost connection once it was open.
             let (writer, events) = sshcraft_local::serial::open(settings).map_err(|e| Failure::Lost(ErrorCode::SerialFailed, e.to_string()))?;
-            Ok((Arc::new(writer), events, None))
+            Ok((Arc::new(writer), events, None, None))
         }
     }
 }
@@ -1016,11 +1068,12 @@ async fn connect_once(ctx: &Context, host_id: HostId, size: &Mutex<(u32, u32)>, 
     // Read on every connect, so a reconnect uses the type set now.
     let term = ctx.settings().terminal.terminal_type;
     let shell = session.open_shell(cols, rows, &term).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    let prober = Some(session.prober());
     if needs_os(&ctx.store, host_id) {
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
     }
     let (writer, events) = shell.split();
-    Ok((Arc::new(writer), events, notice))
+    Ok((Arc::new(writer), events, notice, prober))
 }
 
 /// Connects to a host along its route and signs in on every hop; no shell yet. The notice is
@@ -1046,7 +1099,26 @@ pub(crate) async fn connect_session(
     let proxy = match &route.target.proxy {
         Some(Proxy::Http(endpoint)) => Some(ProxyConfig::Http(proxy_target(ctx, endpoint).await?)),
         Some(Proxy::Socks5(endpoint)) => Some(ProxyConfig::Socks5(proxy_target(ctx, endpoint).await?)),
-        _ => None,
+        Some(Proxy::Command { argv }) => {
+            allow_command(ctx, &route.target.name, argv).await?;
+            // The tokens name the first hop, the one the program connects to.
+            let first = route.jumps.first().unwrap_or(&route.target);
+            let tokens =
+                sshcraft_model::proxy_command::Tokens { host: &first.address, port: first.port, user: &first.username, alias: &route.target.name };
+            sshcraft_model::proxy_command::check_tokens(argv, &tokens)
+                .map_err(|e| end_error(ErrorCode::ProxyCommandNotAllowed, Some(e.to_string())))?;
+            let mut argv = sshcraft_model::proxy_command::expand(argv, &tokens);
+            // `~/` at the start of an argument is the home folder, as `sh` reads it.
+            if let Some(home) = sshcraft_platform::home_dir() {
+                for arg in &mut argv {
+                    if let Some(rest) = arg.strip_prefix("~/") {
+                        *arg = home.join(rest).to_string_lossy().into_owned();
+                    }
+                }
+            }
+            Some(ProxyConfig::Command { argv })
+        }
+        Some(Proxy::Direct) | None => None,
     };
     let opener = if route.target.agent_forwarding { ctx.agent.opener() } else { None };
     let notice = (route.target.agent_forwarding && opener.is_none()).then_some(ErrorCode::AgentForwardingUnavailable);
@@ -1062,6 +1134,7 @@ pub(crate) async fn connect_session(
         mismatch: Mutex::new(None),
         first: Mutex::new(Vec::new()),
         abandoned,
+        update_keys: ctx.settings().general.update_host_keys,
     });
     let params = RouteParams { hops, proxy, options, connect_timeout: sshcraft_ssh::CONNECT_TIMEOUT };
     // The sign-in questions may be asked from another task: they carry the session along.
@@ -1072,6 +1145,31 @@ pub(crate) async fn connect_session(
     let session = sshcraft_ssh::connect_route(params, verifier.clone(), auth).await.map_err(|e| failure(e, &verifier))?;
     let notice = notice.or(session.certificate_expired().then_some(ErrorCode::CertificateExpired));
     Ok((session, notice))
+}
+
+/// A proxy command runs only when it was set on this device or allowed here once: one that
+/// came with sync, a share or an agent's change is asked about first, and the answer is kept.
+async fn allow_command(ctx: &Context, host_name: &str, argv: &[String]) -> Result<(), Failure> {
+    let digest = sshcraft_store::store::command_digest(argv);
+    let approved = ctx
+        .store
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .command_approved(&digest)
+        .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?;
+    if approved {
+        return Ok(());
+    }
+    let line = sshcraft_model::proxy_command::join(argv);
+    if !ctx.prompter.ask_command(host_name, &line).await {
+        return Err(end_error(ErrorCode::ProxyCommandNotAllowed, Some(line)));
+    }
+    ctx.store
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .approve_command(&digest)
+        .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?;
+    Ok(())
 }
 
 fn probed_setting(host_id: HostId) -> String {
@@ -1165,20 +1263,52 @@ struct StoreVerifier {
     first: Mutex<Vec<(String, u16)>>,
     /// Closes when whoever connects gives up: an open question is then withdrawn.
     abandoned: tokio::sync::watch::Receiver<()>,
+    /// Take the keys a server announces after sign-in (`general.update_host_keys`).
+    update_keys: bool,
 }
 
-#[async_trait::async_trait]
-impl HostKeyVerifier for StoreVerifier {
-    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
-        let known = {
-            let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
-            match store.known_host(address, port) {
-                Ok(k) => k,
-                Err(_) => return false,
-            }
+/// A presented key as the store keeps it.
+fn stored_key(address: &str, port: u16, key: &sshcraft_ssh::hostkeys::PresentedKey) -> sshcraft_store::store::HostKey {
+    sshcraft_store::store::HostKey {
+        address: address.to_owned(),
+        port,
+        algorithm: Some(key.algorithm.clone()),
+        public_key: Some(key.public_key.clone()),
+        fingerprint: key.fingerprint.clone(),
+        added_at: crate::now_ms() / 1000,
+    }
+}
+
+impl StoreVerifier {
+    fn known_fingerprints(&self, address: &str, port: u16) -> Option<Vec<String>> {
+        let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        store.host_keys(address, port).ok().map(|keys| keys.into_iter().map(|k| k.fingerprint).collect())
+    }
+
+    /// Checks a key; with the whole key at hand it is stored whole (also filling in a key
+    /// known only by its fingerprint).
+    async fn check(
+        &self,
+        host_name: &str,
+        address: &str,
+        port: u16,
+        fingerprint: &str,
+        whole: Option<&sshcraft_ssh::hostkeys::PresentedKey>,
+    ) -> bool {
+        let Some(known) = self.known_fingerprints(address, port) else {
+            return false;
         };
-        match check_host_key(known.as_deref(), fingerprint) {
-            HostKeyStatus::Trusted => true,
+        let keep = |store: &Store| match whole {
+            Some(key) => store.add_host_key(&stored_key(address, port, key)),
+            None => store.set_known_host(address, port, fingerprint),
+        };
+        match check_host_key(&known, fingerprint) {
+            HostKeyStatus::Trusted => {
+                if whole.is_some() {
+                    let _ = keep(&self.store.lock().unwrap_or_else(PoisonError::into_inner));
+                }
+                true
+            }
             HostKeyStatus::Mismatch { expected } => {
                 *self.mismatch.lock().unwrap_or_else(PoisonError::into_inner) = Some(format!("expected {expected}, got {fingerprint}"));
                 false
@@ -1197,13 +1327,78 @@ impl HostKeyVerifier for StoreVerifier {
                 };
                 if accepted {
                     let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
-                    if store.set_known_host(address, port, fingerprint).is_err() {
+                    if keep(&store).is_err() {
                         return false;
                     }
                     self.first.lock().unwrap_or_else(PoisonError::into_inner).push((address.to_owned(), port));
                 }
                 accepted
             }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl HostKeyVerifier for StoreVerifier {
+    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
+        self.check(host_name, address, port, fingerprint, None).await
+    }
+
+    async fn verify_key(&self, host_name: &str, address: &str, port: u16, key: &sshcraft_ssh::hostkeys::PresentedKey) -> bool {
+        self.check(host_name, address, port, &key.fingerprint, Some(key)).await
+    }
+
+    fn announced(
+        &self,
+        address: &str,
+        port: u16,
+        used: &str,
+        keys: &[sshcraft_ssh::hostkeys::PresentedKey],
+    ) -> sshcraft_ssh::hostkeys::AnnounceAction {
+        use sshcraft_ssh::hostkeys::AnnounceAction;
+        let announced: Vec<String> = keys.iter().map(|k| k.fingerprint.clone()).collect();
+        let plan = match (self.update_keys, self.known_fingerprints(address, port)) {
+            (true, Some(known)) => sshcraft_model::policy::plan_key_update(&known, &announced, used),
+            _ => None,
+        };
+        match plan {
+            None => AnnounceAction::Ignore,
+            Some(plan) if plan.add.is_empty() => AnnounceAction::Apply,
+            Some(plan) => AnnounceAction::Prove(keys.iter().filter(|k| plan.add.contains(&k.fingerprint)).cloned().collect()),
+        }
+    }
+
+    fn apply(
+        &self,
+        address: &str,
+        port: u16,
+        used: &str,
+        keys: &[sshcraft_ssh::hostkeys::PresentedKey],
+        proven: &[sshcraft_ssh::hostkeys::PresentedKey],
+    ) {
+        if !self.update_keys {
+            return;
+        }
+        let announced: Vec<String> = keys.iter().map(|k| k.fingerprint.clone()).collect();
+        let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        let Ok(known) = store.host_keys(address, port) else {
+            return;
+        };
+        let known: Vec<String> = known.into_iter().map(|k| k.fingerprint).collect();
+        let Some(plan) = sshcraft_model::policy::plan_key_update(&known, &announced, used) else {
+            return;
+        };
+        // The plan is made again (the user may have changed the keys meanwhile), but only keys
+        // the server proved are added.
+        for key in proven.iter().filter(|k| plan.add.contains(&k.fingerprint)) {
+            let _ = store.add_host_key(&stored_key(address, port, key));
+        }
+        for fingerprint in &plan.remove {
+            let _ = store.remove_host_key(address, port, fingerprint);
+        }
+        // The key in use was already known; fill in its algorithm and key if they were missing.
+        for key in keys.iter().filter(|k| k.fingerprint == used) {
+            let _ = store.add_host_key(&stored_key(address, port, key));
         }
     }
 

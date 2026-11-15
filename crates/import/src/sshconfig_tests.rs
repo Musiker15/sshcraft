@@ -177,7 +177,7 @@ Host b
 }
 
 #[test]
-fn proxy_jump_and_proxy_command_are_warned() {
+fn proxy_jump_is_warned_and_proxy_command_taken_over() {
     let parsed = parse(
         "Host a
   HostName a.org
@@ -191,7 +191,9 @@ Host c
     );
     let plan = plan_import(&parsed.hosts, &fingerprints, Some(&[]));
     assert_eq!(plan[0].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyJump bastion".into() }]);
-    assert_eq!(plan[1].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyCommand ssh -W %h:%p gw".into() }]);
+    // A ProxyCommand without shell syntax is taken over (F1); see proxy_command_is_imported_as_arguments.
+    assert!(plan[1].warnings.is_empty());
+    assert!(matches!(plan[1].settings.proxy, Some(sshcraft_model::model::Proxy::Command { .. })));
     assert!(plan[2].warnings.is_empty());
 }
 
@@ -290,4 +292,146 @@ fn forwardagent_and_setenv_imported() {
     let env: Vec<(String, String)> = web.settings.env.iter().map(|v| (v.name.clone(), v.value.clone())).collect();
     assert_eq!(env, vec![("LANG".to_owned(), "de_DE.UTF-8".to_owned()), ("MOTTO".to_owned(), "hallo welt".to_owned()),]);
     assert_eq!(stored(&hosts, "db").settings.agent_forwarding, Some(false));
+}
+
+// ---------- Include, and ProxyCommand as arguments
+
+/// Files in memory; `glob` matches `*` in the file name only, as `RealFs` does.
+#[derive(Default)]
+struct MemFs(std::collections::BTreeMap<std::path::PathBuf, String>);
+
+impl MemFs {
+    fn with(mut self, path: &str, text: &str) -> Self {
+        self.0.insert(std::path::PathBuf::from(path), text.to_owned());
+        self
+    }
+}
+
+impl ConfigFs for MemFs {
+    fn read(&self, path: &std::path::Path) -> Option<String> {
+        self.0.get(path).cloned()
+    }
+    fn glob(&self, pattern: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let dir = pattern.parent().unwrap_or(std::path::Path::new(""));
+        let name = pattern.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        self.0
+            .keys()
+            .filter(|p| p.parent() == Some(dir) && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| glob_matches(name, n)))
+            .cloned()
+            .collect()
+    }
+}
+
+fn tree(fs: &MemFs) -> ParsedConfig {
+    parse_tree(fs, std::path::Path::new("/home/u/.ssh/config"), std::path::Path::new("/home/u"))
+}
+
+#[test]
+fn include_reads_relative_and_globbed_files() {
+    let fs = MemFs::default()
+        .with("/home/u/.ssh/config", "Include conf.d/*.conf ~/extra\nHost main\n  HostName main.org\n")
+        .with("/home/u/.ssh/conf.d/b.conf", "Host b\n  HostName b.org\n")
+        .with("/home/u/.ssh/conf.d/a.conf", "Host a\n  HostName a.org\n")
+        .with("/home/u/.ssh/conf.d/skip.txt", "Host no\n")
+        .with("/home/u/extra", "Host x\n  HostName x.org\n");
+    let parsed = tree(&fs);
+    let aliases: Vec<&str> = parsed.hosts.iter().map(|h| h.alias.as_str()).collect();
+    assert_eq!(aliases, vec!["a", "b", "x", "main"], "files in sorted order, where the Include stood");
+    assert_eq!(parsed.files.len(), 4);
+    assert!(parsed.skipped.is_empty(), "{:?}", parsed.skipped);
+}
+
+#[test]
+fn include_inside_host_applies_to_that_host() {
+    let fs =
+        MemFs::default().with("/home/u/.ssh/config", "Host web\n  Include web.conf\n  Port 2222\n").with("/home/u/.ssh/web.conf", "User deploy\n");
+    let parsed = tree(&fs);
+    let web = host(&parsed, "web");
+    assert_eq!(web.user.as_deref(), Some("deploy"));
+    assert_eq!(web.port, Some(2222));
+}
+
+#[test]
+fn lines_after_an_include_belong_to_the_host_again() {
+    let fs = MemFs::default()
+        .with("/home/u/.ssh/config", "Host work\n  Include work.d/*\n  User worker\nHost db\n  HostName db.org\n")
+        .with("/home/u/.ssh/work.d/a", "Host inner\n  HostName inner.org\n");
+    let parsed = tree(&fs);
+    assert_eq!(host(&parsed, "work").user.as_deref(), Some("worker"));
+    assert_eq!(host(&parsed, "db").user, None);
+    // `inner` is only read for hosts that match `work`, so it is no host of its own.
+    assert!(parsed.hosts.iter().all(|h| h.alias != "inner"), "{:?}", parsed.hosts.iter().map(|h| &h.alias).collect::<Vec<_>>());
+}
+
+#[test]
+fn an_include_at_the_top_applies_to_all() {
+    let fs = MemFs::default().with("/home/u/.ssh/config", "Include common\nHost a\n").with("/home/u/.ssh/common", "Host b\n  User shared\n");
+    let parsed = tree(&fs);
+    assert_eq!(host(&parsed, "b").user.as_deref(), Some("shared"));
+    assert!(parsed.hosts.iter().any(|h| h.alias == "a"));
+}
+
+#[test]
+fn too_many_hosts_stop_with_a_warning() {
+    let text: String = (0..MAX_CONFIG_HOSTS + 10).map(|i| format!("Host h{i}\n")).collect();
+    let parsed = parse(&text);
+    assert_eq!(parsed.hosts.len(), MAX_CONFIG_HOSTS);
+    assert!(parsed.skipped.iter().any(|s| s.contains("hosts")), "{:?}", parsed.skipped);
+}
+
+#[test]
+fn include_cycle_stops() {
+    let fs = MemFs::default().with("/home/u/.ssh/config", "Include config\nHost a\n");
+    let parsed = tree(&fs);
+    assert!(parsed.skipped.iter().any(|s| s.contains("too deep")), "{:?}", parsed.skipped);
+    assert!(parsed.files.len() <= MAX_INCLUDE_DEPTH + 1);
+}
+
+#[test]
+fn too_many_files_stop_with_a_warning() {
+    let mut fs = MemFs::default().with("/home/u/.ssh/config", "Include d/*\n");
+    for i in 0..(MAX_CONFIG_FILES + 5) {
+        fs = fs.with(&format!("/home/u/.ssh/d/{i:04}"), &format!("Host h{i}\n"));
+    }
+    let parsed = tree(&fs);
+    assert_eq!(parsed.files.len(), MAX_CONFIG_FILES);
+    assert!(parsed.skipped.iter().any(|s| s.contains("too many")), "{:?}", parsed.skipped);
+}
+
+#[test]
+fn a_missing_include_is_reported() {
+    let fs = MemFs::default().with("/home/u/.ssh/config", "Include gone.conf\nHost a\n");
+    let parsed = tree(&fs);
+    assert_eq!(parsed.hosts.len(), 1);
+    assert!(parsed.skipped.iter().any(|s| s.contains("gone.conf")), "{:?}", parsed.skipped);
+}
+
+#[test]
+fn proxy_command_is_imported_as_arguments() {
+    let parsed = parse("Host inner\n  HostName 10.0.0.5\n  ProxyCommand ssh -W %h:%p 'bastion host'\n");
+    let plan = plan_import(&parsed.hosts, &|_| None, Some(&[]));
+    assert_eq!(
+        plan[0].settings.proxy,
+        Some(sshcraft_model::model::Proxy::Command { argv: vec!["ssh".into(), "-W".into(), "%h:%p".into(), "bastion host".into()] })
+    );
+    assert!(plan[0].warnings.is_empty(), "{:?}", plan[0].warnings);
+}
+
+#[test]
+fn shell_proxy_command_stays_a_warning() {
+    let parsed = parse("Host inner\n  ProxyCommand nc %h %p | tee log\n");
+    let plan = plan_import(&parsed.hosts, &|_| None, Some(&[]));
+    assert_eq!(plan[0].settings.proxy, None);
+    assert_eq!(plan[0].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyCommand nc %h %p | tee log".into() }]);
+}
+
+#[test]
+fn a_glob_skips_dot_files_like_glob3() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["a.conf", ".a.conf.sshcraft-tmp", ".hidden"] {
+        std::fs::write(dir.path().join(name), "Host x\n").unwrap();
+    }
+    let found = RealFs.glob(&dir.path().join("*"));
+    assert_eq!(found, vec![dir.path().join("a.conf")]);
+    assert_eq!(RealFs.glob(&dir.path().join(".h*")), vec![dir.path().join(".hidden")]);
 }

@@ -23,8 +23,9 @@ where it can have one.
 5. **Nothing is left on a server** unless the user asks for it. (iTerm2, CVE-2025-22275.)
 6. **No telemetry.** From F2 on, every connection SSHCraft makes by itself is listed in the
    settings; an update check runs only after consent. (Warp, Wave.)
-7. **Cryptography only from reviewed libraries**, signatures with deterministic nonces; F1 adds a
-   strict-kex test. (PuTTY CVE-2024-31497, Terrapin CVE-2023-48795.)
+7. **Cryptography only from reviewed libraries**, signatures with deterministic nonces; strict
+   kex is tested against a packet slipped in before the key exchange (`crates/ssh/tests/strict_kex.rs`).
+   (PuTTY CVE-2024-31497, Terrapin CVE-2023-48795.)
 8. **Agent interfaces without HTTP**, a token on every connection, rights per action. (Electerm's
    MCP server.)
 9. **Performance budgets as tests:** 1 GB of output must not freeze the interface; a memory budget
@@ -36,6 +37,22 @@ where it can have one.
     Flathub, checksums, an SBOM; reproducible builds as a goal. (Xshell backdoor, fake PuTTY
     downloads.)
 13. **Every security bug gets a test that failed before the fix.** (Tabby's incomplete fix.)
+
+## Proxy commands
+
+A proxy command runs a local program, so it is treated like code: it starts with an argument
+list and never through a shell, a host name in `%h` stays one argument, and it runs only after
+it was allowed on this device. Saving it in the window or importing it from the user's own
+`~/.ssh/config` allows it; one from sync, a share or an agent is shown in full and asked about
+first, and a changed command line asks again. Agents cannot set one at all.
+
+## Host keys and `~/.ssh/config`
+
+New host keys a server announces after sign-in are kept only after the server proved it holds
+them, and only when the key of the connection is among the announced ones. `known_hosts` imports
+never add a key to a server SSHCraft already knows. Writing `~/.ssh/config` happens only when the
+user asks for it, replaces the file in one step and keeps a backup; agents cannot read it in or
+write it.
 
 ## Terminal output
 

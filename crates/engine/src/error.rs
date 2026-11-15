@@ -65,6 +65,8 @@ pub enum ErrorCode {
     JumpFailed,
     ProxyFailed,
     ProxyAuthFailed,
+    /// A proxy command that is not allowed on this device, and the user said no.
+    ProxyCommandNotAllowed,
     PasswordRejected,
     NotSupported,
     LocalShellFailed,

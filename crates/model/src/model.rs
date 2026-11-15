@@ -89,6 +89,12 @@ pub enum Proxy {
     Direct,
     Http(ProxyEndpoint),
     Socks5(ProxyEndpoint),
+    /// A local program whose standard input and output carry the connection (OpenSSH
+    /// `ProxyCommand`), as an argument list; see `proxy_command`. It runs only after it was
+    /// allowed on this device.
+    Command {
+        argv: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
