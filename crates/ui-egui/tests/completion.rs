@@ -134,6 +134,18 @@ mod in_the_window {
         h.run_steps(2);
     }
 
+    /// Types `text` and waits for the shell's echo of it: history keeps only echoed lines, and
+    /// on a slow machine the echo comes after the next frame.
+    fn typed_echoed(h: &mut H, id: SessionId, text: &str) {
+        typed(h, text);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !screen(h.state(), id).contains(text) {
+            assert!(Instant::now() < deadline, "the shell did not echo {text}");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+    }
+
     fn history(session: &Session, host: HostId) -> Vec<String> {
         let rows = session.runtime().block_on(session.execute(Caller::User, "history.list", json!({ "scope": format!("host:{}", host.0) }))).unwrap();
         rows.as_array().unwrap().iter().filter_map(|r| r["command"].as_str().map(str::to_string)).collect()
@@ -148,9 +160,9 @@ mod in_the_window {
         let dir = tempfile::tempdir().unwrap();
         let (mut h, session) = app_harness(dir.path());
         let (id, host, _server) = connected_pane(&mut h, &session);
-        typed(&mut h, "echo kept-line");
+        typed_echoed(&mut h, id, "echo kept-line");
         key(&mut h, Key::Enter);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !history(&session, host).contains(&"echo kept-line".to_string()) {
             assert!(Instant::now() < deadline, "the line was not kept");
             std::thread::sleep(Duration::from_millis(20));
@@ -178,10 +190,10 @@ mod in_the_window {
             .unwrap();
         h.state_mut().terminals.get_mut(&id).unwrap().reload_history();
         h.run_steps(3);
-        typed(&mut h, "ec");
+        typed_echoed(&mut h, id, "ec");
         until(&mut h, "the suggestion", |app| app.terminals.get(&id).is_some_and(|t| !t.suggestions().is_empty()));
         key(&mut h, Key::Enter);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !history(&session, host).contains(&"ec".to_string()) {
             assert!(Instant::now() < deadline, "Enter reached the shell and ended the line 'ec'");
             std::thread::sleep(Duration::from_millis(20));
@@ -191,10 +203,10 @@ mod in_the_window {
     }
 
     /// Types `text` and Enter; waits until the history has it.
-    fn kept_line(h: &mut H, session: &Session, host: HostId, text: &str) {
-        typed(h, text);
+    fn kept_line(h: &mut H, session: &Session, id: SessionId, host: HostId, text: &str) {
+        typed_echoed(h, id, text);
         key(h, Key::Enter);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !history(session, host).contains(&text.to_string()) {
             assert!(Instant::now() < deadline, "{text} was not kept");
             std::thread::sleep(Duration::from_millis(20));
@@ -233,7 +245,7 @@ mod in_the_window {
         let dir = tempfile::tempdir().unwrap();
         let (mut h, session) = app_harness(dir.path());
         let (id, host, _server) = connected_pane(&mut h, &session);
-        kept_line(&mut h, &session, host, "echo secret-line");
+        kept_line(&mut h, &session, id, host, "echo secret-line");
         sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.sidebar");
         until(&mut h, "the sidebar", |_| true);
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -243,7 +255,7 @@ mod in_the_window {
             h.run_steps(1);
         }
         h.get_by_label("Clear").click();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !history(&session, host).is_empty() {
             assert!(Instant::now() < deadline, "not cleared");
             std::thread::sleep(Duration::from_millis(20));
@@ -258,12 +270,12 @@ mod in_the_window {
         let dir = tempfile::tempdir().unwrap();
         let (mut h, session) = app_harness(dir.path());
         let (id, host, _server) = connected_pane(&mut h, &session);
-        kept_line(&mut h, &session, host, "echo secret-line");
+        kept_line(&mut h, &session, id, host, "echo secret-line");
         h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
         h.state_mut().ui.settings.section = sshcraft_ui_egui::pages::settings::Section::Terminal;
         h.run_steps(3);
         h.get_by_label("Keep the commands typed in terminals").click();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !history(&session, host).is_empty() {
             assert!(Instant::now() < deadline, "not cleared");
             std::thread::sleep(Duration::from_millis(20));
@@ -279,10 +291,10 @@ mod in_the_window {
     fn the_sidebar_shows_a_line_typed_while_it_is_open() {
         let dir = tempfile::tempdir().unwrap();
         let (mut h, session) = app_harness(dir.path());
-        let (_id, host, _server) = connected_pane(&mut h, &session);
+        let (id, host, _server) = connected_pane(&mut h, &session);
         sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.sidebar");
         h.run_steps(5);
-        kept_line(&mut h, &session, host, "echo later-line");
+        kept_line(&mut h, &session, id, host, "echo later-line");
         h.run_steps(5);
         assert!(h.query_by_label("echo later-line").is_some(), "the sidebar has the new line");
     }
@@ -292,7 +304,7 @@ mod in_the_window {
         let dir = tempfile::tempdir().unwrap();
         let (mut h, session) = app_harness(dir.path());
         let (id, host, _server) = connected_pane(&mut h, &session);
-        kept_line(&mut h, &session, host, "echo kept-line");
+        kept_line(&mut h, &session, id, host, "echo kept-line");
         sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.sidebar");
         h.run_steps(3);
         type_ec(&mut h, id);
