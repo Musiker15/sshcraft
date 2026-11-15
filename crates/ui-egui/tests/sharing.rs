@@ -158,6 +158,9 @@ fn removing_a_recipient_keeps_one_added_since_the_list_was_read() {
     t.h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
     t.h.state_mut().ui.settings.section = sshcraft_ui_egui::pages::settings::Section::Sync;
     t.h.run_steps(2);
+    // The "Shared." notice may lie over the button: the notices go first.
+    t.h.state_mut().toasts = Default::default();
+    t.h.run_steps(2);
     t.h.get_by_label("Shares").click();
     until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
     // Another device adds Carol; the window still shows only Bob.
@@ -231,6 +234,9 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
     t.h.run_steps(2);
     // The "Shared." notice may lie over the section tabs: the section is chosen directly.
     t.h.state_mut().ui.settings.section = sshcraft_ui_egui::pages::settings::Section::Sync;
+    t.h.run_steps(2);
+    // The "Shared." notice may lie over the button: the notices go first.
+    t.h.state_mut().toasts = Default::default();
     t.h.run_steps(2);
     t.h.get_by_label("Shares").click();
     until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
