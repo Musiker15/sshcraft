@@ -140,8 +140,8 @@ fn kind_label(key: &KeyRow) -> &'static str {
 
 /// A pasted key or certificate scrolls inside a box of fixed height: a dialog that changes its
 /// height while open loses clicks (egui discards the pass).
-fn fixed_height(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui)) {
-    egui::ScrollArea::vertical().id_salt(salt).max_height(120.0).min_scrolled_height(120.0).auto_shrink([false, false]).show(ui, add);
+fn fixed_height(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui)) {
+    egui::ScrollArea::vertical().id_salt(name).max_height(120.0).min_scrolled_height(120.0).auto_shrink([false, false]).show(ui, add);
 }
 
 /// Closes the key dialog that sent the command, if it is still the one open.
