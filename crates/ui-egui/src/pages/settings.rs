@@ -245,6 +245,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     // Turning the history off deletes what it kept.
     if app.data.settings.terminal.history && !t.history {
         app.run_reported("history.clear", json!({}));
+        crate::session_tab::forget_history(app, None);
     }
     save(app, |s| {
         s.terminal = t;

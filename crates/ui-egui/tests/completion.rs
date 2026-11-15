@@ -71,6 +71,7 @@ mod in_the_window {
     use sshcraft_ssh::testing::TestAuth;
     use sshcraft_ui_egui::SshcraftApp;
     use sshcraft_ui_egui::state::ConnectRequest;
+    use egui_kittest::kittest::Queryable;
     use sshcraft_ui_egui::testing::app_harness;
 
     type H = Harness<'static, SshcraftApp>;
@@ -165,6 +166,91 @@ mod in_the_window {
             h.run_steps(1);
         }
         assert!(!screen(h.state(), id).contains("echo old"), "nothing was taken");
+    }
+
+    /// Types `text` and Enter; waits until the history has it.
+    fn kept_line(h: &mut H, session: &Session, host: HostId, text: &str) {
+        typed(h, text);
+        key(h, Key::Enter);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !history(session, host).contains(&text.to_string()) {
+            assert!(Instant::now() < deadline, "{text} was not kept");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+    }
+
+    /// Types `ec` on a clean prompt and lets the suggestions come.
+    fn type_ec(h: &mut H, id: SessionId) {
+        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"\x1b[2J\x1b[H$ ");
+        typed(h, "ec");
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+    }
+
+    fn suggests(app: &SshcraftApp, id: SessionId, label: &str) -> bool {
+        app.terminals.get(&id).is_some_and(|t| t.suggestions().iter().any(|s| s.label == label))
+    }
+
+    #[test]
+    fn clearing_the_history_in_the_sidebar_takes_it_out_of_the_suggestions() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut h, session) = app_harness(dir.path());
+        let (id, host, _server) = connected_pane(&mut h, &session);
+        kept_line(&mut h, &session, host, "echo secret-line");
+        sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.sidebar");
+        until(&mut h, "the sidebar", |_| true);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while h.query_by_label("echo secret-line").is_none() {
+            assert!(Instant::now() < deadline, "the sidebar lists the line");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+        h.get_by_label("Clear").click();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !history(&session, host).is_empty() {
+            assert!(Instant::now() < deadline, "not cleared");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+        type_ec(&mut h, id);
+        assert!(!suggests(h.state(), id, "echo secret-line"), "a cleared line is never suggested");
+    }
+
+    #[test]
+    fn turning_the_history_off_takes_it_out_of_the_suggestions() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut h, session) = app_harness(dir.path());
+        let (id, host, _server) = connected_pane(&mut h, &session);
+        kept_line(&mut h, &session, host, "echo secret-line");
+        h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
+        h.state_mut().ui.settings.section = sshcraft_ui_egui::pages::settings::Section::Terminal;
+        h.run_steps(3);
+        h.get_by_label("Keep the commands typed in terminals").click();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !history(&session, host).is_empty() {
+            assert!(Instant::now() < deadline, "not cleared");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+        h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Tab(0);
+        h.run_steps(3);
+        type_ec(&mut h, id);
+        assert!(!suggests(h.state(), id, "echo secret-line"), "a cleared line is never suggested");
+    }
+
+    #[test]
+    fn the_sidebar_shows_a_line_typed_while_it_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut h, session) = app_harness(dir.path());
+        let (_id, host, _server) = connected_pane(&mut h, &session);
+        sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.sidebar");
+        h.run_steps(5);
+        kept_line(&mut h, &session, host, "echo later-line");
+        h.run_steps(5);
+        assert!(h.query_by_label("echo later-line").is_some(), "the sidebar has the new line");
     }
 
     #[test]

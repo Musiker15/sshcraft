@@ -680,7 +680,22 @@ fn track_line(app: &mut SshcraftApp, id: SessionId, bytes: &[u8], ctx: crate::hi
     let Some(scope) = tab.scope().filter(|_| keep) else { return };
     tab.history.retain(|h| *h != line);
     tab.history.insert(0, line.clone());
+    crate::pages::snippets::sidebar_recorded(app, &scope, &line);
     app.run_reported("history.record", json!({ "scope": scope, "command": line }));
+}
+
+/// Takes a cleared history out of every pane of `scope` (every pane for `None`) and out of the
+/// sidebar, so a cleared line is never suggested again.
+pub fn forget_history(app: &mut SshcraftApp, scope: Option<&str>) {
+    for tab in app.terminals.values_mut() {
+        if scope.is_none() || tab.scope().as_deref() == scope {
+            tab.history.clear();
+            tab.suggestions.clear();
+            tab.selected = None;
+            tab.suggested_for = None;
+        }
+    }
+    crate::pages::snippets::sidebar_forget(app, scope);
 }
 
 /// Makes the suggestions for the line typed so far: history, snippets, then paths.

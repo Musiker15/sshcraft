@@ -384,6 +384,21 @@ fn scope(target: &Value) -> Option<String> {
     }
 }
 
+/// A line the focused pane's history just kept shows in the sidebar at once.
+pub fn sidebar_recorded(app: &mut SshcraftApp, scope: &str, line: &str) {
+    if app.ui.sidebar.scope.as_deref() == Some(scope) {
+        app.ui.sidebar.history.retain(|h| h != line);
+        app.ui.sidebar.history.insert(0, line.to_string());
+    }
+}
+
+/// The sidebar forgets a cleared history (`None`: all of it).
+pub fn sidebar_forget(app: &mut SshcraftApp, scope: Option<&str>) {
+    if scope.is_none() || app.ui.sidebar.scope.as_deref() == scope {
+        app.ui.sidebar.history.clear();
+    }
+}
+
 /// Fetches the history of `scope` when the focused pane changed.
 fn load_history(app: &mut SshcraftApp, want: Option<String>) {
     if app.ui.sidebar.scope == want {
@@ -446,7 +461,7 @@ pub fn sidebar(app: &mut SshcraftApp, ui: &mut Ui, focused: Option<SessionId>) {
     });
     if clear && let Some(scope) = want {
         app.run_reported("history.clear", json!({ "scope": scope }));
-        app.ui.sidebar.history.clear();
+        crate::session_tab::forget_history(app, Some(&scope));
     }
     if let (Some((text, run)), Some(session)) = (paste, focused) {
         for target in crate::session_tab::broadcast_targets(app, session) {
