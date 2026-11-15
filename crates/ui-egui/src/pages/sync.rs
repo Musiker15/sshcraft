@@ -172,6 +172,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     });
     ui.add_space(8.0);
     servers(app, ui);
+    ui.add_space(8.0);
+    crate::pages::sharing::list(app, ui);
     ui.add_space(12.0);
     ui.label(egui::RichText::new(tr("Connections SSHCraft makes by itself")).strong());
     let origins: Vec<String> = app.data.servers.iter().map(|s| text(s, "origin")).collect();

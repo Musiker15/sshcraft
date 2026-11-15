@@ -100,6 +100,10 @@ pub struct UiState {
     #[serde(skip)]
     pub sync: crate::pages::sync::SyncView,
     #[serde(skip)]
+    pub share: Option<crate::pages::sharing::ShareForm>,
+    #[serde(skip)]
+    pub shares: crate::pages::sharing::SharesView,
+    #[serde(skip)]
     pub snippet_form: Option<crate::pages::snippets::SnippetForm>,
     #[serde(skip)]
     pub snippet_run: Option<crate::pages::snippets::SnippetRun>,

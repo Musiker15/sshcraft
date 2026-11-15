@@ -419,6 +419,40 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "This device only" => "Nur dieses Gerät",
         "Move" => "Verschieben",
         "Move to…" => "Verschieben nach…",
+        // Sharing
+        "Move it to a sync server first: shares live there." => "Verschiebe es zuerst auf einen Sync-Server: dort liegen Freigaben.",
+        "Shared." => "Geteilt.",
+        "Share {name}" => "{name} teilen",
+        "Only with accounts on the same server." => "Nur mit Konten auf demselben Server.",
+        "Find" => "Suchen",
+        "{name} ({email})" => "{name} ({email})",
+        "The key of this account changed. Before: {old}. Now: {new}. Ask {name} whether they set up their account again." => {
+            "Der Schlüssel dieses Kontos hat sich geändert. Vorher: {old}. Jetzt: {new}. Frag {name}, ob das Konto neu eingerichtet wurde."
+        }
+        "I compared the new safety number with {name}" => "Ich habe die neue Sicherheitsnummer mit {name} verglichen",
+        "Their safety number: {number}" => "Ihre Sicherheitsnummer: {number}",
+        "Compare it with them by phone or in person; it must be the same on their device." => {
+            "Vergleiche sie telefonisch oder persönlich; auf dem anderen Gerät muss sie gleich sein."
+        }
+        "I compared the safety number with {name}" => "Ich habe die Sicherheitsnummer mit {name} verglichen",
+        "Read" => "Lesen",
+        "Read and change" => "Lesen und ändern",
+        "Share the keys too (never keys in the SSH agent)" => "Auch die Schlüssel teilen (nie Schlüssel im SSH-Agent)",
+        "Share" => "Teilen",
+        "Shares" => "Freigaben",
+        "Nothing shared." => "Nichts geteilt.",
+        "shared by you" => "von dir geteilt",
+        "shared with you" => "mit dir geteilt",
+        "End share" => "Freigabe beenden",
+        "Unknown account" => "Unbekanntes Konto",
+        "read and change" => "lesen und ändern",
+        "read" => "lesen",
+        "Remove recipient" => "Empfänger entfernen",
+        "They lose access, and the share gets a new key." => "Der Zugriff endet, und die Freigabe bekommt einen neuen Schlüssel.",
+        "Keys went along with this share: they may have been copied. Change them on the servers." => {
+            "Mit dieser Freigabe gingen Schlüssel mit: sie können kopiert worden sein. Ändere sie auf den Servern."
+        }
+        "Share…" => "Teilen…",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

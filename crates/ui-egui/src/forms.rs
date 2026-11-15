@@ -70,6 +70,7 @@ pub fn shape(ui: &UiState) -> u64 {
         ui.forward_form.is_some(),
         ui.snippet_form.is_some(),
         ui.snippet_run.is_some(),
+        ui.share.is_some(),
     )
         .hash(&mut hasher);
     hasher.finish()
