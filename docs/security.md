@@ -82,18 +82,27 @@ What a server prints may not reach beyond the terminal on its own:
 
 ## Panes, history and agents in the window
 
-- **Broadcast** sends only what is typed or pasted, and only to panes whose session is connected;
-  mouse, wheel and focus reports and the terminal's own answers go to their own session alone.
-- **History** keeps only lines typed at a shell prompt: never after a password, passphrase, PIN,
-  token or code question (in five languages), never in a REPL, a full-screen program, a line
-  starting with a space, an edited line, a multi-line paste or a broadcast.
+- **Broadcast** sends only what is typed or pasted, and only to panes whose session is connected
+  and that ask a password (or yes/no) question exactly when the pane typed in does; mouse, wheel
+  and focus reports and the terminal's own answers go to their own session alone.
+- **History** keeps only lines typed after a shell prompt sign and echoed back by the shell:
+  never input nothing shows (a secret behind any question), never typeahead, never after a
+  password, passphrase, PIN, token or code question (in five languages), never in a REPL, a
+  full-screen program, a line starting with a space, an edited line, a multi-line paste or a
+  broadcast. Clearing the history takes it out of the suggestions at once.
 - **Templates** type the directory as one quoted word (`cd -- '<dir>'`) and refuse a directory or
-  command with a control character: nothing in them runs as a second command.
+  command with a control character, and a directory with a backslash (fish reads one inside
+  single quotes): nothing in them runs as a second command. A snippet taken from the suggestions
+  is pasted, never run.
 - **An agent's question** names the agent, the action, the target and the command, warns about
   commands of several lines, over 300 characters or with hidden characters, and takes a click
-  only 400 ms after it appears; no key answers it.
+  only 400 ms after it appears. Its buttons never take the keyboard focus, so no key (Tab,
+  Enter, Space) answers it; Deny comes first. The same holds for an unknown host key.
 - **The account key** of a new sync account is shown once, with a QR code, and the window keeps
-  no copy after it is closed. Forms holding an API key or an account key never print them.
+  no copy after it is closed; the key and its QR code are wiped from memory then. Forms holding
+  an API key or an account key never print them and wipe them when they close.
+- **Deleting for good** (logs, a snippet, a forwarding rule, ending a share, removing a sync
+  server) asks first and says what goes.
 - **Sharing** asks to compare the recipient's safety number first, and stops with the old and the
   new number when the server names another key for that e-mail.
 

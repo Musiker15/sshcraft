@@ -113,7 +113,9 @@ imports, accounts, answers to questions) never is:
 - The question shows what changes: for a host every changed field with its old and new value.
   Characters that hide or reorder text are shown as `⟨U+…⟩`, and a command with several lines,
   over 300 characters or with such characters carries a warning. The buttons answer only after
-  a short moment, so a click meant for an earlier question cannot answer a new one.
+  a short moment, so a click meant for an earlier question cannot answer a new one, and only to
+  a click: no key answers, so Tab and Enter typed for a terminal never allow anything. Deny
+  comes first.
 - An agent cannot point stored sign-in data elsewhere: a host (or the groups above it) with a
   stored password, an identity or agent forwarding cannot get another address, port or group
   through an agent, and no host can be created in such a group. A group with such hosts cannot

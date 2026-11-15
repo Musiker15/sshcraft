@@ -46,13 +46,17 @@ SSHCraft keeps the commands typed in a terminal, per host and per local shell (n
 lines), up to 1000 per terminal, the most recent first.
 
 - Encrypted with the vault, on this device only.
-- Only lines typed at a shell prompt (ending in `$`, `#`, `%`, `>` or the like) are kept. What
-  kind of line it is is decided from the output when its first key is typed and kept until
-  Enter, so a password stays secret even where the server prints an asterisk per key.
+- Only lines typed at a shell prompt (ending in `$`, `#`, `%`, `>`, `❯` or `»`, or starting
+  with `➜`) are kept, and only when the shell echoed them: what a program does not show, such as
+  a password, is never kept, whatever its question says. What kind of line it is is decided
+  from the output when its first key is typed and kept until Enter, so a password stays secret
+  even where the server prints an asterisk per key. A line typed before the shell showed its
+  prompt (typeahead) is not kept either.
 - Not kept:
   - lines starting with a space (as `HISTCONTROL=ignorespace` does);
-  - input after a password, passphrase, PIN, token or verification code question (also in
-    German, French, Spanish and Portuguese);
+  - input after a password, passphrase, PIN, token, secret or verification code question (also
+    in German, French, Spanish and Portuguese, and with a hint after it, such as
+    `Token (will be hidden):`);
   - input to programs with their own prompt: mysql, MariaDB, psql, sqlite, python, irb, a
     shell's continuation prompt `>`;
   - anything typed in a full-screen program (vim, less, top);
@@ -62,13 +66,14 @@ lines), up to 1000 per terminal, the most recent first.
 - A nested shell (`ssh` or `su` inside the terminal) looks like a shell prompt: its commands go
   into the history of the outer host.
 - Settings → Terminal turns the history off and clears all of it; the sidebar clears the focused
-  terminal's. Deleting a host deletes its history.
+  terminal's. A cleared line is gone from the suggestions and the sidebar at once. Deleting a
+  host deletes its history.
 
 ## Completion
 
 While you type at a prompt, SSHCraft suggests, in this order: commands from the history, snippets,
-paths and known commands with their subcommands and options (git, docker, systemctl, apt,
-kubectl and about fifty more). Nothing comes from an AI.
+and paths (relative ones start at the shell's directory when it reports it with OSC 7). Nothing
+comes from an AI.
 
 - The list shows up from two characters on, only at a shell prompt (never while a password is
   typed, nor in mysql, python and the like), and never takes a key by itself: Tab, Enter and the
