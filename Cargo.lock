@@ -5605,6 +5605,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcraft-cli"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "data-encoding",
+ "serde_json",
+ "sshcraft-engine",
+ "sshcraft-link",
+ "sshcraft-mcp",
+ "sshcraft-platform",
+ "sshcraft-ssh",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "sshcraft-engine"
 version = "0.1.0"
 dependencies = [

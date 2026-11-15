@@ -35,6 +35,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("server", Class::Exempt),
     // The desktop app (apps/sshcraft).
     ("sshcraft", Class::Exempt),
+    // The command line and MCP server (apps/sshcraft-cli).
+    ("cli", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 
