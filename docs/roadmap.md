@@ -10,14 +10,9 @@ sections 13 and 16, and the market comparison
 
 ## Current focus
 
-R5: the second half of the interface. R4 (the desktop app `apps/sshcraft`: window, sidebar, tabs,
-command palette, tokens and themes, English and German, shortcuts with an editor; hosts and
-groups, keys and identities, the SSH agent's keys and Proton Pass, import and export; session
-tabs with the host key and sign-in questions and OSC 52 consent per host; settings) is done, as
-are R1 (workspace, rules, tooling, core crates), R2 (the engine: 102 commands behind
-`Session::execute`, the agent gate, terminal sessions, forwarding, recording, settings in
-`config.toml`, a command sequence fuzz) and R3 (the terminal: `term` on `alacritty_terminal`, the
-egui renderer and widget, the output pump with flow control, performance budgets).
+R7: macOS, Linux and FreeBSD, the packages, the CI files. R6 (the agent link with its consent,
+the MCP crate, `sshcraft-cli`, the control channel for developers and the acceptance list of
+spec section 10 in [acceptance.md](acceptance.md)) is done, as are R1 to R5.
 
 ## The rebuild
 

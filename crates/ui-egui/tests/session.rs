@@ -13,7 +13,7 @@ use sshcraft_model::model::HostId;
 use sshcraft_ssh::testing::{TestAuth, TestServer};
 use sshcraft_term::{GridPoint, SelectionKind};
 use sshcraft_ui_egui::SshcraftApp;
-use sshcraft_ui_egui::state::{ConnectRequest, Page, TabKind};
+use sshcraft_ui_egui::state::{ConnectRequest, Page, PaneSlot};
 use sshcraft_ui_egui::testing::app_harness;
 
 type H = Harness<'static, SshcraftApp>;
@@ -85,7 +85,7 @@ fn connecting_opens_a_terminal_tab() {
     until(&mut h, "the connection", |app| connected(app, tab));
     assert!(h.state().in_terminal());
     let Page::Tab(i) = h.state().ui.page else { panic!("a tab is shown") };
-    assert!(matches!(&h.state().ui.tabs[i].kind, TabKind::Session { session, .. } if *session == tab));
+    assert_eq!(h.state().ui.tabs[i].panes.panes, [PaneSlot::Session { session: tab }]);
     assert_eq!(h.state().ui.tabs[i].title, "web");
     assert!(h.query_by_role(egui::accesskit::Role::Terminal).is_some(), "the terminal is on screen");
     assert!(h.query_by_label("Connected").is_some(), "the status line says so");
@@ -374,4 +374,23 @@ fn a_long_end_detail_keeps_reconnect_on_screen() {
     h.run_steps(3);
     let button = h.get_by_label("Reconnect").rect();
     assert!(button.max.x <= 1200.0, "Reconnect at {button:?}");
+}
+
+#[test]
+fn a_question_shows_which_tab_it_belongs_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_a, first) = host(&session, "web", false);
+    let (_b, second) = host(&session, "web", false);
+    h.run_steps(2);
+    let one = connect(&mut h, first);
+    until(&mut h, "the first question", |app| !app.prompts.open.is_empty());
+    connect(&mut h, second);
+    until(&mut h, "the second question", |app| app.prompts.open.len() == 2);
+    assert_eq!(h.state().prompts.open[0].session, Some(one));
+    assert_eq!(h.state().ui.page, Page::Tab(1), "the second tab is in front");
+    assert!(h.query_by_label_contains("Asked by tab 1").is_some(), "the question names its tab");
+    h.get_by_label("Show tab").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.page, Page::Tab(0));
 }

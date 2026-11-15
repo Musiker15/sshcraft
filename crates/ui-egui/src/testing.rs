@@ -46,6 +46,8 @@ pub fn app_on_with(dir: &Path, configure: impl FnOnce(&mut SessionConfig)) -> (S
     runtime.block_on(session.execute(sshcraft_engine::Caller::User, "settings.save", serde_json::json!({ "settings": settings }))).unwrap();
     let ctx = egui::Context::default();
     let mut app = SshcraftApp::new(session.clone(), &ctx);
+    // Never the real settings folder: the agent link of a test lives in its own.
+    app.link.dir = Some(dir.join("link"));
     app.keep_runtime(runtime);
     (app, session, ctx)
 }

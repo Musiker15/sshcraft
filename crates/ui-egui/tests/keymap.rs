@@ -82,6 +82,19 @@ fn own_bindings_round_trip_through_the_settings() {
 }
 
 #[test]
+fn every_action_of_the_tauri_version_still_works() {
+    // A binding stored by the Tauri version keeps doing what it did there.
+    for (action, command) in
+        [("toggleSidebar", "ui.terminal.sidebar"), ("toggleBroadcast", "ui.pane.broadcast"), ("bookmark", "ui.terminal.bookmark")]
+    {
+        let mut stored = BTreeMap::new();
+        stored.insert(action.to_string(), vec!["Ctrl+Alt+F9".to_string()]);
+        let b = Bindings::from_settings(&Shortcuts { bindings: stored });
+        assert_eq!(b.command_for(&chord("Ctrl+Alt+F9"), false), Some(command), "{action}");
+    }
+}
+
+#[test]
 fn every_command_has_an_action_the_engine_keeps() {
     for command in sshcraft_ui_egui::commands::ui_commands() {
         assert!(sshcraft_engine::settings::SHORTCUT_ACTIONS.contains(&command.action), "{} ({})", command.id, command.action);

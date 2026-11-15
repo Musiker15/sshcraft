@@ -3,7 +3,7 @@
 
 use crate::app::SshcraftApp;
 use crate::commands::ui_commands;
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::theme::Tokens;
 
 /// Entries shown at once.
@@ -27,6 +27,8 @@ impl PaletteState {
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub id: &'static str,
+    /// What the entry acts on (a workspace's id), for entries that are not plain commands.
+    pub arg: Option<String>,
     pub local: String,
     pub english: &'static str,
     pub shortcut: Option<String>,
@@ -70,16 +72,42 @@ pub fn entries(app: &SshcraftApp) -> Vec<Entry> {
         .filter(|c| c.in_palette)
         .map(|c| Entry {
             id: c.id,
+            arg: None,
             local: tr(c.label).to_string(),
             english: c.label,
             shortcut: app.bindings.chords(c.id).first().map(ToString::to_string),
             enabled: (c.enabled)(app),
         })
+        .chain(app.data.templates.iter().filter_map(|t| {
+            let name = t.get("name").and_then(serde_json::Value::as_str)?;
+            Some(Entry {
+                id: OPEN_WORKSPACE,
+                arg: t.get("id").and_then(serde_json::Value::as_str).map(str::to_string),
+                local: trf("Workspace: {name}", &[("name", &crate::widgets::visible(name))]),
+                english: "Workspace",
+                shortcut: None,
+                enabled: true,
+            })
+        }))
+        .chain(app.data.snippets.iter().map(|s| Entry {
+            id: RUN_SNIPPET,
+            arg: Some(s.id.clone()),
+            local: trf("Snippet: {name}", &[("name", &crate::widgets::visible(&s.name))]),
+            english: "Snippet",
+            shortcut: None,
+            enabled: true,
+        }))
         .collect()
 }
 
+/// The palette entry that opens the run dialog of a snippet (its id in `Entry::arg`).
+pub const RUN_SNIPPET: &str = "ui.snippet.run";
+
+/// The palette entry that opens a workspace template (its id in `Entry::arg`).
+pub const OPEN_WORKSPACE: &str = "ui.workspace.open";
+
 /// Draws the palette when open; returns the command chosen.
-pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) -> Option<&'static str> {
+pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) -> Option<(&'static str, Option<String>)> {
     if !app.ui.palette.open {
         return None;
     }
@@ -128,7 +156,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) -> Option<&'static str> 
                 let label = egui::RichText::new(text).color(if entry.enabled { tokens.text } else { tokens.text_dim });
                 let row = ui.add_enabled(entry.enabled, egui::Button::selectable(i == state.selected, label));
                 if row.clicked() || (enter && i == state.selected && entry.enabled) {
-                    chosen = Some(entry.id);
+                    chosen = Some((entry.id, entry.arg.clone()));
                 }
             }
         });

@@ -173,8 +173,13 @@ impl Fixture {
 }
 
 async fn fixture(answer: bool) -> Fixture {
+    fixture_with(answer, TestAuth::default()).await
+}
+
+/// [`fixture`] with a test server for `auth` (its key is the fixture's).
+async fn fixture_with(answer: bool, auth: TestAuth) -> Fixture {
     let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let server = TestServer::start(key.public_key().clone()).await;
+    let server = TestServer::start_with(TestAuth { key: Some(key.public_key().clone()), ..auth }).await;
     let store = Store::open_in_memory().unwrap();
     let vault = Vault::unlock(&store, Box::new(MemoryMasterKey::default())).unwrap();
     let info = vault.import_key(&store, "test", &key.to_openssh(LineEnding::LF).unwrap(), None).unwrap();
@@ -1402,6 +1407,33 @@ async fn a_host_that_asks_for_it_is_recorded() {
     let bytes = sshcraft_store::session_log::read(&f.vault, &f.store.lock().unwrap(), meta.id).unwrap();
     assert_eq!(bytes, *sink.data.lock().unwrap());
     assert!(bytes[..mark.offset as usize].ends_with(b"first-line"));
+}
+
+/// Spec 10 (T14): a recording holds what the server sent, never what was typed. A password
+/// typed at a prompt that shows nothing must not appear in the log.
+#[tokio::test]
+async fn typed_input_never_reaches_the_log() {
+    let f = fixture_with(true, TestAuth { quiet: true, ..TestAuth::default() }).await;
+    set_recording(&f, Some(true), false);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    assert!(f.manager.is_recording(id));
+    f.manager.write(id, b"typed-secret-hunter2\n").unwrap();
+    // Some output, so there is a log at all (`flood` must come as a chunk of its own).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    f.manager.write(id, b"flood\n").unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while sink.data.lock().unwrap().len() < 4096 {
+        assert!(tokio::time::Instant::now() < deadline, "no output");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    f.manager.close(id);
+    let logs = logs(&f);
+    assert_eq!(logs.len(), 1);
+    let bytes = sshcraft_store::session_log::read(&f.vault, &f.store.lock().unwrap(), logs[0].meta.id).unwrap();
+    assert!(!bytes.is_empty());
+    assert!(!bytes.windows(12).any(|w| w == b"typed-secret"), "what was typed is not in the log");
 }
 
 #[tokio::test]

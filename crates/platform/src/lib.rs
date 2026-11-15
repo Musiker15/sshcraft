@@ -30,6 +30,17 @@ pub fn data_dir() -> Result<PathBuf, PlatformError> {
     directories::ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION).map(|dirs| dirs.data_dir().to_path_buf()).ok_or(PlatformError::NoHome)
 }
 
+/// The folder for SSHCraft's own settings files beside the data: the agent link's token and
+/// connection file live here (on Windows `%APPDATA%\musiker15\SSHCraft\config`, in the user's
+/// profile, which only the user, SYSTEM and administrators may read). `SSHCRAFT_LINK_DIR` moves it
+/// (tests, portable use).
+pub fn config_dir() -> Result<PathBuf, PlatformError> {
+    if let Some(dir) = std::env::var_os("SSHCRAFT_LINK_DIR").filter(|d| !d.is_empty()) {
+        return Ok(PathBuf::from(dir));
+    }
+    directories::ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION).map(|dirs| dirs.config_dir().to_path_buf()).ok_or(PlatformError::NoHome)
+}
+
 /// The names the Tauri version used for its folders; changing one moves existing data away.
 const QUALIFIER: &str = "de";
 const ORGANIZATION: &str = "musiker15";

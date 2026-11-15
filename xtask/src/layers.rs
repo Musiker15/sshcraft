@@ -14,12 +14,12 @@ pub enum Class {
     Exempt,
 }
 
-/// The layer table. Names are package names without the `sshcraft-` prefix. Later layers:
-/// ui-egui 6, mcp 6, term 2.
+/// The layer table. Names are package names without the `sshcraft-` prefix.
 pub const TABLE: &[(&str, Class)] = &[
     ("proto", Class::Layer(0)),
     ("platform", Class::Layer(0)),
     ("model", Class::Layer(1)),
+    ("link", Class::Layer(1)),
     ("store", Class::Layer(2)),
     ("term", Class::Layer(2)),
     ("import", Class::Layer(3)),
@@ -30,10 +30,13 @@ pub const TABLE: &[(&str, Class)] = &[
     ("fido", Class::Layer(4)),
     ("engine", Class::Layer(5)),
     ("ui-egui", Class::Layer(6)),
+    ("mcp", Class::Layer(6)),
     // The sync server program (apps/sshcraft-server).
     ("server", Class::Exempt),
     // The desktop app (apps/sshcraft).
     ("sshcraft", Class::Exempt),
+    // The command line and MCP server (apps/sshcraft-cli).
+    ("cli", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

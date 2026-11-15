@@ -4,9 +4,11 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod agent_link;
 pub mod agent_sessions;
 pub mod caller;
 pub mod cmd;
+pub mod consent;
 pub mod error;
 pub mod events;
 pub mod forwards;
@@ -140,6 +142,8 @@ struct Inner {
     agent_sessions: agent_sessions::AgentSessions,
     /// Terminal streams of the user's sessions until the interface takes them.
     terminals: Mutex<HashMap<SessionId, TerminalStream>>,
+    /// Called when a terminal stream gets output or a status (the window's repaint).
+    terminal_waker: Mutex<Option<terminal::Waker>>,
     /// Work started by [`Session::start`]; stopped with the engine.
     background: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// Open connections of agents and the control channel, with the sessions each opened.
@@ -147,6 +151,8 @@ struct Inner {
     next_conn: std::sync::atomic::AtomicU64,
     confirmer: Option<Arc<dyn gate::Confirmer>>,
     confirm_timeout: Duration,
+    /// The agent link while it runs.
+    agent_link: Mutex<Option<agent_link::Running>>,
     /// Held for the life of the engine: no other process opens the same data.
     _lock: sshcraft_platform::DataLock,
 }
@@ -229,9 +235,11 @@ impl Session {
             prompts,
             agent_sessions: agent_sessions::AgentSessions::default(),
             terminals: Mutex::new(HashMap::new()),
+            terminal_waker: Mutex::new(None),
             background: Mutex::new(Vec::new()),
             connections: Mutex::new(HashMap::new()),
             next_conn: std::sync::atomic::AtomicU64::new(1),
+            agent_link: Mutex::new(None),
             confirmer: config.confirmer,
             confirm_timeout: config.confirm_timeout,
             _lock: lock,
@@ -301,6 +309,16 @@ impl Session {
     }
 
     /// Keeps the stream of a session the user opened until the interface attaches it.
+    /// Wakes the window whenever a terminal stream gets output or a status, so it need not look
+    /// for output on a timer. Applies to the sessions opened from now on.
+    pub fn set_terminal_waker(&self, waker: terminal::Waker) {
+        *self.0.terminal_waker.lock().unwrap_or_else(PoisonError::into_inner) = Some(waker);
+    }
+
+    pub(crate) fn terminal_waker(&self) -> Option<terminal::Waker> {
+        self.0.terminal_waker.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
     pub(crate) fn park_terminal(&self, stream: TerminalStream) {
         self.0.terminals.lock().unwrap_or_else(PoisonError::into_inner).insert(stream.id(), stream);
     }

@@ -13,7 +13,7 @@ fn term(bytes: &[u8]) -> Terminal {
 }
 
 fn run(t: &Terminal, focused: bool) -> Vec<Primitive> {
-    layout(&t.screen(), &M, &TermPalette::dark(), &FontId::monospace(14.0), Pos2::ZERO, focused)
+    layout(&t.screen(), &M, &TermPalette::dark(), &FontId::monospace(14.0), Pos2::ZERO, focused, true)
 }
 
 fn rects(p: &[Primitive]) -> Vec<(egui::Rect, Color32)> {
@@ -146,4 +146,13 @@ fn links_are_underlined_in_the_link_colour() {
     let prims = run(&t, true);
     assert_eq!(texts(&prims)[0].3, p.link);
     assert_eq!(lines(&prims), [LineStyle::Solid]);
+}
+
+#[test]
+fn without_ligatures_each_cell_is_its_own_run() {
+    let t = term(b"->");
+    let joined = layout(&t.screen(), &M, &TermPalette::dark(), &FontId::monospace(14.0), Pos2::ZERO, false, true);
+    assert_eq!(texts(&joined).iter().map(|t| t.2.as_str()).collect::<Vec<_>>(), ["->"], "one run, so the font may join it");
+    let apart = layout(&t.screen(), &M, &TermPalette::dark(), &FontId::monospace(14.0), Pos2::ZERO, false, false);
+    assert_eq!(texts(&apart).iter().map(|t| t.2.as_str()).collect::<Vec<_>>(), ["-", ">"], "each cell alone");
 }

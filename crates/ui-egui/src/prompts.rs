@@ -20,13 +20,45 @@ pub fn answer_id(prompt: u64, line: usize) -> egui::Id {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptKind {
-    HostKey { host_name: String, address: String, port: u16, fingerprint: String },
-    Auth { host_name: String, username: String, name: String, instructions: String, lines: Vec<(String, bool)> },
+    HostKey {
+        host_name: String,
+        address: String,
+        port: u16,
+        fingerprint: String,
+    },
+    Auth {
+        host_name: String,
+        username: String,
+        name: String,
+        instructions: String,
+        lines: Vec<(String, bool)>,
+    },
+    /// An AI agent's action waiting for the user's yes or no.
+    Agent {
+        agent: String,
+        action: String,
+        target: String,
+        detail: String,
+    },
+}
+
+/// Why a command an agent wants to run deserves a second look: several lines, over 300
+/// characters, or characters that hide or reorder text.
+pub fn command_warning(detail: &str) -> Option<&'static str> {
+    if detail.contains('\n') || detail.contains('\r') {
+        return Some(tr("This command has more than one line: read every line."));
+    }
+    if detail.chars().count() > 300 {
+        return Some(tr("This command is long: read all of it."));
+    }
+    (crate::widgets::visible(detail) != detail).then_some(tr("This command has hidden or reordering characters, shown as ⟨U+…⟩."))
 }
 
 #[derive(Debug, Clone)]
 pub struct PromptView {
     pub id: u64,
+    /// The terminal session that asks, if a terminal asks.
+    pub session: Option<sshcraft_engine::SessionId>,
     pub kind: PromptKind,
     /// What the user typed, one per line of a sign-in question.
     pub answers: Vec<String>,
@@ -67,13 +99,15 @@ impl PromptView {
                     })
                     .unwrap_or_default(),
             },
+            "agent" => PromptKind::Agent { agent: text("agent"), action: text("action"), target: text("target"), detail: text("detail") },
             _ => return None,
         };
         let answers = match &kind {
             PromptKind::Auth { lines, .. } => vec![String::new(); lines.len()],
-            PromptKind::HostKey { .. } => Vec::new(),
+            PromptKind::HostKey { .. } | PromptKind::Agent { .. } => Vec::new(),
         };
-        Some(Self { id, kind, answers })
+        let session = v.get("session").and_then(|s| serde_json::from_value(s.clone()).ok());
+        Some(Self { id, session, kind, answers })
     }
 }
 
@@ -160,11 +194,26 @@ pub fn refresh(app: &mut SshcraftApp) {
 }
 
 enum Answer {
+    Agent(bool),
     HostKey(bool),
     Auth(Option<Vec<String>>),
 }
 
+/// A button that answers a question: it takes a click (or a screen reader's click) but never
+/// the keyboard focus, so Tab and Enter typed for a terminal never answer.
+fn answer_button(ui: &mut egui::Ui, ready: bool, text: &str) -> bool {
+    ui.add_enabled(ready, egui::Button::new(text).sense(egui::Sense::CLICK)).clicked()
+}
+
 pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
+    // The tab that asks, by number and title (several tabs may show the same host).
+    let asking =
+        app.prompts.open.first().and_then(|p| p.session).and_then(|id| {
+            crate::session_tab::pane_of(app, id).map(|(t, _)| (t, app.terminals.get(&id).map(|s| s.title.clone()).unwrap_or_default()))
+        });
+    // The answer field takes the keyboard only when the asking tab is on screen: typing meant for
+    // another page never lands in a question the user has not seen.
+    let on_screen = asking.as_ref().is_some_and(|(index, _)| app.ui.page == crate::state::Page::Tab(*index));
     let Some(prompt) = app.prompts.open.first_mut() else {
         app.prompts.shown = None;
         return;
@@ -184,8 +233,22 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     let tokens = Tokens::get(ctx);
     let mut answer = None;
+    let mut show_tab = None;
     egui::Modal::new(egui::Id::unique("sshcraft-prompt")).show(ctx, |ui| {
         ui.set_width(520.0);
+        if let Some((index, title)) = &asking {
+            ui.horizontal(|ui| {
+                let number = (index + 1).to_string();
+                ui.label(
+                    egui::RichText::new(trf("Asked by tab {number}: {title}", &[("number", &number), ("title", &visible(title))]))
+                        .color(tokens.text_dim),
+                );
+                if ui.small_button(tr("Show tab")).clicked() {
+                    show_tab = Some(*index);
+                }
+            });
+            ui.add_space(4.0);
+        }
         match &prompt.kind {
             PromptKind::HostKey { host_name, address, port, fingerprint } => {
                 ui.heading(tr("Unknown host key"));
@@ -199,11 +262,45 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(visible(fingerprint)).monospace().color(tokens.text_strong));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(ready, egui::Button::new(tr("Accept"))).clicked() {
+                    if answer_button(ui, ready, tr("Cancel")) {
+                        answer = Some(Answer::HostKey(false));
+                    }
+                    if answer_button(ui, ready, tr("Accept")) {
                         answer = Some(Answer::HostKey(true));
                     }
-                    if ui.add_enabled(ready, egui::Button::new(tr("Cancel"))).clicked() {
-                        answer = Some(Answer::HostKey(false));
+                });
+            }
+            PromptKind::Agent { agent, action, target, detail } => {
+                ui.heading(tr("An AI agent asks"));
+                ui.add_space(6.0);
+                egui::Grid::new(("sshcraft-agent-question", prompt.id)).num_columns(2).min_col_width(90.0).show(ui, |ui| {
+                    ui.label(tr("Agent"));
+                    ui.label(egui::RichText::new(visible(agent)).strong());
+                    ui.end_row();
+                    ui.label(tr("Action"));
+                    ui.label(visible(action));
+                    ui.end_row();
+                    if !target.is_empty() {
+                        ui.label(tr("Target"));
+                        ui.label(visible(target));
+                        ui.end_row();
+                    }
+                });
+                if !detail.is_empty() {
+                    if let Some(warning) = command_warning(detail) {
+                        ui.label(egui::RichText::new(warning).color(tokens.warning));
+                    }
+                    egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                        ui.label(egui::RichText::new(crate::widgets::visible_lines(detail)).monospace());
+                    });
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if answer_button(ui, ready, tr("Deny")) {
+                        answer = Some(Answer::Agent(false));
+                    }
+                    if answer_button(ui, ready, tr("Allow")) {
+                        answer = Some(Answer::Agent(true));
                     }
                 });
             }
@@ -222,7 +319,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                         ui.label(visible(text));
                         let field = crate::widgets::secret_field(ui, value, answer_id(prompt.id, i), !echo, "", 300.0);
                         // The keyboard goes to the first answer, not to the terminal behind.
-                        if first_frame && i == 0 {
+                        if first_frame && on_screen && i == 0 {
                             field.request_focus();
                         }
                         ui.end_row();
@@ -240,10 +337,14 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         }
     });
+    if let Some(index) = show_tab {
+        app.ui.page = crate::state::Page::Tab(index);
+    }
     let Some(answer) = answer else { return };
     let id = prompt.id;
     app.prompts.withdraw(id);
     match answer {
+        Answer::Agent(allow) => app.run_reported("prompt.agent", json!({ "prompt_id": id, "allow": allow })),
         Answer::HostKey(accept) => app.run_reported("prompt.host_key", json!({ "prompt_id": id, "accept": accept })),
         Answer::Auth(answers) => app.run_reported("prompt.auth", json!({ "prompt_id": id, "answers": answers })),
     }

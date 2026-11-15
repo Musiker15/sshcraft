@@ -80,6 +80,32 @@ What a server prints may not reach beyond the terminal on its own:
   dialog was closed never touches the dialog open now. A connection that opens late waits in
   its tab and does not take the page or the keyboard.
 
+## Panes, history and agents in the window
+
+- **Broadcast** sends only what is typed or pasted, and only to panes whose session is connected
+  and that ask a password (or yes/no) question exactly when the pane typed in does; mouse, wheel
+  and focus reports and the terminal's own answers go to their own session alone.
+- **History** keeps only lines typed after a shell prompt sign and echoed back by the shell:
+  never input nothing shows (a secret behind any question), never typeahead, never after a
+  password, passphrase, PIN, token or code question (in five languages), never in a REPL, a
+  full-screen program, a line starting with a space, an edited line, a multi-line paste or a
+  broadcast. Clearing the history takes it out of the suggestions at once.
+- **Templates** type the directory as one quoted word (`cd -- '<dir>'`) and refuse a directory or
+  command with a control character, and a directory with a backslash (fish reads one inside
+  single quotes): nothing in them runs as a second command. A snippet taken from the suggestions
+  is pasted, never run.
+- **An agent's question** names the agent, the action, the target and the command, warns about
+  commands of several lines, over 300 characters or with hidden characters, and takes a click
+  only 400 ms after it appears. Its buttons never take the keyboard focus, so no key (Tab,
+  Enter, Space) answers it; Deny comes first. The same holds for an unknown host key.
+- **The account key** of a new sync account is shown once, with a QR code, and the window keeps
+  no copy after it is closed; the key and its QR code are wiped from memory then. Forms holding
+  an API key or an account key never print them and wipe them when they close.
+- **Deleting for good** (logs, a snippet, a forwarding rule, ending a share, removing a sync
+  server) asks first and says what goes.
+- **Sharing** asks to compare the recipient's safety number first, and stops with the old and the
+  new number when the server names another key for that e-mail.
+
 ## Port forwarding
 
 - New rules listen on loopback only (`127.0.0.1`, or `localhost` on the server for a remote
@@ -145,9 +171,20 @@ switched on is refused. See [connections.md](connections.md).
 
 ## AI agents
 
-- From R6 on, agents reach SSHCraft only over loopback, with a token made at every start and kept
-  in a file only the current user can read; it is off until the user allows agents. Until R6 there
-  is no agent connection on `main`.
+- Agents reach SSHCraft only over loopback (`127.0.0.1`), and only while the user allows agent
+  control (off on a fresh install; with the suite's AI-MCP flag the ArtCraft Launcher must allow
+  it too). The token is new at every start of the link and stays in a file only the user can read; every connection signs in by
+  challenge, so the token never crosses the wire and a program on a stale port learns nothing.
+  The agent link runs engine commands only: no window input, no screenshots, no journal.
+- The control channel (`--control`) is a developer tool, never on by default: whoever has its
+  token clicks and types like the user. Its engine commands still pass the gate as `control`.
+- A connection's sessions and open questions end with it; an agent cannot flood the log through
+  the link (the newest 1000 entries stay). A request id still running is refused, and connections
+  that never sign in cannot keep a client out.
+- The sign-in proves the token, not the port: a program that could relay a challenge between a
+  client and the real link would be let in. That needs the client to be pointed at it while the
+  link runs, which the connection file (current while the link runs, written only by SSHCraft)
+  does not allow.
 - No action returns key material, passwords or account keys; answers that look like key
   material are blocked. Rights per kind of action (allow, ask, block), questions only in
   SSHCraft's window, hidden hosts answered as unknown, a sealed log of every action.

@@ -1,0 +1,246 @@
+//! Session logs: recorded output listed, searched, played back read-only with its marks,
+//! exported where the user chooses; a log still recording is never deleted.
+
+use std::time::{Duration, Instant};
+
+use craft_dialogs::Answer;
+use egui::{Event, Key, Modifiers};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use serde_json::{Value, json};
+use sshcraft_engine::testing::test_host;
+use sshcraft_engine::{Caller, Session, SessionId, SessionStatus};
+use sshcraft_ssh::testing::TestAuth;
+use sshcraft_ui_egui::SshcraftApp;
+use sshcraft_ui_egui::log_viewer::LogViewer;
+use sshcraft_ui_egui::state::{ConnectRequest, Page};
+use sshcraft_ui_egui::testing::app_harness;
+
+type H = Harness<'static, SshcraftApp>;
+
+fn until(h: &mut H, what: &str, done: impl Fn(&SshcraftApp) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !done(h.state()) {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}; messages: {:?}", h.state().toasts.texts());
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+}
+
+fn run(session: &Session, id: &str, params: Value) -> Value {
+    session.runtime().block_on(session.execute(Caller::User, id, params)).unwrap()
+}
+
+fn logs(session: &Session) -> Vec<Value> {
+    run(session, "log.list", json!({})).as_array().cloned().unwrap_or_default()
+}
+
+/// Recording on, one connected pane that printed `logged-text`; the server stays alive.
+fn recorded(h: &mut H, session: &Session) -> (SessionId, sshcraft_ssh::testing::TestServer) {
+    recorded_with(h, session, "logged-text")
+}
+
+/// Recording on, one more connected pane that printed `text`.
+fn recorded_with(h: &mut H, session: &Session, text: &str) -> (SessionId, sshcraft_ssh::testing::TestServer) {
+    let mut settings = run(session, "settings.get", json!({}));
+    settings["logs"]["session_logs"] = json!(true);
+    run(session, "settings.save", json!({ "settings": settings }));
+    let (server, host) = session.runtime().block_on(test_host(session, "web", TestAuth::default(), true));
+    let before: Vec<SessionId> = h.state().terminals.keys().copied().collect();
+    h.state_mut().open_new_tab();
+    h.run_steps(2);
+    h.state_mut().ui.connect_request = Some(ConnectRequest::Host(host));
+    until(h, "the session", |app| app.terminals.keys().any(|id| !before.contains(id)));
+    let id = *h.state().terminals.keys().find(|id| !before.contains(id)).unwrap();
+    until(h, "the connection", |app| app.terminals.get(&id).is_some_and(|t| matches!(t.status, Some(SessionStatus::Connected { .. }))));
+    h.event(Event::Text(format!("echo {text}")));
+    until(h, "the echo", |app| app.terminals.get(&id).is_some_and(|t| t.term.visible_text().contains(text)));
+    (id, server)
+}
+
+#[test]
+fn delete_all_shown_while_searching_deletes_only_the_hits_after_a_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_a, _sa) = recorded_with(&mut h, &session, "keep-this-one");
+    let (_b, _sb) = recorded_with(&mut h, &session, "drop-that-one");
+    h.state_mut().close_tab();
+    h.state_mut().close_tab();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(logs(&session).len() == 2 && logs(&session).iter().all(|l| l["ended_at"].is_i64())) {
+        assert!(Instant::now() < deadline, "the logs did not end");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.state_mut().ui.page = Page::Logs;
+    until(&mut h, "the list", |app| app.data.logs.len() == 2);
+    h.state_mut().ui.logs.search = "drop-that".into();
+    until(&mut h, "the hits", |app| !app.ui.logs.hits.is_empty());
+    let hit = h.state().ui.logs.hits[0]["log_id"].as_str().unwrap().to_string();
+    h.get_by_label("Delete all shown").click();
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert_eq!(logs(&session).len(), 2, "nothing is deleted before the confirmation");
+    h.get_by_label("Delete").click();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while logs(&session).len() != 1 {
+        assert!(Instant::now() < deadline, "not deleted; {} logs", logs(&session).len());
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert_ne!(logs(&session)[0]["id"].as_str().unwrap(), hit, "the log without a hit stays");
+}
+
+fn close_and_open_logs(h: &mut H, session: &Session) {
+    h.state_mut().close_tab();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !logs(session).iter().any(|l| l["ended_at"].is_i64()) {
+        assert!(Instant::now() < deadline, "the log did not end");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.state_mut().ui.page = Page::Logs;
+    until(h, "the list", |app| !app.data.logs.is_empty());
+}
+
+#[test]
+fn rec_shows_while_recording_and_a_recording_log_is_not_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_id, _server) = recorded(&mut h, &session);
+    until(&mut h, "the Rec mark", |_| true);
+    assert!(h.query_by_label("Rec").is_some(), "the pane says it records");
+    h.state_mut().ui.page = Page::Logs;
+    until(&mut h, "the list", |app| !app.data.logs.is_empty());
+    h.get_by_label("Delete all shown").click();
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert_eq!(logs(&session).len(), 1, "a log still recording stays");
+}
+
+#[test]
+fn ctrl_shift_l_adds_a_bookmark() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_id, _server) = recorded(&mut h, &session);
+    for pressed in [true, false] {
+        h.input_mut().events.push(Event::Key {
+            key: Key::L,
+            pressed,
+            modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+            repeat: false,
+            physical_key: None,
+        });
+        h.step();
+    }
+    until(&mut h, "the notice", |app| app.toasts.texts().iter().any(|t| t.contains("Bookmark")));
+    close_and_open_logs(&mut h, &session);
+    let marks = logs(&session)[0]["marks"].as_array().cloned().unwrap_or_default();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0]["kind"], "bookmark");
+}
+
+#[test]
+fn a_recorded_session_plays_back_with_marks_added_and_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_id, _server) = recorded(&mut h, &session);
+    close_and_open_logs(&mut h, &session);
+    h.get_by_label("Open").click();
+    until(&mut h, "the viewer", |app| app.log_viewer.as_ref().is_some_and(|v| v.text().contains("logged-text")));
+    h.get_by_label("Bookmark").click();
+    until(&mut h, "the mark", |_| logs(&session)[0]["marks"].as_array().is_some_and(|m| m.len() == 1));
+    until(&mut h, "the mark in the list", |app| app.log_viewer.as_ref().is_some_and(|v| v.marks().len() == 1));
+    h.get_by_label("Remove mark").click();
+    until(&mut h, "no mark", |_| logs(&session)[0]["marks"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn search_opens_the_log_at_the_hit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_id, _server) = recorded(&mut h, &session);
+    close_and_open_logs(&mut h, &session);
+    h.state_mut().ui.logs.search = "logged".into();
+    until(&mut h, "the hits", |app| !app.ui.logs.hits.is_empty());
+    h.get_by_label_contains("logged-text").click();
+    until(&mut h, "the viewer", |app| app.log_viewer.is_some());
+    assert!(h.state().log_viewer.as_ref().unwrap().text().contains("logged-text"));
+    assert_eq!(h.state().log_viewer.as_ref().unwrap().search, "logged", "the viewer searches for what the page searched");
+}
+
+#[test]
+fn export_writes_text_where_the_user_chose() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_id, _server) = recorded(&mut h, &session);
+    close_and_open_logs(&mut h, &session);
+    let out = files.path().join("web.txt");
+    let answer = out.clone();
+    h.state_mut().dialogs.set_override(Some(Box::new(move |_| Answer::Paths(vec![answer.clone()]))));
+    h.get_by_label("Export").click();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !out.exists() {
+        assert!(Instant::now() < deadline, "no file; messages: {:?}", h.state().toasts.texts());
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(std::fs::read_to_string(&out).unwrap().contains("logged-text"));
+}
+
+fn numbered(lines: usize) -> Vec<u8> {
+    (0..lines).flat_map(|i| format!("line {i}\r\n").into_bytes()).collect()
+}
+
+#[test]
+fn a_long_log_says_its_beginning_is_missing() {
+    let short = LogViewer::from_bytes(String::new(), b"one\r\ntwo\r\n", &[]);
+    assert!(!short.beginning_missing());
+    let viewer = LogViewer::from_bytes(String::new(), &numbered(100_050), &[]);
+    assert!(viewer.beginning_missing(), "more than 100 000 lines");
+    // More than the terminal keeps at its width, fewer than 100 000.
+    let viewer = LogViewer::from_bytes(String::new(), &numbered(30_000), &[]);
+    assert!(viewer.beginning_missing(), "30 000 lines at 160 columns");
+}
+
+/// A mark at the start of line `line` of [`numbered`] output.
+fn mark_at(bytes: &[u8], line: usize, text: &str) -> Value {
+    let offset = bytes.split(|b| *b == b'\n').take(line).map(|l| l.len() + 1).sum::<usize>();
+    json!({ "id": uuid::Uuid::new_v4(), "offset": offset, "kind": "bookmark", "text": text, "created_at": 0 })
+}
+
+#[test]
+fn the_viewer_finds_text_and_goes_on_to_the_next() {
+    let mut viewer = LogViewer::from_bytes(String::new(), &numbered(1000), &[]);
+    assert!(!viewer.screen_text().contains("line 123"), "the end is shown first");
+    assert!(viewer.find("LINE 123", true), "found, whatever the case");
+    assert!(viewer.screen_text().contains("line 123"), "{}", viewer.screen_text());
+    assert!(viewer.find("line 5", true));
+    assert!(viewer.screen_text().contains("line 5"));
+    assert!(viewer.find("line 5", true), "the next match");
+    assert!(viewer.screen_text().contains("line 50"), "{}", viewer.screen_text());
+    assert!(!viewer.find("not in the log", true));
+}
+
+#[test]
+fn marks_jump_right_after_one_is_added_or_removed() {
+    let bytes = numbered(1000);
+    let late = mark_at(&bytes, 600, "late");
+    let mut viewer = LogViewer::from_bytes(String::new(), &bytes, std::slice::from_ref(&late));
+    let early = mark_at(&bytes, 200, "early");
+    viewer.set_marks(vec![late.clone(), early.clone()]);
+    viewer.jump(0);
+    assert!(viewer.screen_text().contains("line 200"), "the new mark: {}", viewer.screen_text());
+    viewer.jump(1);
+    assert!(viewer.screen_text().contains("line 600"));
+    viewer.set_marks(vec![early]);
+    viewer.jump(0);
+    assert!(viewer.screen_text().contains("line 200"), "after a removal: {}", viewer.screen_text());
+}

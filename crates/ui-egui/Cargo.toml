@@ -14,6 +14,9 @@ testing = ["dep:egui_kittest", "sshcraft-engine/testing"]
 [dependencies]
 sshcraft-term = { workspace = true }
 sshcraft-engine = { workspace = true }
+sshcraft-platform = { workspace = true }
+# The control channel's screenshots as PNG.
+image = { workspace = true, features = ["png"] }
 sshcraft-model = { workspace = true }
 sshcraft-import = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
@@ -29,10 +32,15 @@ bitflags = { workspace = true }
 sys-locale = { workspace = true }
 uuid = { workspace = true }
 data-encoding = { workspace = true }
+qrcode = { workspace = true }
+zeroize = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
 tokio = { workspace = true }
 egui_kittest = { workspace = true, optional = true }
 
 [dev-dependencies]
+sshcraft-server-lib = { workspace = true }
+sshcraft-link = { workspace = true }
 memory-stats = { workspace = true }
 russh = { workspace = true }
 rand = { workspace = true }
@@ -44,7 +52,6 @@ tempfile = { workspace = true }
 data-encoding = { workspace = true }
 uuid = { workspace = true }
 egui_kittest = { workspace = true, features = ["wgpu"] }
-image = { workspace = true, features = ["png"] }
 
 [lints]
 workspace = true

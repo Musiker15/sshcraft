@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 //! SSHCraft, the desktop app: opens the engine on the user's data and shows the window.
 
+mod control;
 mod platform;
 
 use std::process::ExitCode;
@@ -43,12 +44,25 @@ fn start_problem(error: &EngineError, lang: Lang) -> String {
 /// The window around the app.
 struct Shell {
     app: SshcraftApp,
+    /// The control channel, while the app runs with `--control`.
+    _control: Option<sshcraft_link::Server>,
 }
 
 impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.frame(ui);
         self.app.show_dialogs(Some(&*frame));
+    }
+
+    /// Also while the window is minimized or covered (no frame then): the agent link follows the
+    /// consent, and the control channel answers.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.app.logic(ctx);
+    }
+
+    /// The control channel's clicks and keys go in front of the frame, as a person's would.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        raw_input.events.extend(self.app.take_control_input());
     }
 }
 
@@ -76,6 +90,14 @@ fn show_problem(text: String) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let control_args = match control::parse(&args) {
+        Ok(found) => found,
+        Err(problem) => {
+            set_language(system_language());
+            return show_problem(problem);
+        }
+    };
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(e) => {
@@ -108,13 +130,27 @@ fn main() -> ExitCode {
             .with_icon(sshcraft_ui_egui::widgets::icons::app_icon()),
         ..Default::default()
     };
+    let handle = runtime.handle().clone();
     let result = eframe::run_native(
         "SSHCraft",
         options,
         Box::new(move |cc| {
             window.take_from(cc);
-            let app = SshcraftApp::new(session, &cc.egui_ctx);
-            Ok(Box::new(Shell { app }))
+            let mut app = SshcraftApp::new(session.clone(), &cc.egui_ctx);
+            let control = match &control_args {
+                Some(control_args) => {
+                    let queue = app.enable_control(&cc.egui_ctx);
+                    match handle.block_on(control::start(control_args, session, queue)) {
+                        Ok(server) => Some(server),
+                        Err(problem) => {
+                            app.toasts.error(&format!("--control: {problem}"));
+                            None
+                        }
+                    }
+                }
+                None => None,
+            };
+            Ok(Box::new(Shell { app, _control: control }))
         }),
     );
     // The window and the app are gone; the engine's tasks get a moment to end.

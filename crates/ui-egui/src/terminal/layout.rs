@@ -130,7 +130,16 @@ fn stands_alone(cell: &CellView) -> bool {
     cell.flags.contains(CellFlags::WIDE) || cell.text.chars().nth(1).is_some()
 }
 
-pub fn layout(screen: &Screen, metrics: &CellMetrics, palette: &TermPalette, font: &FontId, origin: Pos2, focused: bool) -> Vec<Primitive> {
+/// `ligatures` false draws every narrow cell on its own, so no font joins neighbouring characters.
+pub fn layout(
+    screen: &Screen,
+    metrics: &CellMetrics,
+    palette: &TermPalette,
+    font: &FontId,
+    origin: Pos2,
+    focused: bool,
+    ligatures: bool,
+) -> Vec<Primitive> {
     let cols = usize::from(screen.cols);
     let cursor = screen.cursor;
     let block_cursor = focused && cursor.visible && cursor.shape == CursorShape::Block;
@@ -185,7 +194,7 @@ pub fn layout(screen: &Screen, metrics: &CellMetrics, palette: &TermPalette, fon
             }
             col = col.min(cols);
             let mut cells_drawn = col - start;
-            if !stands_alone(cell) && text == first {
+            if ligatures && !stands_alone(cell) && text == first {
                 while col < cols && !stands_alone(&cells[col]) && !cells[col].flags.contains(CellFlags::WIDE_SPACER) && looks[col] == looks[start] {
                     text.push_str(&cells[col].text);
                     col += 1;

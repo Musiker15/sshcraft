@@ -216,6 +216,15 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
             if ui.button(tr("Edit")).clicked() {
                 edit_group(app, id);
             }
+            if ui.button(tr("Move to…")).clicked() {
+                crate::pages::sync::ask_move(app, "group", &id.0.to_string(), &group.name);
+            }
+            if ui.button(tr("Share…")).clicked() {
+                crate::pages::sharing::ask_share(app, &id.0.to_string(), None);
+            }
+            if ui.button(tr("Hide from agents")).clicked() {
+                crate::pages::agents::set_hidden(app, &id.0.to_string(), true);
+            }
             if ui.button(tr("Delete")).clicked() {
                 ask_delete_group(app, id);
             }
@@ -239,6 +248,16 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
         response.context_menu(|ui| {
             if ui.button(tr("Connect")).clicked() {
                 app.ui.connect_request = Some(ConnectRequest::Host(id));
+            }
+            if ui.button(tr("Move to…")).clicked() {
+                crate::pages::sync::ask_move(app, "host", &id.0.to_string(), &row.host.name);
+            }
+            if ui.button(tr("Share…")).clicked() {
+                let group = row.host.group_id.map(|g| g.0.to_string()).unwrap_or_default();
+                crate::pages::sharing::ask_share(app, &group, Some(&id.0.to_string()));
+            }
+            if ui.button(tr("Hide from agents")).clicked() {
+                crate::pages::agents::set_hidden(app, &id.0.to_string(), true);
             }
             if ui.button(tr("Edit")).clicked() {
                 edit_host(app, id);

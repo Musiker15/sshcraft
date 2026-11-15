@@ -130,3 +130,27 @@ fn closing_another_tab_keeps_the_view() {
     h.run_steps(2);
     assert_eq!(h.state().ui.page, Page::Hosts, "the hosts page stays");
 }
+
+#[test]
+fn the_sidebar_has_every_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(3);
+    let pages = [
+        ("Hosts", Page::Hosts),
+        ("Keys", Page::Keys),
+        ("Snippets", Page::Snippets),
+        ("Port forwarding", Page::Forwarding),
+        ("Logs", Page::Logs),
+        ("Settings", Page::Settings),
+    ];
+    let mut tops = Vec::new();
+    for (label, page) in pages {
+        let entry = h.get_by_role_and_label(egui::accesskit::Role::Button, label);
+        tops.push(entry.rect().top());
+        entry.click();
+        h.run_steps(2);
+        assert_eq!(h.state().ui.page, page, "{label}");
+    }
+    assert!(tops.windows(2).all(|w| w[0] < w[1]), "in this order: {tops:?}");
+}

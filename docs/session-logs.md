@@ -36,8 +36,11 @@ While a pane records, a small **Rec** mark sits in its lower right corner.
   At most 500 per log.
 - Click one to jump there; the bin removes it. Marks set elsewhere meanwhile (in the terminal,
   on another device) stay.
-- The viewer keeps 100,000 lines. A longer log shows a notice there: its beginning is missing
-  in the viewer and marks are off. The export always has all of it.
+- The viewer keeps as many lines as its terminal holds at its width (about 25,000 at 160
+  columns, at most 100,000). A longer log shows a notice there: its beginning is missing in the
+  viewer and marks are off. The export always has all of it.
+- The viewer's search field finds text in the log; *Next* and *Previous* go on from the last
+  match. The log is read and laid out without holding up the window.
 
 ## The logs page
 
@@ -50,8 +53,8 @@ device only* or the sync server). Filter by host, or by *Local and serial*.
 - **Open** a log to play it back in a read-only terminal, with search, bookmarks and comments.
 - **Export** as *text* (`.txt`, without escape sequences) or *raw* (`.log`, the bytes as
   recorded; `cat` on a terminal plays them back). SSHCraft asks where to save.
-- **Delete** selected logs, or all that are shown (while searching: the logs with matches). A
-  log still being recorded cannot be deleted. A deleted host leaves its logs; they show
+- **Delete** selected logs, or all that are shown (while searching: the logs with matches),
+  after a question that says how many go. A log still being recorded cannot be deleted. A deleted host leaves its logs; they show
   *Deleted host*.
 
 ## Keeping

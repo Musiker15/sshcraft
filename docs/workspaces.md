@@ -31,6 +31,11 @@ shows the antenna. It is off for every new tab and for every opened template.
 Answers the terminal gives to the server on its own (cursor position, device attributes,
 focus reports) are never broadcast; they only go to their own session.
 
+Typing goes only to panes in the same state as the one you type in: while it asks for a
+password (or a yes/no), only to the panes that ask too; at a prompt, only to the panes at a
+prompt. So a command never lands in another server's password question, and a password never
+at another server's prompt, where it would show and run.
+
 ## Status dots
 
 Every pane has a dot in its title bar, the tab shows the most urgent one of its panes:
@@ -54,8 +59,10 @@ connecting. The working directory is taken from the shell if it reports it (OSC 
 - Open one from the new-tab page (Ctrl+Shift+T) or the command palette ("Workspace: name").
   Delete one with the bin next to it on the new-tab page.
 - Over SSH the directory is changed with `cd -- '<dir>'` and the command follows with `&&`,
-  typed once after the first connect. That needs a POSIX shell on the server. A local shell
-  starts in the directory directly, a serial line gets only the command.
+  typed once after the first connect. That needs a POSIX shell (or fish) on the server. A
+  directory with a backslash types nothing, since fish would read it inside the quotes. A local
+  shell starts in the directory directly, a serial line gets only the command.
+- A pane closed while it still connects takes its connection with it: nothing is typed.
 - A pane whose host was deleted in the meantime is left out, and a notice says how many.
 - Limits: 100 templates, 16 panes, 100 characters for the name, 1000 for directory and command.
   Directory and command are single lines.

@@ -4,17 +4,25 @@
 
 pub mod app;
 pub mod commands;
+pub mod completion;
+pub mod confirm;
+pub mod control;
 pub mod data;
 pub mod forms;
+pub mod history;
 pub mod i18n;
 pub mod keymap;
+pub mod link;
+pub mod log_viewer;
 pub mod pages;
 pub mod palette;
+pub mod panes;
 pub mod prompts;
 pub mod runner;
 pub mod session_tab;
 pub mod shell;
 pub mod state;
+pub mod status;
 pub mod terminal;
 #[cfg(feature = "testing")]
 pub mod testing;

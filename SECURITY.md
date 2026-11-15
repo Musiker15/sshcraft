@@ -16,6 +16,11 @@ Useful to include:
   compromised sync server, MCP or control-channel access, a local account);
 - steps or a sample file that reproduce it.
 
+The agent link and the control channel listen on loopback only and sign in by challenge
+([docs/control-protocol.md](docs/control-protocol.md)). The control channel (`--control`) is a
+developer tool: whoever has its token can click and type like the user, so a report about it is
+in scope only where it reaches more than that.
+
 We'll acknowledge the report, keep you updated while we work on a fix, and credit you in the
 advisory unless you'd rather not be named.
 

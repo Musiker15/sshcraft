@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 18] = [
+pub const SHORTCUT_ACTIONS: [&str; 21] = [
     "palette",
     "newTab",
     "closeTab",
@@ -48,10 +48,15 @@ pub const SHORTCUT_ACTIONS: [&str; 18] = [
     "settingsPage",
     "copy",
     "paste",
+    "snippetsPage",
+    "forwardingPage",
+    "logsPage",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
 const MAX_COMBOS: usize = 4;
+/// Scrollback lines a terminal keeps, as the setting allows them.
+pub const SCROLLBACK: std::ops::RangeInclusive<usize> = 1000..=100_000;
 /// Most hosts that may always write the clipboard (OSC 52) without asking.
 pub const MAX_CLIPBOARD_HOSTS: usize = 1000;
 const MAX_COMBO_LEN: usize = 40;
@@ -143,6 +148,8 @@ pub struct Appearance {
     pub font_family: String,
     pub font_size: u16,
     pub host_view: HostView,
+    /// Neighbouring characters may join into one glyph where the font has ligatures (`->`).
+    pub ligatures: bool,
 }
 
 impl Default for Appearance {
@@ -153,6 +160,7 @@ impl Default for Appearance {
             font_family: "Cascadia Mono, Consolas, monospace".into(),
             font_size: 14,
             host_view: HostView::Grid,
+            ligatures: true,
         }
     }
 }
@@ -167,6 +175,8 @@ pub struct Terminal {
     /// "Always for this host"). Empty by default: every host asks first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub clipboard_hosts: Vec<sshcraft_model::model::HostId>,
+    /// Lines a terminal keeps above the screen, within [`SCROLLBACK`].
+    pub scrollback: usize,
     /// Commands typed in terminals are kept (sealed) for the sidebar and completion.
     pub history: bool,
     /// Suggestions while typing in a terminal.
@@ -182,6 +192,7 @@ impl Default for Terminal {
             terminal_type: TERMINAL_TYPES[0].into(),
             clipboard_osc52: Osc52::Write,
             clipboard_hosts: Vec::new(),
+            scrollback: 10_000,
             history: true,
             autocomplete: true,
             local_shell: None,
@@ -213,6 +224,16 @@ pub struct Serial {
     pub last: Option<SerialSettings>,
 }
 
+/// Agents and other programs reaching the running app.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Integrations {
+    /// AI agents may connect (through `sshcraft-cli` and MCP). Off until the user turns it on.
+    pub allow_agent_control: bool,
+    /// The loopback port agents connect on; 0 takes any free port.
+    pub agent_port: u16,
+}
+
 /// Everything in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -223,6 +244,7 @@ pub struct EngineSettings {
     pub shortcuts: Shortcuts,
     pub logs: Logs,
     pub serial: Serial,
+    pub integrations: Integrations,
 }
 
 impl Settings for EngineSettings {
@@ -247,6 +269,7 @@ impl EngineSettings {
         let mut seen = std::collections::HashSet::new();
         self.terminal.clipboard_hosts.retain(|h| seen.insert(*h));
         self.terminal.clipboard_hosts.truncate(MAX_CLIPBOARD_HOSTS);
+        self.terminal.scrollback = self.terminal.scrollback.clamp(*SCROLLBACK.start(), *SCROLLBACK.end());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))
@@ -275,6 +298,7 @@ pub fn read_tauri_settings(store: &Store) -> EngineSettings {
             font_family: field(&map, "font_family").unwrap_or(d.appearance.font_family),
             font_size: field(&map, "font_size").unwrap_or(d.appearance.font_size),
             host_view: field(&map, "host_view").unwrap_or(d.appearance.host_view),
+            ligatures: d.appearance.ligatures,
         };
         out.terminal.terminal_type = field(&map, "terminal_type").unwrap_or(d.terminal.terminal_type);
         out.terminal.clipboard_osc52 = field(&map, "clipboard_osc52").unwrap_or(d.terminal.clipboard_osc52);

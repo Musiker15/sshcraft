@@ -105,7 +105,14 @@ pub struct ExportState {
 #[derive(Debug, Clone)]
 pub enum DialogFor {
     ImportSource,
-    Export { json: bool, group: Option<GroupId> },
+    Export {
+        json: bool,
+        group: Option<GroupId>,
+    },
+    /// A session log to export: `.log` writes the raw output, anything else plain text.
+    LogExport {
+        id: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -150,6 +157,18 @@ pub fn take_dialog_answers(app: &mut SshcraftApp) {
                     import.path = Some(path);
                     import.step = ImportStep::Choose;
                 }
+            }
+            DialogFor::LogExport { id } => {
+                let raw = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("log"));
+                let params = json!({ "id": id, "format": if raw { "raw" } else { "text" }, "path": path.to_string_lossy() });
+                app.runner.run(
+                    "log.export",
+                    params,
+                    Box::new(|app, result| match result {
+                        Ok(_) => app.toasts.info(tr("Exported.")),
+                        Err(e) => app.toasts.error(&e.to_string()),
+                    }),
+                );
             }
             DialogFor::Export { json, group } => {
                 let format = if json { "json" } else { "csv" };

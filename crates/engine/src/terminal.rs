@@ -16,19 +16,33 @@ pub enum TermEvent {
     Status(SessionStatus),
 }
 
+/// Wakes whoever reads the terminal streams (the window's repaint); called from any thread.
+pub type Waker = Arc<dyn Fn() + Send + Sync>;
+
 /// Puts a session's output and state into its stream.
 pub(crate) struct StreamSink {
     pub(crate) sender: mpsc::UnboundedSender<TermEvent>,
+    pub(crate) waker: Option<Waker>,
+}
+
+impl StreamSink {
+    fn wake(&self) {
+        if let Some(waker) = &self.waker {
+            waker();
+        }
+    }
 }
 
 impl SessionSink for StreamSink {
     fn data(&self, bytes: Vec<u8>) {
         // The receiver is gone once the session is closed: nothing to deliver to.
         let _ = self.sender.send(TermEvent::Data(bytes));
+        self.wake();
     }
 
     fn status(&self, status: SessionStatus) {
         let _ = self.sender.send(TermEvent::Status(status));
+        self.wake();
     }
 }
 

@@ -111,3 +111,26 @@ fn long_links_are_dropped() {
     let ok = s.cells[2].link.and_then(|i| s.links.get(i as usize));
     assert_eq!(ok.map(String::as_str), Some("https://example.com/"));
 }
+
+/// OSC 7 tells the terminal its working directory; only one plain line of at most 1000
+/// characters counts.
+#[test]
+fn osc7_sets_the_working_directory() {
+    use sshcraft_term::Notice;
+    let cwd = |bytes: &[u8]| {
+        let mut t = crate::term(40, 5);
+        t.feed(bytes);
+        t.take_notices().into_iter().find_map(|n| match n {
+            Notice::WorkingDirectory(dir) => Some(dir),
+            _ => None,
+        })
+    };
+    assert_eq!(cwd(b"\x1b]7;file://host/home/me/src\x07").as_deref(), Some("/home/me/src"));
+    assert_eq!(cwd(b"\x1b]7;file://host/a%20b\x1b\\").as_deref(), Some("/a b"), "percent-decoded, ended by ST");
+    assert_eq!(cwd(b"\x1b]7;file:///C:/Users/me\x07").as_deref(), Some("/C:/Users/me"));
+    let long = format!("\x1b]7;file://h/{}\x07", "a".repeat(1001));
+    assert_eq!(cwd(long.as_bytes()), None, "over 1000 characters");
+    assert_eq!(cwd(b"\x1b]7;file://h/a%0Ab\x07"), None, "a line break");
+    assert_eq!(cwd(b"\x1b]7;http://h/x\x07"), None, "not a file URL");
+    assert_eq!(cwd(b"\x1b]7;file://h/x"), None, "not ended yet");
+}

@@ -76,6 +76,7 @@ async fn saved_settings_come_back() {
             font_family: "JetBrains Mono".into(),
             font_size: 15,
             host_view: HostView::List,
+            ligatures: false,
         };
         s.terminal.terminal_type = "vt100".into();
         s.terminal.clipboard_osc52 = Osc52::Off;
@@ -148,7 +149,7 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 18);
+    assert_eq!(SHORTCUT_ACTIONS.len(), 21);
     for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
@@ -223,7 +224,8 @@ async fn takeover_copies_every_field() {
             terminal_theme: "nord".into(),
             font_family: "Fira Code".into(),
             font_size: 17,
-            host_view: HostView::List
+            host_view: HostView::List,
+            ligatures: true,
         }
     );
     assert_eq!(s.terminal.terminal_type, "vt220");
@@ -338,4 +340,20 @@ fn clipboard_hosts_round_trip() {
     let back: EngineSettings = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
     assert_eq!(back, s);
     assert!(EngineSettings::default().terminal.clipboard_hosts.is_empty(), "nobody is allowed by default");
+}
+
+#[test]
+fn scrollback_is_clamped() {
+    assert_eq!(EngineSettings::default().terminal.scrollback, 10_000);
+    assert_eq!(with(|s| s.terminal.scrollback = 0).terminal.scrollback, 1000);
+    assert_eq!(with(|s| s.terminal.scrollback = 10_000_000).terminal.scrollback, 100_000);
+    assert_eq!(with(|s| s.terminal.scrollback = 50_000).terminal.scrollback, 50_000);
+    assert!(EngineSettings::default().appearance.ligatures, "ligatures on by default");
+}
+
+#[test]
+fn integrations_default_off() {
+    let fresh = EngineSettings::default();
+    assert!(!fresh.integrations.allow_agent_control, "agents are off until the user turns them on");
+    assert_eq!(fresh.integrations.agent_port, 0, "any free port");
 }

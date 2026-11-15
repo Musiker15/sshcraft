@@ -52,17 +52,27 @@ impl Forms {
 /// Which dialogs are open (by kind, not by content).
 pub fn shape(ui: &UiState) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Tuples hash up to 12 parts: the dialogs in groups.
     (
         ui.host_form.is_some(),
         ui.group_form.is_some(),
         ui.key_dialog.as_ref().map(std::mem::discriminant),
         ui.identity_form.is_some(),
         ui.passcli.is_some(),
+    )
+        .hash(&mut hasher);
+    (
         ui.import.is_some(),
         ui.export.is_some(),
         ui.confirm.is_some(),
         ui.key_confirm.is_some(),
+        ui.template_form.is_some(),
+        ui.forward_form.is_some(),
+        ui.snippet_form.is_some(),
+        ui.snippet_run.is_some(),
+        ui.share.is_some(),
     )
         .hash(&mut hasher);
+    (ui.sync.dialogs(), ui.shares.removing_open(), ui.ask.is_some(), ui.logs.confirm_delete.is_some()).hash(&mut hasher);
     hasher.finish()
 }

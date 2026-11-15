@@ -91,6 +91,8 @@ pub enum Notice {
     Bell,
     /// Text a program wants in the clipboard.
     ClipboardWrite(String),
+    /// The shell's working directory (OSC 7), a plain absolute path.
+    WorkingDirectory(String),
 }
 
 /// The size in bytes of one grid cell of the emulator, for memory budgets.
@@ -212,6 +214,7 @@ impl Terminal {
 
     /// Answers and notices since the last call.
     pub fn take_notices(&mut self) -> Vec<Notice> {
+        let cwd = self.prefilter.cwd.take().map(Notice::WorkingDirectory);
         self.listener
             .take()
             .into_iter()
@@ -225,6 +228,7 @@ impl Terminal {
                 }
                 _ => None,
             })
+            .chain(cwd)
             .collect()
     }
 }

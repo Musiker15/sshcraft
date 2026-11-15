@@ -241,6 +241,285 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "pass-cli did not answer." => "pass-cli hat nicht geantwortet.",
         "Proton Pass holds no SSH key." => "Proton Pass enthält keinen SSH-Schlüssel.",
         "Key imported." => "Schlüssel importiert.",
+        // R5
+        "Asked by tab {number}: {title}" => "Frage von Tab {number}: {title}",
+        "Show tab" => "Tab zeigen",
+        "Ligatures" => "Ligaturen",
+        "Join characters where the font has ligatures (->, !=)" => "Zeichen verbinden, wo die Schrift Ligaturen hat (->, !=)",
+        "Scrollback" => "Zeilenspeicher",
+        "lines, for new tabs" => "Zeilen, für neue Tabs",
+        "Snippets" => "Snippets",
+        "Port forwarding" => "Portweiterleitung",
+        "Logs" => "Protokolle",
+        // Panes
+        "New pane" => "Neuer Bereich",
+        "Pane title" => "Bereichstitel",
+        "Close pane" => "Bereich schließen",
+        "Move to its own tab" => "In eigenen Tab verschieben",
+        "Maximize" => "Groß zeigen",
+        "Resize columns" => "Spaltenbreite ändern",
+        "Resize rows" => "Zeilenhöhe ändern",
+        "Tab" => "Tab",
+        "A tab holds at most 16 panes." => "Ein Tab fasst höchstens 16 Bereiche.",
+        "Split: add a pane" => "Teilen: Bereich hinzufügen",
+        "Close the focused pane" => "Aktiven Bereich schließen",
+        "Next pane" => "Nächster Bereich",
+        "Previous pane" => "Vorheriger Bereich",
+        "Switch between grid and one large pane" => "Zwischen Raster und einem großen Bereich wechseln",
+        "Broadcast on" => "Rundsenden an",
+        "Broadcast on or off" => "Rundsenden an oder aus",
+        // Workspaces
+        "Save as workspace" => "Als Workspace speichern",
+        "Workspace saved." => "Workspace gespeichert.",
+        "Title" => "Titel",
+        "Directory" => "Verzeichnis",
+        "Command" => "Befehl",
+        "Over SSH the directory and the command are typed once after the first connect (a POSIX shell)." => {
+            "Über SSH werden Verzeichnis und Befehl einmal nach dem ersten Verbinden getippt (eine POSIX-Shell)."
+        }
+        "{count} pane left out: its host was deleted." => "{count} Bereich weggelassen: sein Host wurde gelöscht.",
+        "Workspaces" => "Workspaces",
+        "Delete workspace" => "Workspace löschen",
+        "Workspace: {name}" => "Workspace: {name}",
+        // Port forwarding
+        "Stopped" => "Gestoppt",
+        "Starting…" => "Startet…",
+        "Running on port {port}, {count} connections" => "Läuft auf Port {port}, {count} Verbindungen",
+        ", {count} refused" => ", {count} abgelehnt",
+        "Reconnecting (attempt {attempt}) in {seconds} s" => "Verbindet neu (Versuch {attempt}) in {seconds} s",
+        "Failed: {detail}" => "Fehlgeschlagen: {detail}",
+        "New rule" => "Neue Regel",
+        "Edit rule" => "Regel bearbeiten",
+        "No forwarding rules yet. A rule belongs to a host and starts here." => {
+            "Noch keine Weiterleitungsregeln. Eine Regel gehört zu einem Host und startet hier."
+        }
+        "Reachable from other machines" => "Von anderen Rechnern erreichbar",
+        "Start" => "Starten",
+        "Stop" => "Stoppen",
+        "Stop the rule to change it." => "Stoppe die Regel, um sie zu ändern.",
+        "Without a rule" => "Ohne Regel",
+        "Choose a host." => "Wähle einen Host.",
+        "Choose a host" => "Host wählen",
+        "A host has at most 50 rules." => "Ein Host hat höchstens 50 Regeln.",
+        "The address has no spaces and at most 253 characters." => "Die Adresse hat keine Leerzeichen und höchstens 253 Zeichen.",
+        "Ports are 1 to 65535, and the target needs an address." => "Ports sind 1 bis 65535, und das Ziel braucht eine Adresse.",
+        "A name has at most 100 characters." => "Ein Name hat höchstens 100 Zeichen.",
+        "Kind" => "Art",
+        "Local (-L)" => "Lokal (-L)",
+        "Remote (-R)" => "Entfernt (-R)",
+        "Dynamic, SOCKS (-D)" => "Dynamisch, SOCKS (-D)",
+        "Address on the server" => "Adresse auf dem Server",
+        "Address here" => "Adresse hier",
+        "Target here" => "Ziel hier",
+        "Target from the server" => "Ziel vom Server aus",
+        "Other machines can reach this port through {address}." => "Andere Rechner erreichen diesen Port über {address}.",
+        "The SOCKS proxy asks no password: anyone who reaches the port can use it." => {
+            "Der SOCKS-Proxy fragt kein Passwort: wer den Port erreicht, kann ihn nutzen."
+        }
+        // Snippets
+        "A name is needed; name and package have at most 100 characters." => "Ein Name ist nötig; Name und Paket haben höchstens 100 Zeichen.",
+        "The content has 1 to 10 000 characters." => "Der Inhalt hat 1 bis 10 000 Zeichen.",
+        "The content has no control characters but line breaks and tabs." => "Der Inhalt hat keine Steuerzeichen außer Zeilenumbrüchen und Tabs.",
+        "Snippet: {name}" => "Snippet: {name}",
+        "New snippet" => "Neues Snippet",
+        "Edit snippet" => "Snippet bearbeiten",
+        "No snippets yet. They stay on this device and need the vault." => {
+            "Noch keine Snippets. Sie bleiben auf diesem Gerät und brauchen den Tresor."
+        }
+        "Without package" => "Ohne Paket",
+        "Run" => "Ausführen",
+        "Package" => "Paket",
+        "Content" => "Inhalt",
+        "Default hosts" => "Standard-Hosts",
+        "Run {name}" => "{name} ausführen",
+        "{count} default host was deleted and is left out." => "{count} Standard-Host wurde gelöscht und fällt weg.",
+        "Open panes" => "Offene Bereiche",
+        "New connections" => "Neue Verbindungen",
+        "Paste only" => "Nur einfügen",
+        "Run on {count}" => "Auf {count} ausführen",
+        "Run snippet" => "Snippet ausführen",
+        "Clear" => "Leeren",
+        "Snippets and history beside the terminal" => "Snippets und Verlauf neben dem Terminal",
+        // Session logs
+        "recording" => "nimmt auf",
+        "Deleted host" => "Gelöschter Host",
+        "A log still recording is not deleted." => "Ein Protokoll, das noch aufnimmt, wird nicht gelöscht.",
+        "All logs" => "Alle Protokolle",
+        "Local and serial" => "Lokal und seriell",
+        "Search in all logs" => "In allen Protokollen suchen",
+        "Delete selected" => "Auswahl löschen",
+        "Delete all shown" => "Alle gezeigten löschen",
+        "{count} hits" => "{count} Treffer",
+        "No session logs. Recording is off unless a host or the settings turn it on." => {
+            "Keine Sitzungsprotokolle. Aufgezeichnet wird nur, wenn ein Host oder die Einstellungen es einschalten."
+        }
+        "This device" => "Dieses Gerät",
+        "Sync server" => "Sync-Server",
+        "Export the log" => "Protokoll exportieren",
+        "Text" => "Text",
+        "Raw output" => "Rohe Ausgabe",
+        "Session log" => "Sitzungsprotokoll",
+        "Bookmark" => "Lesezeichen",
+        "Comment" => "Kommentar",
+        "This log is longer than the viewer keeps: its beginning is not shown, and marks are off." => {
+            "Dieses Protokoll ist länger, als die Ansicht behält: sein Anfang wird nicht gezeigt, und Marken sind aus."
+        }
+        "Add comment" => "Kommentar hinzufügen",
+        "Marks" => "Marken",
+        "Remove mark" => "Marke entfernen",
+        "Rec" => "Rec",
+        "Bookmark added." => "Lesezeichen gesetzt.",
+        "Bookmark in the session log" => "Lesezeichen im Sitzungsprotokoll",
+        "Session logs" => "Sitzungsprotokolle",
+        "Record sessions unless a host or group says otherwise" => "Sitzungen aufzeichnen, wenn Host oder Gruppe nichts anderes sagen",
+        "Keep logs until deleted" => "Protokolle behalten, bis sie gelöscht werden",
+        "Keep logs {days} days" => "Protokolle {days} Tage behalten",
+        // Sync
+        "Sync off" => "Sync aus",
+        "Up to date" => "Aktuell",
+        "Syncing…" => "Synchronisiert…",
+        "Offline, retry in {seconds} s" => "Offline, neuer Versuch in {seconds} s",
+        "This device was revoked" => "Dieses Gerät wurde widerrufen",
+        "Blocked by the server's operator" => "Vom Betreiber des Servers gesperrt",
+        "Error: {detail}" => "Fehler: {detail}",
+        "No sync server yet. Everything stays on this device." => "Noch kein Sync-Server. Alles bleibt auf diesem Gerät.",
+        "Sync" => "Sync",
+        "Keys and passwords" => "Schlüssel und Passwörter",
+        "Devices" => "Geräte",
+        "Remove server" => "Server entfernen",
+        "Create account" => "Konto anlegen",
+        "Join an account" => "Einem Konto beitreten",
+        "Connections SSHCraft makes by itself" => "Verbindungen, die SSHCraft von selbst aufbaut",
+        "None. SSHCraft connects only where you tell it to." => "Keine. SSHCraft verbindet sich nur dorthin, wohin du es sagst.",
+        "Sync server {origin}" => "Sync-Server {origin}",
+        "Server name" => "Servername",
+        "Server address" => "Serveradresse",
+        "API key" => "API-Schlüssel",
+        "Your name" => "Dein Name",
+        "Email" => "E-Mail",
+        "This device's name" => "Name dieses Geräts",
+        "Join" => "Beitreten",
+        "Account key" => "Kontoschlüssel",
+        "Your account key" => "Dein Kontoschlüssel",
+        "Keep it in your password manager now. SSHCraft does not store it and shows it only this once. Every new device needs it." => {
+            "Lege ihn jetzt in deinem Passwortmanager ab. SSHCraft speichert ihn nicht und zeigt ihn nur dieses eine Mal. Jedes neue Gerät braucht ihn."
+        }
+        "Account key as QR code" => "Kontoschlüssel als QR-Code",
+        "I have kept the key" => "Ich habe den Schlüssel abgelegt",
+        "Account key (recovery)" => "Kontoschlüssel (Wiederherstellung)",
+        "{name} (this device)" => "{name} (dieses Gerät)",
+        "Revoked" => "Widerrufen",
+        "Active" => "Aktiv",
+        "Revoke" => "Widerrufen",
+        "Revoke {name}? The account's keys change; SSH keys and passwords that device synced may have been copied: change them on the servers." => {
+            "{name} widerrufen? Die Schlüssel des Kontos ändern sich; SSH-Schlüssel und Passwörter, die das Gerät synchronisiert hat, können kopiert worden sein: ändere sie auf den Servern."
+        }
+        "Revoke the device" => "Gerät widerrufen",
+        "Move {name}" => "{name} verschieben",
+        "This device only" => "Nur dieses Gerät",
+        "Move" => "Verschieben",
+        "Move to…" => "Verschieben nach…",
+        // Sharing
+        "Move it to a sync server first: shares live there." => "Verschiebe es zuerst auf einen Sync-Server: dort liegen Freigaben.",
+        "Shared." => "Geteilt.",
+        "Share {name}" => "{name} teilen",
+        "Only with accounts on the same server." => "Nur mit Konten auf demselben Server.",
+        "Find" => "Suchen",
+        "{name} ({email})" => "{name} ({email})",
+        "The key of this account changed. Before: {old}. Now: {new}. Ask {name} whether they set up their account again." => {
+            "Der Schlüssel dieses Kontos hat sich geändert. Vorher: {old}. Jetzt: {new}. Frag {name}, ob das Konto neu eingerichtet wurde."
+        }
+        "I compared the new safety number with {name}" => "Ich habe die neue Sicherheitsnummer mit {name} verglichen",
+        "Their safety number: {number}" => "Ihre Sicherheitsnummer: {number}",
+        "Compare it with them by phone or in person; it must be the same on their device." => {
+            "Vergleiche sie telefonisch oder persönlich; auf dem anderen Gerät muss sie gleich sein."
+        }
+        "I compared the safety number with {name}" => "Ich habe die Sicherheitsnummer mit {name} verglichen",
+        "Read" => "Lesen",
+        "Read and change" => "Lesen und ändern",
+        "Share the keys too (never keys in the SSH agent)" => "Auch die Schlüssel teilen (nie Schlüssel im SSH-Agent)",
+        "Share" => "Teilen",
+        "Shares" => "Freigaben",
+        "Nothing shared." => "Nichts geteilt.",
+        "shared by you" => "von dir geteilt",
+        "shared with you" => "mit dir geteilt",
+        "End share" => "Freigabe beenden",
+        "Unknown account" => "Unbekanntes Konto",
+        "read and change" => "lesen und ändern",
+        "read" => "lesen",
+        "Remove recipient" => "Empfänger entfernen",
+        "They lose access, and the share gets a new key." => "Der Zugriff endet, und die Freigabe bekommt einen neuen Schlüssel.",
+        "Keys went along with this share: they may have been copied. Change them on the servers." => {
+            "Mit dieser Freigabe gingen Schlüssel mit: sie können kopiert worden sein. Ändere sie auf den Servern."
+        }
+        "Share…" => "Teilen…",
+        // AI agents
+        "View hosts, groups and key names" => "Hosts, Gruppen und Schlüsselnamen ansehen",
+        "Connect and run commands" => "Verbinden und Befehle ausführen",
+        "Create and change hosts and groups" => "Hosts und Gruppen anlegen und ändern",
+        "Import and generate keys" => "Schlüssel importieren und erzeugen",
+        "Sync servers and devices" => "Sync-Server und Geräte",
+        "allowed" => "erlaubt",
+        "asked and allowed" => "gefragt und erlaubt",
+        "asked and denied" => "gefragt und abgelehnt",
+        "blocked" => "gesperrt",
+        "hidden" => "verborgen",
+        "cancelled" => "abgebrochen",
+        "failed" => "fehlgeschlagen",
+        "What AI agents may do through MCP or the command line. \"Ask\" asks in this window; with no window, the answer is no." => {
+            "Was KI-Agenten über MCP oder die Kommandozeile dürfen. \"Fragen\" fragt in diesem Fenster; ohne Fenster ist die Antwort nein."
+        }
+        "Allow" => "Erlauben",
+        "Ask" => "Fragen",
+        "Block" => "Sperren",
+        "Hidden from agents" => "Vor Agenten verborgen",
+        "Nothing. Hide a host or group from its context menu." => "Nichts. Verbirg einen Host oder eine Gruppe über sein Kontextmenü.",
+        "Show again" => "Wieder zeigen",
+        "Log" => "Protokoll",
+        "Clear the log" => "Protokoll leeren",
+        "AI agents" => "KI-Agenten",
+        "This command has more than one line: read every line." => "Dieser Befehl hat mehr als eine Zeile: lies jede Zeile.",
+        "This command is long: read all of it." => "Dieser Befehl ist lang: lies ihn ganz.",
+        "This command has hidden or reordering characters, shown as ⟨U+…⟩." => {
+            "Dieser Befehl hat verborgene oder umordnende Zeichen, gezeigt als ⟨U+…⟩."
+        }
+        "An AI agent asks" => "Ein KI-Agent fragt",
+        "Agent" => "Agent",
+        "Action" => "Aktion",
+        "Target" => "Ziel",
+        "Deny" => "Ablehnen",
+        "Hide from agents" => "Vor Agenten verbergen",
+        "Delete {count} session logs?" => "{count} Sitzungsprotokolle löschen?",
+        "They are deleted for good, on the sync server and your other devices too." => {
+            "Sie werden endgültig gelöscht, auch auf dem Sync-Server und deinen anderen Geräten."
+        }
+        "Try again" => "Noch einmal",
+        "This device leaves the sync server and forgets its sign-in. Joining again needs the account key, which SSHCraft never keeps." => {
+            "Dieses Gerät verlässt den Sync-Server und vergisst seine Anmeldung. Für einen neuen Beitritt braucht es den Kontoschlüssel, den SSHCraft nie aufbewahrt."
+        }
+        "Remove and sign out" => "Entfernen und abmelden",
+        "Every recipient loses access to these hosts at once." => "Alle Empfänger verlieren sofort den Zugriff auf diese Hosts.",
+        "End sharing" => "Teilen beenden",
+        "Delete {name}?" => "{name} löschen?",
+        "The snippet is deleted for good, on your other devices too." => "Das Snippet wird endgültig gelöscht, auch auf deinen anderen Geräten.",
+        "Delete snippet" => "Snippet löschen",
+        "Delete the rule {name}?" => "Die Regel {name} löschen?",
+        "A running rule stops; the rule is gone from its host." => "Eine laufende Regel stoppt; die Regel verschwindet von ihrem Host.",
+        "Delete rule" => "Regel löschen",
+        "The last change is still being saved: try again in a moment." => "Die letzte Änderung wird noch gespeichert: versuch es gleich noch einmal.",
+        "Search in this log" => "In diesem Protokoll suchen",
+        "Previous" => "Vorheriger",
+        "Next" => "Nächster",
+        "Not found in this log." => "In diesem Protokoll nicht gefunden.",
+        "Connection" => "Verbindung",
+        "The port is a number from 0 to 65535." => "Der Port ist eine Zahl von 0 bis 65535.",
+        "Copy" => "Kopieren",
+        "Allow agent control" => "Steuerung durch Agenten erlauben",
+        "Port (0: any free port)" => "Port (0: ein freier Port)",
+        "Agents can connect on 127.0.0.1:{port}." => "Agenten können sich über 127.0.0.1:{port} verbinden.",
+        "Agents cannot connect: {error}" => "Agenten können sich nicht verbinden: {error}",
+        "Turned off in the ArtCraft Launcher (Settings › AI agents)." => "Im ArtCraft Launcher ausgeschaltet (Einstellungen › KI-Agenten).",
+        "Agents cannot connect." => "Agenten können sich nicht verbinden.",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

@@ -11,26 +11,46 @@ pub enum Page {
     #[default]
     Hosts,
     Keys,
+    Snippets,
+    Forwarding,
+    Logs,
     Settings,
     /// The tab at this index of [`UiState::tabs`].
     Tab(usize),
 }
 
-/// What a tab shows.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One place in a tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TabKind {
-    /// The new-tab page: recent hosts, local shell, serial port.
-    New,
-    /// A terminal of an engine session.
+pub enum PaneSlot {
+    /// A page to pick a connection (hosts, local shell, serial port); `id` tells it apart.
+    New { id: u64 },
+    /// The terminal of an engine session.
     Session { session: sshcraft_engine::SessionId },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The panes of a tab: 1 to [`crate::panes::MAX_PANES`] in a near-square grid, or one large
+/// with the others listed beside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Panes {
+    pub panes: Vec<PaneSlot>,
+    pub focused: usize,
+    /// One pane large, the others listed.
+    pub focus_layout: bool,
+    /// The share of the width of each grid column and the height of each row; sums to 1.
+    pub col_sizes: Vec<f32>,
+    pub row_sizes: Vec<f32>,
+    /// Typing goes to every pane with a session.
+    pub broadcast: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TabState {
     pub title: String,
-    #[serde(flatten)]
-    pub kind: TabKind,
+    pub panes: Panes,
+    /// The title was given (a template's or a snippet's name) and does not follow the panes.
+    #[serde(default)]
+    pub named: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -38,6 +58,8 @@ pub struct TabState {
 pub struct UiState {
     pub page: Page,
     pub tabs: Vec<TabState>,
+    /// The id the next new-pane page gets.
+    pub next_pane: u64,
     pub hosts: crate::pages::hosts::HostsView,
     pub settings: crate::pages::settings::SettingsView,
     #[serde(skip)]
@@ -67,12 +89,34 @@ pub struct UiState {
     pub agent_keys: crate::pages::key_sources::AgentKeys,
     #[serde(skip)]
     pub passcli: Option<crate::pages::key_sources::PassCliView>,
-    /// Hosts a connection is being opened for (`None` for local shells and serial ports).
+    /// Connections on their way: for a pane, or (without one) to a host.
     #[serde(skip)]
-    pub connecting: Vec<Option<sshcraft_model::model::HostId>>,
+    pub connecting: Vec<(Option<PaneSlot>, Option<sshcraft_model::model::HostId>)>,
     /// The terminal shown in the last frame, to give the keyboard to the next one shown.
     #[serde(skip)]
     pub shown_terminal: Option<sshcraft_engine::SessionId>,
+    #[serde(skip)]
+    pub logs: crate::pages::logs::LogsView,
+    #[serde(skip)]
+    pub sync: crate::pages::sync::SyncView,
+    #[serde(skip)]
+    pub agents: crate::pages::agents::AgentsView,
+    #[serde(skip)]
+    pub share: Option<crate::pages::sharing::ShareForm>,
+    #[serde(skip)]
+    pub shares: crate::pages::sharing::SharesView,
+    #[serde(skip)]
+    pub snippet_form: Option<crate::pages::snippets::SnippetForm>,
+    #[serde(skip)]
+    pub snippet_run: Option<crate::pages::snippets::SnippetRun>,
+    #[serde(skip)]
+    pub sidebar: crate::pages::snippets::Sidebar,
+    #[serde(skip)]
+    pub ask: Option<crate::confirm::Confirm>,
+    #[serde(skip)]
+    pub forward_form: Option<crate::pages::forwarding::ForwardForm>,
+    #[serde(skip)]
+    pub template_form: Option<crate::pages::templates::TemplateForm>,
     #[serde(skip)]
     pub picker: Option<crate::session_tab::Picker>,
     #[serde(skip)]

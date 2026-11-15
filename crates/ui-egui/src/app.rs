@@ -8,7 +8,7 @@ use crate::data::{self, Data, Refresh};
 use crate::i18n::tr;
 use crate::keymap::Bindings;
 use crate::runner::Runner;
-use crate::state::{Page, TabKind, TabState, UiState};
+use crate::state::{Page, PaneSlot, Panes, TabState, UiState};
 use crate::toasts::Toasts;
 
 pub struct SshcraftApp {
@@ -30,9 +30,15 @@ pub struct SshcraftApp {
     urls: Vec<String>,
     /// Which dialogs are open and the command one waits for.
     pub forms: crate::forms::Forms,
+    /// The session log being played back.
+    pub log_viewer: Option<crate::log_viewer::LogViewer>,
     /// The shortcut settings the bindings were built from.
     bindings_from: Option<sshcraft_engine::settings::Shortcuts>,
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
+    /// Turns the agent link on and off as the consent says.
+    pub link: crate::link::LinkWatch,
+    /// The control channel (`--control`), when the app was started with it.
+    pub control: Option<crate::control::Control>,
     /// Kept alive for the app when it owns the runtime (tests); the app binary owns it itself.
     _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
 }
@@ -42,6 +48,9 @@ impl SshcraftApp {
         // Names from servers and imports can be in any script: the system's fonts fill in.
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
+        // Terminal output wakes the window; nothing polls for it.
+        let waker = ctx.clone();
+        session.set_terminal_waker(std::sync::Arc::new(move || waker.request_repaint()));
         let data = Data { dirty: Refresh::DATA | Refresh::SETTINGS, ..Data::default() };
         let wake = ctx.clone();
         Self {
@@ -58,7 +67,10 @@ impl SshcraftApp {
             term_font: None,
             urls: Vec::new(),
             forms: crate::forms::Forms::default(),
+            log_viewer: None,
             bindings_from: None,
+            link: crate::link::LinkWatch::default(),
+            control: None,
             events,
             _runtime: None,
         }
@@ -90,7 +102,20 @@ impl SshcraftApp {
                 Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
+                Ok(EngineEvent::AgentPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "agent")),
+                Ok(EngineEvent::AgentLogChanged) => self.ui.agents.log = None,
                 Ok(EngineEvent::PromptWithdrawn { prompt_id }) => self.prompts.withdraw(prompt_id),
+                Ok(EngineEvent::SyncStatus { server, status }) => {
+                    if let Ok(value) = serde_json::to_value(&status) {
+                        self.data.sync_status.insert(server.0.to_string(), value);
+                    }
+                }
+                Ok(EngineEvent::SyncWarning { detail, .. }) => self.toasts.error(&crate::widgets::visible(&detail)),
+                Ok(EngineEvent::ForwardStatus(status)) => {
+                    if let Ok(value) = serde_json::to_value(&status) {
+                        self.data.forwards.insert(status.rule_id, value);
+                    }
+                }
                 Ok(EngineEvent::Ui(sshcraft_engine::UiRequest::OpenUrl { url })) => self.urls.push(url),
                 Ok(_) => {}
                 // Events were lost: fetch everything again.
@@ -103,10 +128,112 @@ impl SshcraftApp {
         }
     }
 
+    /// A new-pane page with an id no other pane has.
+    pub fn new_pane(&mut self) -> PaneSlot {
+        self.ui.next_pane = self.ui.next_pane.wrapping_add(1);
+        PaneSlot::New { id: self.ui.next_pane }
+    }
+
     /// Opens the new-tab page as a tab and shows it.
     pub fn open_new_tab(&mut self) {
-        self.ui.tabs.push(TabState { title: tr("New tab").to_string(), kind: TabKind::New });
+        let slot = self.new_pane();
+        self.ui.tabs.push(TabState { title: tr("New tab").to_string(), panes: Panes::single(slot), named: false });
         self.ui.page = Page::Tab(self.ui.tabs.len() - 1);
+    }
+
+    /// Adds a new-pane page beside the focused pane of the shown tab.
+    pub fn split(&mut self) {
+        let Page::Tab(i) = self.ui.page else { return };
+        let slot = self.new_pane();
+        let Some(tab) = self.ui.tabs.get_mut(i) else { return };
+        if !tab.panes.add(slot) {
+            self.toasts.error(tr("A tab holds at most 16 panes."));
+        }
+    }
+
+    /// Closes the focused pane of the shown tab (and its session).
+    pub fn close_pane(&mut self) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(focused) = self.ui.tabs.get(i).map(|t| t.panes.focused)
+        {
+            self.close_pane_at(i, focused);
+        }
+    }
+
+    /// Closes pane `pane` of tab `tab` (and its session); the last pane closes the tab.
+    pub fn close_pane_at(&mut self, tab: usize, pane: usize) {
+        let Some(t) = self.ui.tabs.get_mut(tab) else { return };
+        if t.panes.panes.len() <= 1 {
+            self.close_tab_at(tab);
+            return;
+        }
+        if let Some(PaneSlot::Session { session }) = t.panes.remove(pane) {
+            self.terminals.remove(&session);
+            self.run_reported("session.close", serde_json::json!({ "id": session }));
+        }
+    }
+
+    /// Moves pane `pane` of tab `tab` into a tab of its own, without reconnecting.
+    pub fn move_pane_to_own_tab(&mut self, tab: usize, pane: usize) {
+        let Some(t) = self.ui.tabs.get_mut(tab) else { return };
+        if t.panes.panes.len() <= 1 {
+            return;
+        }
+        let Some(slot) = t.panes.remove(pane) else { return };
+        self.ui.tabs.push(TabState { title: String::new(), panes: Panes::single(slot), named: false });
+        self.ui.page = Page::Tab(self.ui.tabs.len() - 1);
+    }
+
+    /// Moves the panes of tab `from` into tab `to` (up to 16; the rest stays in `from`).
+    pub fn merge_tabs(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.ui.tabs.len() || to >= self.ui.tabs.len() {
+            return;
+        }
+        let mut moving = std::mem::take(&mut self.ui.tabs[from].panes.panes);
+        let room = crate::panes::MAX_PANES.saturating_sub(self.ui.tabs[to].panes.panes.len());
+        let rest = moving.split_off(room.min(moving.len()));
+        let target = &mut self.ui.tabs[to].panes;
+        target.panes.extend(moving);
+        target.reset_sizes();
+        if rest.is_empty() {
+            self.ui.tabs.remove(from);
+            let to = if from < to { to - 1 } else { to };
+            self.ui.page = Page::Tab(to);
+        } else {
+            let left = &mut self.ui.tabs[from].panes;
+            left.panes = rest;
+            left.focused = 0;
+            left.reset_sizes();
+            self.ui.page = Page::Tab(to);
+        }
+    }
+
+    /// Moves the focus `step` panes on in the shown tab, wrapping around.
+    pub fn focus_pane(&mut self, step: isize) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(t) = self.ui.tabs.get_mut(i)
+        {
+            let count = t.panes.panes.len().max(1) as isize;
+            t.panes.focused = (t.panes.focused as isize + step).rem_euclid(count) as usize;
+        }
+    }
+
+    /// Typing into one pane goes to every connected pane of the shown tab, or stops doing so.
+    pub fn toggle_broadcast(&mut self) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(t) = self.ui.tabs.get_mut(i)
+        {
+            t.panes.broadcast = !t.panes.broadcast;
+        }
+    }
+
+    /// One pane large or all in the grid, in the shown tab.
+    pub fn toggle_layout(&mut self) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(t) = self.ui.tabs.get_mut(i)
+        {
+            t.panes.focus_layout = !t.panes.focus_layout;
+        }
     }
 
     /// Closes the shown tab (and its session); the tab before it, or the hosts page, comes next.
@@ -123,7 +250,7 @@ impl SshcraftApp {
             return;
         }
         let tab = self.ui.tabs.remove(i);
-        if let TabKind::Session { session } = tab.kind {
+        for session in tab.panes.sessions() {
             self.terminals.remove(&session);
             self.run_reported("session.close", serde_json::json!({ "id": session }));
         }
@@ -156,14 +283,22 @@ impl SshcraftApp {
 
     /// Whether the shown page is a terminal (shortcuts then leave the shell its keys).
     pub fn in_terminal(&self) -> bool {
-        matches!(self.ui.page, Page::Tab(i) if matches!(self.ui.tabs.get(i).map(|t| &t.kind), Some(TabKind::Session { .. })))
+        matches!(self.ui.page, Page::Tab(i) if matches!(self.ui.tabs.get(i).and_then(|t| t.panes.focused_slot()), Some(PaneSlot::Session { .. })))
+    }
+
+    /// What runs also while the window is hidden (minimized or covered): eframe then calls only
+    /// `App::logic`, no frame.
+    pub fn logic(&mut self, ctx: &egui::Context) {
+        for (then, result) in self.runner.take_done() {
+            then(self, result);
+        }
+        crate::link::tick(self, ctx);
+        crate::control::process(self, ctx);
     }
 
     /// One frame: results that came back, the engine's events, then drawing.
     pub fn frame(&mut self, ui: &mut egui::Ui) {
-        for (then, result) in self.runner.take_done() {
-            then(self, result);
-        }
+        self.logic(&ui.ctx().clone());
         self.take_events();
         crate::pages::import_export::take_dialog_answers(self);
         data::refresh(self);
@@ -188,17 +323,43 @@ impl SshcraftApp {
             }
         }
         crate::session_tab::pump_all(self, &ctx);
+        crate::session_tab::refresh_titles(self);
+        crate::session_tab::mark_looked_at(self);
         crate::shell::show(self, ui);
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
         crate::session_tab::show_clipboard_question(self, &ctx);
+        crate::pages::templates::show_dialog(self, &ctx);
+        crate::pages::snippets::dialogs(self, &ctx);
+        crate::pages::sync::dialogs(self, &ctx);
+        crate::pages::sharing::dialog(self, &ctx);
+        crate::pages::sharing::remove_dialog(self, &ctx);
+        crate::confirm::show(self, &ctx);
         crate::prompts::show(self, &ctx);
+        crate::log_viewer::show(self, &ctx);
+        // The logs are fetched again on the next visit of their page.
+        if self.ui.page != Page::Logs {
+            self.ui.logs.fresh = false;
+        }
         // A shortcut recording ends when the user leaves the settings.
         if self.ui.page != Page::Settings {
             self.ui.settings.recording = None;
         }
-        if let Some(id) = crate::palette::show(self, &ctx) {
-            crate::commands::run(self, id);
+        if let Some((id, arg)) = crate::palette::show(self, &ctx) {
+            match id {
+                crate::palette::OPEN_WORKSPACE => {
+                    let template = self.data.templates.iter().find(|t| t.get("id").and_then(serde_json::Value::as_str) == arg.as_deref()).cloned();
+                    if let Some(template) = template {
+                        crate::pages::templates::open(self, &template);
+                    }
+                }
+                crate::palette::RUN_SNIPPET => {
+                    if let Some(snippet) = arg {
+                        crate::pages::snippets::open_run(self, &snippet);
+                    }
+                }
+                _ => crate::commands::run(self, id),
+            }
         }
         self.toasts.show(&ctx);
         self.forms.observe(crate::forms::shape(&self.ui));

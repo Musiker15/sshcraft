@@ -118,7 +118,7 @@ async fn server_never_sees_password_plaintext() {
     sync(&b).await;
     assert_eq!(b.store.lock().unwrap().list_password_ids().unwrap(), vec![p]);
     let bytes = server_bytes(&server);
-    assert!(!bytes.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()));
+    assert!(!leaks(&bytes, SECRET));
 }
 
 #[tokio::test]
@@ -241,4 +241,54 @@ async fn certificate_travels_with_key() {
     let store = b.store.lock().unwrap();
     let cert = sshcraft_store::vault::certificate(&store, id).unwrap().expect("certificate reached b");
     assert_eq!(cert.valid_principals(), ["deploy".to_owned()]);
+}
+
+/// Spec 10 (T3): what the server keeps is sealed end to end: no host's name, address, user
+/// or tag is in any byte of its database.
+#[tokio::test]
+async fn server_never_sees_host_content() {
+    let server = TestServer::start().await;
+    let (a, b) = pair(&server).await;
+    let mut host = host_with(ConnectionSettings { username: Some("plainuser7q".into()), ..Default::default() });
+    host.name = "plainname7q".into();
+    host.settings.address = Some("plainaddress7q.example.org".into());
+    host.tags = vec!["plaintag7q".into()];
+    save_host(&a, &host);
+    sync(&a).await;
+    let bytes = server_bytes(&server);
+    for text in ["plainname7q", "plainaddress7q", "plainuser7q", "plaintag7q"] {
+        assert!(!leaks(&bytes, text), "{text} is on the server in the clear");
+    }
+    sync(&b).await;
+    assert!(b.hosts().iter().any(|h| h.name == "plainname7q"), "the host reached the other device");
+}
+
+/// Whether `text` is in `bytes` as it is or base64-encoded (records carry their bytes as
+/// base64, so a plaintext body would show only that way), at any of the three alignments.
+fn leaks(bytes: &[u8], text: &str) -> bool {
+    let has = |needle: &[u8]| !needle.is_empty() && bytes.windows(needle.len()).any(|w| w == needle);
+    if has(text.as_bytes()) {
+        return true;
+    }
+    (0..3usize).any(|shift| {
+        let mut shifted = vec![b'x'; shift];
+        shifted.extend_from_slice(text.as_bytes());
+        let encoded = data_encoding::BASE64.encode(&shifted);
+        // The characters that depend only on `text`: past the shift, before the last group.
+        let start = [0, 2, 3][shift];
+        let end = encoded.len().saturating_sub(4);
+        encoded.get(start..end).is_some_and(|middle| has(middle.as_bytes()))
+    })
+}
+
+#[test]
+fn the_leak_scan_finds_base64_too() {
+    let text = "plainname7q";
+    for shift in 0..3 {
+        let mut shifted = vec![b'y'; shift];
+        shifted.extend_from_slice(text.as_bytes());
+        let stored = format!("{{\"ciphertext\":\"{}\"}}", data_encoding::BASE64.encode(&shifted));
+        assert!(leaks(stored.as_bytes(), text), "shift {shift}");
+    }
+    assert!(!leaks(b"nothing here", text));
 }

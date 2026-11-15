@@ -124,12 +124,12 @@ crash on hostile input is a security bug. **This outranks feature work.**
   | Layer | Crates |
   |---|---|
   | L0 | `proto`, `platform` |
-  | L1 | `model` |
+  | L1 | `model`, `link` |
   | L2 | `store`, `term` |
   | L3 | `import`, `ssh`, `local`, `sync`, `server-lib` |
   | L4 | `fido` |
   | L5 | `engine` (R2) |
-  | L6 | `ui-egui`, `mcp` (R4, R6) |
+  | L6 | `ui-egui`, `mcp` |
   | exempt | `apps/*`, `xtask` |
 
 - **Rust only.** No handwritten JavaScript or TypeScript, no Tauri, Electron or webview shell.
@@ -184,10 +184,15 @@ Each has a test where it can have one.
 - Without touching the real data: a local shell in the terminal with
   `cargo run -p sshcraft-ui-egui --example terminal_window`, and pictures without a window with
   `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]` (the
-  terminal) or `-- out.png --page hosts|keys|settings|newtab [--dark|--light] [--language en|de]`
+  terminal) or `-- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de]`
   (the whole window on sample data). Both run an engine on a temp folder.
 - Interface tests run the app in egui_kittest on a test engine (`sshcraft_ui_egui::testing`,
   feature `testing`).
+- Agents: `cargo run -p sshcraft-cli -- --help`; with the app's *Allow agent control* on,
+  `cargo run -p sshcraft-cli -- hosts`. `SSHCRAFT_LINK_DIR` moves the link's files (tests).
+- The control channel, for driving the window from a script: `cargo run -p sshcraft -- --control
+  7878 --control-token-file <path>`, then `sshcraft-cli ui --bridge 7878 --control-token-file
+  <path> inspect` ([docs/control-protocol.md](docs/control-protocol.md)).
 - `cargo xtask perf` runs the performance budgets of the terminal and the window in a release
   build.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.

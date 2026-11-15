@@ -6,7 +6,7 @@ use sshcraft_ui_egui::state::Page;
 use sshcraft_ui_egui::testing::app_harness;
 
 fn entry(id: &'static str, local: &str, english: &'static str, enabled: bool) -> Entry {
-    Entry { id, local: local.to_string(), english, shortcut: None, enabled }
+    Entry { id, arg: None, local: local.to_string(), english, shortcut: None, enabled }
 }
 
 #[test]

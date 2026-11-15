@@ -15,13 +15,18 @@ pub struct TerminalView<'a> {
     pub term: &'a mut Terminal,
     pub palette: &'a TermPalette,
     pub font: FontId,
+    /// Neighbouring characters may join where the font has ligatures (setting `appearance.ligatures`).
+    pub ligatures: bool,
 }
 
 /// What happened in one frame.
 pub struct TerminalResponse {
     pub response: Response,
-    /// Bytes for the session: typed, pasted, IME text, mouse and focus reports.
+    /// Bytes for the session that the user typed, pasted or composed.
     pub input: Vec<u8>,
+    /// Bytes the terminal sends on its own (mouse, wheel and focus reports): only ever to its
+    /// own session, never to the other panes of a broadcast.
+    pub reports: Vec<u8>,
     /// The terminal was resized to fit; the session should be told.
     pub resize: Option<TermSize>,
     /// The user Ctrl+clicked a link; opening it goes through the engine's checks.
@@ -65,6 +70,7 @@ struct Frame {
     /// The program asked for the mouse and Shift is not held to select instead.
     report_mouse: bool,
     focused: bool,
+    ligatures: bool,
 }
 
 impl Frame {
@@ -123,7 +129,7 @@ fn mouse(ui: &Ui, response: &Response, frame: &Frame, term: &mut Terminal, out: 
     let Some(pos) = response.interact_pointer_pos() else { return };
     let (col, row) = frame.cell_at(pos);
     if frame.report_mouse {
-        report_buttons(ui, frame, col, row, &mut out.input);
+        report_buttons(ui, frame, col, row, &mut out.reports);
         let (moved, held) = ui.input(|i| {
             let held = if i.pointer.button_down(egui::PointerButton::Secondary) {
                 MouseButton::Right
@@ -138,7 +144,7 @@ fn mouse(ui: &Ui, response: &Response, frame: &Frame, term: &mut Terminal, out: 
             && moved
             && let Some(bytes) = encode_mouse(held, MouseAction::Drag, col, row, term_mods(frame.modifiers), frame.modes)
         {
-            out.input.extend(bytes);
+            out.reports.extend(bytes);
         }
     } else if response.drag_started() || response.dragged() || response.drag_stopped() {
         if response.drag_started() {
@@ -236,7 +242,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
     let screen = term.screen();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette.bg);
-    paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused));
+    paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused, frame.ligatures));
     let cursor = Rect::from_min_size(
         pos2(rect.min.x + f32::from(screen.cursor.col) * metrics.width, rect.min.y + f32::from(screen.cursor.row) * metrics.height),
         vec2(2.0, metrics.height),
@@ -258,14 +264,15 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
 
 impl TerminalView<'_> {
     pub fn show(self, ui: &mut Ui) -> TerminalResponse {
-        let Self { term, palette, font } = self;
+        let Self { term, palette, font, ligatures } = self;
         // A server may print any character: one no font has is a box, never a panic.
         ui.ctx().set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         let metrics = CellMetrics::measure(ui.ctx(), &font);
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let id = response.id;
         let mut state: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let mut out = TerminalResponse { response: response.clone(), input: Vec::new(), resize: None, open_link: None, copy: None };
+        let mut out =
+            TerminalResponse { response: response.clone(), input: Vec::new(), reports: Vec::new(), resize: None, open_link: None, copy: None };
 
         // Fit the terminal to the space. A collapsed area (a hidden split, a tab being laid out)
         // keeps the size: shrinking to 2x1 would reflow the history away and tell the server.
@@ -282,13 +289,14 @@ impl TerminalView<'_> {
             response.request_focus();
         }
         let focused = ui.memory(|m| m.has_focus(id));
-        let frame = Frame { rect, metrics, size, modes, modifiers, report_mouse: modes.intersects(MOUSE_ANY) && !modifiers.shift, focused };
+        let frame =
+            Frame { rect, metrics, size, modes, modifiers, report_mouse: modes.intersects(MOUSE_ANY) && !modifiers.shift, focused, ligatures };
         if focused {
             let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true };
             ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
         }
         if focused != state.focused {
-            out.input.extend(encode_focus(focused, modes).unwrap_or_default());
+            out.reports.extend(encode_focus(focused, modes).unwrap_or_default());
             if focused {
                 state.ime_generation = state.ime_generation.wrapping_add(1);
             } else {
@@ -299,7 +307,7 @@ impl TerminalView<'_> {
 
         mouse(ui, &response, &frame, term, &mut out);
         if response.hovered() {
-            wheel(ui, &frame, &mut state, term, &mut out.input);
+            wheel(ui, &frame, &mut state, term, &mut out.reports);
         }
         if focused {
             keyboard(ui, &frame, &mut state, term, &mut out);

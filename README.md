@@ -12,10 +12,11 @@ It follows the architecture and conventions of the other Craft apps: layered cra
 where everything is a command, an egui front end, a control channel and an MCP server for AI
 agents, with rights per action and a confirmation in the app.
 
-**Status:** rebuild in progress (see [ROADMAP.md](ROADMAP.md)). The desktop app has hosts, keys,
-import and export, terminal tabs and settings; workspaces, port forwarding, snippets, session
-logs, sync and the agent confirmation return in R5. The sync server works. There is no release
-yet.
+**Status:** rebuild in progress (see [ROADMAP.md](ROADMAP.md)). The desktop app has everything of
+the Tauri version again: hosts, keys, terminal tabs with panes and broadcast, workspaces, port
+forwarding, snippets, session logs, sync and sharing, the rights of AI agents, and MCP and the
+command line for them (`sshcraft-cli`). Packages for macOS, Linux and FreeBSD come in R7. There is
+no release yet.
 
 ## Quick start
 

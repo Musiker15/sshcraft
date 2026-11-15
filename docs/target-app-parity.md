@@ -20,6 +20,6 @@ with other clients, with sources, is
 | Session logs | yes | core crate on `main`; interface: Tauri version only |
 | Sync | Termius cloud, subscription | own server, end-to-end encrypted, free; server and client crates on `main` |
 | Sharing | team plans | free on the own server; client crate on `main` |
-| AI agents | AI features in the app | MCP and command line with rights per action (R6) |
+| AI agents | AI features in the app | MCP and command line with rights per action |
 | SFTP | yes | S1, after the first release |
 | Mobile | yes | M1 to M3, after the first release |

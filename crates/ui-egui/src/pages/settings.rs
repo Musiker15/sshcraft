@@ -22,10 +22,12 @@ pub enum Section {
     Appearance,
     Terminal,
     Shortcuts,
+    Sync,
+    Agents,
 }
 
 impl Section {
-    const ALL: [Self; 4] = [Self::General, Self::Appearance, Self::Terminal, Self::Shortcuts];
+    const ALL: [Self; 6] = [Self::General, Self::Appearance, Self::Terminal, Self::Shortcuts, Self::Sync, Self::Agents];
 
     fn label(self) -> &'static str {
         match self {
@@ -33,6 +35,8 @@ impl Section {
             Self::Appearance => tr("Appearance"),
             Self::Terminal => tr("Terminal"),
             Self::Shortcuts => tr("Shortcuts"),
+            Self::Sync => tr("Sync"),
+            Self::Agents => tr("AI agents"),
         }
     }
 }
@@ -59,7 +63,7 @@ pub struct SettingsView {
 }
 
 /// Saves `change` applied to the current settings; the page shows it at once.
-fn save(app: &mut SshcraftApp, change: impl FnOnce(&mut EngineSettings)) {
+pub(crate) fn save(app: &mut SshcraftApp, change: impl FnOnce(&mut EngineSettings)) {
     let mut settings = app.data.settings.clone();
     change(&mut settings);
     if settings == app.data.settings {
@@ -87,6 +91,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         Section::Appearance => appearance(app, ui),
         Section::Terminal => terminal(app, ui),
         Section::Shortcuts => shortcuts(app, ui),
+        Section::Sync => crate::pages::sync::show(app, ui),
+        Section::Agents => crate::pages::agents::show(app, ui),
     });
 }
 
@@ -130,6 +136,9 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Font size"));
         ui.add(egui::DragValue::new(&mut a.font_size).range(FONT_SIZES));
         ui.end_row();
+        ui.label(tr("Ligatures"));
+        ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
+        ui.end_row();
         ui.label(tr("Hosts as"));
         ui.horizontal(|ui| {
             ui.radio_value(&mut a.host_view, HostView::Grid, tr("Grid"));
@@ -159,6 +168,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     let tokens = Tokens::get(ui.ctx());
     let mut t = app.data.settings.terminal.clone();
+    let mut logs = app.data.settings.logs.clone();
     let mut local_shell: Option<Value> = t.local_shell.as_ref().and_then(|s| serde_json::to_value(s).ok());
     let shells = app.ui.settings.shells.clone().unwrap_or_default();
     egui::Grid::new("sshcraft-terminal").num_columns(2).min_col_width(160.0).spacing([16.0, 10.0]).show(ui, |ui| {
@@ -182,11 +192,27 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             }
         });
         ui.end_row();
+        ui.label(tr("Scrollback"));
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut t.scrollback).range(sshcraft_engine::settings::SCROLLBACK).speed(100.0));
+            ui.label(egui::RichText::new(tr("lines, for new tabs")).color(tokens.text_dim));
+        });
+        ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));
         ui.end_row();
         ui.label(tr("Suggestions"));
         ui.checkbox(&mut t.autocomplete, tr("Suggest while typing"));
+        ui.end_row();
+        ui.label(tr("Session logs"));
+        ui.vertical(|ui| {
+            ui.checkbox(&mut logs.session_logs, tr("Record sessions unless a host or group says otherwise"));
+            egui::ComboBox::from_id_salt("sshcraft-log-retention").selected_text(retention(logs.log_retention_days)).show_ui(ui, |ui| {
+                for days in sshcraft_engine::settings::LOG_RETENTION_DAYS {
+                    ui.selectable_value(&mut logs.log_retention_days, days, retention(days));
+                }
+            });
+        });
         ui.end_row();
         ui.label(tr("Clipboard"));
         let mut write = t.clipboard_osc52 == Osc52::Write;
@@ -216,7 +242,20 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     if chosen != t.local_shell {
         t.local_shell = chosen;
     }
-    save(app, |s| s.terminal = t);
+    // Turning the history off deletes what it kept.
+    if app.data.settings.terminal.history && !t.history {
+        app.run_reported("history.clear", json!({}));
+        crate::session_tab::forget_history(app, None);
+    }
+    save(app, |s| {
+        s.terminal = t;
+        s.logs = logs;
+    });
+}
+
+/// How long finished logs are kept, in words.
+fn retention(days: u32) -> String {
+    if days == 0 { tr("Keep logs until deleted").to_string() } else { trf("Keep logs {days} days", &[("days", &days.to_string())]) }
 }
 
 fn bind_error(text: &str, error: &BindError) -> String {

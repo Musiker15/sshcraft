@@ -1027,3 +1027,16 @@ async fn hidden_and_unknown_logs_answer_alike() {
     let b = call(&w, &conn, "log.delete", json!({ "ids": [unknown] })).await.unwrap_err();
     assert_eq!(a.to_string(), b.to_string(), "log.delete");
 }
+
+/// Whether agents may connect is the user's alone: no agent turns its own link on.
+#[tokio::test]
+async fn an_agent_cannot_change_the_consent() {
+    let w = world(Some(true)).await;
+    let conn = w.conn();
+    let mut settings = w.session.execute(Caller::User, "settings.get", json!({})).await.unwrap();
+    settings["integrations"]["allow_agent_control"] = json!(true);
+    let r = call(&w, &conn, "settings.save", json!({ "settings": settings })).await;
+    assert!(is_denied(&r), "{r:?}");
+    let now = w.session.execute(Caller::User, "settings.get", json!({})).await.unwrap();
+    assert_eq!(now["integrations"]["allow_agent_control"], false);
+}

@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 10] = [
+static COMMANDS: [UiCommand; 21] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
@@ -52,6 +52,17 @@ static COMMANDS: [UiCommand; 10] = [
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.previous", "prevTab", "Previous tab", &["Ctrl+Shift+Tab", "Ctrl+PageUp"]) },
     cmd("ui.page.hosts", "hostsPage", "Hosts", &[]),
     cmd("ui.page.keys", "keysPage", "Keys", &[]),
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.split", "splitPane", "Split: add a pane", &["Ctrl+Shift+D"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.close", "closePane", "Close the focused pane", &["Ctrl+Shift+X"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.next", "nextPane", "Next pane", &["Ctrl+Shift+PageDown"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.previous", "prevPane", "Previous pane", &["Ctrl+Shift+PageUp"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.layout", "toggleLayout", "Switch between grid and one large pane", &["Ctrl+Shift+M"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.broadcast", "toggleBroadcast", "Broadcast on or off", &["Ctrl+Shift+B"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.terminal.sidebar", "toggleSidebar", "Snippets and history beside the terminal", &["Ctrl+Shift+S"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.terminal.bookmark", "bookmark", "Bookmark in the session log", &["Ctrl+Shift+L"]) },
+    cmd("ui.page.snippets", "snippetsPage", "Snippets", &[]),
+    cmd("ui.page.forwarding", "forwardingPage", "Port forwarding", &[]),
+    cmd("ui.page.logs", "logsPage", "Logs", &[]),
     cmd("ui.page.settings", "settingsPage", "Settings", &[]),
     UiCommand {
         scope: Scope::Terminal,
@@ -82,8 +93,19 @@ pub fn run(app: &mut SshcraftApp, id: &str) {
         "ui.tab.close" => app.close_tab(),
         "ui.tab.next" => app.cycle_tab(1),
         "ui.tab.previous" => app.cycle_tab(-1),
+        "ui.pane.split" => app.split(),
+        "ui.pane.close" => app.close_pane(),
+        "ui.pane.next" => app.focus_pane(1),
+        "ui.pane.previous" => app.focus_pane(-1),
+        "ui.pane.layout" => app.toggle_layout(),
+        "ui.pane.broadcast" => app.toggle_broadcast(),
+        "ui.terminal.sidebar" => app.ui.sidebar.open = !app.ui.sidebar.open,
+        "ui.terminal.bookmark" => crate::session_tab::bookmark(app),
         "ui.page.hosts" => app.ui.page = Page::Hosts,
         "ui.page.keys" => app.ui.page = Page::Keys,
+        "ui.page.snippets" => app.ui.page = Page::Snippets,
+        "ui.page.forwarding" => app.ui.page = Page::Forwarding,
+        "ui.page.logs" => app.ui.page = Page::Logs,
         "ui.page.settings" => app.ui.page = Page::Settings,
         // The terminal tab handles these itself (it has the selection and the clipboard).
         _ => app.ui.pending.push(command.id),

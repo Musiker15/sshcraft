@@ -14,7 +14,18 @@ use zeroize::Zeroizing;
 
 use crate::events::{EngineEvent, EventBus};
 pub use crate::gate::confirm::AgentPrompt;
-use crate::sessions::HostKeyPrompter;
+use crate::sessions::{HostKeyPrompter, SessionId};
+
+tokio::task_local! {
+    /// The terminal session a question is asked for; set around a session's task and around
+    /// its questions, so the window can show which tab asks.
+    pub(crate) static ASKING_SESSION: SessionId;
+}
+
+/// The session the current task asks for, if any.
+pub(crate) fn asking_session() -> Option<SessionId> {
+    ASKING_SESSION.try_with(|id| *id).ok()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HostKeyPrompt {
@@ -23,6 +34,8 @@ pub struct HostKeyPrompt {
     pub address: String,
     pub port: u16,
     pub fingerprint: String,
+    /// The terminal session that asks; none for a forwarding rule, an agent or `key.install`.
+    pub session: Option<SessionId>,
 }
 
 /// A sign-in question. Carries the questions only, never an answer.
@@ -34,6 +47,8 @@ pub struct AuthPrompt {
     pub name: String,
     pub instructions: String,
     pub prompts: Vec<AuthPromptLine>,
+    /// The terminal session that asks; none for a forwarding rule, an agent or `key.install`.
+    pub session: Option<SessionId>,
 }
 
 /// A question that waits for an answer, as `prompt.list` shows it.
@@ -237,8 +252,14 @@ impl<E: PromptEmitter> PromptRegistry<E> {
     pub async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
         let prompt_id = self.next_id();
         let (tx, rx) = oneshot::channel();
-        let prompt =
-            HostKeyPrompt { prompt_id, host_name: host_name.to_owned(), address: address.to_owned(), port, fingerprint: fingerprint.to_owned() };
+        let prompt = HostKeyPrompt {
+            prompt_id,
+            host_name: host_name.to_owned(),
+            address: address.to_owned(),
+            port,
+            fingerprint: fingerprint.to_owned(),
+            session: asking_session(),
+        };
         self.put_back(prompt_id, Pending { prompt: OpenPrompt::HostKey(prompt.clone()), answer: Answer::HostKey(tx) });
         if !self.emitter.asked(&prompt) {
             self.take(prompt_id);
@@ -258,6 +279,7 @@ impl<E: PromptEmitter> PromptRegistry<E> {
             name: request.name,
             instructions: request.instructions,
             prompts: request.prompts,
+            session: asking_session(),
         };
         self.put_back(prompt_id, Pending { prompt: OpenPrompt::Auth(prompt.clone()), answer: Answer::Auth(tx) });
         if !self.emitter.asked_auth(&prompt) {
