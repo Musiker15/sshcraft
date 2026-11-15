@@ -51,6 +51,25 @@ sshcraft-server api-key show
 
 In Docker: `docker exec sshcraft sshcraft-server api-key show`.
 
+## Install the program
+
+Every release has `sshcraft-server-<version>-linux-<arch>.tar.gz` for x86_64 and aarch64: the
+program, this file, the licences, a systemd unit and an example environment file. As root:
+
+```bash
+tar -xzf sshcraft-server-<version>-linux-x86_64.tar.gz && cd sshcraft-server-<version>-linux-x86_64
+install -m 755 sshcraft-server /usr/local/bin/
+useradd --system --home-dir /var/lib/sshcraft --create-home --shell /usr/sbin/nologin sshcraft
+install -m 600 -o sshcraft sshcraft-server.env.example /etc/sshcraft-server.env
+editor /etc/sshcraft-server.env        # public origin, database
+install -m 644 sshcraft-server.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now sshcraft-server
+```
+
+The unit runs the server as `sshcraft` with a read-only system and only `/var/lib/sshcraft`
+writable. For an update, replace the binary and `systemctl restart sshcraft-server`; the
+database migrates on start.
+
 ## PostgreSQL
 
 SQLite is the default and enough for a few dozen users. For PostgreSQL create an empty database

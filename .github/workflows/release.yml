@@ -35,6 +35,8 @@ jobs:
       version: ${{ inputs.version }}
       # SSHCraft has no web build: SSH needs TCP.
       has-web: false
+      # The sync server as a Linux program (packaging/server/package.sh).
+      has-server: true
     secrets:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

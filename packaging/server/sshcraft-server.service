@@ -1,0 +1,42 @@
+# systemd unit for the SSHCraft sync server (docs/server.md, "Install the program").
+#
+#   install -m 755 sshcraft-server /usr/local/bin/
+#   useradd --system --home-dir /var/lib/sshcraft --create-home --shell /usr/sbin/nologin sshcraft
+#   install -m 600 -o sshcraft sshcraft-server.env.example /etc/sshcraft-server.env   (then edit it)
+#   install -m 644 sshcraft-server.service /etc/systemd/system/
+#   systemctl enable --now sshcraft-server
+[Unit]
+Description=SSHCraft sync server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=sshcraft
+Group=sshcraft
+# SSHCRAFT_PUBLIC_ORIGIN, SSHCRAFT_DATABASE_URL and SSHCRAFT_LISTEN. The database URL can hold a
+# password, so the file is readable only by the service user.
+EnvironmentFile=/etc/sshcraft-server.env
+WorkingDirectory=/var/lib/sshcraft
+ExecStart=/usr/local/bin/sshcraft-server serve
+Restart=on-failure
+RestartSec=5
+
+# The server writes only its SQLite file (or nothing, with PostgreSQL).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/sshcraft
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
