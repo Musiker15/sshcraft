@@ -12,6 +12,18 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of SSHCraft is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
+    <!-- The Tauri version of SSHCraft (an NSIS installer, uninstall entry "SSHCraft") must not
+         run beside this one: both would sync with the same device key. It is not removed from
+         here, which would run its uninstaller unseen; the install stops and says how. Its
+         uninstaller keeps the data unless "Delete the application data" is ticked. -->
+    <Property Id="TAURI_SSHCRAFT_U">
+      <RegistrySearch Id="TauriUninstallUser" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SSHCraft" Name="UninstallString" Type="raw" />
+    </Property>
+    <Property Id="TAURI_SSHCRAFT_M">
+      <RegistrySearch Id="TauriUninstallMachine" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\SSHCraft" Name="UninstallString" Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR (NOT TAURI_SSHCRAFT_U AND NOT TAURI_SSHCRAFT_M)" Message="The previous SSHCraft (from before version 1) is still installed. Uninstall it first in Settings, Apps. Leave Delete the application data unticked and your hosts, keys and settings stay. Then run this installer again." />
+
     <Icon Id="SshcraftIcon.ico" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="SshcraftIcon.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/musiker15/sshcraft" />
@@ -187,8 +199,8 @@
       </Component>
       <Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Condition="DESKTOPSHORTCUT = &quot;1&quot;">
         <Shortcut Id="DesktopShortcut" Name="SSHCraft" Description="SSHCraft SSH client" Target="[#SshcraftExe]" WorkingDirectory="INSTALLFOLDER" Icon="SshcraftIcon.ico" IconIndex="0" />
-        <!-- HKMU resolves to HKLM for this per-machine package, so another account can
-             uninstall the marker too. MSI root -1 also satisfies ICE43 for this shortcut. -->
+        <!-- HKMU follows the chosen scope (HKLM for everyone, HKCU for one account), so the
+             marker goes with the shortcut. MSI root -1 also satisfies ICE43 for this shortcut. -->
         <RegistryValue Root="HKMU" Key="Software\SSHCraft\Installer" Name="DesktopShortcutComponent" Value="1" Type="integer" KeyPath="yes" />
       </Component>
     </ComponentGroup>

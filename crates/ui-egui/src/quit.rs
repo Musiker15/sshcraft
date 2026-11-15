@@ -18,8 +18,29 @@ pub struct Quit {
 }
 
 /// The sessions a quit would end: open terminals whose session has not ended.
-pub fn running(app: &SshcraftApp) -> usize {
+pub fn sessions(app: &SshcraftApp) -> usize {
     app.terminals.values().filter(|t| !matches!(t.status, Some(sshcraft_engine::SessionStatus::Ended { .. }))).count()
+}
+
+/// The port forwards a quit would end: rules that run or are starting, also without a terminal.
+pub fn forwards(app: &SshcraftApp) -> usize {
+    app.data.forwards.values().filter(|s| matches!(s.get("state").and_then(serde_json::Value::as_str), Some("running" | "starting"))).count()
+}
+
+/// Everything a quit would end.
+pub fn running(app: &SshcraftApp) -> usize {
+    sessions(app).saturating_add(forwards(app))
+}
+
+/// What runs, in words: "2 sessions and 1 port forward".
+fn running_text(sessions: usize, forwards: usize) -> String {
+    let count = |n: usize, one: &'static str, many: &'static str| if n == 1 { tr(one).to_string() } else { trf(many, &[("n", &n.to_string())]) };
+    let parts: Vec<String> = [(sessions, "1 session", "{n} sessions"), (forwards, "1 port forward", "{n} port forwards")]
+        .into_iter()
+        .filter(|(n, ..)| *n > 0)
+        .map(|(n, one, many)| count(n, one, many))
+        .collect();
+    parts.join(tr(" and "))
 }
 
 /// The menu's Quit: asks like the close button does.
@@ -73,11 +94,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         ui.set_width(420.0);
         ui.heading(tr("Quit SSHCraft?"));
         ui.add_space(6.0);
-        let body = if count == 1 {
-            tr("A session is running. It ends when SSHCraft quits.").to_string()
-        } else {
-            trf("{n} sessions are running. They end when SSHCraft quits.", &[("n", &count.to_string())])
-        };
+        let body = trf("Still running: {what}. Quitting ends it.", &[("what", &running_text(sessions(app), forwards(app)))]);
         ui.label(body);
         ui.add_space(10.0);
         ui.horizontal(|ui| {

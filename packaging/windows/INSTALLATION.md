@@ -16,6 +16,9 @@ What the package installs:
 - A desktop shortcut only when its box is ticked; the choice is kept for updates.
 - No file types and no `ssh://` handler. Links never run anything; a link handler comes with F1
   and only opens the connection dialog.
+- Nothing while the Tauri version of SSHCraft is installed (its uninstall entry `SSHCraft`): the
+  two would sync with the same device key. The installer says to uninstall it first; its
+  uninstaller keeps the data unless "Delete the application data" is ticked.
 
 The upgrade code (`install-policy.json`) never changes: it is how a new version replaces an old
 one.
@@ -31,8 +34,10 @@ On Windows with WiX 5.0.2:
 The script builds x64, x86 and arm64 packages with deliberately non-executable payloads from the
 real package source. A safe Windows Installer session checks the scope, registration and
 maintenance cases, remembered and explicit custom folders, sequencing, the upgrade identity and
-the registrations recorded in `install-policy.json`. `package.ps1` runs the same checker before
-signing, and the packaging lint workflow runs the fixture builds without compiling Rust.
+the registrations recorded in `install-policy.json`, and SSHCraft's own rules: the desktop
+shortcut only when ticked, no link handler or file type, and the stop for the Tauri version.
+`package.ps1` runs the same checker before signing, and the packaging lint workflow runs the
+fixture builds without compiling Rust.
 
 Never install or distribute the `NOT-INSTALLABLE.msi` fixtures. Passing these checks does not
 prove a real installation, elevation, upgrades, the `PATH` change, the optional shortcut,

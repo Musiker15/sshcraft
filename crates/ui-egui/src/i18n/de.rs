@@ -528,8 +528,6 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SSHCraft could not start." => "SSHCraft konnte nicht starten.",
         // The menus, the title bar and quitting (R7).
         "Quit SSHCraft?" => "SSHCraft beenden?",
-        "A session is running. It ends when SSHCraft quits." => "Eine Sitzung läuft. Sie endet, wenn SSHCraft beendet wird.",
-        "{n} sessions are running. They end when SSHCraft quits." => "{n} Sitzungen laufen. Sie enden, wenn SSHCraft beendet wird.",
         "End sessions and quit" => "Sitzungen beenden und schließen",
         "Quit" => "Beenden",
         "Broadcast" => "Übertragen an alle",
@@ -569,6 +567,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "The system keyring could not be opened, so keys and passwords are not available. On Linux a Secret Service (GNOME Keyring or KWallet) must run." => {
             "Der Schlüsselbund des Systems ließ sich nicht öffnen, deshalb sind Schlüssel und Passwörter nicht verfügbar. Unter Linux muss ein Secret Service laufen (GNOME Keyring oder KWallet)."
         }
+        "Still running: {what}. Quitting ends it." => "Es läuft noch: {what}. Mit dem Beenden endet das.",
+        "1 session" => "1 Sitzung",
+        "{n} sessions" => "{n} Sitzungen",
+        "1 port forward" => "1 Portweiterleitung",
+        "{n} port forwards" => "{n} Portweiterleitungen",
+        " and " => " und ",
         _ => return None,
     })
 }

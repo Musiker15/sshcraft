@@ -48,6 +48,9 @@
   <true/>
   <key>NSRequiresAquaSystemAppearance</key>
   <false/>
+  <!-- macOS 15 asks before an app reaches the local network: SSH to a server in the LAN. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>SSHCraft connects to the servers on your local network that you add as hosts.</string>
   <key>NSHumanReadableCopyright</key>
   <string>Copyright © the SSHCraft contributors. MIT OR Apache-2.0.</string>
   <!-- No document types and no ssh:// URL scheme: links never run anything, and a link handler

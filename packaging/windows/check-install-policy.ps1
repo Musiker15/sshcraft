@@ -51,35 +51,6 @@ try {
   if ('INSTALLFOLDER' -notin $secureProperties) {
     throw 'The selected installation folder must survive elevation (secure INSTALLFOLDER).'
   }
-  if ($policy.mode -eq 'perUser') {
-    if ($properties.ContainsKey('ALLUSERS')) { throw 'Launcher must remain per-user; machine self-update is not part of this change.' }
-    if ($properties['UpgradeCode'].Trim('{}') -ne $policy.upgradeCode) { throw 'Launcher upgrade identity changed.' }
-    $dirs = @{}
-    foreach ($row in (Read-Rows $database 'SELECT `Directory`, `Directory_Parent`, `DefaultDir` FROM `Directory`' 3)) { $dirs[$row[0]] = @($row[1],$row[2]) }
-    if ($dirs['INSTALLFOLDER'][0] -ne 'CraftSuiteFolder' -or $dirs['CraftSuiteFolder'][1] -ne 'ArtCraft' -or
-        $dirs['CraftSuiteFolder'][0] -ne 'LocalProgramsFolder' -or $dirs['LocalProgramsFolder'][0] -ne 'LocalAppDataFolder') {
-      throw 'Launcher new-install folder must be under the per-user ArtCraft suite root.'
-    }
-    foreach ($explicit in @('', 'F:\Chosen exact launcher')) {
-      Set-SessionProperty $session 'PREVIOUSINSTALLFOLDER' 'E:\Existing exact launcher'
-      Set-SessionProperty $session 'INSTALLFOLDER' $explicit
-      $row = @(Read-Rows $database 'SELECT `Condition` FROM `InstallUISequence` WHERE `Action` = ''CraftRestoreLauncherFolder''' 1)[0]
-      if ($session.EvaluateCondition($row[0]) -eq 1) {
-        if ($session.DoAction('CraftRestoreLauncherFolder') -ne 1) { throw 'Launcher restore action failed.' }
-      }
-      $expected = if ($explicit) { $explicit } else { 'E:\Existing exact launcher' }
-      if ((Get-SessionProperty $session 'INSTALLFOLDER') -ne $expected) { throw 'Launcher custom or existing path was lost.' }
-    }
-    $rows = @(Read-Rows $database 'SELECT `Root`, `Key`, `Name`, `Value` FROM `Registry`' 4)
-    if (@($rows | Where-Object { $_[0] -ne '1' }).Count) { throw 'Launcher registration must stay under the current account.' }
-    foreach ($entry in $policy.registry) {
-      if (@($rows | Where-Object { $_[0] -eq $entry[0] -and $_[1] -eq $entry[1] -and $_[2] -eq $entry[2] -and $_[3] -eq $entry[3] }).Count -ne 1) {
-        throw 'Launcher registration or shortcut preference changed unexpectedly.'
-      }
-    }
-    Write-Output 'PASS ArtCraft Launcher: per-user scope, suite folder, remembered/custom paths and existing registration. No installation performed.'
-    return
-  }
   if ($properties['ALLUSERS'] -ne '2' -or $properties['MSIINSTALLPERUSER'] -ne '1') {
     throw 'Policy regression: new packages must default to the per-user dual-scope context.'
   }
@@ -89,7 +60,7 @@ try {
     $directories[$row[0]] = @($row[1], $row[2])
   }
   # SSHCraft (`suiteFolder` empty) goes straight into Program Files, not into a suite folder.
-  $suite = if ($policy.PSObject.Properties.Name -contains 'suiteFolder') { [string]$policy.suiteFolder } else { 'ArtCraft' }
+  $suite = if ($policy.PSObject.Properties.Name -contains 'suiteFolder') { [string]$policy.suiteFolder } else { '' }
   if ($suite) {
     if ($directories['INSTALLFOLDER'][0] -ne 'CraftSuiteFolder' -or
         $directories['CraftSuiteFolder'][1] -ne $suite) { throw "Expected the app under the $suite suite folder." }
@@ -276,16 +247,6 @@ try {
       if ((Test-ControlVisible $text) -ne ($scope -eq '1')) { throw 'The welcome-page scope text must follow the selected scope.' }
     }
   }
-  if ($policy.id -in 'deckcraft','filmcraft','soundcraft') {
-    foreach ($route in @(@('WelcomeDlg','Next','InstallDirDlg'),@('InstallDirDlg','Back','WelcomeDlg'))) {
-      $dialog = $route[0]; $control = $route[1]
-      $routes = @(Read-Rows $database "SELECT ``Argument``, ``Condition`` FROM ``ControlEvent`` WHERE ``Dialog_`` = '$dialog' AND ``Control_`` = '$control' AND ``Event`` = 'NewDialog' ORDER BY ``Ordering``" 2)
-      Set-SessionProperty $session 'Installed' ''
-      $destination = ''
-      foreach ($event in $routes) { if ($session.EvaluateCondition($event[1]) -eq 1) { $destination = $event[0] } }
-      if ($destination -ne $route[2]) { throw 'Skipping the licence page must work in both navigation directions.' }
-    }
-  }
   $registry = @(Read-Rows $database 'SELECT `Root`, `Key`, `Name`, `Value` FROM `Registry`' 4)
   if (@($registry | Where-Object { $_[0] -in '1', '2' }).Count) { throw 'Registration must follow the selected context, not force HKCU or HKLM.' }
   if (@($registry | Where-Object { $_[0] -eq '0' -and $_[1] -match '^Software\\Classes(\\|$)' }).Count) {
@@ -297,6 +258,17 @@ try {
   }
   $installDir = @($registry | Where-Object { $_[0] -eq '-1' -and $_[1] -eq "Software\$($policy.name)" -and $_[2] -eq 'InstallDir' -and $_[3] -eq '[INSTALLFOLDER]' })
   if ($installDir.Count -ne 1) { throw 'A context-sensitive installation-folder record is required.' }
+  # SSHCraft's own rules: the desktop shortcut only when ticked, no link handler and no file
+  # type (links never run anything), and no install beside the Tauri version.
+  $shortcut = @(Read-Rows $database 'SELECT `Component`, `Condition` FROM `Component`' 2 | Where-Object { $_[0] -eq 'DesktopShortcutComponent' })
+  if ($shortcut.Count -ne 1 -or $shortcut[0][1] -ne 'DESKTOPSHORTCUT = "1"') { throw 'The desktop shortcut must be installed only when its box is ticked.' }
+  $default = @(Read-Rows $database 'SELECT `Action`, `Source`, `Target` FROM `CustomAction`' 3 | Where-Object { $_[0] -eq 'DefaultDesktopShortcut' })
+  if ($default.Count -ne 1 -or $default[0][1] -ne 'DESKTOPSHORTCUT' -or $default[0][2] -ne '0') { throw 'A fresh install must default to no desktop shortcut.' }
+  if (@($registry | Where-Object { $_[2] -eq 'URL Protocol' -or $_[1] -match '^Software\\Classes(\\|$)' }).Count) {
+    throw 'The package must register no link handler and no file type.'
+  }
+  $legacy = @(Read-Rows $database 'SELECT `Condition` FROM `LaunchCondition`' 1 | Where-Object { $_[0] -match 'TAURI_SSHCRAFT_U' -and $_[0] -match 'TAURI_SSHCRAFT_M' })
+  if ($legacy.Count -ne 1) { throw 'The install must stop while the Tauri version is installed.' }
   Write-Output "PASS $($policy.name): $cases scope cases, folder preservation, action sequencing and registry contract. No installation performed."
 } finally {
   foreach ($com in @($session, $database, $installer)) {

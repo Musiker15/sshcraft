@@ -361,3 +361,16 @@ fn the_window_resizes_from_its_edges_where_the_app_draws_the_frame() {
     press_at(&mut h, egui::pos2(600.0, 400.0));
     assert_eq!(began_resize(&h), None);
 }
+
+#[test]
+fn quitting_with_a_running_port_forward_asks_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(3);
+    let rule = sshcraft_model::forward::ForwardId(uuid::Uuid::new_v4());
+    h.state_mut().data.forwards.insert(rule, serde_json::json!({ "state": "running" }));
+    request_close(&mut h);
+    assert!(cancelled_close(&h), "a running forward ends with the app: ask first");
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("1 port forward").is_some(), "the question names it");
+}

@@ -22,7 +22,7 @@ These need the repository's settings and secrets, so only the owner sets them up
 
 1. **Branch `release`**, created from `main`, with branch protection: no force push, no deletion.
 2. **Environment `release`** (Settings, Environments), limited to the branch `release`. The
-   signing jobs and the draft release run in it; a run from any other branch is a dry run.
+   signing jobs and the draft release run in it, and only the `release` branch may use it.
 3. **Secrets** in that environment, each optional: a missing one leaves its artifact unsigned
    and the job summary says so.
 
@@ -62,7 +62,9 @@ Pushing to `release` again before publishing rebuilds the same draft. After publ
 workflow refuses to touch that version again: set a new one first.
 
 **Test runs:** Actions, Release, Run workflow runs the pipeline by hand, as a dry run by default
-(no signing, no draft). The optional `version` input overrides `Cargo.toml` for that run only.
+(no signing, no draft). The optional `version` input overrides `Cargo.toml` for that run only. A
+run by hand with dry run off asks for the `release` environment, so from any branch but `release`
+its signing jobs stop there.
 
 ## What gets built
 

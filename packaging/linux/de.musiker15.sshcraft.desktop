@@ -10,4 +10,4 @@ Terminal=false
 StartupNotify=true
 StartupWMClass=de.musiker15.sshcraft
 Categories=Network;RemoteAccess;
-Keywords=ssh;terminal;sftp;server;remote;shell;console;serial;
+Keywords=ssh;terminal;server;remote;shell;console;serial;
