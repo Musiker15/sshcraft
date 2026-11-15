@@ -11,6 +11,7 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 2a | A second start of the app does not hand over to the running one; it says SSHCraft is already open | later |
 | 3 | The packages are built only by the release workflow, which has not run yet; the installers, the CLI on `PATH`, the Flatpak sandbox and the native macOS menu are untried by hand | V1 |
 | 4 | The MSI stops while the Tauri version is installed and says to uninstall it, instead of removing it itself (spec section 2) | V1 |
+| 4a | FreeBSD: the last output of a local shell that ends at once (a `sh -c` command) can be lost; an interactive shell is not affected | later |
 | 5 | No reconnect with backoff, no ProxyCommand, no host key management | F1 |
 | 6 | No trash, no versions, no backup file | F2 |
 | 7 | No SFTP | S1 |
