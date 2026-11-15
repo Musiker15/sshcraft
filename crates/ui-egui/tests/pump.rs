@@ -63,8 +63,12 @@ async fn leftover_output_waits_for_the_next_frame() {
     let (session, id, mut pump, _server, _dir) = open().await;
     let mut term = Terminal::new(TermSize::clamped(80, 24), &TermConfig::default());
     flood(&session, id).await;
-    // Let the session read up to its watermark, then take a little.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Let the session read some output (a busy CI runner takes its time), then take a little.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while session.unacknowledged(id).unwrap_or(0) < 1000 {
+        assert!(tokio::time::Instant::now() < deadline, "no output arrived");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let first = pump.frame(&mut term, bytes(1000));
     assert_eq!(first.fed, 1000);
     assert!(first.more, "there is more to take");
