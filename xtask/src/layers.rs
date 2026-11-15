@@ -15,11 +15,12 @@ pub enum Class {
 }
 
 /// The layer table. Names are package names without the `sshcraft-` prefix. Later layers:
-/// ui-egui 6, mcp 6, term 2.
+/// mcp 6.
 pub const TABLE: &[(&str, Class)] = &[
     ("proto", Class::Layer(0)),
     ("platform", Class::Layer(0)),
     ("model", Class::Layer(1)),
+    ("link", Class::Layer(1)),
     ("store", Class::Layer(2)),
     ("term", Class::Layer(2)),
     ("import", Class::Layer(3)),

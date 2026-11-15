@@ -124,12 +124,12 @@ crash on hostile input is a security bug. **This outranks feature work.**
   | Layer | Crates |
   |---|---|
   | L0 | `proto`, `platform` |
-  | L1 | `model` |
+  | L1 | `model`, `link` |
   | L2 | `store`, `term` |
   | L3 | `import`, `ssh`, `local`, `sync`, `server-lib` |
   | L4 | `fido` |
   | L5 | `engine` (R2) |
-  | L6 | `ui-egui`, `mcp` (R4, R6) |
+  | L6 | `ui-egui`, `mcp` |
   | exempt | `apps/*`, `xtask` |
 
 - **Rust only.** No handwritten JavaScript or TypeScript, no Tauri, Electron or webview shell.

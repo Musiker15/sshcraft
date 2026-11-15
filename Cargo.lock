@@ -5661,6 +5661,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcraft-link"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "futures",
+ "hmac",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sshcraft-platform",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "sshcraft-local"
 version = "0.1.0"
 dependencies = [
