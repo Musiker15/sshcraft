@@ -24,6 +24,10 @@ pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
     let ctx = egui::Context::default();
     let mut app = SshcraftApp::new(session.clone(), &ctx);
     app.keep_runtime(runtime);
-    let harness = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(|ui, app: &mut SshcraftApp| app.frame(ui), app);
+    // A frame as long as on a 60 Hz display, so double clicks fall inside egui's time for them.
+    let harness = Harness::builder()
+        .with_size(egui::vec2(1200.0, 800.0))
+        .with_step_dt(1.0 / 60.0)
+        .build_ui_state(|ui, app: &mut SshcraftApp| app.frame(ui), app);
     (harness, session)
 }

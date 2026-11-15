@@ -38,6 +38,7 @@ pub struct TabState {
 pub struct UiState {
     pub page: Page,
     pub tabs: Vec<TabState>,
+    pub hosts: crate::pages::hosts::HostsView,
     #[serde(skip)]
     pub palette: PaletteState,
     /// Commands for the active terminal tab, taken by it in the frame.
@@ -48,6 +49,12 @@ pub struct UiState {
     pub connect_request: Option<ConnectRequest>,
     #[serde(skip)]
     pub new_tab_query: String,
+    #[serde(skip)]
+    pub host_form: Option<crate::pages::host_form::HostForm>,
+    #[serde(skip)]
+    pub group_form: Option<crate::pages::host_form::GroupForm>,
+    #[serde(skip)]
+    pub confirm: Option<crate::pages::hosts::Confirm>,
 }
 
 /// What a page asked to connect to.

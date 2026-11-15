@@ -27,6 +27,8 @@ pub struct SshcraftApp {
 
 impl SshcraftApp {
     pub fn new(session: Session, ctx: &egui::Context) -> Self {
+        // Names from servers and imports can be in any script: the system's fonts fill in.
+        ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
         let data = Data { dirty: Refresh::DATA | Refresh::SETTINGS, ..Data::default() };
         Self {
@@ -120,6 +122,8 @@ impl SshcraftApp {
         self.take_events();
         data::refresh(self);
         let ctx = ui.ctx().clone();
+        // A character no font has is drawn as a box, never a panic (tests switch egui to panic).
+        ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {

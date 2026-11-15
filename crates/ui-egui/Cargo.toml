@@ -24,6 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 bitflags = { workspace = true }
 sys-locale = { workspace = true }
+uuid = { workspace = true }
 tokio = { workspace = true }
 egui_kittest = { workspace = true, optional = true }
 

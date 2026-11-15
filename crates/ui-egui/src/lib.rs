@@ -7,6 +7,7 @@ pub mod commands;
 pub mod data;
 pub mod i18n;
 pub mod keymap;
+pub mod pages;
 pub mod palette;
 pub mod runner;
 pub mod shell;
