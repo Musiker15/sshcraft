@@ -47,6 +47,19 @@ pub struct SessionTab {
     /// Bytes to type once, when the session first connects (a template's `cd` and command, a
     /// snippet).
     start: Option<Vec<u8>>,
+    /// The line being typed, for history and suggestions.
+    capture: crate::history::Capture,
+    /// This pane's history (`history.list` of its host or the local shell), newest first.
+    history: Vec<String>,
+    history_loaded: bool,
+    suggestions: Vec<crate::completion::Suggestion>,
+    selected: Option<usize>,
+    /// The list was closed for the line typed so far.
+    dismissed: bool,
+    /// The line the suggestions were made for.
+    suggested_for: Option<String>,
+    paths: crate::completion::PathCache,
+    path_pending: Option<String>,
     /// The bell rang, or the cursor's line asks for a secret or a yes/no.
     waiting: bool,
 }
@@ -58,6 +71,29 @@ impl SessionTab {
         let screen = self.term.screen();
         let line = screen.text().lines().nth(usize::from(screen.cursor.row)).map(str::to_string).unwrap_or_default();
         self.waiting = crate::status::waiting_line(&line);
+    }
+
+    /// What the list under the cursor offers now.
+    pub fn suggestions(&self) -> &[crate::completion::Suggestion] {
+        if self.dismissed { &[] } else { &self.suggestions }
+    }
+
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// Fetches this pane's history again.
+    pub fn reload_history(&mut self) {
+        self.history_loaded = false;
+    }
+
+    /// The history scope of this pane: `host:<id>`, `local`, or none for a serial line.
+    fn scope(&self) -> Option<String> {
+        match self.target.get("kind").and_then(Value::as_str)? {
+            "host" => self.target.get("host_id").and_then(Value::as_str).map(|id| format!("host:{id}")),
+            "local" => Some("local".into()),
+            _ => None,
+        }
     }
 
     /// The pane is looked at: blue and amber go, red stays.
@@ -218,6 +254,15 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 waiting: false,
                 cwd: None,
                 start,
+                capture: crate::history::Capture::default(),
+                history: Vec::new(),
+                history_loaded: false,
+                suggestions: Vec::new(),
+                selected: None,
+                dismissed: false,
+                suggested_for: None,
+                paths: crate::completion::PathCache::default(),
+                path_pending: None,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -536,6 +581,151 @@ fn app_shown_changed(shown: &mut Option<SessionId>, id: SessionId) -> bool {
 }
 
 /// The page of a session tab: the terminal and its status line.
+/// The text of the cursor's line: the prompt a new line is typed after.
+fn cursor_line(term: &Terminal) -> String {
+    let screen = term.screen();
+    screen.text().lines().nth(usize::from(screen.cursor.row)).unwrap_or_default().to_string()
+}
+
+/// The keys the suggestion list takes: Down selects, Up moves back, Tab or Enter take the
+/// selected one, Escape closes. Without a selection Enter, Tab and Escape stay the shell's.
+fn completion_keys(ctx: &egui::Context, tab: &mut SessionTab) -> Option<Vec<u8>> {
+    if tab.suggestions().is_empty() {
+        return None;
+    }
+    let count = tab.suggestions.len();
+    let mut taken = None;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let egui::Event::Key { key, pressed: true, modifiers, .. } = event else { return true };
+            if !modifiers.is_none() {
+                return true;
+            }
+            match (key, tab.selected) {
+                (egui::Key::ArrowDown, sel) => {
+                    tab.selected = Some(sel.map_or(0, |s| (s + 1).min(count.saturating_sub(1))));
+                    false
+                }
+                (egui::Key::ArrowUp, Some(s)) => {
+                    tab.selected = s.checked_sub(1);
+                    false
+                }
+                (egui::Key::Tab | egui::Key::Enter, Some(s)) => {
+                    taken = tab.suggestions.get(s).map(|sug| sug.insert.clone());
+                    tab.selected = None;
+                    tab.dismissed = true;
+                    false
+                }
+                (egui::Key::Escape, sel) => {
+                    tab.dismissed = true;
+                    tab.selected = None;
+                    // With nothing selected, Escape goes on to the shell.
+                    sel.is_none()
+                }
+                _ => true,
+            }
+        });
+    });
+    taken
+}
+
+/// Follows the line typed into `id`; a finished line that counts goes into the history.
+fn track_line(app: &mut SshcraftApp, id: SessionId, bytes: &[u8], ctx: crate::history::LineContext) {
+    let keep = app.data.settings.terminal.history;
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    let Some(line) = tab.capture.input(bytes, &ctx) else { return };
+    let Some(scope) = tab.scope().filter(|_| keep) else { return };
+    tab.history.retain(|h| *h != line);
+    tab.history.insert(0, line.clone());
+    app.run_reported("history.record", json!({ "scope": scope, "command": line }));
+}
+
+/// Makes the suggestions for the line typed so far: history, snippets, then paths.
+fn update_suggestions(app: &mut SshcraftApp, id: SessionId) {
+    let enabled = app.data.settings.terminal.autocomplete;
+    let snippets = app.data.snippets.clone();
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    if !tab.history_loaded
+        && let Some(scope) = tab.scope()
+    {
+        tab.history_loaded = true;
+        app.runner.run(
+            "history.list",
+            json!({ "scope": scope }),
+            Box::new(move |app, result| {
+                if let (Ok(Value::Array(rows)), Some(tab)) = (result, app.terminals.get_mut(&id)) {
+                    tab.history = rows.iter().filter_map(|r| r.get("command").and_then(Value::as_str)).map(str::to_string).collect();
+                }
+            }),
+        );
+        return;
+    }
+    let line = if enabled { tab.capture.line().map(str::to_string) } else { None };
+    if line == tab.suggested_for && tab.path_pending.is_none() {
+        return;
+    }
+    if line != tab.suggested_for {
+        tab.dismissed = false;
+        tab.selected = None;
+    }
+    tab.suggested_for.clone_from(&line);
+    let Some(line) = line else {
+        tab.suggestions.clear();
+        return;
+    };
+    let now = std::time::Instant::now();
+    let mut paths: Vec<String> = Vec::new();
+    if let Some((dir, _)) = crate::completion::path_word(&line) {
+        match tab.paths.get(&dir, now) {
+            Some(names) => paths = names.to_vec(),
+            None if tab.path_pending.as_deref() != Some(dir.as_str()) => {
+                tab.path_pending = Some(dir.clone());
+                app.runner.run(
+                    "session.list_dir",
+                    json!({ "id": id, "dir": dir, "prefix": "" }),
+                    Box::new(move |app, result| {
+                        if let Some(tab) = app.terminals.get_mut(&id) {
+                            let names = match result {
+                                Ok(Value::Array(names)) => names.iter().filter_map(|n| n.as_str()).map(str::to_string).collect(),
+                                _ => Vec::new(),
+                            };
+                            tab.paths.put(&dir, names, std::time::Instant::now());
+                            tab.path_pending = None;
+                            tab.suggested_for = None;
+                        }
+                    }),
+                );
+            }
+            None => {}
+        }
+    }
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    tab.suggestions = crate::completion::suggest(&line, &tab.history, &snippets, &paths);
+}
+
+/// The list under the cursor.
+fn draw_suggestions(app: &SshcraftApp, ui: &Ui, id: SessionId, rect: Rect, font: &egui::FontId) {
+    let Some(tab) = app.terminals.get(&id) else { return };
+    let list = tab.suggestions();
+    if list.is_empty() {
+        return;
+    }
+    let tokens = Tokens::get(ui.ctx());
+    let metrics = crate::terminal::CellMetrics::measure(ui.ctx(), font);
+    let cursor = tab.term.screen().cursor;
+    let at = rect.min + egui::vec2(f32::from(cursor.col) * metrics.width, (f32::from(cursor.row) + 1.0) * metrics.height);
+    egui::Area::new(egui::Id::unique(("sshcraft-suggestions", id))).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
+        egui::Frame::new().fill(tokens.panel).stroke(egui::Stroke::new(1.0, tokens.separator)).inner_margin(4.0).show(ui, |ui| {
+            for (i, s) in list.iter().enumerate() {
+                let color = if tab.selected == Some(i) { tokens.text_strong } else { tokens.text };
+                let text = egui::RichText::new(visible(&s.label)).monospace().color(color);
+                let text = if tab.selected == Some(i) { text.background_color(tokens.row_selected) } else { text };
+                ui.label(text);
+            }
+        });
+    });
+}
+
 /// The terminal of session `id` and its status line in the rest of `ui`; `focused` is the pane
 /// the keyboard and the terminal commands go to.
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
@@ -569,9 +759,16 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             _ => {}
         }
     }
+    // The suggestion list takes its keys before the terminal sees them.
+    let taken = if focused && !blocked { completion_keys(&ctx, tab) } else { None };
+    let line_context = crate::history::LineContext {
+        prompt: cursor_line(&tab.term),
+        alt_screen: tab.term.modes().contains(sshcraft_term::TermModes::ALT_SCREEN),
+        broadcast: false,
+    };
     let response = ui
         .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| {
-            TerminalView { term: &mut tab.term, palette: &palette, font, ligatures }.show(ui)
+            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures }.show(ui)
         })
         .inner;
     // Only the focused pane takes the keyboard.
@@ -589,10 +786,19 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     if !response.reports.is_empty() && can_send {
         send(app, id, &response.reports);
     }
-    if !response.input.is_empty() && can_send {
-        for target in broadcast_targets(app, id) {
-            send(app, target, &response.input);
+    let mut typed = taken.unwrap_or_default();
+    typed.extend_from_slice(&response.input);
+    if !typed.is_empty() && can_send {
+        let targets = broadcast_targets(app, id);
+        let broadcast = targets.len() > 1 || targets.first() != Some(&id);
+        for target in targets {
+            send(app, target, &typed);
         }
+        track_line(app, id, &typed, crate::history::LineContext { broadcast, ..line_context });
+    }
+    if focused {
+        update_suggestions(app, id);
+        draw_suggestions(app, ui, id, response.response.rect, &font);
     }
     if let Some(size) = response.resize
         && can_send

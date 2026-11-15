@@ -225,6 +225,10 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     if chosen != t.local_shell {
         t.local_shell = chosen;
     }
+    // Turning the history off deletes what it kept.
+    if app.data.settings.terminal.history && !t.history {
+        app.run_reported("history.clear", json!({}));
+    }
     save(app, |s| s.terminal = t);
 }
 
