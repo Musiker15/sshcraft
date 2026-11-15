@@ -119,7 +119,9 @@ async fn main() -> ExitCode {
             _ => Remote::window(link_dir, "mcp"),
         };
         let backend: Arc<dyn Backend> = match when_closed {
-            WhenClosed::Launch if bridge.is_none() => Arc::new(launch::Launching::new(remote, launch::app_path(), launch::LAUNCH_WAIT)),
+            WhenClosed::Launch if bridge.is_none() => {
+                Arc::new(launch::Launching::new(remote, launch::app_path(), launch::data_dir(), launch::LAUNCH_WAIT))
+            }
             _ => Arc::new(remote),
         };
         // `--agent` given explicitly names the agent; else the MCP client's own name does.

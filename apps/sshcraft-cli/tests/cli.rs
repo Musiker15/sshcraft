@@ -89,6 +89,8 @@ async fn launch_starts_the_app_and_waits_for_it() {
         .args(["mcp", "--when-closed", "launch"])
         .env("SSHCRAFT_LINK_DIR", link.path())
         .env("SSHCRAFT_APP_PATH", harmless())
+        // Never the user's own data folder (an SSHCraft may run on this computer).
+        .env("SSHCRAFT_DATA_DIR", link.path().join("data"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
