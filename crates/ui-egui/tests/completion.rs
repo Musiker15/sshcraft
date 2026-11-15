@@ -189,7 +189,9 @@ mod in_the_window {
             .block_on(session.execute(Caller::User, "history.record", json!({ "scope": format!("host:{}", host.0), "command": "echo old" })))
             .unwrap();
         h.state_mut().terminals.get_mut(&id).unwrap().reload_history();
-        h.run_steps(3);
+        // The history comes back from the engine a moment later; typed before, "ec" would find
+        // nothing to suggest (a slow FreeBSD VM showed it).
+        until(&mut h, "the reloaded history", |app| app.terminals.get(&id).is_some_and(|t| t.history().iter().any(|c| c == "echo old")));
         typed_echoed(&mut h, id, "ec");
         until(&mut h, "the suggestion", |app| app.terminals.get(&id).is_some_and(|t| !t.suggestions().is_empty()));
         key(&mut h, Key::Enter);

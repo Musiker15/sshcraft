@@ -86,6 +86,11 @@ impl SessionTab {
         self.selected
     }
 
+    /// The pane's history as loaded, newest first.
+    pub fn history(&self) -> &[String] {
+        &self.history
+    }
+
     /// Fetches this pane's history again.
     pub fn reload_history(&mut self) {
         self.history_loaded = false;
