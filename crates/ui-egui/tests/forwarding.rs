@@ -97,7 +97,6 @@ fn a_local_rule_is_created_started_and_stopped() {
     until(&mut h, "the stopped rule", |app| state_of(app, id) == "stopped");
 }
 
-
 /// Lets a few frames and answers pass.
 fn settle(h: &mut H) {
     for _ in 0..15 {

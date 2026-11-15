@@ -84,7 +84,9 @@ fn own_bindings_round_trip_through_the_settings() {
 #[test]
 fn every_action_of_the_tauri_version_still_works() {
     // A binding stored by the Tauri version keeps doing what it did there.
-    for (action, command) in [("toggleSidebar", "ui.terminal.sidebar"), ("toggleBroadcast", "ui.pane.broadcast"), ("bookmark", "ui.terminal.bookmark")] {
+    for (action, command) in
+        [("toggleSidebar", "ui.terminal.sidebar"), ("toggleBroadcast", "ui.pane.broadcast"), ("bookmark", "ui.terminal.bookmark")]
+    {
         let mut stored = BTreeMap::new();
         stored.insert(action.to_string(), vec!["Ctrl+Alt+F9".to_string()]);
         let b = Bindings::from_settings(&Shortcuts { bindings: stored });

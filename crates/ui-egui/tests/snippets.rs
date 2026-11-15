@@ -73,7 +73,6 @@ fn multi_line_uses_bracketed_paste_when_the_shell_has_it() {
     assert_eq!(paste_bytes("x\x1b[201~y", true, false), b"\x1b[200~x[201~y\x1b[201~", "no escape inside the paste");
 }
 
-
 /// Lets a few frames and answers pass.
 fn settle(h: &mut H) {
     for _ in 0..15 {

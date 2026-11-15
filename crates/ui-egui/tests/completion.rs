@@ -86,6 +86,7 @@ mod in_the_window {
 
     use egui::{Event, Key, Modifiers};
     use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
     use serde_json::json;
     use sshcraft_engine::testing::test_host;
     use sshcraft_engine::{Caller, Session, SessionId, SessionStatus};
@@ -93,7 +94,6 @@ mod in_the_window {
     use sshcraft_ssh::testing::TestAuth;
     use sshcraft_ui_egui::SshcraftApp;
     use sshcraft_ui_egui::state::ConnectRequest;
-    use egui_kittest::kittest::Queryable;
     use sshcraft_ui_egui::testing::app_harness;
 
     type H = Harness<'static, SshcraftApp>;

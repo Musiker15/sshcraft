@@ -341,7 +341,9 @@ pub fn remove_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                     .filter(|g| g.get("account") != Some(&account))
                     .map(|g| json!({ "account": g.get("account"), "role": g.get("role") }))
                     .collect();
-                session.execute(sshcraft_engine::Caller::User, "share.set_grants", json!({ "server": server, "area": area, "grants": remaining })).await
+                session
+                    .execute(sshcraft_engine::Caller::User, "share.set_grants", json!({ "server": server, "area": area, "grants": remaining }))
+                    .await
             },
             Box::new(|app, result| {
                 if let Err(e) = result {

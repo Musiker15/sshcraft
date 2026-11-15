@@ -90,12 +90,7 @@ impl Capture {
         // The shell showed the line before the cursor: what nothing echoes is a secret or was
         // typed ahead of the next prompt.
         let echoed = format!("{}{}", ctx.above, ctx.prompt).trim_end().ends_with(text.as_str());
-        let keep = self.kind == Kind::Shell
-            && echoed
-            && !self.edited
-            && !text.starts_with(' ')
-            && !text.is_empty()
-            && self.line.len() <= MAX_LINE;
+        let keep = self.kind == Kind::Shell && echoed && !self.edited && !text.starts_with(' ') && !text.is_empty() && self.line.len() <= MAX_LINE;
         self.reset();
         keep.then_some(text)
     }

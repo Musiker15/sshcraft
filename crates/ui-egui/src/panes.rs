@@ -153,7 +153,15 @@ fn slot_title(app: &SshcraftApp, slot: PaneSlot) -> String {
 
 /// The title bar of pane `index` (shown when the tab has more than one).
 /// `targets`: the panes a title can be dropped on, by pane index.
-fn title_bar(app: &SshcraftApp, ui: &mut Ui, rect: Rect, index: usize, slot: PaneSlot, focused: bool, targets: &[(usize, Rect)]) -> Option<PaneAction> {
+fn title_bar(
+    app: &SshcraftApp,
+    ui: &mut Ui,
+    rect: Rect,
+    index: usize,
+    slot: PaneSlot,
+    focused: bool,
+    targets: &[(usize, Rect)],
+) -> Option<PaneAction> {
     let tokens = Tokens::get(ui.ctx());
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_HEIGHT));
     let response = ui.interact(bar, ui.scope_id().with(("sshcraft-pane-title", index)), Sense::click_and_drag());

@@ -99,7 +99,13 @@ fn a_sign_in_question_of_a_hidden_tab_does_not_take_the_keyboard() {
     until(&mut h, "the question", |app| !app.prompts.open.is_empty());
     assert_eq!(h.state().ui.page, Page::Keys);
     type_line(&mut h, "meant-elsewhere");
-    assert_eq!(h.state().prompts.open[0].answers[0], "", "typing meant for another place stays out of the answer; page {:?} session {:?}", h.state().ui.page, h.state().prompts.open[0].session);
+    assert_eq!(
+        h.state().prompts.open[0].answers[0],
+        "",
+        "typing meant for another place stays out of the answer; page {:?} session {:?}",
+        h.state().ui.page,
+        h.state().prompts.open[0].session
+    );
 }
 
 #[test]
@@ -276,7 +282,8 @@ fn every_dialog_counts_for_late_answers() {
     use sshcraft_ui_egui::forms::shape;
     use sshcraft_ui_egui::state::UiState;
     let closed = shape(&UiState::default());
-    let opened: [(&str, fn(&mut UiState)); 4] = [
+    type Open = fn(&mut UiState);
+    let opened: [(&str, Open); 4] = [
         ("create account", |ui| ui.sync.create = Some(Default::default())),
         ("join account", |ui| ui.sync.join = Some(Default::default())),
         ("delete logs", |ui| ui.logs.confirm_delete = Some(vec!["a".into()])),

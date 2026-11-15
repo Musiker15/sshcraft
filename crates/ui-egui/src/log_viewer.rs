@@ -54,7 +54,8 @@ impl LogViewer {
         marks.sort_by_key(offset_of);
         let term = Terminal::new(TermSize::clamped(160, 40), &TermConfig { scrollback: MAX_LINES, clipboard_write: false });
         let plain = sshcraft_model::logtext::plain_text(bytes);
-        let mut viewer = Self { id, bytes: bytes.to_vec(), term, plain, line_starts, marks, beginning_missing: false, comment: None, search: String::new() };
+        let mut viewer =
+            Self { id, bytes: bytes.to_vec(), term, plain, line_starts, marks, beginning_missing: false, comment: None, search: String::new() };
         viewer.lay_out();
         viewer
     }

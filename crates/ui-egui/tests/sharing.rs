@@ -178,7 +178,11 @@ fn removing_a_recipient_keeps_one_added_since_the_list_was_read() {
     t.h.run_steps(2);
     t.h.get_by_label("Remove").click();
     let emails = |t: &Two| -> Vec<String> {
-        shares(t).iter().flat_map(|s| s["grants"].as_array().cloned().unwrap_or_default()).filter_map(|g| g["email"].as_str().map(str::to_string)).collect()
+        shares(t)
+            .iter()
+            .flat_map(|s| s["grants"].as_array().cloned().unwrap_or_default())
+            .filter_map(|g| g["email"].as_str().map(str::to_string))
+            .collect()
     };
     let deadline = Instant::now() + Duration::from_secs(20);
     while emails(&t).contains(&"bob@example.org".to_string()) {

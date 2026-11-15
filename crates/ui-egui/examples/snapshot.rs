@@ -80,8 +80,16 @@ fn sample_data(session: &Session) -> Result<(), String> {
             json!({ "id": uuid::Uuid::new_v4(), "name": name, "group_id": group, "tags": tags, "settings": { "address": address, "port": 22 } });
         run(session, "host.save", json!({ "host": host }))?;
     }
-    run(session, "snippet.save", json!({ "snippet": { "id": uuid::Uuid::new_v4(), "name": "restart app", "package": "ops", "content": "sudo systemctl restart app", "default_targets": [] } }))?;
-    run(session, "snippet.save", json!({ "snippet": { "id": uuid::Uuid::new_v4(), "name": "disk usage", "content": "df -h", "default_targets": [] } }))?;
+    run(
+        session,
+        "snippet.save",
+        json!({ "snippet": { "id": uuid::Uuid::new_v4(), "name": "restart app", "package": "ops", "content": "sudo systemctl restart app", "default_targets": [] } }),
+    )?;
+    run(
+        session,
+        "snippet.save",
+        json!({ "snippet": { "id": uuid::Uuid::new_v4(), "name": "disk usage", "content": "df -h", "default_targets": [] } }),
+    )?;
     run(session, "key.generate", json!({ "name": "laptop", "spec": { "type": "ed25519" }, "passphrase": null }))?;
     run(session, "key.generate", json!({ "name": "deploy-ci", "spec": { "type": "ecdsa", "curve": "nistp256" }, "passphrase": null }))?;
     Ok(())
