@@ -1,0 +1,49 @@
+{
+  "id": "sshcraft",
+  "name": "SSHCraft",
+  "upgradeCode": "E577A976-EE1A-4C98-96B7-D3A2EBE306CB",
+  "suiteFolder": "",
+  "sources": [
+    "sshcraft.wxs"
+  ],
+  "icon": "assets/app-icon/sshcraft.ico",
+  "localization": [],
+  "extensions": [],
+  "payloads": [
+    "sshcraft-cli.exe",
+    "sshcraft.exe"
+  ],
+  "registry": [
+    [
+      "-1",
+      "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\sshcraft.exe",
+      "",
+      "[#SshcraftExe]"
+    ],
+    [
+      "-1",
+      "Software\\SSHCraft\\Installer",
+      "DesktopShortcut",
+      "[DESKTOPSHORTCUT]"
+    ],
+    [
+      "-1",
+      "Software\\SSHCraft\\Installer",
+      "DesktopShortcutComponent",
+      "#1"
+    ],
+    [
+      "-1",
+      "Software\\SSHCraft\\Installer",
+      "CliOnPath",
+      "#1"
+    ],
+    [
+      "-1",
+      "Software\\SSHCraft\\Installer",
+      "CliOnPathMachine",
+      "#1"
+    ]
+  ],
+  "mode": "dualScope"
+}
