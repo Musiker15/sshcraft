@@ -28,10 +28,17 @@ impl raw_window_handle::HasDisplayHandle for NoWindow {
 /// The app on a fresh engine in `dir` (English, whatever the machine's language), its engine
 /// session and the context it was made with, without a harness: for budgets that time frames.
 pub fn app_on(dir: &Path) -> (SshcraftApp, Session, egui::Context) {
+    app_on_with(dir, |_| {})
+}
+
+/// [`app_on`] on an engine whose test configuration `configure` changed (an agent, a pass-cli).
+pub fn app_on_with(dir: &Path, configure: impl FnOnce(&mut SessionConfig)) -> (SshcraftApp, Session, egui::Context) {
     let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap());
     let session = {
         let _inside = runtime.enter();
-        Session::open(SessionConfig::for_tests(dir)).unwrap().0
+        let mut config = SessionConfig::for_tests(dir);
+        configure(&mut config);
+        Session::open(config).unwrap().0
     };
     // Tests read English labels, whatever the machine's language.
     let mut settings = runtime.block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", serde_json::json!({}))).unwrap();
@@ -50,7 +57,18 @@ pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
 
 /// [`app_harness`] from `builder` (a renderer for pictures, another size).
 pub fn app_harness_from(builder: egui_kittest::HarnessBuilder<SshcraftApp>, dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
-    let (app, session, _ctx) = app_on(dir);
+    harness_for(builder, app_on(dir))
+}
+
+/// [`app_harness`] on an engine whose test configuration `configure` changed.
+pub fn app_harness_with(dir: &Path, configure: impl FnOnce(&mut SessionConfig)) -> (Harness<'static, SshcraftApp>, Session) {
+    harness_for(Harness::builder(), app_on_with(dir, configure))
+}
+
+fn harness_for(
+    builder: egui_kittest::HarnessBuilder<SshcraftApp>,
+    (app, session, _ctx): (SshcraftApp, Session, egui::Context),
+) -> (Harness<'static, SshcraftApp>, Session) {
     // A frame as long as on a 60 Hz display, so double clicks fall inside egui's time for them.
     let harness = builder.with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
         |ui, app: &mut SshcraftApp| {

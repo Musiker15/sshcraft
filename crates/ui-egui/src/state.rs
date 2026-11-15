@@ -64,6 +64,10 @@ pub struct UiState {
     #[serde(skip)]
     pub key_confirm: Option<(String, String)>,
     #[serde(skip)]
+    pub agent_keys: crate::pages::key_sources::AgentKeys,
+    #[serde(skip)]
+    pub passcli: Option<crate::pages::key_sources::PassCliView>,
+    #[serde(skip)]
     pub picker: Option<crate::session_tab::Picker>,
     #[serde(skip)]
     pub import: Option<crate::pages::import_export::ImportState>,

@@ -453,6 +453,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             app.ui.key_dialog =
                 Some(KeyDialog::Import(ImportForm { name: String::new(), text: String::new(), passphrase: String::new(), save_passphrase: true }));
         }
+        if ui.button(tr("Import from Proton Pass")).clicked() {
+            crate::pages::key_sources::open_passcli(app);
+        }
         if let Some(support) = app.data.security
             && (support.fido2 || support.hello)
             && ui.button(tr("Security key")).clicked()
@@ -469,6 +472,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     for key in &keys {
         key_row(app, ui, key);
     }
+    ui.add_space(20.0);
+    crate::pages::key_sources::agent_section(app, ui);
     ui.add_space(20.0);
     ui.horizontal(|ui| {
         ui.heading(tr("Identities"));
@@ -511,4 +516,5 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     dialog(app, &ctx);
     identity_dialog(app, &ctx);
     confirm_delete(app, &ctx);
+    crate::pages::key_sources::passcli_dialog(app, &ctx);
 }

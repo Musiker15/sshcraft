@@ -223,6 +223,24 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "{shortcut} (outside the terminal only)" => "{shortcut} (nur außerhalb des Terminals)",
         "Change" => "Ändern",
         "Default" => "Standard",
+        // Keys from elsewhere
+        "Import from Proton Pass" => "Aus Proton Pass importieren",
+        "In the SSH agent" => "Im SSH-Agent",
+        "Refresh" => "Aktualisieren",
+        "The SSH agent cannot be reached. Is Proton Pass or another agent running?" => {
+            "Der SSH-Agent ist nicht erreichbar. Läuft Proton Pass oder ein anderer Agent?"
+        }
+        "The SSH agent holds no key." => "Der SSH-Agent hat keinen Schlüssel.",
+        "Agent key" => "Agent-Schlüssel",
+        "pass-cli is not installed. Install Proton Pass's command line to import keys from it." => {
+            "pass-cli ist nicht installiert. Installiere die Kommandozeile von Proton Pass, um Schlüssel daraus zu importieren."
+        }
+        "pass-cli is not signed in. Run pass-cli login, then try again." => {
+            "pass-cli ist nicht angemeldet. Führe pass-cli login aus und versuche es dann erneut."
+        }
+        "pass-cli did not answer." => "pass-cli hat nicht geantwortet.",
+        "Proton Pass holds no SSH key." => "Proton Pass enthält keinen SSH-Schlüssel.",
+        "Key imported." => "Schlüssel importiert.",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."
