@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 13] = [
+static COMMANDS: [UiCommand; 18] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
@@ -52,6 +52,11 @@ static COMMANDS: [UiCommand; 13] = [
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.previous", "prevTab", "Previous tab", &["Ctrl+Shift+Tab", "Ctrl+PageUp"]) },
     cmd("ui.page.hosts", "hostsPage", "Hosts", &[]),
     cmd("ui.page.keys", "keysPage", "Keys", &[]),
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.split", "splitPane", "Split: add a pane", &["Ctrl+Shift+D"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.close", "closePane", "Close the focused pane", &["Ctrl+Shift+X"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.next", "nextPane", "Next pane", &["Ctrl+Shift+PageDown"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.previous", "prevPane", "Previous pane", &["Ctrl+Shift+PageUp"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.layout", "toggleLayout", "Switch between grid and one large pane", &["Ctrl+Shift+M"]) },
     cmd("ui.page.snippets", "snippetsPage", "Snippets", &[]),
     cmd("ui.page.forwarding", "forwardingPage", "Port forwarding", &[]),
     cmd("ui.page.logs", "logsPage", "Logs", &[]),
@@ -85,6 +90,11 @@ pub fn run(app: &mut SshcraftApp, id: &str) {
         "ui.tab.close" => app.close_tab(),
         "ui.tab.next" => app.cycle_tab(1),
         "ui.tab.previous" => app.cycle_tab(-1),
+        "ui.pane.split" => app.split(),
+        "ui.pane.close" => app.close_pane(),
+        "ui.pane.next" => app.focus_pane(1),
+        "ui.pane.previous" => app.focus_pane(-1),
+        "ui.pane.layout" => app.toggle_layout(),
         "ui.page.hosts" => app.ui.page = Page::Hosts,
         "ui.page.keys" => app.ui.page = Page::Keys,
         "ui.page.snippets" => app.ui.page = Page::Snippets,

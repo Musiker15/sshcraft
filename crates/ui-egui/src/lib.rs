@@ -10,6 +10,7 @@ pub mod i18n;
 pub mod keymap;
 pub mod pages;
 pub mod palette;
+pub mod panes;
 pub mod prompts;
 pub mod runner;
 pub mod session_tab;

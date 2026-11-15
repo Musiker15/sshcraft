@@ -5,7 +5,7 @@ use egui::{FontId, Sense, Ui, vec2};
 
 use crate::app::SshcraftApp;
 use crate::i18n::tr;
-use crate::state::{Page, TabKind};
+use crate::state::Page;
 use crate::theme::Tokens;
 use crate::widgets::elided_label;
 use crate::widgets::icons::{Icon, draw};
@@ -49,17 +49,27 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let mut select = None;
     let mut close = None;
+    let mut merge = None;
+    let mut rects = Vec::new();
+    let mut dropped = None;
+    // Last frame's places of the tabs: the drag areas lie under the tabs' own buttons.
+    let places_id = egui::Id::unique("sshcraft-tab-places");
+    let last: Vec<egui::Rect> = ui.ctx().data(|d| d.get_temp(places_id)).unwrap_or_default();
     ui.horizontal(|ui| {
+        for (i, place) in last.iter().enumerate().take(app.ui.tabs.len()) {
+            let handle = ui.interact(*place, ui.scope_id().with(("sshcraft-tab", i)), Sense::drag());
+            handle.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, tr("Tab")));
+            if handle.drag_stopped() {
+                dropped = Some(i);
+            }
+        }
         for (i, tab) in app.ui.tabs.iter().enumerate() {
             let selected = app.ui.page == Page::Tab(i);
             let frame =
                 egui::Frame::new().fill(if selected { tokens.panel } else { tokens.bg }).corner_radius(tokens.radius).inner_margin(vec2(8.0, 4.0));
-            frame.show(ui, |ui| {
+            let shown = frame.show(ui, |ui| {
                 ui.set_max_width(MAX_TAB_WIDTH);
-                let icon = match tab.kind {
-                    TabKind::New => Icon::Plus,
-                    TabKind::Session { .. } => Icon::Terminal,
-                };
+                let icon = if tab.panes.sessions().next().is_some() { Icon::Terminal } else { Icon::Plus };
                 let (icon_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                 draw(ui.painter(), icon, icon_rect, tokens.text_dim);
                 let color = if selected { tokens.text_strong } else { tokens.text };
@@ -75,6 +85,8 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                     close = Some(i);
                 }
             });
+            // Dragging a tab onto another merges its panes into that one.
+            rects.push(shown.response.rect);
         }
         let (plus, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
         draw(ui.painter(), Icon::Plus, plus.shrink(5.0), tokens.text_dim);
@@ -83,8 +95,19 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
             app.open_new_tab();
         }
     });
+    ui.ctx().data_mut(|d| d.insert_temp(places_id, rects.clone()));
+    if let Some(from) = dropped
+        && let Some(at) = ui.ctx().pointer_interact_pos()
+        && let Some(to) = rects.iter().position(|r| r.contains(at))
+        && to != from
+    {
+        merge = Some((from, to));
+    }
     if let Some(i) = select {
         app.ui.page = Page::Tab(i);
+    }
+    if let Some((from, to)) = merge {
+        app.merge_tabs(from, to);
     }
     if let Some(i) = close {
         app.close_tab_at(i);
@@ -92,7 +115,7 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
 }
 
 /// The new-tab page: hosts to connect to, the local terminal and the serial port.
-fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
+pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     ui.add_space(16.0);
     ui.heading(tr("New tab"));
@@ -153,9 +176,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         Page::Forwarding => crate::pages::forwarding::show(app, ui),
         Page::Logs => crate::pages::logs::show(app, ui),
         Page::Settings => crate::pages::settings::show(app, ui),
-        Page::Tab(i) => match app.ui.tabs.get(i).map(|t| t.kind.clone()) {
-            Some(TabKind::New) | None => new_tab_page(app, ui),
-            Some(TabKind::Session { session }) => crate::session_tab::show(app, ui, session, i),
-        },
+        Page::Tab(i) if i < app.ui.tabs.len() => crate::panes::show(app, ui, i),
+        Page::Tab(_) => new_tab_page(app, ui),
     });
 }

@@ -12,7 +12,7 @@ use sshcraft_term::{Notice, TermConfig, TermSize, Terminal};
 
 use crate::app::SshcraftApp;
 use crate::i18n::{tr, trf};
-use crate::state::{ConnectRequest, Page, TabKind, TabState};
+use crate::state::{ConnectRequest, Page, PaneSlot, Panes, TabState};
 use crate::terminal::pump::{FrameBudget, Pump};
 use crate::terminal::{TermPalette, TerminalView, install_terminal_font};
 use crate::theme::Tokens;
@@ -31,6 +31,8 @@ pub struct SessionTab {
     pub name: String,
     /// A program set the title.
     titled: bool,
+    /// The pane's title: the program's, else the host's or the shell's name.
+    pub title: String,
     pub term: Terminal,
     pump: Option<Pump>,
     pub status: Option<SessionStatus>,
@@ -47,17 +49,34 @@ pub enum Picker {
     Serial { ports: Vec<String>, settings: Value },
 }
 
-fn tab_index(app: &SshcraftApp, id: SessionId) -> Option<usize> {
-    app.ui.tabs.iter().position(|t| matches!(t.kind, TabKind::Session { session } if session == id))
+/// The tab and pane that show session `id`.
+pub fn pane_of(app: &SshcraftApp, id: SessionId) -> Option<(usize, usize)> {
+    let slot = PaneSlot::Session { session: id };
+    app.ui.tabs.iter().enumerate().find_map(|(t, tab)| tab.panes.position(slot).map(|p| (t, p)))
+}
+
+/// Each tab's title is the title of its focused pane.
+pub fn refresh_titles(app: &mut SshcraftApp) {
+    for tab in &mut app.ui.tabs {
+        let title = match tab.panes.focused_slot() {
+            Some(PaneSlot::Session { session }) => app.terminals.get(&session).map(|t| t.title.clone()).unwrap_or_default(),
+            // A new-pane page keeps the tab's title, or names it when it has none.
+            _ if !tab.title.is_empty() => continue,
+            _ => tr("New tab").to_string(),
+        };
+        if tab.title != title {
+            tab.title = title;
+        }
+    }
 }
 
 fn host_name(app: &SshcraftApp, host: HostId) -> Option<String> {
     app.data.hosts.iter().find(|r| r.host.id == host).map(|r| r.host.name.clone())
 }
 
-/// Opens a session for `target` in the tab `replace` (a new-tab page or the tab being
-/// reconnected), or in a new tab.
-fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<usize>) {
+/// Opens a session for `target` in the pane `replace` (a new-pane page, or the pane being
+/// reconnected), or in a new tab when that pane is gone.
+fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<PaneSlot>) {
     // A connection to this host is already on its way (a double click): one is enough.
     if host.is_some() && app.ui.connecting.contains(&host) {
         return;
@@ -67,10 +86,10 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
     let scrollback = app.data.settings.terminal.scrollback;
     let params = json!({ "target": target, "cols": 100, "rows": 30 });
-    let old = replace.and_then(|i| match app.ui.tabs.get(i).map(|t| &t.kind) {
-        Some(TabKind::Session { session }) => Some(*session),
+    let old = match replace {
+        Some(PaneSlot::Session { session }) => Some(session),
         _ => None,
-    });
+    };
     app.runner.run(
         "session.open",
         params,
@@ -91,45 +110,58 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
             let pump = app.session.attach_terminal(id).map(Pump::new);
             let term = Terminal::new(TermSize::clamped(100, 30), &TermConfig { clipboard_write, scrollback });
             let title = host.and_then(|h| host_name(app, h)).unwrap_or_else(|| name.clone());
-            let tab = TabState { title: visible(&title), kind: TabKind::Session { session: id } };
-            // The tab it was asked for, if it is still what it was.
-            let slot = replace.filter(|&i| match app.ui.tabs.get(i).map(|t| &t.kind) {
-                Some(TabKind::New) => true,
-                Some(TabKind::Session { session }) => Some(*session) == old,
-                None => false,
-            });
-            let index = match slot {
-                Some(i) => {
+            let slot = PaneSlot::Session { session: id };
+            // The pane it was asked for, if it is still there; else a tab of its own.
+            let place = replace.and_then(|wanted| app.ui.tabs.iter().enumerate().find_map(|(t, tab)| tab.panes.position(wanted).map(|p| (t, p))));
+            let (index, pane) = match place {
+                Some((t, p)) => {
                     if let Some(old) = old {
                         app.terminals.remove(&old);
                         // The old session ended; closing it finishes its log and frees it.
                         app.run_reported("session.close", json!({ "id": old }));
                     }
-                    if let Some(slot) = app.ui.tabs.get_mut(i) {
-                        *slot = tab;
+                    if let Some(tab) = app.ui.tabs.get_mut(t)
+                        && let Some(cell) = tab.panes.panes.get_mut(p)
+                    {
+                        *cell = slot;
                     }
-                    i
+                    (t, p)
                 }
                 None => {
-                    app.ui.tabs.push(tab);
-                    app.ui.tabs.len() - 1
+                    app.ui.tabs.push(TabState { title: visible(&title), panes: Panes::single(slot) });
+                    (app.ui.tabs.len() - 1, 0)
                 }
             };
             // Shown only if the user still is where they asked from; otherwise it waits in its tab.
             let follow = app.ui.page == asked_from;
             if follow {
                 app.ui.page = Page::Tab(index);
+                if let Some(tab) = app.ui.tabs.get_mut(index) {
+                    tab.panes.focused = pane;
+                }
             }
-            let session_tab = SessionTab { id, host, target, name, titled: false, term, pump, status: None, clipboard: None, focus: follow };
+            let session_tab = SessionTab {
+                id,
+                host,
+                target,
+                name,
+                titled: false,
+                title: visible(&title),
+                term,
+                pump,
+                status: None,
+                clipboard: None,
+                focus: follow,
+            };
             app.terminals.insert(id, session_tab);
         }),
     );
 }
 
-/// The tab to replace when a connection is asked for on a new-tab page.
-fn new_tab_slot(app: &SshcraftApp) -> Option<usize> {
+/// The new-pane page a connection asked for on it goes into: the focused pane of the shown tab.
+fn new_tab_slot(app: &SshcraftApp) -> Option<PaneSlot> {
     match app.ui.page {
-        Page::Tab(i) if matches!(app.ui.tabs.get(i).map(|t| &t.kind), Some(TabKind::New)) => Some(i),
+        Page::Tab(i) => app.ui.tabs.get(i).and_then(|t| t.panes.focused_slot()).filter(|s| matches!(s, PaneSlot::New { .. })),
         _ => None,
     }
 }
@@ -230,9 +262,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                     let title: String = visible(&title).chars().take(MAX_TITLE).collect();
                     if let Some(tab) = app.terminals.get_mut(&id) {
                         tab.titled = true;
-                    }
-                    if let Some(i) = tab_index(app, id) {
-                        app.ui.tabs[i].title = title;
+                        tab.title = title;
                     }
                 }
                 Notice::ResetTitle => {
@@ -243,16 +273,13 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                 Notice::ClipboardWrite(text) => clipboard_write(app, ctx, id, host, text),
             }
         }
-        // The host's name once the data has it, unless a program named the tab.
-        if let Some(tab) = app.terminals.get(&id)
-            && !tab.titled
+        // The host's name once the data has it, unless a program named the pane.
+        let named =
+            app.terminals.get(&id).filter(|t| !t.titled).map(|t| visible(&t.host.and_then(|h| host_name(app, h)).unwrap_or_else(|| t.name.clone())));
+        if let Some(title) = named
+            && let Some(tab) = app.terminals.get_mut(&id)
         {
-            let title = visible(&tab.host.and_then(|h| host_name(app, h)).unwrap_or_else(|| tab.name.clone()));
-            if let Some(i) = tab_index(app, id)
-                && app.ui.tabs[i].title != title
-            {
-                app.ui.tabs[i].title = title;
-            }
+            tab.title = title;
         }
     }
     // More output than one frame takes: the next frame continues. New output wakes the window
@@ -358,7 +385,7 @@ fn status_text(status: Option<&SessionStatus>) -> (String, bool) {
     }
 }
 
-fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
+fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
     let tokens = Tokens::get(ui.ctx());
     let Some(tab) = app.terminals.get(&id) else { return };
     let (text, is_end) = status_text(tab.status.as_ref());
@@ -387,7 +414,7 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) 
         }
     });
     if reconnect && let Some(tab) = app.terminals.get(&id) {
-        open(app, tab.target.clone(), tab.name.clone(), tab.host, Some(index));
+        open(app, tab.target.clone(), tab.name.clone(), tab.host, Some(PaneSlot::Session { session: id }));
     }
 }
 
@@ -404,12 +431,14 @@ fn app_shown_changed(shown: &mut Option<SessionId>, id: SessionId) -> bool {
 }
 
 /// The page of a session tab: the terminal and its status line.
-pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
+/// The terminal of session `id` and its status line in the rest of `ui`; `focused` is the pane
+/// the keyboard and the terminal commands go to.
+pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let full = ui.available_rect_before_wrap();
     let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT).max(full.min.y)));
     let status_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), full.max);
     let ctx = ui.ctx().clone();
-    let pending = std::mem::take(&mut app.ui.pending);
+    let pending = if focused { std::mem::take(&mut app.ui.pending) } else { Vec::new() };
     let appearance = &app.data.settings.appearance;
     // Loading a font is slow: only when the setting changes.
     if app.term_font.as_ref().is_none_or(|(name, _)| *name != appearance.font_family) {
@@ -440,13 +469,14 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
             TerminalView { term: &mut tab.term, palette: &palette, font, ligatures }.show(ui)
         })
         .inner;
-    let first = std::mem::take(&mut tab.focus);
-    let switched = app_shown_changed(&mut app.ui.shown_terminal, id);
+    // Only the focused pane takes the keyboard.
+    let first = focused && std::mem::take(&mut tab.focus);
+    let switched = focused && app_shown_changed(&mut app.ui.shown_terminal, id);
     let Some(tab) = app.terminals.get_mut(&id) else { return };
-    if blocked {
+    if blocked || (!focused && response.response.has_focus()) {
         // A question is open: what is typed belongs to it, never to the shell behind it.
         response.response.surrender_focus();
-    } else if first || switched || ctx.memory(|m| m.focused().is_none()) {
+    } else if focused && (first || switched || ctx.memory(|m| m.focused().is_none())) {
         response.response.request_focus();
     }
     let can_send = !ended(tab.status.as_ref()) && !blocked;
@@ -464,7 +494,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
     if let Some(url) = response.open_link {
         app.run_reported("link.open", json!({ "url": url }));
     }
-    ui.scope_builder(UiBuilder::new().max_rect(status_rect), |ui| status_line(app, ui, id, index));
+    ui.scope_builder(UiBuilder::new().max_rect(status_rect), |ui| status_line(app, ui, id));
 }
 
 /// The shell and serial pickers.

@@ -13,7 +13,7 @@ use sshcraft_model::model::HostId;
 use sshcraft_ssh::testing::{TestAuth, TestServer};
 use sshcraft_term::{GridPoint, SelectionKind};
 use sshcraft_ui_egui::SshcraftApp;
-use sshcraft_ui_egui::state::{ConnectRequest, Page, TabKind};
+use sshcraft_ui_egui::state::{ConnectRequest, Page, PaneSlot};
 use sshcraft_ui_egui::testing::app_harness;
 
 type H = Harness<'static, SshcraftApp>;
@@ -85,7 +85,7 @@ fn connecting_opens_a_terminal_tab() {
     until(&mut h, "the connection", |app| connected(app, tab));
     assert!(h.state().in_terminal());
     let Page::Tab(i) = h.state().ui.page else { panic!("a tab is shown") };
-    assert!(matches!(&h.state().ui.tabs[i].kind, TabKind::Session { session, .. } if *session == tab));
+    assert_eq!(h.state().ui.tabs[i].panes.panes, [PaneSlot::Session { session: tab }]);
     assert_eq!(h.state().ui.tabs[i].title, "web");
     assert!(h.query_by_role(egui::accesskit::Role::Terminal).is_some(), "the terminal is on screen");
     assert!(h.query_by_label("Connected").is_some(), "the status line says so");

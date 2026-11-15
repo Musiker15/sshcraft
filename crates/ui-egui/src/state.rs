@@ -19,21 +19,35 @@ pub enum Page {
     Tab(usize),
 }
 
-/// What a tab shows.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One place in a tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TabKind {
-    /// The new-tab page: recent hosts, local shell, serial port.
-    New,
-    /// A terminal of an engine session.
+pub enum PaneSlot {
+    /// A page to pick a connection (hosts, local shell, serial port); `id` tells it apart.
+    New { id: u64 },
+    /// The terminal of an engine session.
     Session { session: sshcraft_engine::SessionId },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The panes of a tab: 1 to [`crate::panes::MAX_PANES`] in a near-square grid, or one large
+/// with the others listed beside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Panes {
+    pub panes: Vec<PaneSlot>,
+    pub focused: usize,
+    /// One pane large, the others listed.
+    pub focus_layout: bool,
+    /// The share of the width of each grid column and the height of each row; sums to 1.
+    pub col_sizes: Vec<f32>,
+    pub row_sizes: Vec<f32>,
+    /// Typing goes to every pane with a session.
+    pub broadcast: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TabState {
     pub title: String,
-    #[serde(flatten)]
-    pub kind: TabKind,
+    pub panes: Panes,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -41,6 +55,8 @@ pub struct TabState {
 pub struct UiState {
     pub page: Page,
     pub tabs: Vec<TabState>,
+    /// The id the next new-pane page gets.
+    pub next_pane: u64,
     pub hosts: crate::pages::hosts::HostsView,
     pub settings: crate::pages::settings::SettingsView,
     #[serde(skip)]

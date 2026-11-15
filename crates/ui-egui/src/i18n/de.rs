@@ -251,6 +251,21 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Snippets" => "Snippets",
         "Port forwarding" => "Portweiterleitung",
         "Logs" => "Protokolle",
+        // Panes
+        "New pane" => "Neuer Bereich",
+        "Pane title" => "Bereichstitel",
+        "Close pane" => "Bereich schließen",
+        "Move to its own tab" => "In eigenen Tab verschieben",
+        "Maximize" => "Groß zeigen",
+        "Resize columns" => "Spaltenbreite ändern",
+        "Resize rows" => "Zeilenhöhe ändern",
+        "Tab" => "Tab",
+        "A tab holds at most 16 panes." => "Ein Tab fasst höchstens 16 Bereiche.",
+        "Split: add a pane" => "Teilen: Bereich hinzufügen",
+        "Close the focused pane" => "Aktiven Bereich schließen",
+        "Next pane" => "Nächster Bereich",
+        "Previous pane" => "Vorheriger Bereich",
+        "Switch between grid and one large pane" => "Zwischen Raster und einem großen Bereich wechseln",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

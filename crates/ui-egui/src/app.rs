@@ -8,7 +8,7 @@ use crate::data::{self, Data, Refresh};
 use crate::i18n::tr;
 use crate::keymap::Bindings;
 use crate::runner::Runner;
-use crate::state::{Page, TabKind, TabState, UiState};
+use crate::state::{Page, PaneSlot, Panes, TabState, UiState};
 use crate::toasts::Toasts;
 
 pub struct SshcraftApp {
@@ -106,10 +106,103 @@ impl SshcraftApp {
         }
     }
 
+    /// A new-pane page with an id no other pane has.
+    pub fn new_pane(&mut self) -> PaneSlot {
+        self.ui.next_pane = self.ui.next_pane.wrapping_add(1);
+        PaneSlot::New { id: self.ui.next_pane }
+    }
+
     /// Opens the new-tab page as a tab and shows it.
     pub fn open_new_tab(&mut self) {
-        self.ui.tabs.push(TabState { title: tr("New tab").to_string(), kind: TabKind::New });
+        let slot = self.new_pane();
+        self.ui.tabs.push(TabState { title: tr("New tab").to_string(), panes: Panes::single(slot) });
         self.ui.page = Page::Tab(self.ui.tabs.len() - 1);
+    }
+
+    /// Adds a new-pane page beside the focused pane of the shown tab.
+    pub fn split(&mut self) {
+        let Page::Tab(i) = self.ui.page else { return };
+        let slot = self.new_pane();
+        let Some(tab) = self.ui.tabs.get_mut(i) else { return };
+        if !tab.panes.add(slot) {
+            self.toasts.error(tr("A tab holds at most 16 panes."));
+        }
+    }
+
+    /// Closes the focused pane of the shown tab (and its session).
+    pub fn close_pane(&mut self) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(focused) = self.ui.tabs.get(i).map(|t| t.panes.focused)
+        {
+            self.close_pane_at(i, focused);
+        }
+    }
+
+    /// Closes pane `pane` of tab `tab` (and its session); the last pane closes the tab.
+    pub fn close_pane_at(&mut self, tab: usize, pane: usize) {
+        let Some(t) = self.ui.tabs.get_mut(tab) else { return };
+        if t.panes.panes.len() <= 1 {
+            self.close_tab_at(tab);
+            return;
+        }
+        if let Some(PaneSlot::Session { session }) = t.panes.remove(pane) {
+            self.terminals.remove(&session);
+            self.run_reported("session.close", serde_json::json!({ "id": session }));
+        }
+    }
+
+    /// Moves pane `pane` of tab `tab` into a tab of its own, without reconnecting.
+    pub fn move_pane_to_own_tab(&mut self, tab: usize, pane: usize) {
+        let Some(t) = self.ui.tabs.get_mut(tab) else { return };
+        if t.panes.panes.len() <= 1 {
+            return;
+        }
+        let Some(slot) = t.panes.remove(pane) else { return };
+        self.ui.tabs.push(TabState { title: String::new(), panes: Panes::single(slot) });
+        self.ui.page = Page::Tab(self.ui.tabs.len() - 1);
+    }
+
+    /// Moves the panes of tab `from` into tab `to` (up to 16; the rest stays in `from`).
+    pub fn merge_tabs(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.ui.tabs.len() || to >= self.ui.tabs.len() {
+            return;
+        }
+        let mut moving = std::mem::take(&mut self.ui.tabs[from].panes.panes);
+        let room = crate::panes::MAX_PANES.saturating_sub(self.ui.tabs[to].panes.panes.len());
+        let rest = moving.split_off(room.min(moving.len()));
+        let target = &mut self.ui.tabs[to].panes;
+        target.panes.extend(moving);
+        target.reset_sizes();
+        if rest.is_empty() {
+            self.ui.tabs.remove(from);
+            let to = if from < to { to - 1 } else { to };
+            self.ui.page = Page::Tab(to);
+        } else {
+            let left = &mut self.ui.tabs[from].panes;
+            left.panes = rest;
+            left.focused = 0;
+            left.reset_sizes();
+            self.ui.page = Page::Tab(to);
+        }
+    }
+
+    /// Moves the focus `step` panes on in the shown tab, wrapping around.
+    pub fn focus_pane(&mut self, step: isize) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(t) = self.ui.tabs.get_mut(i)
+        {
+            let count = t.panes.panes.len().max(1) as isize;
+            t.panes.focused = (t.panes.focused as isize + step).rem_euclid(count) as usize;
+        }
+    }
+
+    /// One pane large or all in the grid, in the shown tab.
+    pub fn toggle_layout(&mut self) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(t) = self.ui.tabs.get_mut(i)
+        {
+            t.panes.focus_layout = !t.panes.focus_layout;
+        }
     }
 
     /// Closes the shown tab (and its session); the tab before it, or the hosts page, comes next.
@@ -126,7 +219,7 @@ impl SshcraftApp {
             return;
         }
         let tab = self.ui.tabs.remove(i);
-        if let TabKind::Session { session } = tab.kind {
+        for session in tab.panes.sessions() {
             self.terminals.remove(&session);
             self.run_reported("session.close", serde_json::json!({ "id": session }));
         }
@@ -159,7 +252,7 @@ impl SshcraftApp {
 
     /// Whether the shown page is a terminal (shortcuts then leave the shell its keys).
     pub fn in_terminal(&self) -> bool {
-        matches!(self.ui.page, Page::Tab(i) if matches!(self.ui.tabs.get(i).map(|t| &t.kind), Some(TabKind::Session { .. })))
+        matches!(self.ui.page, Page::Tab(i) if matches!(self.ui.tabs.get(i).and_then(|t| t.panes.focused_slot()), Some(PaneSlot::Session { .. })))
     }
 
     /// One frame: results that came back, the engine's events, then drawing.
@@ -191,6 +284,7 @@ impl SshcraftApp {
             }
         }
         crate::session_tab::pump_all(self, &ctx);
+        crate::session_tab::refresh_titles(self);
         crate::shell::show(self, ui);
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);

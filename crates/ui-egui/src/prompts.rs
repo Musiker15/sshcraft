@@ -168,6 +168,11 @@ enum Answer {
 }
 
 pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
+    // The tab that asks, by number and title (several tabs may show the same host).
+    let asking =
+        app.prompts.open.first().and_then(|p| p.session).and_then(|id| {
+            crate::session_tab::pane_of(app, id).map(|(t, _)| (t, app.terminals.get(&id).map(|s| s.title.clone()).unwrap_or_default()))
+        });
     let Some(prompt) = app.prompts.open.first_mut() else {
         app.prompts.shown = None;
         return;
@@ -187,14 +192,6 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     let tokens = Tokens::get(ctx);
     let mut answer = None;
-    // The tab that asks, by number and title (several tabs may show the same host).
-    let asking = prompt.session.and_then(|id| {
-        app.ui
-            .tabs
-            .iter()
-            .position(|t| matches!(t.kind, crate::state::TabKind::Session { session } if session == id))
-            .map(|i| (i, app.ui.tabs[i].title.clone()))
-    });
     let mut show_tab = None;
     egui::Modal::new(egui::Id::unique("sshcraft-prompt")).show(ctx, |ui| {
         ui.set_width(520.0);

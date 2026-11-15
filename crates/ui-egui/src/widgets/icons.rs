@@ -21,6 +21,8 @@ pub enum Icon {
     Log,
     Broadcast,
     Record,
+    Maximize,
+    Detach,
 }
 
 /// Draws `icon` into `rect` (square works best) with lines of `color`.
@@ -128,7 +130,29 @@ pub fn draw(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Record => {
             painter.circle_filled(c, s * 0.3, color);
         }
+        Icon::Maximize => {
+            painter.rect_stroke(Rect::from_min_max(p(-0.7, -0.7), p(0.7, 0.7)), 1.0, stroke, egui::StrokeKind::Inside);
+            line(p(-0.7, -0.4), p(0.7, -0.4));
+        }
+        Icon::Detach => {
+            painter.rect_stroke(Rect::from_min_max(p(-0.8, -0.3), p(0.3, 0.8)), 1.0, stroke, egui::StrokeKind::Inside);
+            line(p(-0.1, 0.1), p(0.8, -0.8));
+            line(p(0.3, -0.8), p(0.8, -0.8));
+            line(p(0.8, -0.8), p(0.8, -0.3));
+        }
     }
+}
+
+/// A small button drawn as `icon`, named `label` for screen readers and in its tooltip.
+pub fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str) -> bool {
+    let tokens = crate::theme::Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 3.0, tokens.row_hover);
+    }
+    draw(ui.painter(), icon, rect.shrink(3.0), if response.hovered() { tokens.text_strong } else { tokens.text_dim });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    response.on_hover_text(label).clicked()
 }
 
 /// The app icon: a prompt (`>_`) in SSHCraft's green on a dark rounded square, 64 by 64 pixels.
