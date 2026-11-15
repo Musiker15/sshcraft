@@ -26,8 +26,10 @@ finish-args:
   - --device=dri
   # Keys and passwords live in the desktop's keyring (Secret Service).
   - --talk-name=org.freedesktop.secrets
-  # Importing ~/.ssh/config and its keys reads them; nothing there is written.
-  - --filesystem=~/.ssh:ro
+  # ~/.ssh/config and its keys are read for import and the live link (F1). Written only when
+  # the user saves a linked host back (sshconfig.write), with a copy of the old file in
+  # ~/.ssh/.sshcraft-backup first.
+  - --filesystem=~/.ssh
   # Open/Save dialogs (import, export, logs) use the file-chooser portal (rfd), so broad
   # filesystem access isn't needed. Serial ports and the host's own shell are not reachable from
   # the sandbox; use the deb, rpm, AppImage or tarball for them.
