@@ -17,6 +17,10 @@ pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
         let _inside = runtime.enter();
         Session::open(SessionConfig::for_tests(dir)).unwrap().0
     };
+    // Tests read English labels, whatever the machine's language.
+    let mut settings = runtime.block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", serde_json::json!({}))).unwrap();
+    settings["general"]["language"] = serde_json::json!("en");
+    runtime.block_on(session.execute(sshcraft_engine::Caller::User, "settings.save", serde_json::json!({ "settings": settings }))).unwrap();
     let ctx = egui::Context::default();
     let mut app = SshcraftApp::new(session.clone(), &ctx);
     app.keep_runtime(runtime);

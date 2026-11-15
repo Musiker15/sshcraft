@@ -5792,6 +5792,7 @@ dependencies = [
  "sshcraft-ssh",
  "sshcraft-term",
  "sshcraft-ui-egui",
+ "sys-locale",
  "tempfile",
  "tokio",
  "uuid",

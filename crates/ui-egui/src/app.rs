@@ -78,6 +78,7 @@ impl SshcraftApp {
         data::refresh(self);
         let ctx = ui.ctx().clone();
         crate::theme::apply(&ctx, &self.data.settings);
+        crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
         let tokens = Tokens::get(&ctx);
         egui::Panel::left("sshcraft-sidebar").exact_size(180.0).show(ui, |ui| {
             for (page, label) in [(Page::Hosts, tr("Hosts")), (Page::Keys, tr("Keys")), (Page::Settings, tr("Settings"))] {
