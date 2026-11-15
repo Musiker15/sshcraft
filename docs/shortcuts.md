@@ -44,6 +44,10 @@ without one, **Default** brings back the ones above.
 - Shortcuts are kept on this device, in `config.toml` under the action's name (`newTab`,
   `palette`, ...), the same names the Tauri version used.
 
+The menu bar shows each command with its current shortcut. Quit SSHCraft (Exit on Windows) and
+About SSHCraft have none by default; macOS gives Quit ⌘Q. On Windows and Linux, Alt with a
+menu's underlined letter opens it.
+
 In the command palette, the arrow keys move the selection, Enter opens it and Escape closes the
 palette. On the host list, Enter or a double click connects to the selected host, a right click
 opens its menu.

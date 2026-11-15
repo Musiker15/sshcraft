@@ -58,8 +58,9 @@ SSHCraft is an open-source SSH client with end-to-end encrypted, self-hosted syn
 Rust. It follows the architecture and conventions of the other Craft apps: layered crates, an
 engine where everything is a command, an egui front end with design tokens, a control channel, an
 MCP server, the same tooling and packaging. Its target app is Termius. The desktop app is being
-rebuilt on these conventions (R1 to R7 in [`ROADMAP.md`](ROADMAP.md)); the design is
-[`docs/superpowers/specs/2026-11-14-sshcraft-craft-neuaufbau-design.md`](docs/superpowers/specs/2026-11-14-sshcraft-craft-neuaufbau-design.md).
+rebuilt on these conventions (R1 to R7 in [`ROADMAP.md`](ROADMAP.md)); how it is built is in
+[`docs/architecture.md`](docs/architecture.md), and the decisions that carry it are in
+[`docs/decisions.md`](docs/decisions.md).
 
 ## Start every session here
 
@@ -185,7 +186,8 @@ Each has a test where it can have one.
   `cargo run -p sshcraft-ui-egui --example terminal_window`, and pictures without a window with
   `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]` (the
   terminal) or `-- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de]`
-  (the whole window on sample data). Both run an engine on a temp folder.
+  (the whole window on sample data; `--captions windows|adwaita|breeze|generic` adds the app's own
+  title bar with its window buttons). Both run an engine on a temp folder.
 - Interface tests run the app in egui_kittest on a test engine (`sshcraft_ui_egui::testing`,
   feature `testing`).
 - Agents: `cargo run -p sshcraft-cli -- --help`; with the app's *Allow agent control* on,
@@ -197,6 +199,9 @@ Each has a test where it can have one.
   build.
 - `cargo xtask linux` runs clippy and the tests on Linux in a Docker container (from Windows or
   macOS); macOS and FreeBSD run in CI.
+- Packages and releases: [`docs/releasing.md`](docs/releasing.md). `cargo xtask version [set X.Y.Z]`
+  prints or sets the one version of the workspace. Never start a release or push to `release`
+  without the maintainer.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.
 
 ## Roadmap

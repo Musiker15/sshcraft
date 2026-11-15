@@ -15,12 +15,12 @@ agents, with rights per action and a confirmation in the app.
 **Status:** rebuild in progress (see [ROADMAP.md](ROADMAP.md)). The desktop app has everything of
 the Tauri version again: hosts, keys, terminal tabs with panes and broadcast, workspaces, port
 forwarding, snippets, session logs, sync and sharing, the rights of AI agents, and MCP and the
-command line for them (`sshcraft-cli`). Packages for macOS, Linux and FreeBSD come in R7. There is
-no release yet.
+command line for them (`sshcraft-cli`). It builds on Windows, macOS, Linux and FreeBSD, with
+packages for each; there is no release yet.
 
 ## Quick start
 
-The desktop app (Windows for now), from the repository root:
+The desktop app, from the repository root:
 
 ```bash
 cargo run -p sshcraft
@@ -54,6 +54,7 @@ cargo run -p sshcraft-server -- serve --public-origin https://sync.example.org
 | AI agents | [docs/agents.md](docs/agents.md) |
 | Keyboard shortcuts | [docs/shortcuts.md](docs/shortcuts.md) |
 | Security | [SECURITY.md](SECURITY.md), [docs/security.md](docs/security.md) |
+| Releasing and packages | [docs/releasing.md](docs/releasing.md) |
 | Glossary | [GLOSSARY.md](GLOSSARY.md) |
 
 ## Help and contributing

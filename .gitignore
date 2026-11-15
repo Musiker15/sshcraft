@@ -1,6 +1,9 @@
 /target/
 /plan/
 /.superpowers/
+# Plans and design notes of agent tools: a notebook like plan/, not part of the tree (the R1 to
+# R7 documents are in the history before R7).
+/docs/superpowers/
 *.db
 node_modules/
 # Leftovers of the Tauri app (removed in R1) in older checkouts: build output and dependencies.

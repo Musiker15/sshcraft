@@ -4,8 +4,8 @@
 
 Where SSHCraft stands against Termius, area by area. "Tauri version only" means the feature exists
 at the tag `tauri-final` and returns with the rebuilt interface (R4 and R5). The full comparison
-with other clients, with sources, is
-[`superpowers/specs/2026-11-14-sshcraft-marktvergleich.md`](superpowers/specs/2026-11-14-sshcraft-marktvergleich.md).
+with other clients, with sources, is the German
+[`2026-11-14-sshcraft-marktvergleich.md`](https://github.com/musiker15/sshcraft/blob/e04ce8846d23cd6e2f528c83a06c03248d5d41f5/docs/superpowers/specs/2026-11-14-sshcraft-marktvergleich.md) in the history.
 
 | Area | Termius | SSHCraft |
 |---|---|---|
