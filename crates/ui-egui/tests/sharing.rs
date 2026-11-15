@@ -161,7 +161,7 @@ fn removing_a_recipient_keeps_one_added_since_the_list_was_read() {
     // The "Shared." notice may lie over the button: the notices go first.
     t.h.state_mut().toasts = Default::default();
     t.h.run_steps(2);
-    t.h.get_by_label("Shares").click();
+    t.h.get_by_label("Shares").click_accesskit();
     until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
     // Another device adds Carol; the window still shows only Bob.
     let found = run(&t.alice, "share.find_recipient", json!({ "server": t.server, "email": "carol@example.org" }));
@@ -238,7 +238,7 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
     // The "Shared." notice may lie over the button: the notices go first.
     t.h.state_mut().toasts = Default::default();
     t.h.run_steps(2);
-    t.h.get_by_label("Shares").click();
+    t.h.get_by_label("Shares").click_accesskit();
     until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
     t.h.get_by_label("Remove recipient").click();
     t.h.run_steps(2);
