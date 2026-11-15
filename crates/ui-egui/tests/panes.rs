@@ -189,6 +189,23 @@ fn dragging_a_title_bar_onto_another_pane_swaps_them() {
 }
 
 #[test]
+fn in_the_focus_layout_a_title_dropped_on_its_own_pane_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.state_mut().open_new_tab();
+    h.state_mut().split();
+    h.state_mut().split();
+    h.run_steps(3);
+    sshcraft_ui_egui::commands::run(h.state_mut(), "ui.pane.layout");
+    h.state_mut().ui.tabs[0].panes.focused = 2;
+    h.run_steps(3);
+    let before = slots(h.state(), 0);
+    let bar = h.get_by_label("Pane title").rect().center();
+    drag(&mut h, bar, bar + egui::vec2(40.0, 150.0));
+    assert_eq!(slots(h.state(), 0), before, "the focused pane stays where it is");
+}
+
+#[test]
 fn move_to_own_tab_and_merging_keep_the_sessions() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, session) = app_harness(dir.path());

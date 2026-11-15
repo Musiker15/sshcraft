@@ -152,7 +152,8 @@ fn slot_title(app: &SshcraftApp, slot: PaneSlot) -> String {
 }
 
 /// The title bar of pane `index` (shown when the tab has more than one).
-fn title_bar(app: &SshcraftApp, ui: &mut Ui, rect: Rect, index: usize, slot: PaneSlot, focused: bool, rects: &[Rect]) -> Option<PaneAction> {
+/// `targets`: the panes a title can be dropped on, by pane index.
+fn title_bar(app: &SshcraftApp, ui: &mut Ui, rect: Rect, index: usize, slot: PaneSlot, focused: bool, targets: &[(usize, Rect)]) -> Option<PaneAction> {
     let tokens = Tokens::get(ui.ctx());
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_HEIGHT));
     let response = ui.interact(bar, ui.scope_id().with(("sshcraft-pane-title", index)), Sense::click_and_drag());
@@ -164,7 +165,7 @@ fn title_bar(app: &SshcraftApp, ui: &mut Ui, rect: Rect, index: usize, slot: Pan
     }
     if response.drag_stopped()
         && let Some(at) = ui.ctx().pointer_interact_pos()
-        && let Some(target) = rects.iter().position(|r| r.contains(at))
+        && let Some(target) = targets.iter().find(|(_, r)| r.contains(at)).map(|(i, _)| *i)
         && target != index
     {
         action = Some(PaneAction::SwapWith(target));
@@ -262,14 +263,13 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, tab: usize) {
     } else {
         panes.rects(area).into_iter().enumerate().collect()
     };
-    let rects: Vec<Rect> = layout.iter().map(|(_, r)| *r).collect();
-    let grid_rects = panes.rects(area);
+    let grid_rects: Vec<(usize, Rect)> = panes.rects(area).into_iter().enumerate().collect();
     for (i, rect) in &layout {
         let Some(slot) = panes.panes.get(*i).copied() else { continue };
         let focused = *i == panes.focused;
         let mut content = *rect;
         if multi {
-            let targets = if panes.focus_layout { &rects } else { &grid_rects };
+            let targets = if panes.focus_layout { &layout } else { &grid_rects };
             if let Some(a) = title_bar(app, ui, *rect, *i, slot, focused, targets) {
                 action = Some((*i, a));
             }
