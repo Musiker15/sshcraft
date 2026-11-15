@@ -1,0 +1,27 @@
+name: Feature request
+description: Something SSHCraft could do, or do better.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check [ROADMAP.md](https://github.com/Musiker15/sshcraft/blob/main/ROADMAP.md) and
+        [docs/gaps.md](https://github.com/Musiker15/sshcraft/blob/main/docs/gaps.md) first; it may
+        already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The task you are trying to get done, and what stands in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: Your idea. If another client does it well, describe the behaviour in your own words.
+  - type: textarea
+    id: else
+    attributes:
+      label: Anything else
+      description: Workarounds you use now, or related issues.

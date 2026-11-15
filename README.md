@@ -49,8 +49,10 @@ cargo run -p sshcraft-server -- serve --public-origin https://sync.example.org
 
 ## Help and contributing
 
-Questions and bug reports go to the GitHub issues of this repository. Before you contribute, read
-[AGENTS.md](AGENTS.md); `cargo xtask ci` is the gate every change passes.
+Questions and bug reports go to the GitHub issues of this repository; security problems are
+reported privately (see [SECURITY.md](SECURITY.md)). Before you contribute, read
+[CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md); `cargo xtask ci` is the gate every
+change passes. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
