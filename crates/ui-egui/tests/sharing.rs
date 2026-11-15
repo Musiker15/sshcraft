@@ -259,3 +259,23 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
         t.h.run_steps(1);
     }
 }
+
+/// The shares come from the engine even while the window's list of servers is reloading.
+#[test]
+fn the_shares_load_while_the_server_list_reloads() {
+    let mut t = two();
+    find_bob(&mut t);
+    t.h.get_by_label("I compared the safety number with Bob").click();
+    t.h.run_steps(2);
+    t.h.get_by_label("Share").click();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while shares(&t).is_empty() {
+        assert!(Instant::now() < deadline, "no share");
+        std::thread::sleep(Duration::from_millis(20));
+        t.h.run_steps(1);
+    }
+    // The cached list of servers is empty for a moment (it reloads after a change).
+    t.h.state_mut().data.servers.clear();
+    sshcraft_ui_egui::pages::sharing::load(t.h.state_mut());
+    until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
+}

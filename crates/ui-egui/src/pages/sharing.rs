@@ -205,10 +205,12 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 /// Fetches the shares of every server.
 pub fn load(app: &mut SshcraftApp) {
-    let servers: Vec<String> = app.data.servers.iter().map(|s| text(s, "id")).collect();
     let session = app.session.clone();
     app.runner.run_future(
         async move {
+            // The servers as the engine has them: the window's list may be reloading.
+            let rows = session.execute(sshcraft_engine::Caller::User, "sync.servers", json!({})).await?;
+            let servers: Vec<String> = rows.as_array().into_iter().flatten().map(|s| text(s, "id")).filter(|id| !id.is_empty()).collect();
             let mut all = Vec::new();
             for server in servers {
                 let list = session.execute(sshcraft_engine::Caller::User, "share.list", json!({ "server": server })).await?;
