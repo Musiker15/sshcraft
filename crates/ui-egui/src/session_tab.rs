@@ -168,7 +168,8 @@ fn host_name(app: &SshcraftApp, host: HostId) -> Option<String> {
 }
 
 /// Opens a session for `target` in the pane `replace` (a new-pane page, or the pane being
-/// reconnected), or in a new tab when that pane is gone.
+/// reconnected), or in a new tab when no pane asked. A pane closed while it connects takes its
+/// connection with it.
 fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<PaneSlot>) {
     open_with(app, target, name, host, replace, None);
 }
@@ -207,12 +208,18 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                     return;
                 }
             };
+            // The pane it was asked for, if it is still there; without one, a tab of its own.
+            let place = replace.and_then(|wanted| app.ui.tabs.iter().enumerate().find_map(|(t, tab)| tab.panes.position(wanted).map(|p| (t, p))));
+            if replace.is_some() && place.is_none() {
+                // The user closed that pane while it connected: the connection goes too, and
+                // nothing it was to type runs.
+                app.run_reported("session.close", json!({ "id": id }));
+                return;
+            }
             let pump = app.session.attach_terminal(id).map(Pump::new);
             let term = Terminal::new(TermSize::clamped(100, 30), &TermConfig { clipboard_write, scrollback });
             let title = host.and_then(|h| host_name(app, h)).unwrap_or_else(|| name.clone());
             let slot = PaneSlot::Session { session: id };
-            // The pane it was asked for, if it is still there; else a tab of its own.
-            let place = replace.and_then(|wanted| app.ui.tabs.iter().enumerate().find_map(|(t, tab)| tab.panes.position(wanted).map(|p| (t, p))));
             let (index, pane) = match place {
                 Some((t, p)) => {
                     if let Some(old) = old {

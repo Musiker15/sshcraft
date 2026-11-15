@@ -161,6 +161,24 @@ fn the_shown_terminal_gets_the_keyboard_after_switching_tabs() {
 }
 
 #[test]
+fn a_connection_whose_tab_was_closed_while_connecting_does_not_come_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, id) = host(&session, "web", TestAuth::default(), true);
+    h.run_steps(2);
+    h.state_mut().open_new_tab();
+    h.run_steps(2);
+    h.state_mut().ui.connect_request = Some(ConnectRequest::Host(id));
+    // The request goes out in this frame; the user closes the tab before the answer.
+    h.run_steps(1);
+    h.state_mut().close_tab();
+    settle(&mut h);
+    settle(&mut h);
+    assert!(h.state().ui.tabs.is_empty(), "the closed tab does not come back as a tab of its own");
+    assert!(h.state().terminals.is_empty());
+}
+
+#[test]
 fn a_late_connection_does_not_take_the_page() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, session) = app_harness(dir.path());
