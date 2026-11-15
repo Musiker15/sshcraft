@@ -161,9 +161,11 @@ fn write_entry(session: &Session, host_id: HostId, links: &[ConfigLink]) -> Resu
     let (address, port) = sshcraft_model::model::effective_endpoint(host, &chain_refs)
         .map_err(|e| CommandError::failed(ErrorCode::from(&e), "the host has no address"))?;
     let user = pick(&|s| s.username.clone());
+    // Written when set in SSHCraft, even when it is 22, so a later `Host *` does not take over.
+    let explicit_port = host.settings.port.or_else(|| chain.iter().find_map(|g| g.defaults.port));
     let jumps = host.settings.jump_hosts.clone().or_else(|| chain.iter().find_map(|g| g.defaults.jump_hosts.clone())).unwrap_or_default();
     let proxy = host.settings.proxy.clone().or_else(|| chain.iter().find_map(|g| g.defaults.proxy.clone()));
-    let agent = host.settings.agent_forwarding.or_else(|| chain.iter().find_map(|g| g.defaults.agent_forwarding)).unwrap_or(false);
+    let agent = host.settings.agent_forwarding.or_else(|| chain.iter().find_map(|g| g.defaults.agent_forwarding));
     let mut jump = Vec::new();
     for id in jumps {
         let hop = find(id)?;
@@ -187,21 +189,29 @@ fn write_entry(session: &Session, host_id: HostId, links: &[ConfigLink]) -> Resu
     Ok(WriteHost {
         alias: links.iter().find(|l| l.host_id == host_id).map_or_else(|| host.name.clone(), |l| l.alias.clone()),
         hostname: Some(address),
-        port: (port != sshcraft_model::model::DEFAULT_PORT).then_some(port),
+        port: explicit_port.or((port != sshcraft_model::model::DEFAULT_PORT).then_some(port)),
         user,
         jump,
         proxy_command: match proxy {
             Some(Proxy::Command { argv }) => Some(argv),
             _ => None,
         },
-        forward_agent: agent.then_some(true),
+        forward_agent: agent,
     })
 }
 
-/// Writes `path` in one step: a temporary file next to it, then renamed over it, keeping its
-/// permissions (`~/.ssh/config` must not be writable by others).
+/// Where the copies of files before a write-back go: a folder of its own, so no `Include` glob
+/// (`config.d/*`) reads them.
+pub fn backup_dir(home: &Path) -> PathBuf {
+    home.join(".ssh").join(".sshcraft-backup")
+}
+
+/// Writes `path` in one step: a temporary file next to it (a dot file, which `*` does not
+/// match), then renamed over it, keeping its permissions (`~/.ssh/config` must not be writable
+/// by others).
 fn replace_file(path: &Path, text: &str) -> Result<(), CommandError> {
-    let temp = path.with_extension("sshcraft-tmp");
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let temp = path.with_file_name(format!(".{name}.sshcraft-tmp"));
     std::fs::write(&temp, text).map_err(failed)?;
     if let Ok(meta) = std::fs::metadata(path) {
         let _ = std::fs::set_permissions(&temp, meta.permissions());
@@ -231,6 +241,8 @@ pub fn write_back(session: &Session, host_ids: &[HostId], home: &Path) -> Result
             )));
         }
         let file = links.iter().find(|l| l.host_id == *id).map(|l| PathBuf::from(&l.file)).filter(|f| f.is_file()).unwrap_or_else(|| root.clone());
+        // A linked config (dotfile managers) is written where it points, the link stays.
+        let file = std::fs::canonicalize(&file).unwrap_or(file);
         let text = match std::fs::read_to_string(&file) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -238,7 +250,11 @@ pub fn write_back(session: &Session, host_ids: &[HostId], home: &Path) -> Result
         };
         let shown = file.to_string_lossy().into_owned();
         if !written.contains(&shown) && !text.is_empty() {
-            std::fs::write(file.with_extension("sshcraft-bak"), &text).map_err(failed)?;
+            // One copy per write-back, by time, so the original is never overwritten.
+            let dir = backup_dir(home);
+            std::fs::create_dir_all(&dir).map_err(failed)?;
+            let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "config".into());
+            std::fs::write(dir.join(format!("{name}.{}", crate::now_ms())), &text).map_err(failed)?;
         }
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir).map_err(failed)?;

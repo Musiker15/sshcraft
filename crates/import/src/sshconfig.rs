@@ -90,7 +90,8 @@ impl ConfigFs for RealFs {
         let mut found: Vec<PathBuf> = entries
             .filter_map(Result::ok)
             .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-            .filter(|e| e.file_name().to_str().is_some_and(|n| glob_matches(name, n)))
+            // As in glob(3): `*` does not match a leading dot (backups and temporary files).
+            .filter(|e| e.file_name().to_str().is_some_and(|n| (name.starts_with('.') || !n.starts_with('.')) && glob_matches(name, n)))
             .map(|e| e.path())
             .collect();
         found.sort();

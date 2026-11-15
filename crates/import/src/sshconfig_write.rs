@@ -1,7 +1,8 @@
 //! Writes a host back into an OpenSSH client config, changing as little as possible: the
-//! lines SSHCraft manages (`HostName`, `Port`, `User`, `ProxyJump`, `ProxyCommand`,
+//! lines SSHCraft has a value for (`HostName`, `Port`, `User`, `ProxyJump`, `ProxyCommand`,
 //! `ForwardAgent`) in the host's own block are replaced, every other line of the file stays as
-//! it was, comments and order included.
+//! it was, comments and order included; also such a line SSHCraft has no value for (a
+//! `ProxyCommand` that needs a shell, a `ProxyJump` to a host it does not know).
 
 use crate::sshconfig::{split_args, split_keyword};
 
@@ -85,13 +86,20 @@ fn keyword_of(line: &str) -> String {
 /// lines for every host stay before it.
 pub fn write_host(text: &str, host: &WriteHost) -> Result<String, WriteError> {
     check_alias(&host.alias)?;
+    // A BOM stays where it is and does not hide the first line.
+    let (bom, text) = match text.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", text),
+    };
     let managed = entries(host)?;
+    let written: Vec<String> = managed.iter().map(|(k, _)| k.to_ascii_lowercase()).collect();
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let starts_block = |line: &str| matches!(keyword_of(line).as_str(), "host" | "match");
     let own =
         lines.iter().position(|line| keyword_of(line) == "host" && split_args(split_keyword(line.trim()).1) == std::slice::from_ref(&host.alias));
     let mut out = String::with_capacity(text.len() + 256);
+    out.push_str(bom);
     match own {
         Some(start) => {
             let end = lines.iter().skip(start + 1).position(|l| starts_block(l)).map_or(lines.len(), |i| start + 1 + i);
@@ -110,7 +118,10 @@ pub fn write_host(text: &str, host: &WriteHost) -> Result<String, WriteError> {
             for (k, v) in &managed {
                 out.push_str(&format!("{indent}{k} {v}{newline}"));
             }
-            for line in body.iter().filter(|l| !MANAGED.contains(&keyword_of(l).as_str())) {
+            for line in body.iter().filter(|l| {
+                let keyword = keyword_of(l);
+                !(MANAGED.contains(&keyword.as_str()) && written.contains(&keyword))
+            }) {
                 out.push_str(line);
             }
             for line in lines.get(end..).unwrap_or_default() {

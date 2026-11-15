@@ -396,3 +396,14 @@ fn shell_proxy_command_stays_a_warning() {
     assert_eq!(plan[0].settings.proxy, None);
     assert_eq!(plan[0].warnings, vec![ImportWarning::ProxyIgnored { directive: "ProxyCommand nc %h %p | tee log".into() }]);
 }
+
+#[test]
+fn a_glob_skips_dot_files_like_glob3() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["a.conf", ".a.conf.sshcraft-tmp", ".hidden"] {
+        std::fs::write(dir.path().join(name), "Host x\n").unwrap();
+    }
+    let found = RealFs.glob(&dir.path().join("*"));
+    assert_eq!(found, vec![dir.path().join("a.conf")]);
+    assert_eq!(RealFs.glob(&dir.path().join(".h*")), vec![dir.path().join(".hidden")]);
+}

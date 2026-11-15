@@ -75,6 +75,29 @@ fn values_that_would_break_the_file_are_refused() {
 }
 
 #[test]
+fn lines_without_a_value_here_stay() {
+    let text = "Host web\n  ProxyCommand nc %h %p | tee log\n  ForwardAgent yes\n  Port 22\n";
+    let host = WriteHost {
+        alias: "web".into(),
+        hostname: Some("w.org".into()),
+        port: None,
+        user: None,
+        jump: Vec::new(),
+        proxy_command: None,
+        forward_agent: Some(false),
+    };
+    let out = write_host(text, &host).unwrap();
+    assert_eq!(out, "Host web\n  HostName w.org\n  ForwardAgent no\n  ProxyCommand nc %h %p | tee log\n  Port 22\n");
+}
+
+#[test]
+fn a_bom_does_not_hide_the_first_block() {
+    let out = write_host("\u{feff}Host web\n  User old\n", &web()).unwrap();
+    assert!(out.starts_with("\u{feff}Host web\n  HostName 10.0.0.5\n"), "{out:?}");
+    assert_eq!(out.matches("Host web").count(), 1);
+}
+
+#[test]
 fn crlf_files_stay_crlf() {
     let out = write_host("Host web\r\n  User old\r\n", &web()).unwrap();
     assert!(out.contains("  User deploy\r\n"), "{out:?}");

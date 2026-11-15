@@ -101,8 +101,16 @@ async fn write_back_is_atomic_and_keeps_a_backup() {
     assert_eq!(files.len(), 1);
     let now = std::fs::read_to_string(w.config()).unwrap();
     assert_eq!(now, "# mine\nHost web\n  HostName web.org\n  Port 2222\n  IdentityFile ~/.ssh/web\n");
-    assert_eq!(std::fs::read_to_string(w.config().with_extension("sshcraft-bak")).unwrap(), original);
-    assert!(!w.config().with_extension("sshcraft-tmp").exists());
+    let backups: Vec<_> = std::fs::read_dir(backup_dir(w.home.path())).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), original);
+    let left: Vec<_> =
+        std::fs::read_dir(w.home.path().join(".ssh")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert!(!left.iter().any(|n| n.contains("sshcraft-tmp")), "{left:?}");
+    // A second write-back keeps the first copy.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    write_back(&w.session, &[web.id], w.home.path()).unwrap();
+    assert_eq!(std::fs::read_dir(backup_dir(w.home.path())).unwrap().count(), 2);
 }
 
 #[tokio::test]
