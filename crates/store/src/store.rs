@@ -97,9 +97,7 @@ CREATE TABLE host_keys (
 INSERT INTO host_keys (address, port, fingerprint) SELECT address, port, fingerprint FROM known_hosts;
 DROP TABLE known_hosts;
 CREATE TABLE approved_commands (
-    host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-    digest TEXT NOT NULL,
-    PRIMARY KEY (host_id, digest)
+    digest TEXT PRIMARY KEY
 );
 CREATE TABLE ssh_config_links (
     host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
@@ -108,6 +106,14 @@ CREATE TABLE ssh_config_links (
     digest TEXT NOT NULL
 );
 ";
+
+/// The digest a proxy command is approved by: SHA-256 over its arguments as JSON, so arguments
+/// that differ only in how they were split never share one.
+pub fn command_digest(argv: &[String]) -> String {
+    use sha2::Digest;
+    let json = serde_json::to_vec(argv).unwrap_or_default();
+    sha2::Sha256::digest(&json).iter().map(|b| format!("{b:02x}")).collect()
+}
 
 /// A host key known for an address and port. Keys from schema 11 and from fingerprint-only
 /// sources have no algorithm and no key; they still match by fingerprint.
@@ -607,23 +613,15 @@ impl Store {
         Ok(())
     }
 
-    /// Marks a proxy command (by its digest) as allowed to run for a host on this device.
-    pub fn approve_command(&self, host: HostId, digest: &str) -> Result<(), StoreError> {
-        self.conn
-            .execute("INSERT OR IGNORE INTO approved_commands (host_id, digest) VALUES (?1, ?2)", rusqlite::params![host.0.to_string(), digest])?;
+    /// Marks a proxy command line (by [`command_digest`], before its tokens are replaced) as
+    /// allowed to run on this device.
+    pub fn approve_command(&self, digest: &str) -> Result<(), StoreError> {
+        self.conn.execute("INSERT OR IGNORE INTO approved_commands (digest) VALUES (?1)", [digest])?;
         Ok(())
     }
 
-    pub fn command_approved(&self, host: HostId, digest: &str) -> Result<bool, StoreError> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT 1 FROM approved_commands WHERE host_id = ?1 AND digest = ?2",
-                rusqlite::params![host.0.to_string(), digest],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some())
+    pub fn command_approved(&self, digest: &str) -> Result<bool, StoreError> {
+        Ok(self.conn.query_row("SELECT 1 FROM approved_commands WHERE digest = ?1", [digest], |_| Ok(())).optional()?.is_some())
     }
 
     pub fn config_links(&self) -> Result<Vec<ConfigLink>, StoreError> {

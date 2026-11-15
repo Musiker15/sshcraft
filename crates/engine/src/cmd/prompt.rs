@@ -19,6 +19,7 @@ pub fn specs() -> Vec<CommandSpec> {
         },
         query("prompt.list", "Open questions", "none", run_list),
         command("prompt.agent", "Answer a question about an agent's action", "{ prompt_id, allow }", run_agent),
+        command("prompt.proxy_command", "Answer whether a proxy command may run", "{ prompt_id, allow }", run_proxy_command),
     ]
 }
 
@@ -33,6 +34,16 @@ fn run_agent(ctx: Ctx, params: Value) -> Out {
         let AgentParams { prompt_id, allow } = parse("prompt.agent", params)?;
         if !ctx.session.prompts().answer_agent(prompt_id, allow) {
             return Err(CommandError::NotFound(format!("agent question {prompt_id}")));
+        }
+        Ok(Value::Null)
+    })
+}
+
+fn run_proxy_command(ctx: Ctx, params: Value) -> Out {
+    sync_run(move || {
+        let AgentParams { prompt_id, allow } = parse("prompt.proxy_command", params)?;
+        if !ctx.session.prompts().answer_command(prompt_id, allow) {
+            return Err(CommandError::NotFound(format!("proxy command question {prompt_id}")));
         }
         Ok(Value::Null)
     })

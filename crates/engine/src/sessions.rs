@@ -81,6 +81,11 @@ pub trait SessionSink: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait HostKeyPrompter: Send + Sync + 'static {
     async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
+
+    /// Whether a proxy command that is not approved on this device may run.
+    async fn ask_command(&self, _host_name: &str, _command: &str) -> bool {
+        false
+    }
 }
 
 /// The UI may hold this many unacknowledged output bytes before SSHCraft stops reading from
@@ -1046,7 +1051,22 @@ pub(crate) async fn connect_session(
     let proxy = match &route.target.proxy {
         Some(Proxy::Http(endpoint)) => Some(ProxyConfig::Http(proxy_target(ctx, endpoint).await?)),
         Some(Proxy::Socks5(endpoint)) => Some(ProxyConfig::Socks5(proxy_target(ctx, endpoint).await?)),
-        _ => None,
+        Some(Proxy::Command { argv }) => {
+            allow_command(ctx, &route.target.name, argv).await?;
+            // The tokens name the first hop, the one the program connects to.
+            let first = route.jumps.first().unwrap_or(&route.target);
+            let tokens =
+                sshcraft_model::proxy_command::Tokens { host: &first.address, port: first.port, user: &first.username, alias: &route.target.name };
+            let mut argv = sshcraft_model::proxy_command::expand(argv, &tokens);
+            if let Some(program) = argv.first_mut()
+                && let Some(rest) = program.strip_prefix("~/")
+                && let Some(home) = sshcraft_platform::home_dir()
+            {
+                *program = home.join(rest).to_string_lossy().into_owned();
+            }
+            Some(ProxyConfig::Command { argv })
+        }
+        Some(Proxy::Direct) | None => None,
     };
     let opener = if route.target.agent_forwarding { ctx.agent.opener() } else { None };
     let notice = (route.target.agent_forwarding && opener.is_none()).then_some(ErrorCode::AgentForwardingUnavailable);
@@ -1072,6 +1092,31 @@ pub(crate) async fn connect_session(
     let session = sshcraft_ssh::connect_route(params, verifier.clone(), auth).await.map_err(|e| failure(e, &verifier))?;
     let notice = notice.or(session.certificate_expired().then_some(ErrorCode::CertificateExpired));
     Ok((session, notice))
+}
+
+/// A proxy command runs only when it was set on this device or allowed here once: one that
+/// came with sync, a share or an agent's change is asked about first, and the answer is kept.
+async fn allow_command(ctx: &Context, host_name: &str, argv: &[String]) -> Result<(), Failure> {
+    let digest = sshcraft_store::store::command_digest(argv);
+    let approved = ctx
+        .store
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .command_approved(&digest)
+        .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?;
+    if approved {
+        return Ok(());
+    }
+    let line = sshcraft_model::proxy_command::join(argv);
+    if !ctx.prompter.ask_command(host_name, &line).await {
+        return Err(end_error(ErrorCode::ProxyCommandNotAllowed, Some(line)));
+    }
+    ctx.store
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .approve_command(&digest)
+        .map_err(|e| end_error(ErrorCode::Store, Some(e.to_string())))?;
+    Ok(())
 }
 
 fn probed_setting(host_id: HostId) -> String {

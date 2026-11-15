@@ -275,6 +275,7 @@ fn run_apply(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let ApplyParams { candidates, location } = parse("import.apply", params)?;
         let (outcome, servers) = apply_and_queue(&ctx.session.store(), &candidates, location)?;
+        super::host::approve_commands(&ctx, candidates.iter().flat_map(|c| [&c.settings, &c.group_defaults]))?;
         ctx.session.sync().nudge(&servers);
         ctx.session.announce(&servers);
         to_value(&outcome)
@@ -369,6 +370,7 @@ fn run_ssh_config_apply(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let SshConfigApplyParams { candidates } = parse("import.ssh_config_apply", params)?;
         let created = apply_import(&ctx.session.store(), &candidates, None)?.created;
+        super::host::approve_commands(&ctx, candidates.iter().flat_map(|c| [&c.settings, &c.group_defaults]))?;
         ctx.session.announce(&[]);
         Ok(json!({ "created": created }))
     })

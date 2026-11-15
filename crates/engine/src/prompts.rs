@@ -38,6 +38,17 @@ pub struct HostKeyPrompt {
     pub session: Option<SessionId>,
 }
 
+/// Whether a proxy command that was not set on this device may run (it came with sync, a
+/// share or an agent's change, or it changed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProxyCommandPrompt {
+    pub prompt_id: u64,
+    pub host_name: String,
+    /// The command line as it will run, before its tokens are replaced.
+    pub command: String,
+    pub session: Option<SessionId>,
+}
+
 /// A sign-in question. Carries the questions only, never an answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuthPrompt {
@@ -58,6 +69,7 @@ pub enum OpenPrompt {
     HostKey(HostKeyPrompt),
     Auth(AuthPrompt),
     Agent(AgentPrompt),
+    ProxyCommand(ProxyCommandPrompt),
 }
 
 impl OpenPrompt {
@@ -66,6 +78,7 @@ impl OpenPrompt {
             Self::HostKey(p) => p.prompt_id,
             Self::Auth(p) => p.prompt_id,
             Self::Agent(p) => p.prompt_id,
+            Self::ProxyCommand(p) => p.prompt_id,
         }
     }
 }
@@ -78,6 +91,11 @@ pub trait PromptEmitter: Send + Sync + 'static {
     fn asked_auth(&self, prompt: &AuthPrompt) -> bool;
     /// Shows a question about an agent's action; `false` if it could not be delivered.
     fn asked_agent(&self, prompt: &AgentPrompt) -> bool;
+    /// Asks whether a proxy command may run; `false` if it could not be delivered (then it
+    /// does not run).
+    fn asked_command(&self, _prompt: &ProxyCommandPrompt) -> bool {
+        false
+    }
     /// Takes back a question nobody waits for anymore (ids are unique across both kinds).
     fn withdrawn(&self, prompt_id: u64);
 }
@@ -111,6 +129,14 @@ impl PromptEmitter for BusEmitter {
         true
     }
 
+    fn asked_command(&self, prompt: &ProxyCommandPrompt) -> bool {
+        if !self.0.has_subscribers() {
+            return false;
+        }
+        self.0.send(EngineEvent::ProxyCommandPrompt(prompt.clone()));
+        true
+    }
+
     fn withdrawn(&self, prompt_id: u64) {
         self.0.send(EngineEvent::PromptWithdrawn { prompt_id });
     }
@@ -122,6 +148,7 @@ enum Answer {
     HostKey(oneshot::Sender<bool>),
     Auth(oneshot::Sender<Answers>),
     Agent(oneshot::Sender<bool>),
+    ProxyCommand(oneshot::Sender<bool>),
 }
 
 struct Pending {
@@ -234,6 +261,35 @@ impl<E: PromptEmitter> PromptRegistry<E> {
         }
     }
 
+    /// Answers whether a proxy command may run; returns whether one with this id was open.
+    pub fn answer_command(&self, prompt_id: u64, allow: bool) -> bool {
+        match self.take(prompt_id) {
+            Some(Pending { answer: Answer::ProxyCommand(tx), .. }) => {
+                let _ = tx.send(allow);
+                true
+            }
+            Some(other) => {
+                self.put_back(prompt_id, other);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Asks whether a proxy command may run. Not delivered or dropped unanswered counts as no.
+    pub async fn ask_command(&self, host_name: &str, command: &str) -> bool {
+        let prompt_id = self.next_id();
+        let (tx, rx) = oneshot::channel();
+        let prompt = ProxyCommandPrompt { prompt_id, host_name: host_name.to_owned(), command: command.to_owned(), session: asking_session() };
+        self.put_back(prompt_id, Pending { prompt: OpenPrompt::ProxyCommand(prompt.clone()), answer: Answer::ProxyCommand(tx) });
+        if !self.emitter.asked_command(&prompt) {
+            self.take(prompt_id);
+            return false;
+        }
+        let _withdraw = Withdraw { registry: self, prompt_id };
+        rx.await.unwrap_or(false)
+    }
+
     /// Asks whether an agent's action may run. `prompt.prompt_id` is replaced with a new id.
     /// Not delivered (no window) or dropped unanswered counts as no.
     pub async fn ask_agent(&self, mut prompt: AgentPrompt) -> bool {
@@ -295,6 +351,10 @@ impl<E: PromptEmitter> PromptRegistry<E> {
 impl<E: PromptEmitter> HostKeyPrompter for PromptRegistry<E> {
     async fn ask(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
         PromptRegistry::ask(self, host_name, address, port, fingerprint).await
+    }
+
+    async fn ask_command(&self, host_name: &str, command: &str) -> bool {
+        PromptRegistry::ask_command(self, host_name, command).await
     }
 }
 

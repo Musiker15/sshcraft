@@ -184,6 +184,7 @@ fn inspect(app: &SshcraftApp, ctx: &egui::Context) -> Value {
                 crate::prompts::PromptKind::HostKey { .. } => "host_key",
                 crate::prompts::PromptKind::Auth { .. } => "sign_in",
                 crate::prompts::PromptKind::Agent { .. } => "agent",
+                crate::prompts::PromptKind::ProxyCommand { .. } => "proxy_command",
             };
             json!({ "id": p.id, "kind": kind })
         })

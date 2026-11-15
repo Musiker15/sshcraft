@@ -72,6 +72,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Port" => "Port",
         "Proxy" => "Proxy",
         "Proxy address" => "Proxy-Adresse",
+        "Run a program to connect?" => "Ein Programm zum Verbinden starten?",
+        "{host} connects through this program on your computer. It was not set up on this device (it came with sync, a share or an agent, or it changed). Allow it only if you know it." => {
+            "{host} verbindet sich über dieses Programm auf deinem Rechner. Es wurde nicht auf diesem Gerät eingerichtet (es kam über Sync, eine Freigabe oder einen Agent, oder es hat sich geändert). Erlaube es nur, wenn du es kennst."
+        }
+        "Allow on this device" => "Auf diesem Gerät erlauben",
+        "Proxy command" => "Proxy-Befehl",
         "Runs without a shell. %h, %p, %r and %n stand for address, port, user and name." => {
             "Läuft ohne Shell. %h, %p, %r und %n stehen für Adresse, Port, Benutzer und Name."
         }

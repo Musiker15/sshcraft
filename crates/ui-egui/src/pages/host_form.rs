@@ -329,7 +329,13 @@ fn proxy_command_field(ui: &mut Ui, argv: &mut Vec<String>, host: Option<HostId>
         .data(|d| d.get_temp::<String>(id))
         .filter(|line| proxy_command::split(line).map_or(true, |words| words == *argv))
         .unwrap_or_else(|| proxy_command::join(argv));
-    let edit = ui.add(egui::TextEdit::singleline(&mut line).hint_text("ssh -W %h:%p bastion").font(egui::TextStyle::Monospace).desired_width(320.0));
+    let edit = ui
+        .horizontal(|ui| {
+            let label = ui.label(tr("Proxy command"));
+            ui.add(egui::TextEdit::singleline(&mut line).hint_text("ssh -W %h:%p bastion").font(egui::TextStyle::Monospace).desired_width(320.0))
+                .labelled_by(label.id)
+        })
+        .inner;
     let parsed = proxy_command::split(&line);
     if edit.changed()
         && let Ok(words) = &parsed

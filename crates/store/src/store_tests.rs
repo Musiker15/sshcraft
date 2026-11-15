@@ -378,16 +378,24 @@ fn a_known_fingerprint_gains_its_key() {
 }
 
 #[test]
-fn deleting_a_host_drops_its_approval_and_link() {
+fn deleting_a_host_drops_its_config_link() {
     let store = Store::open_in_memory().unwrap();
     let h = host("web", None);
     store.upsert_host(&h).unwrap();
-    store.approve_command(h.id, "d1").unwrap();
     store.set_config_link(&ConfigLink { host_id: h.id, alias: "web".into(), file: "/x/config".into(), digest: "c1".into() }).unwrap();
-    assert!(store.command_approved(h.id, "d1").unwrap());
-    assert!(!store.command_approved(h.id, "d2").unwrap());
     assert_eq!(store.config_links().unwrap().len(), 1);
     store.delete_host(h.id).unwrap();
-    assert!(!store.command_approved(h.id, "d1").unwrap());
     assert!(store.config_links().unwrap().is_empty());
+}
+
+#[test]
+fn approved_commands_are_kept_by_digest() {
+    let store = Store::open_in_memory().unwrap();
+    let a = command_digest(&["ssh".into(), "-W".into(), "%h:%p".into()]);
+    let b = command_digest(&["ssh -W".into(), "%h:%p".into()]);
+    assert_ne!(a, b, "the same text split differently is another command");
+    store.approve_command(&a).unwrap();
+    store.approve_command(&a).unwrap();
+    assert!(store.command_approved(&a).unwrap());
+    assert!(!store.command_approved(&b).unwrap());
 }

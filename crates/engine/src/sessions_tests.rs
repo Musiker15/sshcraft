@@ -83,6 +83,11 @@ impl HostKeyPrompter for FixedPrompter {
         self.asked.fetch_add(1, Ordering::SeqCst);
         self.answer
     }
+
+    async fn ask_command(&self, _: &str, _: &str) -> bool {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.answer
+    }
 }
 
 struct Fixture {
@@ -1585,4 +1590,64 @@ mod agents {
         assert!(!read.output.is_empty());
         agents.close(&f.manager, id);
     }
+}
+
+// ---------- proxy commands run only after approval on this device
+
+/// A program that does not exist: starting it fails, which shows it was started.
+fn missing_program() -> Vec<String> {
+    vec!["sshcraft-no-such-program".into(), "%h".into(), "%p".into()]
+}
+
+async fn command_session(w: &PasswordWorld, server: &TestServer, argv: Vec<String>, answer: bool) -> (Vec<SessionStatus>, usize) {
+    let host = w.host(server.port, Some("pw"), Vec::new());
+    w.set(host, |s| s.proxy = Some(sshcraft_model::model::Proxy::Command { argv }));
+    let prompter = Arc::new(FixedPrompter { answer, asked: AtomicUsize::new(0) });
+    let manager = w.manager(Some(w.vault.clone()), prompter.clone(), Arc::new(sshcraft_ssh::NoPrompter), verified());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    (sink.statuses(), prompter.asked.load(Ordering::SeqCst))
+}
+
+#[tokio::test]
+async fn a_synced_proxy_command_asks_before_it_runs() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let digest = sshcraft_store::store::command_digest(&missing_program());
+    // Said no: nothing starts, nothing is kept.
+    let (statuses, asked) = command_session(&w, &server, missing_program(), false).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
+    assert!(!w.store.lock().unwrap().command_approved(&digest).unwrap());
+    // Said yes: the program is started (and fails, it does not exist) and the answer is kept.
+    let (statuses, asked) = command_session(&w, &server, missing_program(), true).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyFailed));
+    assert!(w.store.lock().unwrap().command_approved(&digest).unwrap());
+}
+
+#[tokio::test]
+async fn an_approved_proxy_command_runs_without_asking() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    w.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&missing_program())).unwrap();
+    let (statuses, asked) = command_session(&w, &server, missing_program(), false).await;
+    assert_eq!(asked, 0);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyFailed));
+}
+
+#[tokio::test]
+async fn a_changed_command_asks_again() {
+    let server = password_server("pw").await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    w.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&missing_program())).unwrap();
+    let mut changed = missing_program();
+    changed.push("--extra".into());
+    let (statuses, asked) = command_session(&w, &server, changed, false).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
 }

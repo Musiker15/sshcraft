@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 use serde_json::Value;
-use sshcraft_model::model::{Group, Host, HostId, PasswordId, effective_endpoint, group_chain};
+use sshcraft_model::model::{ConnectionSettings, Group, Host, HostId, PasswordId, Proxy, effective_endpoint, group_chain};
 use sshcraft_store::store::{ItemKind, Store};
 
 use super::password::{HostView, drop_passwords, host_view, keep_passwords, queue};
@@ -143,6 +143,7 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
             keep_passwords(stored.as_ref().map(|h| &h.settings), &mut host.settings)
         };
         let mut servers = checked(&ctx.session, Change::SaveHost(&host), ItemKind::Host, id, |s| Ok(s.upsert_host(&host)?))?;
+        approve_commands(&ctx, [&host.settings])?;
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
         // Rules removed from the host stop forwarding.
         let rules: Vec<_> = host.forwards.iter().map(|r| r.id).collect();
@@ -150,6 +151,21 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         ctx.session.announce(&servers);
         Ok(Value::Null)
     })
+}
+
+/// A proxy command the user saves in the window runs on this device without asking again.
+/// One that an agent, sync or a share brings is asked about when it is first used.
+pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item = &'a ConnectionSettings>) -> Result<(), CommandError> {
+    if !ctx.caller.is_user() {
+        return Ok(());
+    }
+    let store = ctx.session.store();
+    for s in settings {
+        if let Some(Proxy::Command { argv }) = &s.proxy {
+            store.approve_command(&sshcraft_store::store::command_digest(argv))?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]

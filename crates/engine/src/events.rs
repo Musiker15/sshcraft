@@ -28,6 +28,7 @@ pub enum EngineEvent {
     AuthPrompt(crate::prompts::AuthPrompt),
     /// Whether an agent's action may run; answer with `prompt.agent`.
     AgentPrompt(crate::gate::confirm::AgentPrompt),
+    ProxyCommandPrompt(crate::prompts::ProxyCommandPrompt),
     /// A prompt was answered elsewhere, timed out or its session went away.
     PromptWithdrawn {
         prompt_id: u64,

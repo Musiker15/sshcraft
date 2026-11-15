@@ -1040,3 +1040,23 @@ async fn an_agent_cannot_change_the_consent() {
     let now = w.session.execute(Caller::User, "settings.get", json!({})).await.unwrap();
     assert_eq!(now["integrations"]["allow_agent_control"], false);
 }
+
+/// An agent can neither set nor change a proxy command (it would run a program on this
+/// computer); the user can, and what the user saves runs without asking again.
+#[tokio::test]
+async fn agents_cannot_set_a_proxy_command() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let conn = w.conn();
+    let argv = json!(["nc", "%h", "%p"]);
+    let digest = sshcraft_store::store::command_digest(&["nc".into(), "%h".into(), "%p".into()]);
+    let r = call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "proxy": { "kind": "command", "argv": argv } } })).await;
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(w.stored(w.web.id).unwrap().settings.proxy, None);
+    assert!(!w.session.store().command_approved(&digest).unwrap());
+    // The same change from the user is saved and approved on this device.
+    let mut web = w.stored(w.web.id).unwrap();
+    web.settings.proxy = Some(sshcraft_model::model::Proxy::Command { argv: vec!["nc".into(), "%h".into(), "%p".into()] });
+    w.session.execute(Caller::User, "host.save", json!({ "host": web })).await.unwrap();
+    assert!(w.session.store().command_approved(&digest).unwrap());
+}
