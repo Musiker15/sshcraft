@@ -6,7 +6,7 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 
 | Rank | Gap | Where it is planned |
 |---|---|---|
-| 1 | The desktop app lacks workspaces and splits, broadcast, port forwarding, snippets, session logs, sync and sharing, and the window that answers an agent's question; they return in R5 | R5 |
+| 1 | A new mark in the log viewer is placed by line breaks: with long wrapped lines above it, it lands a few lines higher than seen | later |
 | 1a | The title bar is the system's; the integrated title bar, the menu bar (craft-menu) and the fonts from craft-fonts (`CRAFT_FONTS_DIR`) come with the packaging | R7 |
 | 2 | Agents and the command line have no transport until the control channel and the MCP crate (R6) | R6 |
 | 3 | Only Windows is built and tested; macOS, Linux and FreeBSD follow | R7 |

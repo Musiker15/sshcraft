@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last updated:** 2026-11-15 · **Change:** R4, the interface
+> **Last updated:** 2026-11-15 · **Change:** R5, the second half of the interface
 
 How SSHCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md); the
 design of the rebuild is
@@ -110,6 +110,12 @@ reads `config.toml`.
   `Pump`; the terminal's answers go back to the session, titles become the tab's, clipboard
   writes need consent per host, links go through `link.open`. Host key and sign-in questions
   show one at a time over the window.
+- **Panes** (`panes.rs`, `state::Panes`): every tab holds 1 to 16 panes in a near-square grid or
+  one large with the others listed; dividers resize, title bars swap and detach, tabs merge.
+  Broadcast and status dots (`status.rs`) sit on the panes.
+- **More pages:** port forwarding, snippets (with the sidebar beside the terminal), session logs
+  (`log_viewer.rs`), Settings > Sync (accounts, devices, shares) and Settings > AI agents. Typed
+  lines go through `history.rs` and `completion.rs`; templates through `pages/templates.rs`.
 - **Words and keys.** `tr` and `trf` translate English texts to German (`i18n/de.rs`; a test
   fails for a text without German). Shortcuts are craft-keymap chords; inside a terminal only
   Ctrl+Shift and Ctrl+Tab are taken.

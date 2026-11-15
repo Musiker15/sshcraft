@@ -5,6 +5,11 @@ The decisions that carry SSHCraft, newest first. The reasoning is in the design 
 
 | Date | Decision |
 |---|---|
+| 2026-11-15 | A tab is a set of up to 16 panes; a connection lands in the pane it was asked from. Questions name their tab through a task-local session id. |
+| 2026-11-15 | The terminal stream wakes the window; nothing polls for output. |
+| 2026-11-15 | History and suggestions follow the bytes the window sends and the cursor's line at the first key; any edit key makes a line no history. |
+| 2026-11-15 | The session-log viewer plays a log back in a read-only `term` terminal; marks sit on term's own line marks. |
+| 2026-11-15 | The account key's QR code is drawn from the key with `qrcode`, the crate the sync crate already uses. |
 | 2026-11-15 | The window asks the engine through a runner: a command runs on the engine's runtime and its answer comes back on a later frame; no frame waits for the engine. |
 | 2026-11-15 | A new question's answer buttons take a click only 400 ms after it appears; a changed host key is never asked about, the tab shows a warning and nothing to accept. |
 | 2026-11-15 | OSC 52 asks per write ("Once", "Always for this host", "No"); "Always" stores the host in `terminal.clipboard_hosts` (at most 1000). Local shells and serial ports always ask. |

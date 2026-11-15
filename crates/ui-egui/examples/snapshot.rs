@@ -3,7 +3,7 @@
 //!
 //! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]`
 //!
-//! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png --page hosts|keys|settings|newtab
+//! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab
 //! [--dark|--light] [--language en|de]`
 //!
 //! The window runs on an engine in a fresh temp folder with made-up sample data, never on
@@ -80,6 +80,8 @@ fn sample_data(session: &Session) -> Result<(), String> {
             json!({ "id": uuid::Uuid::new_v4(), "name": name, "group_id": group, "tags": tags, "settings": { "address": address, "port": 22 } });
         run(session, "host.save", json!({ "host": host }))?;
     }
+    run(session, "snippet.save", json!({ "snippet": { "id": uuid::Uuid::new_v4(), "name": "restart app", "package": "ops", "content": "sudo systemctl restart app", "default_targets": [] } }))?;
+    run(session, "snippet.save", json!({ "snippet": { "id": uuid::Uuid::new_v4(), "name": "disk usage", "content": "df -h", "default_targets": [] } }))?;
     run(session, "key.generate", json!({ "name": "laptop", "spec": { "type": "ed25519" }, "passphrase": null }))?;
     run(session, "key.generate", json!({ "name": "deploy-ci", "spec": { "type": "ecdsa", "curve": "nistp256" }, "passphrase": null }))?;
     Ok(())
@@ -97,6 +99,9 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
                 Some("hosts") => page = Page::Hosts,
                 Some("keys") => page = Page::Keys,
                 Some("settings") => page = Page::Settings,
+                Some("snippets") => page = Page::Snippets,
+                Some("forwarding") => page = Page::Forwarding,
+                Some("logs") => page = Page::Logs,
                 Some("newtab") => new_tab = true,
                 other => return Err(format!("unknown page {other:?}")),
             },
@@ -130,7 +135,7 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(out) = args.next() else {
         eprintln!("usage: snapshot <out.png> [colors|unicode|fullscreen]");
-        eprintln!("       snapshot <out.png> --page hosts|keys|settings|newtab [--dark|--light] [--language en|de]");
+        eprintln!("       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de]");
         return ExitCode::FAILURE;
     };
     let name = args.next().unwrap_or_else(|| "colors".into());

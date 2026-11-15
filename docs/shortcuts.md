@@ -1,8 +1,7 @@
 # Keyboard shortcuts
 
 > The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps.
-> Since R4: the palette, tabs, the pages, copy and paste, and the editor below. Panes, broadcast,
-> snippets and bookmarks return in R5.
+> Every shortcut below works since R5.
 
 Shortcuts that work everywhere in SSHCraft. Inside a terminal only combinations with
 Ctrl+Shift (without Alt) or Ctrl+Tab are taken, so every key the shell needs (Ctrl+W, Ctrl+K,

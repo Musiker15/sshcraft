@@ -80,6 +80,23 @@ What a server prints may not reach beyond the terminal on its own:
   dialog was closed never touches the dialog open now. A connection that opens late waits in
   its tab and does not take the page or the keyboard.
 
+## Panes, history and agents in the window
+
+- **Broadcast** sends only what is typed or pasted, and only to panes whose session is connected;
+  mouse, wheel and focus reports and the terminal's own answers go to their own session alone.
+- **History** keeps only lines typed at a shell prompt: never after a password, passphrase, PIN,
+  token or code question (in five languages), never in a REPL, a full-screen program, a line
+  starting with a space, an edited line, a multi-line paste or a broadcast.
+- **Templates** type the directory as one quoted word (`cd -- '<dir>'`) and refuse a directory or
+  command with a control character: nothing in them runs as a second command.
+- **An agent's question** names the agent, the action, the target and the command, warns about
+  commands of several lines, over 300 characters or with hidden characters, and takes a click
+  only 400 ms after it appears; no key answers it.
+- **The account key** of a new sync account is shown once, with a QR code, and the window keeps
+  no copy after it is closed. Forms holding an API key or an account key never print them.
+- **Sharing** asks to compare the recipient's safety number first, and stops with the old and the
+  new number when the server names another key for that e-mail.
+
 ## Port forwarding
 
 - New rules listen on loopback only (`127.0.0.1`, or `localhost` on the server for a remote
