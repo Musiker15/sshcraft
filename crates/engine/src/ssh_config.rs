@@ -124,7 +124,7 @@ pub async fn refresh_from(session: &Session, home: &Path) -> Result<(RefreshOutc
             }
         };
         // Saved as the user: the file is the user's own, its proxy commands are theirs.
-        session.execute(Caller::User, "host.save", json!({ "host": host })).await.map_err(engine)?;
+        session.execute(Caller::User, "host.save", json!({ "host": host, "approve_command": true })).await.map_err(engine)?;
         let file = link.as_ref().map(|l| l.file.clone()).unwrap_or_else(|| {
             parsed
                 .hosts
@@ -220,6 +220,16 @@ pub fn write_back(session: &Session, host_ids: &[HostId], home: &Path) -> Result
     let mut written: Vec<String> = Vec::new();
     for id in host_ids {
         let entry = write_entry(session, *id, &links)?;
+        // `ssh` runs a proxy command through a shell, and the next refresh would take it as the
+        // user's own: only a command allowed on this device goes into the file.
+        if let Some(argv) = &entry.proxy_command
+            && !session.store().command_approved(&sshcraft_store::store::command_digest(argv))?
+        {
+            return Err(CommandError::Denied(format!(
+                "the proxy command of {} is not allowed on this device yet; connect once to allow it",
+                entry.alias
+            )));
+        }
         let file = links.iter().find(|l| l.host_id == *id).map(|l| PathBuf::from(&l.file)).filter(|f| f.is_file()).unwrap_or_else(|| root.clone());
         let text = match std::fs::read_to_string(&file) {
             Ok(text) => text,

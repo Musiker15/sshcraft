@@ -49,6 +49,26 @@ fn tokens_stay_one_argument() {
 }
 
 #[test]
+fn the_program_is_never_made_from_tokens() {
+    let out = expand(&s(&["%h", "%h"]), &Tokens { host: "evil", port: 22, user: "u", alias: "a" });
+    assert_eq!(out, s(&["%h", "evil"]));
+}
+
+#[test]
+fn a_value_that_starts_an_option_is_refused() {
+    let argv = s(&["nc", "%h", "%p"]);
+    let tokens = |host| Tokens { host, port: 22, user: "u", alias: "a" };
+    assert!(matches!(check_tokens(&argv, &tokens("-e/bin/sh")), Err(ProxyCommandError::UnsafeValue(_))));
+    assert!(matches!(check_tokens(&argv, &tokens("a\nb")), Err(ProxyCommandError::UnsafeValue(_))));
+    assert!(matches!(check_tokens(&argv, &tokens("bad\u{1b}x")), Err(ProxyCommandError::UnsafeValue(_))));
+    assert!(check_tokens(&argv, &tokens("host.org")).is_ok());
+    assert!(check_tokens(&argv, &tokens("my-host")).is_ok(), "a dash inside is fine");
+    // A value of a token the command does not use does not matter.
+    assert!(check_tokens(&argv, &Tokens { host: "h", port: 22, user: "-oProxyCommand=x", alias: "a" }).is_ok());
+    assert!(check_tokens(&s(&["nc", "%r"]), &Tokens { host: "h", port: 22, user: "-oProxyCommand=x", alias: "a" }).is_err());
+}
+
+#[test]
 fn percent_percent_is_a_percent() {
     let out = expand(&s(&["x", "100%%", "%q", "%"]), &Tokens { host: "h", port: 22, user: "u", alias: "a" });
     assert_eq!(out, s(&["x", "100%", "%q", "%"]), "unknown tokens stay as they are");

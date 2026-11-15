@@ -143,3 +143,28 @@ async fn agents_cannot_read_or_write_the_config() {
         assert!(w.session.execute(agent.clone(), id, params).await.is_err(), "{id}");
     }
 }
+
+/// A proxy command not allowed on this device never goes into the file: `ssh` would run it
+/// through a shell, and the next refresh would take it as the user's own.
+#[tokio::test]
+async fn an_unapproved_command_is_not_written() {
+    let w = World::new();
+    let argv: Vec<String> = ["sh", "-c", "curl evil"].map(String::from).to_vec();
+    let host = Host {
+        id: HostId::new(),
+        name: "synced".into(),
+        group_id: None,
+        settings: ConnectionSettings { address: Some("s.org".into()), proxy: Some(Proxy::Command { argv: argv.clone() }), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    w.session.store().upsert_host(&host).unwrap();
+    assert!(write_back(&w.session, &[host.id], w.home.path()).is_err());
+    assert!(!w.config().exists());
+    // Counter-check: once allowed, it is written.
+    w.session.store().approve_command(&sshcraft_store::store::command_digest(&argv)).unwrap();
+    write_back(&w.session, &[host.id], w.home.path()).unwrap();
+    assert!(std::fs::read_to_string(w.config()).unwrap().contains("ProxyCommand sh -c 'curl evil'"));
+}

@@ -18,6 +18,9 @@ pub enum ProxyCommandError {
     /// The character only means something to a shell (or is a control character).
     #[error("the proxy command needs a shell for '{0}'; SSHCraft runs it without one")]
     ShellSyntax(char),
+    /// A value for a token would start an option or hold a control character.
+    #[error("{0} cannot go to the proxy command: it starts with '-' or holds a control character")]
+    UnsafeValue(String),
 }
 
 /// Characters a shell would act on outside quotes.
@@ -126,10 +129,28 @@ pub struct Tokens<'a> {
     pub alias: &'a str,
 }
 
-/// Replaces `%h`, `%p`, `%r`, `%n` and `%%` in each argument. Unknown tokens stay as written.
+/// Whether the values for the tokens the command uses are safe: a host name, user or name from
+/// sync, a share or an agent must not start with `-` (it would be an option to the program, as
+/// OpenSSH refuses too) or hold a control character.
+pub fn check_tokens(argv: &[String], tokens: &Tokens<'_>) -> Result<(), ProxyCommandError> {
+    let used = |token: &str| argv.iter().skip(1).any(|a| a.contains(token));
+    for (token, value) in [("%h", tokens.host), ("%r", tokens.user), ("%n", tokens.alias)] {
+        if used(token) && (value.starts_with('-') || value.chars().any(char::is_control)) {
+            return Err(ProxyCommandError::UnsafeValue(value.escape_default().to_string()));
+        }
+    }
+    Ok(())
+}
+
+/// Replaces `%h`, `%p`, `%r`, `%n` and `%%` in each argument but the program itself, which is
+/// never made from host data. Unknown tokens stay as written.
 pub fn expand(argv: &[String], tokens: &Tokens<'_>) -> Vec<String> {
     argv.iter()
-        .map(|arg| {
+        .enumerate()
+        .map(|(index, arg)| {
+            if index == 0 {
+                return arg.clone();
+            }
             let mut out = String::with_capacity(arg.len());
             let mut chars = arg.chars().peekable();
             while let Some(c) = chars.next() {

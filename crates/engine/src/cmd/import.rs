@@ -271,8 +271,8 @@ struct ApplyParams {
 fn run_apply(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let ApplyParams { candidates, location } = parse("import.apply", params)?;
+        // Candidates may come from someone else's export: their proxy commands ask first.
         let (outcome, servers) = apply_and_queue(&ctx.session.store(), &candidates, location)?;
-        super::host::approve_commands(&ctx, candidates.iter().flat_map(|c| [&c.settings, &c.group_defaults]))?;
         ctx.session.sync().nudge(&servers);
         ctx.session.announce(&servers);
         to_value(&outcome)

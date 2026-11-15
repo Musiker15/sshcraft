@@ -195,9 +195,13 @@ impl GateView {
 }
 
 /// Whether these settings sign in with something stored: a password (also a proxy's), an
-/// identity, or agent forwarding.
+/// identity, or agent forwarding; or run a proxy command, which an agent must not point at an
+/// address of its choosing either (the address goes to the program as `%h`).
 pub fn signs_in_with_stored(settings: &ConnectionSettings) -> bool {
-    !settings.password_ids().is_empty() || settings.identity.is_some() || settings.agent_forwarding == Some(true)
+    !settings.password_ids().is_empty()
+        || settings.identity.is_some()
+        || settings.agent_forwarding == Some(true)
+        || matches!(settings.proxy, Some(sshcraft_model::model::Proxy::Command { .. }))
 }
 
 /// A name an agent may give: not blank, at most [`MAX_NAME`] characters, no control or bidi

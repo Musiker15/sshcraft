@@ -1105,6 +1105,8 @@ pub(crate) async fn connect_session(
             let first = route.jumps.first().unwrap_or(&route.target);
             let tokens =
                 sshcraft_model::proxy_command::Tokens { host: &first.address, port: first.port, user: &first.username, alias: &route.target.name };
+            sshcraft_model::proxy_command::check_tokens(argv, &tokens)
+                .map_err(|e| end_error(ErrorCode::ProxyCommandNotAllowed, Some(e.to_string())))?;
             let mut argv = sshcraft_model::proxy_command::expand(argv, &tokens);
             if let Some(program) = argv.first_mut()
                 && let Some(rest) = program.strip_prefix("~/")

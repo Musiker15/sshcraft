@@ -24,7 +24,12 @@ type Out = futures::future::BoxFuture<'static, Result<Value, CommandError>>;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         query("host.list", "Hosts", "none", run_list),
-        command("host.save", "Save a host", "{ host: the host as host.list returns it, without password flags }", run_save),
+        command(
+            "host.save",
+            "Save a host",
+            "{ host: the host as host.list returns it, without password flags, approve_command?: the user entered its proxy command }",
+            run_save,
+        ),
         command("host.delete", "Delete a host", "{ id }", run_delete),
         query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
         command("host.forget_key", "Forget the host key", "{ host_id }", run_forget_key),
@@ -131,11 +136,15 @@ fn run_list(ctx: Ctx, _: Value) -> Out {
 #[derive(Deserialize)]
 struct SaveParams {
     host: Host,
+    /// The user entered the proxy command in this save (the host form sets it only when the
+    /// command changed there); anything else never approves one.
+    #[serde(default)]
+    approve_command: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host } = parse("host.save", params)?;
+        let SaveParams { mut host, approve_command } = parse("host.save", params)?;
         let id = host.id.0.to_string();
         let orphans = {
             let store = ctx.session.store();
@@ -143,7 +152,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
             keep_passwords(stored.as_ref().map(|h| &h.settings), &mut host.settings)
         };
         let mut servers = checked(&ctx.session, Change::SaveHost(&host), ItemKind::Host, id, |s| Ok(s.upsert_host(&host)?))?;
-        approve_commands(&ctx, [&host.settings])?;
+        if approve_command {
+            approve_commands(&ctx, [&host.settings])?;
+        }
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
         // Rules removed from the host stop forwarding.
         let rules: Vec<_> = host.forwards.iter().map(|r| r.id).collect();
@@ -153,8 +164,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
     })
 }
 
-/// A proxy command the user saves in the window runs on this device without asking again.
-/// One that an agent, sync or a share brings is asked about when it is first used.
+/// A proxy command the user entered in the window runs on this device without asking again.
+/// One that an agent, sync, a share or an import brings is asked about when it is first used;
+/// saving such a host for another reason (a rename, a rule, a move) does not approve it.
 pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item = &'a ConnectionSettings>) -> Result<(), CommandError> {
     if !ctx.caller.is_user() {
         return Ok(());

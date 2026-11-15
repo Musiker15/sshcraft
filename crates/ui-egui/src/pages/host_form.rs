@@ -105,14 +105,22 @@ pub struct HostForm {
     pub tags: String,
     pub port: String,
     pub error: Option<String>,
+    /// The proxy as the form opened; a command that differs at save was entered here.
+    pub opened_proxy: Option<Proxy>,
 }
 
 impl HostForm {
     pub fn new(host: Host, editing: bool, has_password: bool) -> Self {
         let tags = host.tags.join(", ");
         let port = host.settings.port.map(|p| p.to_string()).unwrap_or_default();
-        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None }
+        let opened_proxy = host.settings.proxy.clone();
+        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
     }
+}
+
+/// Whether the user entered a proxy command in this form (it is new or changed).
+fn entered_command(opened: &Option<Proxy>, now: &Option<Proxy>) -> bool {
+    matches!(now, Some(Proxy::Command { .. })) && opened != now
 }
 
 /// A group being created or edited.
@@ -126,6 +134,7 @@ pub struct GroupForm {
     pub tags: String,
     pub port: String,
     pub error: Option<String>,
+    pub opened_proxy: Option<Proxy>,
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -473,7 +482,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "host.save",
-                    json!({ "host": form.host }),
+                    json!({ "host": form.host, "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy) }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
@@ -567,7 +576,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "group.save",
-                    json!({ "group": form.group }),
+                    json!({ "group": form.group, "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy) }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
@@ -599,6 +608,7 @@ impl GroupForm {
     pub fn new(group: Group, editing: bool, has_password: bool) -> Self {
         let tags = group.tags.join(", ");
         let port = group.defaults.port.map(|p| p.to_string()).unwrap_or_default();
-        Self { group, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None }
+        let opened_proxy = group.defaults.proxy.clone();
+        Self { group, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
     }
 }
