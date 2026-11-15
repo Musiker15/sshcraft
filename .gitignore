@@ -2,3 +2,6 @@
 /plan/
 /.superpowers/
 *.db
+node_modules/
+# Leftovers of the Tauri app (removed in R1) in older checkouts: build output and dependencies.
+/app/
