@@ -19,7 +19,14 @@ use sshcraft_ui_egui::testing::app_harness;
 type H = Harness<'static, SshcraftApp>;
 
 fn until(h: &mut H, what: &str, done: impl Fn(&SshcraftApp) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    until_within(h, what, Duration::from_secs(20), done);
+}
+
+/// An RSA key of 4096 bits, made in a debug build on a busy CI machine, can take a minute.
+const SLOW_KEY: Duration = Duration::from_secs(180);
+
+fn until_within(h: &mut H, what: &str, within: Duration, done: impl Fn(&SshcraftApp) -> bool) {
+    let deadline = Instant::now() + within;
     while !done(h.state()) {
         assert!(Instant::now() < deadline, "timed out waiting for {what}; messages: {:?}", h.state().toasts.texts());
         std::thread::sleep(Duration::from_millis(20));
@@ -224,7 +231,7 @@ fn a_form_waits_for_its_command_before_it_can_be_sent_again() {
     h.run_steps(2);
     assert!(h.get_by_label("Generate").accesskit_node().is_disabled(), "the button waits for the key");
     h.get_by_label("Generate").click();
-    until(&mut h, "the key", |app| !app.data.keys.is_empty() && app.runner.busy() == 0);
+    until_within(&mut h, "the key", SLOW_KEY, |app| !app.data.keys.is_empty() && app.runner.busy() == 0);
     h.run_steps(5);
     assert_eq!(h.state().data.keys.len(), 1, "one key, not two");
 }
@@ -242,7 +249,7 @@ fn a_late_answer_does_not_close_the_next_dialog() {
     h.get_by_label("Import key").click();
     h.run_steps(3);
     h.state_mut().ui.key_dialog.as_mut().and_then(keys::KeyDialog::import_mut).unwrap().name = "typed".into();
-    until(&mut h, "the slow key", |app| !app.data.keys.is_empty());
+    until_within(&mut h, "the slow key", SLOW_KEY, |app| !app.data.keys.is_empty());
     let import = h.state_mut().ui.key_dialog.as_mut().and_then(keys::KeyDialog::import_mut).map(|f| f.name.clone());
     assert_eq!(import.as_deref(), Some("typed"), "the import dialog and what was typed stay");
 }
