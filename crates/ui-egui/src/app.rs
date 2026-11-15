@@ -53,7 +53,9 @@ pub struct SshcraftApp {
 
 impl SshcraftApp {
     pub fn new(session: Session, ctx: &egui::Context) -> Self {
-        // Names from servers and imports can be in any script: the system's fonts fill in.
+        // The craft-fonts faces of a release build, then the system's fonts for any other script
+        // in names from servers and imports.
+        crate::fonts::install_embedded(ctx, crate::fonts::CRAFT_FONTS);
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
         // Terminal output wakes the window; nothing polls for it.

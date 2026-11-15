@@ -30,8 +30,8 @@ jobs:
       packages: >-
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
         libgtk-3-dev libfontconfig1-dev libfreetype-dev libudev-dev libdbus-1-dev mesa-vulkan-drivers
-      # SSHCraft builds without craft-fonts so far.
-      craft-fonts-ref: ""
-      require-craft-fonts: false
+      # The suite's craft-fonts commit, as in release.yml and freebsd.yml, so the gate tests the
+      # fonts that ship.
+      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
       tools: cargo-nextest@0.9.152,cargo-deny@0.20.2
       targets: wasm32-unknown-unknown

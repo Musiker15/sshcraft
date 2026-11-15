@@ -5986,6 +5986,7 @@ dependencies = [
  "bitflags 2.13.2",
  "chrono",
  "craft-dialogs",
+ "craft-fonts-build",
  "craft-keymap",
  "craft-menu",
  "craft-quit",

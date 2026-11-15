@@ -27,6 +27,7 @@ craft-dialogs = { workspace = true }
 craft-window = { workspace = true }
 craft-menu = { workspace = true }
 craft-quit = { workspace = true }
+craft-fonts-build = { workspace = true }
 raw-window-handle = { workspace = true }
 fontique = { workspace = true }
 serde = { workspace = true }
@@ -40,6 +41,10 @@ zeroize = { workspace = true }
 chrono = { workspace = true, features = ["clock"] }
 tokio = { workspace = true }
 egui_kittest = { workspace = true, optional = true }
+
+[build-dependencies]
+# Embeds the craft-fonts faces when CRAFT_FONTS_DIR names a checkout (build.rs).
+craft-fonts-build = { workspace = true }
 
 [dev-dependencies]
 sshcraft-server-lib = { workspace = true }

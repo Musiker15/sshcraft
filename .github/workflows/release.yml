@@ -31,7 +31,7 @@ jobs:
       dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
       app-name: sshcraft
       app-title: SSHCraft
-      craft-fonts-ref: ""
+      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
       version: ${{ inputs.version }}
       # SSHCraft has no web build: SSH needs TCP.
       has-web: false
