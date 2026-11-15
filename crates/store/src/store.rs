@@ -51,7 +51,7 @@ pub struct Store {
     pub(crate) conn: rusqlite::Connection,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -344,6 +344,12 @@ impl Store {
         if version < 12 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(SCHEMA_V12)?;
+            tx.pragma_update(None, "user_version", 12)?;
+            tx.commit()?;
+        }
+        if version < 13 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(crate::trash::SCHEMA_V13)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
