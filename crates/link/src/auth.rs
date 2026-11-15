@@ -61,6 +61,16 @@ impl Token {
         Self::parse(&std::fs::read_to_string(path).ok()?)
     }
 
+    /// A fresh token in `path`, replacing whatever was there: a token for this start only.
+    pub fn create_fresh(path: &Path) -> Result<Self, LinkError> {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(LinkError::Io(format!("{}: {e}", path.display()))),
+        }
+        Self::load_or_create(path)
+    }
+
     /// The token in `path`, made (with a fresh token, only the owner may read it) when the file
     /// is missing. A file that holds no token is an error: deleting it gives a new one.
     pub fn load_or_create(path: &Path) -> Result<Self, LinkError> {

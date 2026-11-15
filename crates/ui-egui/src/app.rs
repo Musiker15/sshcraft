@@ -37,6 +37,8 @@ pub struct SshcraftApp {
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
     /// Turns the agent link on and off as the consent says.
     pub link: crate::link::LinkWatch,
+    /// The control channel (`--control`), when the app was started with it.
+    pub control: Option<crate::control::Control>,
     /// Kept alive for the app when it owns the runtime (tests); the app binary owns it itself.
     _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
 }
@@ -68,6 +70,7 @@ impl SshcraftApp {
             log_viewer: None,
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
+            control: None,
             events,
             _runtime: None,
         }
@@ -300,6 +303,7 @@ impl SshcraftApp {
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
         crate::link::tick(self, &ctx);
+        crate::control::process(self, &ctx);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {
             self.bindings = Bindings::from_settings(&self.data.settings.shortcuts);

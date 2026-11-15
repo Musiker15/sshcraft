@@ -16,6 +16,9 @@ sshcraft-engine = { workspace = true }
 sshcraft-fido = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-ui-egui = { workspace = true }
+sshcraft-link = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 tokio = { workspace = true }

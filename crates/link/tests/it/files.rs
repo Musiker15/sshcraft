@@ -40,3 +40,13 @@ fn a_connection_file_round_trips_and_a_bad_one_is_none() {
     ConnectionFile::remove(dir.path()).unwrap();
     assert!(!dir.path().join(CONNECTION_FILE).exists());
 }
+
+#[test]
+fn a_fresh_token_replaces_the_old_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("control.token");
+    let first = Token::create_fresh(&path).unwrap();
+    let second = Token::create_fresh(&path).unwrap();
+    assert_ne!(first.hex(), second.hex(), "a new token for every start");
+    assert_eq!(Token::load(&path).unwrap().hex(), second.hex());
+}
