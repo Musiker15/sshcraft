@@ -30,6 +30,12 @@ allow = [
 crate = "foldhash"
 allow = ["Zlib"]
 
+# slotmap: through glow in wgpu-hal, the renderer under eframe (the desktop app); Zlib is a
+# permissive licence.
+[[licenses.exceptions]]
+crate = "slotmap"
+allow = ["Zlib"]
+
 # option-ext: through dirs-sys and directories (the data folder) and craft-libs later.
 # MPL-2.0 is file-level copyleft; SSHCraft does not modify the crate. Named in the rebuild design.
 [[licenses.exceptions]]

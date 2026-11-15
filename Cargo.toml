@@ -49,6 +49,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 bitflags = "2.13.2"
 unicode-width = "0.2.3"
 cursor-icon = "1.2.0"
+raw-window-handle = "0.6.2"
 
 # terminal
 alacritty_terminal = { version = "0.26.0", default-features = false }
@@ -89,6 +90,9 @@ http-body-util = "0.1.5"
 
 # craft-libs: the shared libraries of the Craft apps, all from one pinned revision.
 craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032", version = "0.1.0" }
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032" }
+craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032", features = ["egui"] }
+craft-dialogs = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032" }
 
 # tests
 tempfile = "3.27.0"

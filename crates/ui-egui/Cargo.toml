@@ -7,21 +7,42 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# testing::app_harness: the app in egui_kittest on an engine for tests.
+testing = ["dep:egui_kittest", "sshcraft-engine/testing"]
+
 [dependencies]
 sshcraft-term = { workspace = true }
 sshcraft-engine = { workspace = true }
+sshcraft-model = { workspace = true }
+sshcraft-import = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 egui_system_font_provider = { workspace = true }
+craft-ui = { workspace = true }
+craft-keymap = { workspace = true }
+craft-dialogs = { workspace = true }
+raw-window-handle = { workspace = true }
 fontique = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bitflags = { workspace = true }
+sys-locale = { workspace = true }
+uuid = { workspace = true }
+data-encoding = { workspace = true }
+tokio = { workspace = true }
+egui_kittest = { workspace = true, optional = true }
 
 [dev-dependencies]
+memory-stats = { workspace = true }
+russh = { workspace = true }
+rand = { workspace = true }
+sshcraft-ui-egui = { path = ".", features = ["testing"] }
 sshcraft-engine = { workspace = true, features = ["testing"] }
 sshcraft-ssh = { workspace = true, features = ["testing"] }
 eframe = { workspace = true }
-tokio = { workspace = true }
 tempfile = { workspace = true }
-serde_json = { workspace = true }
 data-encoding = { workspace = true }
+uuid = { workspace = true }
 egui_kittest = { workspace = true, features = ["wgpu"] }
 image = { workspace = true, features = ["png"] }
 

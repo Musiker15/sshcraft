@@ -1,0 +1,30 @@
+[package]
+name = "sshcraft"
+description = "SSHCraft, the desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "sshcraft"
+path = "src/main.rs"
+
+[dependencies]
+sshcraft-engine = { workspace = true }
+sshcraft-fido = { workspace = true }
+sshcraft-platform = { workspace = true }
+sshcraft-ui-egui = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+raw-window-handle = { workspace = true }
+
+[dev-dependencies]
+sshcraft-engine = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

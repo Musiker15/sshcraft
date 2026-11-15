@@ -6,7 +6,8 @@
 //! - `assets`: every asset attributed, no font files (`assets.rs`)
 //! - `deny`: licences, bans, sources and advisories through cargo-deny (`deny.toml`)
 //! - `wasm`: the crates that must build for the browser do
-//! - `perf`: the performance budgets of the terminal, in a release build (`crates/term/tests/budgets.rs`)
+//! - `perf`: the performance budgets of the terminal and the window, in a release build
+//!   (`crates/term/tests/budgets.rs`, `crates/ui-egui/tests/budgets.rs`)
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -178,5 +179,8 @@ fn cmd_wasm() -> Result<(), String> {
 fn cmd_perf() -> Result<(), String> {
     let mut c = cargo();
     c.args(["test", "--release", "-p", "sshcraft-term", "--test", "budgets"]);
-    run(c, "cargo test --release -p sshcraft-term --test budgets")
+    run(c, "cargo test --release -p sshcraft-term --test budgets")?;
+    let mut c = cargo();
+    c.args(["test", "--release", "-p", "sshcraft-ui-egui", "--test", "budgets"]);
+    run(c, "cargo test --release -p sshcraft-ui-egui --test budgets")
 }

@@ -42,9 +42,12 @@ where it can have one.
 What a server prints may not reach beyond the terminal on its own:
 
 - **Clipboard (OSC 52):** a program may write text to the clipboard (at most 1 MiB, and only
-  while the setting is on), never read it. A read request gets no answer.
+  while the setting is on), never read it. A read request gets no answer. Each write asks first:
+  "Once", "Always for this host" or "No". "Always" stores that one host in
+  `terminal.clipboard_hosts` (at most 1000 hosts); a local shell or serial port always asks.
 - **Links:** only `http` and `https` links open, only on Ctrl+click, and the engine checks the
-  link again (`link.open`) before the system opens it. `file:`, `javascript:` and other schemes
+  link again (`link.open`) before the window opens it; a refused link shows why and opens
+  nothing. `file:`, `javascript:` and other schemes
   are refused. A link target longer than 2048 bytes is dropped.
 - **Titles:** a window title loses control and bidi characters and is cut to 256 characters.
   Title reports (`CSI 20 t`, `CSI 21 t`) get no answer, so a server cannot make the terminal
@@ -61,6 +64,21 @@ What a server prints may not reach beyond the terminal on its own:
   bracketed paste early nor type an escape sequence of its own.
 - **Broadcast:** answers the terminal gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
+
+## Questions in the window
+
+- **Host keys:** a server whose key is not stored yet shows its fingerprint and asks; only
+  "Accept" stores it. A server whose key differs from the stored one is never asked about: the
+  session ends with a warning and nothing to accept, and the stored key stays.
+- **One click, one answer:** the buttons of a new question take a click only 400 ms after it
+  appears, so a click meant for the question before it never answers the next one.
+- **Sign-in questions** show what the server asks and hide the typed answer unless the server
+  says it may be shown. A question takes the keyboard: while it is open, nothing typed reaches
+  the terminal behind it, so a password typed out of habit never lands in a shell. Answer
+  fields keep no undo history.
+- **Late answers:** a dialog sends one command at a time, and an answer that comes after its
+  dialog was closed never touches the dialog open now. A connection that opens late waits in
+  its tab and does not take the page or the keyboard.
 
 ## Port forwarding
 

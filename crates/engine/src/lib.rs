@@ -76,6 +76,33 @@ pub struct SessionConfig {
     pub confirmer: Option<Arc<dyn gate::Confirmer>>,
 }
 
+impl SessionConfig {
+    /// The desktop app's engine on `data_dir`: the master key in the OS credential store,
+    /// `config.toml` in the data folder, the Proton Pass agent, `pass-cli` found where it is
+    /// installed. `presence` and `security` need the app's window and come from the app.
+    pub fn for_app(
+        data_dir: PathBuf,
+        runtime: tokio::runtime::Handle,
+        presence: Arc<dyn sshcraft_fido::presence::UserPresence>,
+        security: Option<Arc<dyn sshcraft_fido::Authenticator>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            runtime,
+            master_key: Box::new(sshcraft_store::vault::KeyringMasterKey),
+            presence,
+            security,
+            legacy_running: sshcraft_platform::legacy_instance_running,
+            confirm_timeout: CONFIRM_TIMEOUT,
+            event_capacity: EVENT_CAPACITY,
+            settings: craft_settings::Location::Auto,
+            pass_cli: passcli::locate_installed(),
+            agent: Arc::new(WindowsAgent),
+            confirmer: None,
+        }
+    }
+}
+
 /// What happened while opening.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenReport {
@@ -141,6 +168,11 @@ impl Drop for Inner {
 pub struct Session(Arc<Inner>);
 
 impl Session {
+    /// The runtime the engine runs its work on; the interface spawns its command tasks there.
+    pub fn runtime(&self) -> tokio::runtime::Handle {
+        self.0.runtime.clone()
+    }
+
     /// Opens the data in `config.data_dir`. Refuses while a Tauri version runs or another engine
     /// holds the folder, before the database or the vault are touched.
     pub fn open(config: SessionConfig) -> Result<(Session, OpenReport), EngineError> {

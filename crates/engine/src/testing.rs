@@ -111,20 +111,31 @@ impl SessionConfig {
 /// the server's host key is trusted, so `session.open` connects without a question. The server's
 /// shell answers `flood\n` with [`sshcraft_ssh::testing::flood_pattern`].
 pub async fn trusted_test_host(session: &crate::Session) -> (sshcraft_ssh::testing::TestServer, sshcraft_model::model::HostId) {
+    test_host(session, "test host", sshcraft_ssh::testing::TestAuth { quiet: true, ..Default::default() }, true).await
+}
+
+/// A test SSH server for `auth` (its key is replaced by a fresh one stored in the vault) and a
+/// host `name` for it; the server's host key is trusted when `trusted`.
+pub async fn test_host(
+    session: &crate::Session,
+    name: &str,
+    auth: sshcraft_ssh::testing::TestAuth,
+    trusted: bool,
+) -> (sshcraft_ssh::testing::TestServer, sshcraft_model::model::HostId) {
     use russh::keys::ssh_key::LineEnding;
     use russh::keys::{Algorithm, PrivateKey};
     use sshcraft_model::model::{ConnectionSettings, Host, HostId, KeyRef};
     use sshcraft_ssh::testing::{TestAuth, TestServer};
 
     let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let server = TestServer::start_with(TestAuth { key: Some(key.public_key().clone()), quiet: true, ..Default::default() }).await;
+    let server = TestServer::start_with(TestAuth { key: Some(key.public_key().clone()), ..auth }).await;
     let store = session.store();
-    let info = session.vault().unwrap().import_key(&store, "test", &key.to_openssh(LineEnding::LF).unwrap(), None).unwrap();
+    let info = session.vault().unwrap().import_key(&store, name, &key.to_openssh(LineEnding::LF).unwrap(), None).unwrap();
     let host = Host {
         forwards: Vec::new(),
         location: None,
         id: HostId::new(),
-        name: "test host".into(),
+        name: name.into(),
         group_id: None,
         settings: ConnectionSettings {
             address: Some("127.0.0.1".into()),
@@ -137,6 +148,18 @@ pub async fn trusted_test_host(session: &crate::Session) -> (sshcraft_ssh::testi
         os: None,
     };
     store.upsert_host(&host).unwrap();
-    store.set_known_host("127.0.0.1", server.port, &server.host_fingerprint).unwrap();
+    if trusted {
+        store.set_known_host("127.0.0.1", server.port, &server.host_fingerprint).unwrap();
+    }
     (server, host.id)
+}
+
+/// The stored host key fingerprint for `address` and `port`.
+pub fn known_host(session: &crate::Session, address: &str, port: u16) -> Option<String> {
+    session.store().known_host(address, port).unwrap()
+}
+
+/// Stores `fingerprint` as the host key of `address` and `port`.
+pub fn set_known_host(session: &crate::Session, address: &str, port: u16, fingerprint: &str) {
+    session.store().set_known_host(address, port, fingerprint).unwrap();
 }

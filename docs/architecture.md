@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last updated:** 2026-11-14 · **Change:** R2, the engine
+> **Last updated:** 2026-11-15 · **Change:** R4, the interface
 
 How SSHCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md); the
 design of the rebuild is
@@ -87,6 +87,35 @@ reads `config.toml`.
   engine reads the server on only as the terminal catches up.
 - **Budgets.** `cargo xtask perf` runs `crates/term/tests/budgets.rs` in a release build: a
   feed slice well inside a frame, 1 GiB of `cat`, the memory of a full scrollback.
+
+## Interface
+
+- **App.** `apps/sshcraft` opens the engine (`SessionConfig::for_app`, the real data folder),
+  takes the window handle for Windows Hello and security keys, and runs `SshcraftApp` in eframe.
+  A second start, or a running Tauri version, shows why and stops.
+- **Frame.** `SshcraftApp::frame` takes the answers of earlier commands, the engine's events
+  (data changed, questions, links to open) and the answers of file dialogs; fetches what is
+  stale; applies tokens, theme and language; runs the shortcuts; draws the shell (sidebar, tabs,
+  page), the palette, the questions and the messages. File dialogs show after the frame
+  (`show_dialogs`).
+- **Runner.** Pages never wait for the engine: `Runner::run` spawns `Session::execute` on the
+  engine's runtime and hands the result to a continuation on a later frame.
+- **Data.** `Data` caches hosts, groups, keys, identities and settings; an engine event marks a
+  part stale, and one fetch per part runs at a time. Its `version` lets pages cache what they
+  derive (the hosts page's filtered lists).
+- **Pages** (`ui-egui/src/pages/`): hosts and groups with inherited settings, keys and identities
+  with the agent's keys and Proton Pass, import with a preview and export, settings. Forms are
+  modal windows of fixed height: a window that changes its height loses a click.
+- **Sessions** (`session_tab.rs`, `prompts.rs`): one tab per session with its `Terminal` and
+  `Pump`; the terminal's answers go back to the session, titles become the tab's, clipboard
+  writes need consent per host, links go through `link.open`. Host key and sign-in questions
+  show one at a time over the window.
+- **Words and keys.** `tr` and `trf` translate English texts to German (`i18n/de.rs`; a test
+  fails for a text without German). Shortcuts are craft-keymap chords; inside a terminal only
+  Ctrl+Shift and Ctrl+Tab are taken.
+- **Tests and budgets.** `sshcraft_ui_egui::testing` runs the app in egui_kittest on a test
+  engine; `crates/ui-egui/tests/budgets.rs` holds the memory of the empty app and the frame time
+  of 5000 hosts (release, `cargo xtask perf`).
 
 ## Data
 

@@ -5,6 +5,12 @@ The decisions that carry SSHCraft, newest first. The reasoning is in the design 
 
 | Date | Decision |
 |---|---|
+| 2026-11-15 | The window asks the engine through a runner: a command runs on the engine's runtime and its answer comes back on a later frame; no frame waits for the engine. |
+| 2026-11-15 | A new question's answer buttons take a click only 400 ms after it appears; a changed host key is never asked about, the tab shows a warning and nothing to accept. |
+| 2026-11-15 | OSC 52 asks per write ("Once", "Always for this host", "No"); "Always" stores the host in `terminal.clipboard_hosts` (at most 1000). Local shells and serial ports always ask. |
+| 2026-11-15 | Shortcuts are stored under the Tauri version's action names; actions new in the egui window get new names in `SHORTCUT_ACTIONS`. |
+| 2026-11-15 | File dialogs go through craft-dialogs: asked in a frame, shown after it, answered on a later frame, so a native dialog never blocks the event loop. |
+| 2026-11-15 | Long lists draw only the rows in view and cache their filtering per data version: the hosts page with 5000 hosts takes 0.2 ms a frame (budget 8 ms, `cargo xtask perf`). |
 | 2026-11-15 | The terminal stays on `alacritty_terminal` (Apache-2.0): a trial measured 130 to 170 MiB/s on every kind of output. `term` hides it behind its own types. |
 | 2026-11-15 | Terminal text is drawn in runs of narrow cells (ligatures) and wide cells and clusters on their own (the grid stays exact); a full redraw of 200 by 50 cells took 4.8 ms. |
 | 2026-11-15 | A frame feeds terminal output in 32 KiB slices until 4 MiB or 6 ms and acknowledges only what it fed; budgets are release-build tests (`cargo xtask perf`). |
