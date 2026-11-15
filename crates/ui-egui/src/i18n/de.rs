@@ -241,6 +241,13 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "pass-cli did not answer." => "pass-cli hat nicht geantwortet.",
         "Proton Pass holds no SSH key." => "Proton Pass enthält keinen SSH-Schlüssel.",
         "Key imported." => "Schlüssel importiert.",
+        // R5
+        "Asked by tab {number}: {title}" => "Frage von Tab {number}: {title}",
+        "Show tab" => "Tab zeigen",
+        "Ligatures" => "Ligaturen",
+        "Join characters where the font has ligatures (->, !=)" => "Zeichen verbinden, wo die Schrift Ligaturen hat (->, !=)",
+        "Scrollback" => "Zeilenspeicher",
+        "lines, for new tabs" => "Zeilen, für neue Tabs",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

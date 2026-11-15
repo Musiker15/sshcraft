@@ -27,6 +27,8 @@ pub enum PromptKind {
 #[derive(Debug, Clone)]
 pub struct PromptView {
     pub id: u64,
+    /// The terminal session that asks, if a terminal asks.
+    pub session: Option<sshcraft_engine::SessionId>,
     pub kind: PromptKind,
     /// What the user typed, one per line of a sign-in question.
     pub answers: Vec<String>,
@@ -73,7 +75,8 @@ impl PromptView {
             PromptKind::Auth { lines, .. } => vec![String::new(); lines.len()],
             PromptKind::HostKey { .. } => Vec::new(),
         };
-        Some(Self { id, kind, answers })
+        let session = v.get("session").and_then(|s| serde_json::from_value(s.clone()).ok());
+        Some(Self { id, session, kind, answers })
     }
 }
 
@@ -184,8 +187,30 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     let tokens = Tokens::get(ctx);
     let mut answer = None;
+    // The tab that asks, by number and title (several tabs may show the same host).
+    let asking = prompt.session.and_then(|id| {
+        app.ui
+            .tabs
+            .iter()
+            .position(|t| matches!(t.kind, crate::state::TabKind::Session { session } if session == id))
+            .map(|i| (i, app.ui.tabs[i].title.clone()))
+    });
+    let mut show_tab = None;
     egui::Modal::new(egui::Id::unique("sshcraft-prompt")).show(ctx, |ui| {
         ui.set_width(520.0);
+        if let Some((index, title)) = &asking {
+            ui.horizontal(|ui| {
+                let number = (index + 1).to_string();
+                ui.label(
+                    egui::RichText::new(trf("Asked by tab {number}: {title}", &[("number", &number), ("title", &visible(title))]))
+                        .color(tokens.text_dim),
+                );
+                if ui.small_button(tr("Show tab")).clicked() {
+                    show_tab = Some(*index);
+                }
+            });
+            ui.add_space(4.0);
+        }
         match &prompt.kind {
             PromptKind::HostKey { host_name, address, port, fingerprint } => {
                 ui.heading(tr("Unknown host key"));
@@ -240,6 +265,9 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         }
     });
+    if let Some(index) = show_tab {
+        app.ui.page = crate::state::Page::Tab(index);
+    }
     let Some(answer) = answer else { return };
     let id = prompt.id;
     app.prompts.withdraw(id);

@@ -84,7 +84,7 @@ fn run_open(ctx: Ctx, params: Value) -> Out {
             return Err(CommandError::code(ErrorCode::LocalShellFailed));
         }
         let (sender, receiver) = mpsc::unbounded_channel();
-        let id = session.sessions().open(target, cols, rows, Arc::new(StreamSink { sender }));
+        let id = session.sessions().open(target, cols, rows, Arc::new(StreamSink { sender, waker: session.terminal_waker() }));
         if let Some(flow) = session.sessions().flow(id) {
             session.park_terminal(TerminalStream::new(id, receiver, flow));
         }

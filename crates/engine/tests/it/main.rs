@@ -6,4 +6,5 @@
 
 mod command_ids;
 mod command_sequence_fuzz;
+mod questions;
 mod tauri_mapping;

@@ -163,7 +163,7 @@ fn main() -> ExitCode {
         let metrics = CellMetrics::measure(ui.ctx(), &font);
         let rect = ui.max_rect();
         ui.painter().rect_filled(rect, 0.0, palette.bg);
-        paint(ui.painter(), &layout(&term.screen(), &metrics, &palette, &font, Pos2::new(rect.min.x + 4.0, rect.min.y + 4.0), true));
+        paint(ui.painter(), &layout(&term.screen(), &metrics, &palette, &font, Pos2::new(rect.min.x + 4.0, rect.min.y + 4.0), true, true));
     });
     harness.run_steps(20);
     match harness.render().map_err(|e| e.to_string()).and_then(|image| image.save(&out).map_err(|e| e.to_string())) {

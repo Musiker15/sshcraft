@@ -42,6 +42,9 @@ impl SshcraftApp {
         // Names from servers and imports can be in any script: the system's fonts fill in.
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
+        // Terminal output wakes the window; nothing polls for it.
+        let waker = ctx.clone();
+        session.set_terminal_waker(std::sync::Arc::new(move || waker.request_repaint()));
         let data = Data { dirty: Refresh::DATA | Refresh::SETTINGS, ..Data::default() };
         let wake = ctx.clone();
         Self {

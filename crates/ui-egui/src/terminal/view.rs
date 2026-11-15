@@ -15,6 +15,8 @@ pub struct TerminalView<'a> {
     pub term: &'a mut Terminal,
     pub palette: &'a TermPalette,
     pub font: FontId,
+    /// Neighbouring characters may join where the font has ligatures (setting `appearance.ligatures`).
+    pub ligatures: bool,
 }
 
 /// What happened in one frame.
@@ -65,6 +67,7 @@ struct Frame {
     /// The program asked for the mouse and Shift is not held to select instead.
     report_mouse: bool,
     focused: bool,
+    ligatures: bool,
 }
 
 impl Frame {
@@ -236,7 +239,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
     let screen = term.screen();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette.bg);
-    paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused));
+    paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused, frame.ligatures));
     let cursor = Rect::from_min_size(
         pos2(rect.min.x + f32::from(screen.cursor.col) * metrics.width, rect.min.y + f32::from(screen.cursor.row) * metrics.height),
         vec2(2.0, metrics.height),
@@ -258,7 +261,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
 
 impl TerminalView<'_> {
     pub fn show(self, ui: &mut Ui) -> TerminalResponse {
-        let Self { term, palette, font } = self;
+        let Self { term, palette, font, ligatures } = self;
         // A server may print any character: one no font has is a box, never a panic.
         ui.ctx().set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         let metrics = CellMetrics::measure(ui.ctx(), &font);
@@ -282,7 +285,8 @@ impl TerminalView<'_> {
             response.request_focus();
         }
         let focused = ui.memory(|m| m.has_focus(id));
-        let frame = Frame { rect, metrics, size, modes, modifiers, report_mouse: modes.intersects(MOUSE_ANY) && !modifiers.shift, focused };
+        let frame =
+            Frame { rect, metrics, size, modes, modifiers, report_mouse: modes.intersects(MOUSE_ANY) && !modifiers.shift, focused, ligatures };
         if focused {
             let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true };
             ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));

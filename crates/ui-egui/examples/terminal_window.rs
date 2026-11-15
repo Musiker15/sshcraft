@@ -62,7 +62,7 @@ impl eframe::App for App {
                 Notice::ResetTitle | Notice::Bell => {}
             }
         }
-        let response = TerminalView { term: &mut self.term, palette: &self.palette, font }.show(ui);
+        let response = TerminalView { term: &mut self.term, palette: &self.palette, font, ligatures: true }.show(ui);
         if !response.input.is_empty() {
             self.send(&response.input);
         }

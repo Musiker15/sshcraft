@@ -130,6 +130,9 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Font size"));
         ui.add(egui::DragValue::new(&mut a.font_size).range(FONT_SIZES));
         ui.end_row();
+        ui.label(tr("Ligatures"));
+        ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
+        ui.end_row();
         ui.label(tr("Hosts as"));
         ui.horizontal(|ui| {
             ui.radio_value(&mut a.host_view, HostView::Grid, tr("Grid"));
@@ -180,6 +183,12 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
                 let text = label(&choice);
                 ui.selectable_value(&mut local_shell, choice, text);
             }
+        });
+        ui.end_row();
+        ui.label(tr("Scrollback"));
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut t.scrollback).range(sshcraft_engine::settings::SCROLLBACK).speed(100.0));
+            ui.label(egui::RichText::new(tr("lines, for new tabs")).color(tokens.text_dim));
         });
         ui.end_row();
         ui.label(tr("History"));

@@ -140,6 +140,8 @@ struct Inner {
     agent_sessions: agent_sessions::AgentSessions,
     /// Terminal streams of the user's sessions until the interface takes them.
     terminals: Mutex<HashMap<SessionId, TerminalStream>>,
+    /// Called when a terminal stream gets output or a status (the window's repaint).
+    terminal_waker: Mutex<Option<terminal::Waker>>,
     /// Work started by [`Session::start`]; stopped with the engine.
     background: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// Open connections of agents and the control channel, with the sessions each opened.
@@ -229,6 +231,7 @@ impl Session {
             prompts,
             agent_sessions: agent_sessions::AgentSessions::default(),
             terminals: Mutex::new(HashMap::new()),
+            terminal_waker: Mutex::new(None),
             background: Mutex::new(Vec::new()),
             connections: Mutex::new(HashMap::new()),
             next_conn: std::sync::atomic::AtomicU64::new(1),
@@ -301,6 +304,16 @@ impl Session {
     }
 
     /// Keeps the stream of a session the user opened until the interface attaches it.
+    /// Wakes the window whenever a terminal stream gets output or a status, so it need not look
+    /// for output on a timer. Applies to the sessions opened from now on.
+    pub fn set_terminal_waker(&self, waker: terminal::Waker) {
+        *self.0.terminal_waker.lock().unwrap_or_else(PoisonError::into_inner) = Some(waker);
+    }
+
+    pub(crate) fn terminal_waker(&self) -> Option<terminal::Waker> {
+        self.0.terminal_waker.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
     pub(crate) fn park_terminal(&self, stream: TerminalStream) {
         self.0.terminals.lock().unwrap_or_else(PoisonError::into_inner).insert(stream.id(), stream);
     }

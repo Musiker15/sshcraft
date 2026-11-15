@@ -490,7 +490,8 @@ impl SessionManager {
             writer: shared.writer.clone(),
             size: shared.size.clone(),
             flow: shared.flow.clone(),
-            task: self.ctx.runtime.spawn(run(self.ctx.clone(), target, shared)),
+            // The session's questions carry its id.
+            task: self.ctx.runtime.spawn(crate::prompts::ASKING_SESSION.scope(id, run(self.ctx.clone(), target, shared))),
             recorder,
         };
         self.sessions().insert(id, live);
@@ -1053,7 +1054,9 @@ pub(crate) async fn connect_session(
     // The host key question runs in russh's own task. When this connect is given up (its tab
     // closed, its rule stopped), `alive` drops and the question is withdrawn.
     let (_alive, abandoned) = tokio::sync::watch::channel(());
+    let asking = crate::prompts::asking_session();
     let verifier = Arc::new(StoreVerifier {
+        session: asking,
         store: ctx.store.clone(),
         prompter: ctx.prompter.clone(),
         mismatch: Mutex::new(None),
@@ -1061,7 +1064,12 @@ pub(crate) async fn connect_session(
         abandoned,
     });
     let params = RouteParams { hops, proxy, options, connect_timeout: sshcraft_ssh::CONNECT_TIMEOUT };
-    let session = sshcraft_ssh::connect_route(params, verifier.clone(), ctx.auth.clone()).await.map_err(|e| failure(e, &verifier))?;
+    // The sign-in questions may be asked from another task: they carry the session along.
+    let auth: Arc<dyn AuthPrompter> = match asking {
+        Some(session) => Arc::new(SessionAuth { inner: ctx.auth.clone(), session }),
+        None => ctx.auth.clone(),
+    };
+    let session = sshcraft_ssh::connect_route(params, verifier.clone(), auth).await.map_err(|e| failure(e, &verifier))?;
     let notice = notice.or(session.certificate_expired().then_some(ErrorCode::CertificateExpired));
     Ok((session, notice))
 }
@@ -1134,7 +1142,22 @@ fn lookup(store: &Store, host_id: HostId) -> Result<Route, (ErrorCode, Option<St
     })
 }
 
+/// Asks the sign-in questions of one session, naming it.
+struct SessionAuth {
+    inner: Arc<dyn AuthPrompter>,
+    session: SessionId,
+}
+
+#[async_trait::async_trait]
+impl AuthPrompter for SessionAuth {
+    async fn answer(&self, request: sshcraft_ssh::AuthRequest) -> Option<Vec<zeroize::Zeroizing<String>>> {
+        crate::prompts::ASKING_SESSION.scope(self.session, self.inner.answer(request)).await
+    }
+}
+
 struct StoreVerifier {
+    /// The session that connects, for its question (russh asks from its own task).
+    session: Option<SessionId>,
     store: Arc<Mutex<Store>>,
     prompter: Arc<dyn HostKeyPrompter>,
     mismatch: Mutex<Option<String>>,
@@ -1163,7 +1186,12 @@ impl HostKeyVerifier for StoreVerifier {
             HostKeyStatus::Unknown => {
                 let mut abandoned = self.abandoned.clone();
                 let accepted = tokio::select! {
-                    accepted = self.prompter.ask(host_name, address, port, fingerprint) => accepted,
+                    accepted = async {
+                        match self.session {
+                            Some(id) => crate::prompts::ASKING_SESSION.scope(id, self.prompter.ask(host_name, address, port, fingerprint)).await,
+                            None => self.prompter.ask(host_name, address, port, fingerprint).await,
+                        }
+                    } => accepted,
                     // Nobody waits for the answer any more: drop the question, trust nothing.
                     _ = abandoned.changed() => return false,
                 };

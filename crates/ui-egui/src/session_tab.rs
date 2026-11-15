@@ -3,8 +3,6 @@
 //! the tab's; a clipboard write (OSC 52) needs the user's consent per host; a link opens only
 //! through the engine's `link.open`, which takes `http` and `https` alone.
 
-use std::time::Duration;
-
 use egui::{Rect, Ui, UiBuilder, pos2};
 use serde_json::{Value, json};
 use sshcraft_engine::settings::Osc52;
@@ -23,8 +21,6 @@ use crate::widgets::visible;
 /// Most characters of a title a program sets.
 const MAX_TITLE: usize = 256;
 const STATUS_HEIGHT: f32 = 28.0;
-/// While a session is open the frame loop looks for output this often.
-const POLL: Duration = Duration::from_millis(16);
 
 pub struct SessionTab {
     pub id: SessionId,
@@ -69,6 +65,7 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
     app.ui.connecting.push(host);
     let asked_from = app.ui.page;
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
+    let scrollback = app.data.settings.terminal.scrollback;
     let params = json!({ "target": target, "cols": 100, "rows": 30 });
     let old = replace.and_then(|i| match app.ui.tabs.get(i).map(|t| &t.kind) {
         Some(TabKind::Session { session }) => Some(*session),
@@ -92,7 +89,7 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
                 }
             };
             let pump = app.session.attach_terminal(id).map(Pump::new);
-            let term = Terminal::new(TermSize::clamped(100, 30), &TermConfig { clipboard_write, ..TermConfig::default() });
+            let term = Terminal::new(TermSize::clamped(100, 30), &TermConfig { clipboard_write, scrollback });
             let title = host.and_then(|h| host_name(app, h)).unwrap_or_else(|| name.clone());
             let tab = TabState { title: visible(&title), kind: TabKind::Session { session: id } };
             // The tab it was asked for, if it is still what it was.
@@ -258,10 +255,10 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         }
     }
+    // More output than one frame takes: the next frame continues. New output wakes the window
+    // through the engine's terminal waker.
     if more {
         ctx.request_repaint();
-    } else if app.terminals.values().any(|t| t.pump.is_some()) {
-        ctx.request_repaint_after(POLL);
     }
 }
 
@@ -420,6 +417,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
     }
     let family = app.term_font.as_ref().map_or(egui::FontFamily::Monospace, |(_, f)| f.clone());
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
+    let ligatures = appearance.ligatures;
     let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
     let blocked = modal_open(app);
     let Some(tab) = app.terminals.get_mut(&id) else {
@@ -438,7 +436,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
         }
     }
     let response = ui
-        .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| TerminalView { term: &mut tab.term, palette: &palette, font }.show(ui))
+        .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| {
+            TerminalView { term: &mut tab.term, palette: &palette, font, ligatures }.show(ui)
+        })
         .inner;
     let first = std::mem::take(&mut tab.focus);
     let switched = app_shown_changed(&mut app.ui.shown_terminal, id);

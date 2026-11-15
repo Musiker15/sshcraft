@@ -375,3 +375,22 @@ fn a_long_end_detail_keeps_reconnect_on_screen() {
     let button = h.get_by_label("Reconnect").rect();
     assert!(button.max.x <= 1200.0, "Reconnect at {button:?}");
 }
+
+#[test]
+fn a_question_shows_which_tab_it_belongs_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_a, first) = host(&session, "web", false);
+    let (_b, second) = host(&session, "web", false);
+    h.run_steps(2);
+    let one = connect(&mut h, first);
+    until(&mut h, "the first question", |app| !app.prompts.open.is_empty());
+    connect(&mut h, second);
+    until(&mut h, "the second question", |app| app.prompts.open.len() == 2);
+    assert_eq!(h.state().prompts.open[0].session, Some(one));
+    assert_eq!(h.state().ui.page, Page::Tab(1), "the second tab is in front");
+    assert!(h.query_by_label_contains("Asked by tab 1").is_some(), "the question names its tab");
+    h.get_by_label("Show tab").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.page, Page::Tab(0));
+}
