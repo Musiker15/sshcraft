@@ -616,9 +616,18 @@ pub fn bookmark(app: &mut SshcraftApp) {
 }
 
 /// The text of the cursor's line: the prompt a new line is typed after.
-fn cursor_line(term: &Terminal) -> String {
+/// The cursor's line up to the cursor (what a shell's grey suggestion after it is not part of)
+/// and the line above it.
+fn before_cursor(term: &Terminal) -> (String, String) {
     let screen = term.screen();
-    screen.text().lines().nth(usize::from(screen.cursor.row)).unwrap_or_default().to_string()
+    let cols = usize::from(screen.cols);
+    let row = usize::from(screen.cursor.row);
+    let cells = |r: usize, upto: usize| -> String {
+        let start = r.saturating_mul(cols);
+        screen.cells.get(start..start.saturating_add(upto.min(cols))).map(|c| c.iter().map(|c| c.text.as_str()).collect()).unwrap_or_default()
+    };
+    let above = row.checked_sub(1).map(|r| cells(r, cols)).unwrap_or_default();
+    (cells(row, usize::from(screen.cursor.col)), above)
 }
 
 /// The keys the suggestion list takes: Down selects, Up moves back, Tab or Enter take the
@@ -796,7 +805,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     // The suggestion list takes its keys before the terminal sees them.
     let taken = if focused && !blocked { completion_keys(&ctx, tab) } else { None };
     let line_context = crate::history::LineContext {
-        prompt: cursor_line(&tab.term),
+        prompt: before_cursor(&tab.term).0,
+        above: before_cursor(&tab.term).1,
         alt_screen: tab.term.modes().contains(sshcraft_term::TermModes::ALT_SCREEN),
         broadcast: false,
     };

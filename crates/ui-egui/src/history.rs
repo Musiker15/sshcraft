@@ -1,16 +1,21 @@
-//! Which typed lines become history (`history.record`): only lines typed at a shell prompt, and
-//! the kind of a line is decided when its first key is typed. Never kept: lines starting with a
-//! space, answers to a password, passphrase, PIN, token or code question, input to a REPL or a
-//! continuation prompt, anything in a full-screen program, lines changed by Tab completion,
-//! arrows or Ctrl+R, multi-line pastes, and input while broadcast is on.
+//! Which typed lines become history (`history.record`): only lines typed after a shell prompt
+//! (a line ending in `$`, `#`, `%`, `>`, `❯` or `»`, or starting with `➜`), decided when the
+//! first key is typed, and only when the shell echoed the line back. Never kept: input nothing
+//! echoes (a secret), typeahead before the next prompt, lines starting with a space, answers to
+//! a password, passphrase, PIN, token or code question, input to a REPL or a continuation
+//! prompt, anything in a full-screen program, lines changed by Tab completion, arrows or Ctrl+R,
+//! multi-line pastes, and input while broadcast is on.
 
 use crate::status::waiting_line;
 
 /// What the pane shows when a line starts.
 #[derive(Debug, Clone, Default)]
 pub struct LineContext {
-    /// The cursor's line before the key: the prompt.
+    /// The cursor's line up to the cursor, before the key: the prompt, and at Enter the prompt
+    /// with the echoed line.
     pub prompt: String,
+    /// The line above the cursor's: the start of a line that wrapped.
+    pub above: String,
     /// A full-screen program runs (the alternate screen).
     pub alt_screen: bool,
     pub broadcast: bool,
@@ -27,6 +32,13 @@ fn repl(prompt: &str) -> bool {
         || p.ends_with("sqlite>")
         || p.ends_with(">>>")
         || p.starts_with("irb(")
+}
+
+/// Whether `prompt` ends like a shell's prompt. Anything else (a program's question, a line of
+/// output the typing raced) is no place for history.
+fn shell_prompt(prompt: &str) -> bool {
+    let p = prompt.trim_end();
+    p.ends_with(['$', '#', '%', '>', '❯', '»']) || p.trim_start().starts_with('➜')
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -64,7 +76,7 @@ pub struct Capture {
 impl Capture {
     fn decide(&mut self, ctx: &LineContext) {
         if self.kind == Kind::Undecided {
-            let skip = ctx.alt_screen || ctx.broadcast || waiting_line(&ctx.prompt) || repl(&ctx.prompt);
+            let skip = ctx.alt_screen || ctx.broadcast || waiting_line(&ctx.prompt) || repl(&ctx.prompt) || !shell_prompt(&ctx.prompt);
             self.kind = if skip { Kind::Skip } else { Kind::Shell };
         }
     }
@@ -73,9 +85,17 @@ impl Capture {
         *self = Self::default();
     }
 
-    fn finish(&mut self) -> Option<String> {
+    fn finish(&mut self, ctx: &LineContext) -> Option<String> {
         let text = String::from_utf8_lossy(&self.line).trim_end().to_string();
-        let keep = self.kind == Kind::Shell && !self.edited && !text.starts_with(' ') && !text.is_empty() && self.line.len() <= MAX_LINE;
+        // The shell showed the line before the cursor: what nothing echoes is a secret or was
+        // typed ahead of the next prompt.
+        let echoed = format!("{}{}", ctx.above, ctx.prompt).trim_end().ends_with(text.as_str());
+        let keep = self.kind == Kind::Shell
+            && echoed
+            && !self.edited
+            && !text.starts_with(' ')
+            && !text.is_empty()
+            && self.line.len() <= MAX_LINE;
         self.reset();
         keep.then_some(text)
     }
@@ -132,7 +152,7 @@ impl Capture {
                     self.decide(ctx);
                     self.escape = Escape::Esc;
                 }
-                b'\r' | b'\n' => kept = self.finish().or(kept),
+                b'\r' | b'\n' => kept = self.finish(ctx).or(kept),
                 0x7f | 0x08 => {
                     // One character back, whole UTF-8 sequences at a time.
                     while let Some(last) = self.line.pop() {

@@ -43,6 +43,9 @@ impl Dot {
     }
 }
 
+/// Words that mark a question for a secret wherever they stand in it.
+const SECRETS: [&str; 9] = ["password", "passphrase", "pass phrase", "passwort", "kennwort", "mot de passe", "contraseña", "senha", "secret"];
+
 /// Words a line ends with when it waits for a secret or a yes/no, in English, German, French,
 /// Spanish and Portuguese.
 const ASKS: [&str; 14] = [
@@ -66,7 +69,23 @@ const ASKS: [&str; 14] = [
 pub fn waiting_line(line: &str) -> bool {
     let line = line.trim_end().to_lowercase();
     let Some(question) = line.strip_suffix(':').or_else(|| line.strip_suffix('?')) else { return false };
-    let question = question.trim_end();
+    let full = question.trim_end();
+    // A hint in brackets after the question: "Token (will be hidden):", "Key [None]:".
+    let mut bare = full;
+    for (open, close) in [('(', ')'), ('[', ']')] {
+        if let Some(rest) = bare.strip_suffix(close)
+            && let Some(at) = rest.rfind(open)
+        {
+            bare = rest.get(..at).unwrap_or_default().trim_end();
+        }
+    }
+    if SECRETS.iter().any(|s| bare.contains(s)) {
+        return true;
+    }
+    [full, bare].iter().any(|question| asks(question))
+}
+
+fn asks(question: &str) -> bool {
     ASKS.iter().any(|ask| {
         let ask = ask.trim_start_matches('(');
         question.ends_with(ask.trim_end_matches(')'))

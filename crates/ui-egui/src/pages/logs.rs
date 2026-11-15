@@ -161,7 +161,7 @@ fn confirm_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(ids) = app.ui.logs.confirm_delete.clone() else { return };
     let mut close = false;
     let mut confirmed = false;
-    let modal = egui::Modal::new(egui::Id::new("sshcraft-logs-confirm")).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("sshcraft-logs-confirm")).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.heading(trf("Delete {count} session logs?", &[("count", &ids.len().to_string())]));
         ui.add_space(6.0);

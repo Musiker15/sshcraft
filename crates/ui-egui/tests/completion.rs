@@ -94,6 +94,8 @@ mod in_the_window {
         let id = *h.state().terminals.keys().next().unwrap();
         until(h, "the connection", |app| app.terminals.get(&id).is_some_and(|t| matches!(t.status, Some(SessionStatus::Connected { .. }))));
         h.run_steps(5);
+        // The test shell shows no prompt; history keeps only lines typed after one.
+        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"$ ");
         (id, host, server)
     }
 
@@ -132,7 +134,7 @@ mod in_the_window {
             h.run_steps(1);
         }
         // The test shell echoes Enter as a carriage return: a clean screen shows what follows.
-        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"\x1b[2J\x1b[H");
+        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"\x1b[2J\x1b[H$ ");
         typed(&mut h, "ec");
         until(&mut h, "the suggestion", |app| app.terminals.get(&id).is_some_and(|t| t.suggestions().iter().any(|s| s.label == "echo kept-line")));
         assert!(!screen(h.state(), id).contains("echo kept-line"), "only what was typed so far");
