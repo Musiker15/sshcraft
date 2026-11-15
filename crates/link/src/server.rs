@@ -201,6 +201,10 @@ async fn serve(stream: TcpStream, token: Token, handler: Arc<dyn Handler>, conn:
             "auth" | "auth.challenge" => {
                 let _ = answers.send(Response::error(id, "already authenticated")).await;
             }
+            // An id still running would replace its request (and get around the cap below).
+            _ if running.contains_key(&id) => {
+                let _ = answers.send(Response::error(id, "a request with this id is still running")).await;
+            }
             _ if running.len() >= MAX_RUNNING => {
                 let _ = answers.send(Response::error(id, "too many requests at once")).await;
             }

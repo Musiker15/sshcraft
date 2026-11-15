@@ -199,6 +199,10 @@ where
             Step::Answer(answer) => {
                 let _ = answers.send(answer);
             }
+            // An id still running would replace its call (and get around the cap below).
+            Step::Call { id, .. } if calls.contains_key(&id.to_string()) => {
+                let _ = answers.send(failure(&id, INVALID_REQUEST, "a call with this id is still running"));
+            }
             Step::Call { id, .. } if calls.len() >= MAX_CALLS => {
                 let _ = answers.send(failure(&id, INVALID_REQUEST, "too many calls at once"));
             }

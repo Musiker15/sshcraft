@@ -50,3 +50,22 @@ async fn a_gone_mcp_process_ends_its_sessions_and_questions() {
     }
     assert!(cancelled(&w.agent_log().await));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_id_still_running_is_refused_and_cancel_hits_the_right_call() {
+    let w = world().await;
+    let _window = w.session.subscribe();
+    w.set_connect("ask").await;
+    let mut mcp = start(w.backend(), None);
+    mcp.initialize("claude").await;
+    let open = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "sshcraft_session_open", "arguments": {"host": "web"}}});
+    mcp.send(open.clone()).await;
+    w.until_questions(1).await;
+    mcp.send(open).await;
+    let answer = mcp.recv().await;
+    assert_eq!(answer["id"], 9);
+    assert_eq!(answer["error"]["code"], -32600, "{answer}");
+    assert_eq!(w.questions().await, 1, "the second call never ran");
+    mcp.send(json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 9}})).await;
+    w.until_questions(0).await;
+}

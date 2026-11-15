@@ -110,3 +110,30 @@ async fn a_closed_connection_is_reported_and_stop_drops_all() {
     assert!(client.call("ping", json!({})).await.is_err(), "stopping cut it off");
     assert_eq!(handler.closed.load(Ordering::SeqCst), 2);
 }
+
+async fn answer_of(read: &mut BufReader<tokio::net::tcp::OwnedReadHalf>) -> serde_json::Value {
+    let mut text = String::new();
+    tokio::time::timeout(Duration::from_secs(5), read.read_line(&mut text)).await.unwrap().unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+#[tokio::test]
+async fn an_id_still_running_is_refused_and_the_cap_holds() {
+    let (server, handler, token) = echo_server().await;
+    let (mut read, mut write) = signed_in(&server, &token).await;
+    let wait = |id: u64| format!("{}\n", json!({"id": id, "method": "wait"}));
+    write.write_all(wait(5).as_bytes()).await.unwrap();
+    write.write_all(wait(5).as_bytes()).await.unwrap();
+    let answer = answer_of(&mut read).await;
+    assert_eq!(answer["id"], 5);
+    assert_eq!(answer["error"], "a request with this id is still running");
+    for id in 100..(100 + sshcraft_link::MAX_RUNNING as u64 - 1) {
+        write.write_all(wait(id).as_bytes()).await.unwrap();
+    }
+    write.write_all(wait(999).as_bytes()).await.unwrap();
+    let answer = answer_of(&mut read).await;
+    assert_eq!(answer["id"], 999);
+    assert_eq!(answer["error"], "too many requests at once");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(handler.calls.load(Ordering::SeqCst), sshcraft_link::MAX_RUNNING, "only what fits runs");
+}
