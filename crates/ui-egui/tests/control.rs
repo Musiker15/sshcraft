@@ -188,3 +188,21 @@ fn the_queue_is_bounded() {
     let refused = answers.iter_mut().filter_map(|a| a.try_recv().ok()).filter(Result::is_err).count();
     assert_eq!(refused, 5, "what does not fit is refused at once");
 }
+
+/// While the window is locked the control channel tells nothing of the sessions or hosts, and
+/// changes no page; the screenshot shows only the lock screen.
+#[test]
+fn the_locked_window_tells_the_channel_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let queue = with_control(&mut h);
+    h.state_mut().lock.locked = true;
+    step(&mut h);
+    assert_eq!(request(&mut h, &queue, "ui.inspect", json!({})).unwrap(), json!({ "locked": true }));
+    assert!(request(&mut h, &queue, "terminal.read", json!({})).is_err());
+    assert!(request(&mut h, &queue, "ui.set", json!({ "page": "hosts" })).is_err());
+    // Counter-check: unlocked, the page and tabs are there again.
+    h.state_mut().lock.locked = false;
+    step(&mut h);
+    assert!(request(&mut h, &queue, "ui.inspect", json!({})).unwrap().get("page").is_some());
+}

@@ -39,24 +39,31 @@ pub fn lock(app: &mut SshcraftApp) {
     app.run_reported("app.lock", json!({}));
 }
 
-/// Notes input and locks after the idle time.
+/// Locks after the idle time, then notes input. Runs in `logic`, so also while the window is
+/// hidden or covered; the idle time is measured before this frame's input counts, so the input
+/// that brings the window back (a click, a focus change) cannot reset the timer first.
 pub fn tick(app: &mut SshcraftApp, ctx: &egui::Context) {
-    if ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
-        app.lock.last_input = Instant::now();
-    }
     let minutes = app.data.settings.general.lock_after_minutes;
-    if minutes > 0 && supported() && !app.lock.locked && app.lock.last_input.elapsed() >= Duration::from_secs(u64::from(minutes) * 60) {
+    let limit = Duration::from_secs(u64::from(minutes) * 60);
+    let idle = app.lock.last_input.elapsed();
+    if minutes > 0 && supported() && !app.lock.locked && idle >= limit {
         lock(app);
     }
-    // Checked again when the time is up, also without input.
-    if minutes > 0 && !app.lock.locked {
-        ctx.request_repaint_after(Duration::from_secs(30));
+    if !app.lock.locked && ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
+        app.lock.last_input = Instant::now();
+    }
+    // Woken again when the time is up, also without input.
+    if minutes > 0 && supported() && !app.lock.locked {
+        ctx.request_repaint_after(limit.saturating_sub(app.lock.last_input.elapsed()).max(Duration::from_secs(1)));
     }
 }
 
 pub fn show(app: &mut SshcraftApp, ui: &mut egui::Ui) {
     let tokens = Tokens::get(ui.ctx());
     egui::CentralPanel::default().show(ui, |ui| {
+        // The top of the lock screen moves the window, as a title bar does (no menus here).
+        let top = egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(ui.max_rect().width(), 32.0));
+        let _ = craft_window::title_bar::empty_area(ui, top);
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() / 3.0);
             ui.heading(tr("SSHCraft is locked"));

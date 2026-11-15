@@ -334,6 +334,7 @@ impl SshcraftApp {
             then(self, result);
         }
         crate::link::tick(self, ctx);
+        crate::lock::tick(self, ctx);
         crate::control::process(self, ctx);
         crate::quit::logic(self, ctx);
     }
@@ -353,12 +354,13 @@ impl SshcraftApp {
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
-        crate::lock::tick(self, &ctx);
         if self.lock.locked {
-            // Output keeps flowing into the terminals; only the lock screen is drawn.
+            // Output keeps flowing into the terminals; only the lock screen is drawn, and the
+            // quit question (no toasts: they can name hosts and addresses).
             crate::session_tab::pump_all(self, &ctx);
             crate::lock::show(self, ui);
-            self.toasts.show(&ctx);
+            crate::quit::show(self, &ctx);
+            crate::window::resize_edges(self, &ctx);
             return;
         }
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {

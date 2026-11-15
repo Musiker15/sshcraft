@@ -85,3 +85,19 @@ fn zero_minutes_never_locks() {
     h.step();
     assert!(!h.state().lock.locked);
 }
+
+/// The input that brings a window back after the idle time (a click, a pointer move) does not
+/// reset the timer before it is checked: the window comes back locked.
+#[test]
+fn input_after_the_idle_time_does_not_unlock() {
+    if !sshcraft_ui_egui::lock::supported() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(2);
+    set_minutes(&mut h, 5);
+    h.event(egui::Event::PointerMoved(egui::pos2(10.0, 10.0)));
+    h.step();
+    assert!(h.state().lock.locked);
+}

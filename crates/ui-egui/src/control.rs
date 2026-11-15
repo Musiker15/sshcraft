@@ -341,6 +341,13 @@ pub fn process(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             continue;
         }
+        // While locked, the channel learns nothing of the sessions or hosts either: only the
+        // window itself can be handled (its screenshot shows the lock screen).
+        if app.lock.locked && !matches!(method.as_str(), "window.list" | "ui.screenshot" | "ui.resize" | "ui.focus" | "app.quit") {
+            let answer = if method == "ui.inspect" { Ok(json!({ "locked": true })) } else { Err("SSHCraft is locked".to_owned()) };
+            let _ = reply.send(answer);
+            continue;
+        }
         let answer = match method.as_str() {
             "window.list" => object(&params, &[]).map(|_| json!([{ "id": "main", "title": "SSHCraft" }])),
             "ui.inspect" => object(&params, &[]).map(|_| inspect(app, ctx)),
