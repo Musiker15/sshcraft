@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
+     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>de.musiker15.sshcraft</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>SSHCraft</name>
+  <summary>SSH client with end-to-end encrypted, self-hosted sync</summary>
+  <developer id="de.musiker15">
+    <name>MSK Scripts</name>
+  </developer>
+  <description>
+    <p>
+      SSHCraft is an open-source SSH client. It keeps hosts, groups, keys and snippets, opens
+      terminals in tabs and panes, forwards ports, records session logs and talks to serial
+      ports and the local shell.
+    </p>
+    <p>
+      Its data syncs end-to-end encrypted through a server you run yourself. Every action is a
+      command that the included sshcraft-cli tool and AI agents (over MCP) can run too, each
+      under rights you set.
+    </p>
+  </description>
+  <launchable type="desktop-id">de.musiker15.sshcraft.desktop</launchable>
+  <icon type="stock">de.musiker15.sshcraft</icon>
+  <url type="homepage">https://github.com/musiker15/sshcraft</url>
+  <url type="bugtracker">https://github.com/musiker15/sshcraft/issues</url>
+  <url type="help">https://github.com/musiker15/sshcraft</url>
+  <categories>
+    <category>Network</category>
+    <category>RemoteAccess</category>
+  </categories>
+  <keywords>
+    <keyword>ssh</keyword>
+    <keyword>terminal</keyword>
+    <keyword>sftp</keyword>
+    <keyword>server</keyword>
+  </keywords>
+  <branding>
+    <color type="primary" scheme_preference="light">#a9f5cf</color>
+    <color type="primary" scheme_preference="dark">#0f1115</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">720</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <provides>
+    <binary>sshcraft</binary>
+    <binary>sshcraft-cli</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

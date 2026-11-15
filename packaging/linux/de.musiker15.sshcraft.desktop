@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=SSHCraft
+GenericName=SSH Client
+Comment=Connect to your servers over SSH, with end-to-end encrypted sync
+Exec=sshcraft
+TryExec=sshcraft
+Icon=de.musiker15.sshcraft
+Terminal=false
+StartupNotify=true
+StartupWMClass=de.musiker15.sshcraft
+Categories=Network;RemoteAccess;
+Keywords=ssh;terminal;sftp;server;remote;shell;console;serial;
