@@ -79,6 +79,13 @@ fn create(h: &mut H, origin: &str, api_key: &str) -> String {
     h.run_steps(2);
     h.get_by_label("Create").click();
     until(h, "the account key", |app| app.ui.sync.account_key().is_some());
+    // The dialog that shows it is drawn on the next frames.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.query_by_label("I have kept the key").is_none() {
+        assert!(Instant::now() < deadline, "the account key dialog");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
     h.state().ui.sync.account_key().unwrap().to_string()
 }
 
