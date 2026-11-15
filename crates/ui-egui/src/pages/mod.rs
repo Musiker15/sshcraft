@@ -9,4 +9,5 @@ pub mod keys;
 pub mod logs;
 pub mod settings;
 pub mod snippets;
+pub mod sync;
 pub mod templates;

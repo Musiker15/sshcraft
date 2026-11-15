@@ -97,6 +97,12 @@ impl SshcraftApp {
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
                 Ok(EngineEvent::PromptWithdrawn { prompt_id }) => self.prompts.withdraw(prompt_id),
+                Ok(EngineEvent::SyncStatus { server, status }) => {
+                    if let Ok(value) = serde_json::to_value(&status) {
+                        self.data.sync_status.insert(server.0.to_string(), value);
+                    }
+                }
+                Ok(EngineEvent::SyncWarning { detail, .. }) => self.toasts.error(&crate::widgets::visible(&detail)),
                 Ok(EngineEvent::ForwardStatus(status)) => {
                     if let Ok(value) = serde_json::to_value(&status) {
                         self.data.forwards.insert(status.rule_id, value);
@@ -309,6 +315,7 @@ impl SshcraftApp {
         crate::session_tab::show_clipboard_question(self, &ctx);
         crate::pages::templates::show_dialog(self, &ctx);
         crate::pages::snippets::dialogs(self, &ctx);
+        crate::pages::sync::dialogs(self, &ctx);
         crate::prompts::show(self, &ctx);
         crate::log_viewer::show(self, &ctx);
         // The logs are fetched again on the next visit of their page.

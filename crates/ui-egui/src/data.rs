@@ -12,7 +12,7 @@ use crate::app::SshcraftApp;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-    pub struct Refresh: u8 {
+    pub struct Refresh: u16 {
         const HOSTS = 1;
         const GROUPS = 1 << 1;
         const KEYS = 1 << 2;
@@ -21,13 +21,15 @@ bitflags! {
         const TEMPLATES = 1 << 5;
         const SNIPPETS = 1 << 6;
         const LOGS = 1 << 7;
+        const SERVERS = 1 << 8;
         const DATA = Self::HOSTS.bits()
             | Self::GROUPS.bits()
             | Self::KEYS.bits()
             | Self::IDENTITIES.bits()
             | Self::TEMPLATES.bits()
             | Self::SNIPPETS.bits()
-            | Self::LOGS.bits();
+            | Self::LOGS.bits()
+            | Self::SERVERS.bits();
     }
 }
 
@@ -99,6 +101,10 @@ pub struct Data {
     pub snippets: Vec<SnippetRow>,
     /// Session logs as `log.list` returns them.
     pub logs: Vec<Value>,
+    /// Sync servers as `sync.servers` returns them.
+    pub servers: Vec<Value>,
+    /// The last state each sync server reported, by server id.
+    pub sync_status: std::collections::HashMap<String, Value>,
     /// The last state of each forwarding rule that ran, as the engine reports it.
     pub forwards: std::collections::HashMap<sshcraft_model::forward::ForwardId, Value>,
     /// The states of running rules were asked for once.
@@ -155,6 +161,9 @@ pub fn refresh(app: &mut SshcraftApp) {
     }
     if due.contains(Refresh::KEYS) {
         fetch(app, Refresh::KEYS, "key.list", |d, v| d.keys = rows(v));
+    }
+    if due.contains(Refresh::SERVERS) {
+        fetch(app, Refresh::SERVERS, "sync.servers", |d, v| d.servers = rows(v));
     }
     if due.contains(Refresh::LOGS) {
         fetch(app, Refresh::LOGS, "log.list", |d, v| d.logs = rows(v));

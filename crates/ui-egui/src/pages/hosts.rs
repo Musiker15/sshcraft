@@ -216,6 +216,9 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
             if ui.button(tr("Edit")).clicked() {
                 edit_group(app, id);
             }
+            if ui.button(tr("Move to…")).clicked() {
+                crate::pages::sync::ask_move(app, "group", &id.0.to_string(), &group.name);
+            }
             if ui.button(tr("Delete")).clicked() {
                 ask_delete_group(app, id);
             }
@@ -239,6 +242,9 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
         response.context_menu(|ui| {
             if ui.button(tr("Connect")).clicked() {
                 app.ui.connect_request = Some(ConnectRequest::Host(id));
+            }
+            if ui.button(tr("Move to…")).clicked() {
+                crate::pages::sync::ask_move(app, "host", &id.0.to_string(), &row.host.name);
             }
             if ui.button(tr("Edit")).clicked() {
                 edit_host(app, id);

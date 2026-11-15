@@ -1,0 +1,162 @@
+//! Settings > Sync against a sync server in this process: an account created with its key shown
+//! once, a second device joining with it, devices revoked (never the recovery one), items moved,
+//! the server's state, and the list of connections SSHCraft makes by itself.
+
+use std::time::{Duration, Instant};
+
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT, Queryable};
+use serde_json::{Value, json};
+use sshcraft_engine::{Caller, Session};
+use sshcraft_ui_egui::SshcraftApp;
+use sshcraft_ui_egui::pages::sync::{CreateForm, JoinForm};
+use sshcraft_ui_egui::state::Page;
+use sshcraft_ui_egui::testing::app_harness;
+
+type H = Harness<'static, SshcraftApp>;
+
+fn until(h: &mut H, what: &str, done: impl Fn(&SshcraftApp) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done(h.state()) {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}; messages: {:?}", h.state().toasts.texts());
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+}
+
+/// A sync server in this process; its origin and API key. It stops when the sender is dropped.
+fn sync_server(session: &Session, dir: &std::path::Path) -> (String, String, tokio::sync::oneshot::Sender<()>) {
+    session.runtime().block_on(async {
+        let database_url = format!("sqlite://{}", dir.join("server.db").display());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let origin = format!("http://127.0.0.1:{}", addr.port());
+        let config = sshcraft_server_lib::config::ServeConfig {
+            listen: addr,
+            database_url: database_url.clone(),
+            public_origin: origin.clone(),
+            ws_recheck: Duration::from_millis(200),
+        };
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let _ = sshcraft_server_lib::serve_on(listener, config, async {
+                let _ = stopped.await;
+            })
+            .await;
+        });
+        for _ in 0..100 {
+            if sshcraft_server_lib::health(addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let api_key = sshcraft_server_lib::store::open(&database_url).await.unwrap().api_key().await.unwrap().0;
+        (origin, api_key, stop)
+    })
+}
+
+fn sync_page(h: &mut H) {
+    h.state_mut().ui.page = Page::Settings;
+    h.run_steps(3);
+    h.get_by_label("Sync").click();
+    h.run_steps(3);
+}
+
+/// Creates the account through the dialog; the account key it showed.
+fn create(h: &mut H, origin: &str, api_key: &str) -> String {
+    sync_page(h);
+    h.get_by_label("Create account").click();
+    h.run_steps(3);
+    *h.state_mut().ui.sync.create.as_mut().expect("the form opened") = CreateForm {
+        server_name: "home".into(),
+        origin: origin.into(),
+        api_key: api_key.into(),
+        name: "Alice".into(),
+        email: "alice@example.org".into(),
+        device_name: "laptop".into(),
+    };
+    h.run_steps(2);
+    h.get_by_label("Create").click();
+    until(h, "the account key", |app| app.ui.sync.account_key().is_some());
+    h.state().ui.sync.account_key().unwrap().to_string()
+}
+
+#[test]
+fn an_account_is_created_and_its_key_shown_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (origin, api_key, _stop) = sync_server(&session, server_dir.path());
+    let key = create(&mut h, &origin, &api_key);
+    assert!(h.query_by_label("Account key as QR code").is_some(), "a QR code to scan");
+    assert!(format!("{:?}", h.root()).contains(&key), "the key is shown");
+    h.get_by_label("I have kept the key").click();
+    h.run_steps(3);
+    assert!(h.state().ui.sync.account_key().is_none(), "the window lets the key go");
+    assert!(!format!("{:?}", h.state().ui).contains(&key), "nothing keeps the key");
+    until(&mut h, "the server", |app| app.data.servers.iter().any(|s| s["name"] == "home"));
+    assert!(h.query_by_label(&format!("Sync server {origin}")).is_some(), "the connections SSHCraft makes by itself list the server");
+    until(&mut h, "the server's state", |app| app.data.sync_status.values().any(|s| s["state"] == "idle"));
+    assert!(h.query_by_label_contains("Up to date").is_some());
+}
+
+#[test]
+fn a_second_device_joins_and_devices_are_revoked_but_never_the_recovery_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let other_dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (origin, api_key, _stop) = sync_server(&session, server_dir.path());
+    let key = create(&mut h, &origin, &api_key);
+    h.get_by_label("I have kept the key").click();
+    h.run_steps(3);
+
+    let (mut other, _other_session) = app_harness(other_dir.path());
+    sync_page(&mut other);
+    other.get_by_label("Join an account").click();
+    other.run_steps(3);
+    *other.state_mut().ui.sync.join.as_mut().expect("the join form") =
+        JoinForm { server_name: "home".into(), origin: origin.clone(), api_key: api_key.clone(), account_key: key, device_name: "desktop".into() };
+    other.run_steps(2);
+    other.get_by_label("Join").click();
+    until(&mut other, "the joined server", |app| app.data.servers.iter().any(|s| s["name"] == "home"));
+
+    until(&mut h, "the server", |app| !app.data.servers.is_empty());
+    h.get_by_label("Devices").click();
+    until(&mut h, "the devices", |app| app.ui.sync.devices.as_ref().is_some_and(|d| d.len() >= 3));
+    let devices: Vec<Value> = h.state().ui.sync.devices.clone().unwrap();
+    let recovery = devices.iter().position(|d| d["recovery"] == true).expect("the recovery device");
+    let desktop = devices.iter().position(|d| d["name"] == "desktop").expect("the joined device");
+    let buttons: Vec<bool> = h.query_all_by_label("Revoke").map(|n| n.accesskit_node().is_disabled()).collect();
+    assert!(buttons[recovery], "the recovery device cannot be revoked");
+    h.get_all_by_label("Revoke").nth(desktop).unwrap().click();
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("may have been copied").is_some(), "it warns about copied keys");
+    h.get_by_label("Revoke the device").click();
+    until(&mut h, "the revoked device", |app| {
+        app.ui.sync.devices.as_ref().is_some_and(|d| d.iter().any(|x| x["name"] == "desktop" && x["active"] == false))
+    });
+}
+
+#[test]
+fn a_group_moves_with_its_hosts() {
+    let dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (origin, api_key, _stop) = sync_server(&session, server_dir.path());
+    create(&mut h, &origin, &api_key);
+    h.get_by_label("I have kept the key").click();
+    let group = uuid::Uuid::new_v4();
+    let run = |id: &str, params| session.runtime().block_on(session.execute(Caller::User, id, params)).unwrap();
+    run("group.save", json!({ "group": { "id": group, "name": "web", "defaults": {} } }));
+    run("host.save", json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "web-01", "group_id": group, "settings": { "address": "192.0.2.1" } } }));
+    until(&mut h, "the server and the group", |app| !app.data.servers.is_empty() && !app.data.groups.is_empty());
+    let server = h.state().data.servers[0]["id"].as_str().unwrap().to_string();
+    sshcraft_ui_egui::pages::sync::ask_move(h.state_mut(), "group", &group.to_string(), "web");
+    h.run_steps(3);
+    h.get_by_role_and_label(egui::accesskit::Role::RadioButton, "home").click();
+    h.run_steps(1);
+    h.get_by_label("Move").click();
+    until(&mut h, "the moved group", |app| app.data.hosts.first().and_then(|r| r.host.location.map(|l| l.0.to_string())) == Some(server.clone()));
+}

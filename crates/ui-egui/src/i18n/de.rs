@@ -374,6 +374,51 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Record sessions unless a host or group says otherwise" => "Sitzungen aufzeichnen, wenn Host oder Gruppe nichts anderes sagen",
         "Keep logs until deleted" => "Protokolle behalten, bis sie gelöscht werden",
         "Keep logs {days} days" => "Protokolle {days} Tage behalten",
+        // Sync
+        "Sync off" => "Sync aus",
+        "Up to date" => "Aktuell",
+        "Syncing…" => "Synchronisiert…",
+        "Offline, retry in {seconds} s" => "Offline, neuer Versuch in {seconds} s",
+        "This device was revoked" => "Dieses Gerät wurde widerrufen",
+        "Blocked by the server's operator" => "Vom Betreiber des Servers gesperrt",
+        "Error: {detail}" => "Fehler: {detail}",
+        "No sync server yet. Everything stays on this device." => "Noch kein Sync-Server. Alles bleibt auf diesem Gerät.",
+        "Sync" => "Sync",
+        "Keys and passwords" => "Schlüssel und Passwörter",
+        "Devices" => "Geräte",
+        "Remove server" => "Server entfernen",
+        "Create account" => "Konto anlegen",
+        "Join an account" => "Einem Konto beitreten",
+        "Connections SSHCraft makes by itself" => "Verbindungen, die SSHCraft von selbst aufbaut",
+        "None. SSHCraft connects only where you tell it to." => "Keine. SSHCraft verbindet sich nur dorthin, wohin du es sagst.",
+        "Sync server {origin}" => "Sync-Server {origin}",
+        "Server name" => "Servername",
+        "Server address" => "Serveradresse",
+        "API key" => "API-Schlüssel",
+        "Your name" => "Dein Name",
+        "Email" => "E-Mail",
+        "This device's name" => "Name dieses Geräts",
+        "Join" => "Beitreten",
+        "Account key" => "Kontoschlüssel",
+        "Your account key" => "Dein Kontoschlüssel",
+        "Keep it in your password manager now. SSHCraft does not store it and shows it only this once. Every new device needs it." => {
+            "Lege ihn jetzt in deinem Passwortmanager ab. SSHCraft speichert ihn nicht und zeigt ihn nur dieses eine Mal. Jedes neue Gerät braucht ihn."
+        }
+        "Account key as QR code" => "Kontoschlüssel als QR-Code",
+        "I have kept the key" => "Ich habe den Schlüssel abgelegt",
+        "Account key (recovery)" => "Kontoschlüssel (Wiederherstellung)",
+        "{name} (this device)" => "{name} (dieses Gerät)",
+        "Revoked" => "Widerrufen",
+        "Active" => "Aktiv",
+        "Revoke" => "Widerrufen",
+        "Revoke {name}? The account's keys change; SSH keys and passwords that device synced may have been copied: change them on the servers." => {
+            "{name} widerrufen? Die Schlüssel des Kontos ändern sich; SSH-Schlüssel und Passwörter, die das Gerät synchronisiert hat, können kopiert worden sein: ändere sie auf den Servern."
+        }
+        "Revoke the device" => "Gerät widerrufen",
+        "Move {name}" => "{name} verschieben",
+        "This device only" => "Nur dieses Gerät",
+        "Move" => "Verschieben",
+        "Move to…" => "Verschieben nach…",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

@@ -5844,6 +5844,7 @@ dependencies = [
  "fontique",
  "image",
  "memory-stats",
+ "qrcode",
  "rand 0.10.3",
  "raw-window-handle",
  "russh",
@@ -5852,6 +5853,7 @@ dependencies = [
  "sshcraft-engine",
  "sshcraft-import",
  "sshcraft-model",
+ "sshcraft-server-lib",
  "sshcraft-ssh",
  "sshcraft-term",
  "sshcraft-ui-egui",
@@ -5859,6 +5861,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

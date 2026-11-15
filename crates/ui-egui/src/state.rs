@@ -98,6 +98,8 @@ pub struct UiState {
     #[serde(skip)]
     pub logs: crate::pages::logs::LogsView,
     #[serde(skip)]
+    pub sync: crate::pages::sync::SyncView,
+    #[serde(skip)]
     pub snippet_form: Option<crate::pages::snippets::SnippetForm>,
     #[serde(skip)]
     pub snippet_run: Option<crate::pages::snippets::SnippetRun>,
