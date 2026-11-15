@@ -50,3 +50,9 @@ fn a_fresh_token_replaces_the_old_one() {
     assert_ne!(first.hex(), second.hex(), "a new token for every start");
     assert_eq!(Token::load(&path).unwrap().hex(), second.hex());
 }
+
+#[test]
+fn only_a_regular_file_is_read_as_a_token() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(Token::load(dir.path()).is_none(), "a folder is no token file");
+}

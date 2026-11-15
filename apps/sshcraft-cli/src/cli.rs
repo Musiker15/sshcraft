@@ -117,7 +117,7 @@ pub enum DeleteCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum UiCommand {
-    /// The window's state: page, tabs, dialogs, the widgets with their labels.
+    /// The window's state: page, tabs with their panes, questions, notices, window size.
     Inspect,
     /// Click at a point in screen points.
     Click { x: f32, y: f32 },
@@ -194,8 +194,11 @@ pub fn engine_call(command: &Command) -> Result<Option<Engine>, String> {
             engine("key.generate", json!({ "name": name, "key_type": key_type }))
         }
         Command::ImportKey { name, file } => {
-            // A key file is small; a large one is not a key.
+            // A key file is a small regular file; a pipe or device could be read without end.
             let meta = std::fs::metadata(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            if !meta.is_file() {
+                return Err(format!("{}: not a file", file.display()));
+            }
             if meta.len() > 1024 * 1024 {
                 return Err(format!("{}: larger than 1 MiB, not a key file", file.display()));
             }
@@ -214,13 +217,15 @@ pub fn readable(value: &Value) -> String {
         return session.to_owned();
     }
     if let Some(items) = value.as_array() {
+        // Names and addresses come from imports and other devices: no escape sequence of theirs
+        // reaches the terminal.
         return items
             .iter()
             .map(|item| {
-                let field = |name: &str| item.get(name).and_then(Value::as_str).unwrap_or("");
-                let detail = ["address", "fingerprint", "parent", "label"].iter().map(|f| field(f)).find(|v| !v.is_empty()).unwrap_or("");
-                let name = if field("name").is_empty() { field("id") } else { field("name") };
-                format!("{name}\t{detail}\t{}", if field("name").is_empty() { "" } else { field("id") })
+                let field = |name: &str| item.get(name).and_then(Value::as_str).unwrap_or("").replace(|c: char| c.is_control(), "");
+                let detail = ["address", "fingerprint", "parent", "label"].iter().map(|f| field(f)).find(|v| !v.is_empty()).unwrap_or_default();
+                let (name, id) = (field("name"), field("id"));
+                if name.is_empty() { format!("{id}\t{detail}\t") } else { format!("{name}\t{detail}\t{id}") }
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -271,6 +276,21 @@ mod tests {
         assert!(matches!(cli.command, Command::Mcp { when_closed: WhenClosed::Error, bridge: None, .. }));
         assert_eq!(engine_call(&cli.command).unwrap(), None);
         assert!(matches!(parse(&["mcp", "--when-closed", "launch"]).command, Command::Mcp { when_closed: WhenClosed::Launch, .. }));
+    }
+
+    #[test]
+    fn list_fields_lose_control_characters() {
+        let hosts = json!([{"id": "1", "name": "web\u{1b}]0;owned\u{7}", "address": "10.0.0.1\u{1b}[2J"}]);
+        let text = readable(&hosts);
+        assert!(!text.chars().any(|c| c.is_control() && c != '\t'), "{text:?}");
+        assert!(text.contains("web") && text.contains("10.0.0.1"));
+    }
+
+    #[test]
+    fn import_key_takes_only_a_regular_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = parse(&["import-key", "k", dir.path().to_str().unwrap()]);
+        assert!(engine_call(&cli.command).is_err(), "a folder is no key file");
     }
 
     #[test]

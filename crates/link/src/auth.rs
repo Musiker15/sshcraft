@@ -55,7 +55,8 @@ impl Token {
     /// this way: only the app makes the file.
     pub fn load(path: &Path) -> Option<Self> {
         let meta = std::fs::metadata(path).ok()?;
-        if meta.len() > 1024 {
+        // A regular file: a pipe or device in its place would block the reader.
+        if !meta.is_file() || meta.len() > 1024 {
             return None;
         }
         Self::parse(&std::fs::read_to_string(path).ok()?)

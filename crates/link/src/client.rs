@@ -114,6 +114,12 @@ impl Client {
         let id = self.inner.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.inner.pending.lock().unwrap_or_else(PoisonError::into_inner).insert(id, tx);
+        // The connection may have ended between the check above and the insert: its reader has
+        // cleared the waiting calls already, and this one would wait for ever.
+        if !self.is_alive() {
+            self.inner.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
+            return Err(LinkError::Closed);
+        }
         let mut guard = CancelOnDrop { client: self.clone(), id, armed: true };
         let request = Request { id, method: method.to_string(), params };
         let sent = write_line(&mut *self.inner.write.lock().await, &request, MAX_REQUEST).await;
