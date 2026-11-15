@@ -337,7 +337,8 @@ mod link {
         let f = file(&h).unwrap();
         let token = Token::load_or_create(&f.token_file).unwrap();
         let client = session.runtime().block_on(Client::connect(std::net::SocketAddr::from(([127, 0, 0, 1], f.port)), &token)).unwrap();
-        assert!(h.query_by_label_contains(&format!("127.0.0.1:{}", f.port)).is_some(), "the page says where agents connect");
+        let shown = format!("127.0.0.1:{}", f.port);
+        wait(&mut h, "the page to say where agents connect", |h| h.query_by_label_contains(&shown).is_some());
         h.get_by_label("Allow agent control").click();
         wait(&mut h, "the link to stop", |h| file(h).is_none());
         std::thread::sleep(Duration::from_millis(200));
