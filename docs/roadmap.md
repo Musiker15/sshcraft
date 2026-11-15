@@ -11,8 +11,10 @@ comparison with other clients, both in the history at [`docs/superpowers/specs/`
 The rebuild (R1 to R7) is done: SSHCraft builds and tests on Windows, Linux and macOS in CI and
 on FreeBSD in a VM, has the integrated title bar and menus of the Craft apps, the fonts from
 craft-fonts, and packages for every platform ([releasing.md](releasing.md)). F1 (connection and
-configuration) and F2 (sign-in and data safety) are done; next is the first release (V1), which
-Moritz starts.
+configuration) and F2 (sign-in and data safety) are done. The first release (V1) is being
+prepared: the release workflow also packs the sync server, `cargo xtask sbom` makes the bill of
+materials and `cargo xtask stores` the winget and Homebrew entries. Moritz installs and tries
+the packages before anything is published.
 
 ## The rebuild
 

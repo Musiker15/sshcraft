@@ -55,8 +55,19 @@ changes it.
 4. **Check it.** Install a package or two and go through the hand-test list of the last pull
    requests. A `::warning::` in a job summary means a secret was missing and that artifact is
    unsigned.
-5. **Publish** the draft. Publishing creates the tag `v0.2.0`; a version with a suffix
+5. **Attach the SBOM** to the draft before publishing it:
+
+   ```sh
+   cargo xtask sbom                  # dist/release/sshcraft-0.2.0.cdx.json
+   gh release upload v0.2.0 dist/release/sshcraft-0.2.0.cdx.json
+   ```
+
+   It is CycloneDX 1.6 and lists every crate in the shipped programs on any platform, with
+   version, licence and package URL; dev-dependencies stay out. The shared release workflow does
+   not make one yet, so this is a step by hand.
+6. **Publish** the draft. Publishing creates the tag `v0.2.0`; a version with a suffix
    (`-rc.1`) is marked as a pre-release.
+7. **Update the stores** (below).
 
 Pushing to `release` again before publishing rebuilds the same draft. After publishing, the
 workflow refuses to touch that version again: set a new one first.
@@ -71,13 +82,37 @@ its signing jobs stop there.
 | Platform | Artifacts |
 |---|---|
 | macOS 11+ (Apple silicon and Intel) | `sshcraft-<v>-macos-universal.dmg`, `sshcraft-cli-<v>-macos-universal.zip` |
-| Windows 10+ x64, x86, ARM64 | `sshcraft-<v>-windows-<arch>.msi`, `sshcraft-<v>-windows-<arch>-portable.zip` |
+| Windows 10+ x64, ARM64 | `sshcraft-<v>-windows-<arch>.msi`, `sshcraft-<v>-windows-<arch>-portable.zip` |
 | Linux x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
 | Flatpak x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
-| FreeBSD 14 x86_64 | `sshcraft-<v>-freebsd-x86_64.tar.gz` |
+| FreeBSD 15 x86_64, aarch64 | `sshcraft-<v>-freebsd-<arch>.tar.gz` |
+| Sync server, Linux x86_64 and aarch64 | `sshcraft-server-<v>-linux-<arch>.tar.gz`: the program, a systemd unit and an example environment file ([server.md](server.md#install-the-program)) |
 
-SSHCraft has no web build: SSH needs TCP. The sync server's Docker image and Linux program get
-their release path later (V1).
+SSHCraft has no web build: SSH needs TCP.
+
+**The server's Docker image** is built from [`packaging/docker/Dockerfile`](../packaging/docker/Dockerfile)
+by whoever runs it ([server.md](server.md#start)). The shared release workflow pushes no server
+image to a registry; a published image needs that workflow first, since CI here stays shared.
+
+## Stores
+
+After a stable release is published, the store entries are filled in from its checksums:
+
+```sh
+gh release download v0.2.0 --pattern SHA256SUMS.txt --dir dist
+cargo xtask stores dist/SHA256SUMS.txt      # writes dist/stores/
+```
+
+The templates are in [`packaging/winget/`](../packaging/winget) and
+[`packaging/homebrew/`](../packaging/homebrew); `{{version}}` and `{{sha256:<file>}}` are their
+only placeholders, and a file the checksums do not list stops the command. Submitting is the
+maintainer's step, never an automatic one:
+
+| Store | What to submit |
+|---|---|
+| winget | `dist/stores/winget/*.yaml` as `manifests/m/MSKScripts/SSHCraft/<v>/` in a pull request to `microsoft/winget-pkgs` (`winget validate` first). Id `MSKScripts.SSHCraft`; per-user by default, per-machine with `ALLUSERS=1` |
+| Homebrew | `dist/stores/homebrew/sshcraft.rb`. `Homebrew/homebrew-cask` takes only signed, notarized apps that are notable enough; until then it goes into an own tap |
+| Flathub | the from-source manifest [`de.musiker15.sshcraft.yml`](../packaging/linux/flatpak/de.musiker15.sshcraft.yml) with a generated `cargo-sources.json` (how is at its top), as a new-app pull request to `flathub/flathub` |
 
 ### Per platform
 
@@ -95,10 +130,13 @@ their release path later (V1).
   and rpm with nfpm, and the AppImage with a pinned appimagetool. `--formats "deb rpm tar"`
   skips the AppImage.
 - **Flatpak:** [`packaging/linux/flatpak-bundle.sh`](../packaging/linux/flatpak-bundle.sh) wraps
-  the tarball. The sandbox has the network, the Secret Service and `~/.ssh` read-only; serial
-  ports and the host's own shell stay outside it.
+  the tarball. The sandbox has the network, the Secret Service and `~/.ssh` (written only when the
+  user saves a linked host back); serial ports and the host's own shell stay outside it.
 - **FreeBSD:** [`packaging/freebsd/package.sh`](../packaging/freebsd/package.sh) runs in a
   FreeBSD VM ([`freebsd.yml`](../.github/workflows/freebsd.yml)).
+- **Sync server:** [`packaging/server/package.sh`](../packaging/server/package.sh) builds
+  `sshcraft-server` and packs it with the licences, `docs/server.md`, `sshcraft-server.service`
+  and `sshcraft-server.env.example`; `has-server` in `release.yml` turns the job on.
 
 Builds with `CRAFT_FONTS_DIR` embed craft-fonts' interface faces, and every package carries their
 licences (`OFL-<family>.txt`) next to `NOTICE` and `ATTRIBUTION.md`.

@@ -1,4 +1,6 @@
 /target/
+# Release artifacts of packaging/*.sh, cargo xtask sbom and cargo xtask stores.
+/dist/
 /plan/
 /.superpowers/
 # Plans and design notes of agent tools: a notebook like plan/, not part of the tree (the R1 to
