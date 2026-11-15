@@ -57,13 +57,20 @@ choosing. A TOTP secret is sealed like a password and answers only a question fo
 a password question; a stored password never answers a code question.
 
 The window locks after the idle time set (*Settings › General › App lock*, off by default):
-nothing of the sessions, hosts or terminals is drawn, so neither a screen reader nor a screenshot
-of the control channel sees them, and the approval for keys and passwords is asked again.
-Unlocking needs Windows Hello; elsewhere the lock is not offered yet.
+nothing of the sessions, hosts or terminals is drawn (no toasts either), so neither a screen
+reader nor a screenshot sees them; the control channel answers only `{"locked": true}` and
+refuses to read terminals or switch pages. The idle time is checked also while the window is
+hidden, before the input that brings it back counts. The approval for keys and passwords, and
+KeePassXC database passwords, are asked again; passwords from password managers need Windows
+Hello like stored ones. Unlocking needs Windows Hello; elsewhere the lock is not offered yet.
 
 The backup file holds secrets in plain form inside, sealed with Argon2id (64 MiB, 3 passes) and
-XChaCha20-Poly1305; its header is authenticated and a file cannot ask for more than 1 GiB or 16
-passes. Backups, the trash and earlier versions are never reachable for agents.
+XChaCha20-Poly1305; its header is authenticated and a file cannot ask for more than 256 MiB or 8
+passes. Restoring checks every key and snippet first and trusts a file only with what it holds: a
+host naming a password, key or identity the file does not carry loses that reference, and host
+keys come only for servers of its own hosts that this device does not know. Restoring from the
+trash keeps share rights: what a read-only share would not take back comes back on this device
+only. Backups, the trash and earlier versions are never reachable for agents.
 
 ## Host keys and `~/.ssh/config`
 

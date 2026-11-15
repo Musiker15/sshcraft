@@ -54,8 +54,9 @@ carry a reference.
 ### One-time codes
 
 *One-time codes* in the host form takes a TOTP secret, as an authenticator app gets it (Base32,
-or the `otpauth://` link of the QR code). It is sealed in the vault like a password, syncs and
-moves with its host under the same rules, and answers a server's question for a code once per
+or the `otpauth://` link of the QR code; a link for other settings than SHA-1, 6 digits and 30
+seconds is refused). It is sealed in the vault like a password, syncs, moves and is shared with
+its host under the same rules (only with keys), and answers a server's question for a code once per
 connection (RFC 6238: SHA-1, 30 seconds, 6 digits).
 
 ## Identities

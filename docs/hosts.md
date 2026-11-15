@@ -64,8 +64,10 @@ Limits on purpose:
 
 A deleted host, group (with its subgroups and their hosts), key or snippet goes to *Settings ›
 Trash* for 30 days (1 to 365), also when another device deleted it through sync. *Restore* puts
-it back with its passwords and sends it to its sync server again; one whose id is in use again
-stays in the trash. Every save of a host, group or snippet keeps the stand before: *Earlier
+it back with its passwords and sends it to its sync server again (a group takes back its hosts
+that came to the trash on their own); one whose id is in use again stays in the trash, and one
+whose share or parent group is gone comes back on this device only. Keys bound to this device
+(Windows Hello) do not go to the trash. Deleting for good also removes the earlier versions. Every save of a host, group or snippet keeps the stand before: *Earlier
 versions…* in a host's menu lists up to 20 and restores one like an edit.
 
 ## Backup
