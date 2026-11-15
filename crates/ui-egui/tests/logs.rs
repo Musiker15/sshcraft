@@ -194,11 +194,39 @@ fn export_writes_text_where_the_user_chose() {
     assert!(std::fs::read_to_string(&out).unwrap().contains("logged-text"));
 }
 
+fn numbered(lines: usize) -> Vec<u8> {
+    (0..lines).flat_map(|i| format!("line {i}\r\n").into_bytes()).collect()
+}
+
 #[test]
 fn a_long_log_says_its_beginning_is_missing() {
     let short = LogViewer::from_bytes(String::new(), b"one\r\ntwo\r\n", &[]);
     assert!(!short.beginning_missing());
-    let long: Vec<u8> = (0..100_050).flat_map(|i| format!("line {i}\r\n").into_bytes()).collect();
-    let viewer = LogViewer::from_bytes(String::new(), &long, &[]);
+    let viewer = LogViewer::from_bytes(String::new(), &numbered(100_050), &[]);
     assert!(viewer.beginning_missing(), "more than 100 000 lines");
+    // More than the terminal keeps at its width, fewer than 100 000.
+    let viewer = LogViewer::from_bytes(String::new(), &numbered(30_000), &[]);
+    assert!(viewer.beginning_missing(), "30 000 lines at 160 columns");
+}
+
+/// A mark at the start of line `line` of [`numbered`] output.
+fn mark_at(bytes: &[u8], line: usize, text: &str) -> Value {
+    let offset = bytes.split(|b| *b == b'\n').take(line).map(|l| l.len() + 1).sum::<usize>();
+    json!({ "id": uuid::Uuid::new_v4(), "offset": offset, "kind": "bookmark", "text": text, "created_at": 0 })
+}
+
+#[test]
+fn marks_jump_right_after_one_is_added_or_removed() {
+    let bytes = numbered(1000);
+    let late = mark_at(&bytes, 600, "late");
+    let mut viewer = LogViewer::from_bytes(String::new(), &bytes, std::slice::from_ref(&late));
+    let early = mark_at(&bytes, 200, "early");
+    viewer.set_marks(vec![late.clone(), early.clone()]);
+    viewer.jump(0);
+    assert!(viewer.screen_text().contains("line 200"), "the new mark: {}", viewer.screen_text());
+    viewer.jump(1);
+    assert!(viewer.screen_text().contains("line 600"));
+    viewer.set_marks(vec![early]);
+    viewer.jump(0);
+    assert!(viewer.screen_text().contains("line 200"), "after a removal: {}", viewer.screen_text());
 }

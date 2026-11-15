@@ -361,8 +361,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Session log" => "Sitzungsprotokoll",
         "Bookmark" => "Lesezeichen",
         "Comment" => "Kommentar",
-        "This log is longer than 100 000 lines: its beginning is not shown, and marks are off." => {
-            "Dieses Protokoll hat mehr als 100 000 Zeilen: sein Anfang wird nicht gezeigt, und Marken sind aus."
+        "This log is longer than the viewer keeps: its beginning is not shown, and marks are off." => {
+            "Dieses Protokoll ist länger, als die Ansicht behält: sein Anfang wird nicht gezeigt, und Marken sind aus."
         }
         "Add comment" => "Kommentar hinzufügen",
         "Marks" => "Marken",
