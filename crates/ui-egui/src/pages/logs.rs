@@ -35,6 +35,8 @@ pub struct LogsView {
     pub selected: HashSet<String>,
     /// The list was fetched for this visit of the page.
     pub fresh: bool,
+    /// Logs waiting for the user to confirm their deletion.
+    pub confirm_delete: Option<Vec<String>>,
 }
 
 fn text(v: &Value, key: &str) -> String {
@@ -79,7 +81,10 @@ fn host_label(app: &SshcraftApp, log: &Value) -> String {
     }
 }
 
+/// The logs the list shows: those of the filter, and while searching only those with a hit.
 fn shown(app: &SshcraftApp) -> Vec<Value> {
+    let searching = app.ui.logs.searched.chars().count() >= 2;
+    let hits: HashSet<String> = app.ui.logs.hits.iter().map(|h| text(h, "log_id")).collect();
     app.data
         .logs
         .iter()
@@ -88,6 +93,7 @@ fn shown(app: &SshcraftApp) -> Vec<Value> {
             LogFilter::Local => l.get("host_id").is_none_or(Value::is_null),
             LogFilter::Host(h) => l.get("host_id").and_then(Value::as_str) == Some(h.as_str()),
         })
+        .filter(|l| !searching || hits.contains(&text(l, "id")))
         .cloned()
         .collect()
 }
@@ -148,6 +154,37 @@ fn filter_box(app: &mut SshcraftApp, ui: &mut Ui) {
             ui.selectable_value(&mut app.ui.logs.filter, LogFilter::Host(id.clone()), visible(name));
         }
     });
+}
+
+/// Asks before logs go: they are gone for good, on the sync server and the other devices too.
+fn confirm_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
+    let Some(ids) = app.ui.logs.confirm_delete.clone() else { return };
+    let mut close = false;
+    let mut confirmed = false;
+    let modal = egui::Modal::new(egui::Id::new("sshcraft-logs-confirm")).show(ctx, |ui| {
+        ui.set_width(420.0);
+        ui.heading(trf("Delete {count} session logs?", &[("count", &ids.len().to_string())]));
+        ui.add_space(6.0);
+        ui.label(tr("They are deleted for good, on the sync server and your other devices too."));
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if ui.button(tr("Cancel")).clicked() {
+                close = true;
+            }
+            if ui.button(tr("Delete")).clicked() {
+                confirmed = true;
+            }
+        });
+    });
+    if modal.should_close() {
+        close = true;
+    }
+    if confirmed {
+        app.ui.logs.confirm_delete = None;
+        delete(app, ids);
+    } else if close {
+        app.ui.logs.confirm_delete = None;
+    }
 }
 
 enum LogAction {
@@ -222,9 +259,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             }
         });
     });
-    if let Some(ids) = delete_ids {
-        delete(app, ids);
+    match delete_ids {
+        Some(ids) if ids.is_empty() => delete(app, ids),
+        Some(ids) => app.ui.logs.confirm_delete = Some(ids),
+        None => {}
     }
+    confirm_dialog(app, ui.ctx());
     match action {
         Some(LogAction::Open(id)) => crate::log_viewer::open(app, id),
         Some(LogAction::Export(id)) => {

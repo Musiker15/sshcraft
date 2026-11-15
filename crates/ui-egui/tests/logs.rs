@@ -38,19 +38,60 @@ fn logs(session: &Session) -> Vec<Value> {
 
 /// Recording on, one connected pane that printed `logged-text`; the server stays alive.
 fn recorded(h: &mut H, session: &Session) -> (SessionId, sshcraft_ssh::testing::TestServer) {
+    recorded_with(h, session, "logged-text")
+}
+
+/// Recording on, one more connected pane that printed `text`.
+fn recorded_with(h: &mut H, session: &Session, text: &str) -> (SessionId, sshcraft_ssh::testing::TestServer) {
     let mut settings = run(session, "settings.get", json!({}));
     settings["logs"]["session_logs"] = json!(true);
     run(session, "settings.save", json!({ "settings": settings }));
     let (server, host) = session.runtime().block_on(test_host(session, "web", TestAuth::default(), true));
+    let before: Vec<SessionId> = h.state().terminals.keys().copied().collect();
     h.state_mut().open_new_tab();
     h.run_steps(2);
     h.state_mut().ui.connect_request = Some(ConnectRequest::Host(host));
-    until(h, "the session", |app| !app.terminals.is_empty());
-    let id = *h.state().terminals.keys().next().unwrap();
+    until(h, "the session", |app| app.terminals.keys().any(|id| !before.contains(id)));
+    let id = *h.state().terminals.keys().find(|id| !before.contains(id)).unwrap();
     until(h, "the connection", |app| app.terminals.get(&id).is_some_and(|t| matches!(t.status, Some(SessionStatus::Connected { .. }))));
-    h.event(Event::Text("echo logged-text".into()));
-    until(h, "the echo", |app| app.terminals.get(&id).is_some_and(|t| t.term.visible_text().contains("logged-text")));
+    h.event(Event::Text(format!("echo {text}")));
+    until(h, "the echo", |app| app.terminals.get(&id).is_some_and(|t| t.term.visible_text().contains(text)));
     (id, server)
+}
+
+#[test]
+fn delete_all_shown_while_searching_deletes_only_the_hits_after_a_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_a, _sa) = recorded_with(&mut h, &session, "keep-this-one");
+    let (_b, _sb) = recorded_with(&mut h, &session, "drop-that-one");
+    h.state_mut().close_tab();
+    h.state_mut().close_tab();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(logs(&session).len() == 2 && logs(&session).iter().all(|l| l["ended_at"].is_i64())) {
+        assert!(Instant::now() < deadline, "the logs did not end");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.state_mut().ui.page = Page::Logs;
+    until(&mut h, "the list", |app| app.data.logs.len() == 2);
+    h.state_mut().ui.logs.search = "drop-that".into();
+    until(&mut h, "the hits", |app| !app.ui.logs.hits.is_empty());
+    let hit = h.state().ui.logs.hits[0]["log_id"].as_str().unwrap().to_string();
+    h.get_by_label("Delete all shown").click();
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert_eq!(logs(&session).len(), 2, "nothing is deleted before the confirmation");
+    h.get_by_label("Delete").click();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while logs(&session).len() != 1 {
+        assert!(Instant::now() < deadline, "not deleted; {} logs", logs(&session).len());
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert_ne!(logs(&session)[0]["id"].as_str().unwrap(), hit, "the log without a hit stays");
 }
 
 fn close_and_open_logs(h: &mut H, session: &Session) {
