@@ -128,3 +128,63 @@ fn a_screenshot_is_a_png() {
     assert_eq!((back.width(), back.height()), (2, 2));
     assert!(png_of(3, 3, vec![0; 4]).is_err(), "a size that does not fit its pixels");
 }
+
+#[test]
+fn a_click_whose_requester_went_away_never_lands() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let queue = with_control(&mut h);
+    let at = h.get_by_label("New host").rect().center();
+    // Gone before the window took it (a script that timed out and was stopped).
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    drop(answer);
+    queue.push(ControlRequest { method: "ui.click".into(), params: json!({ "x": at.x, "y": at.y }), reply });
+    for _ in 0..10 {
+        step(&mut h);
+    }
+    assert!(h.state().ui.host_form.is_none(), "the stale click was dropped");
+    // Gone while its input was going in: the rest of it is dropped.
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    queue.push(ControlRequest { method: "ui.click".into(), params: json!({ "x": at.x, "y": at.y }), reply });
+    step(&mut h);
+    drop(answer);
+    for _ in 0..10 {
+        step(&mut h);
+    }
+    assert!(h.state().ui.host_form.is_none(), "the rest of the click was dropped");
+}
+
+#[test]
+fn the_answer_comes_after_the_input_took_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let queue = with_control(&mut h);
+    let at = h.get_by_label("New host").rect().center();
+    let (reply, mut answer) = tokio::sync::oneshot::channel();
+    queue.push(ControlRequest { method: "ui.click".into(), params: json!({ "x": at.x, "y": at.y }), reply });
+    for _ in 0..20 {
+        let events = h.state_mut().take_control_input();
+        if answer.try_recv().is_ok() {
+            assert!(h.state().ui.host_form.is_some(), "answered before the click took effect");
+            return;
+        }
+        h.input_mut().events.extend(events);
+        h.step();
+    }
+    panic!("no answer");
+}
+
+#[test]
+fn the_queue_is_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let queue = with_control(&mut h);
+    let mut answers = Vec::new();
+    for _ in 0..(sshcraft_ui_egui::control::MAX_QUEUED + 5) {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        queue.push(ControlRequest { method: "ui.inspect".into(), params: json!({}), reply });
+        answers.push(answer);
+    }
+    let refused = answers.iter_mut().filter_map(|a| a.try_recv().ok()).filter(Result::is_err).count();
+    assert_eq!(refused, 5, "what does not fit is refused at once");
+}

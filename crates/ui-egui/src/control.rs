@@ -17,6 +17,8 @@ use crate::state::{Page, PaneSlot};
 const MAX_COORD: f64 = 1_000_000.0;
 /// The longest text `ui.text` types at once.
 const MAX_TEXT: usize = 4096;
+/// Requests waiting for the window at most; more are refused at once.
+pub const MAX_QUEUED: usize = 64;
 /// The most clicks one `ui.click` makes.
 const MAX_COUNT: u64 = 8;
 
@@ -39,8 +41,16 @@ impl ControlQueue {
         Self { items: Arc::default(), wake }
     }
 
+    /// Queues `request`; with [`MAX_QUEUED`] waiting already, it is refused at once.
     pub fn push(&self, request: ControlRequest) {
-        self.items.lock().unwrap_or_else(PoisonError::into_inner).push_back(request);
+        let mut items = self.items.lock().unwrap_or_else(PoisonError::into_inner);
+        if items.len() >= MAX_QUEUED {
+            drop(items);
+            let _ = request.reply.send(Err("too many requests waiting for the window".into()));
+            return;
+        }
+        items.push_back(request);
+        drop(items);
         self.wake.request_repaint();
     }
 
@@ -49,18 +59,31 @@ impl ControlQueue {
     }
 }
 
+type Reply = oneshot::Sender<Result<Value, String>>;
+
 /// The control channel's state in the window.
 pub struct Control {
     pub queue: ControlQueue,
-    /// Input for the coming frames, one list per frame.
-    frames: VecDeque<Vec<Event>>,
-    /// Answers sent once the frames before them have been delivered.
-    after_input: Vec<(usize, oneshot::Sender<Result<Value, String>>)>,
+    /// Input for the coming frames, one list per frame, each with the request it belongs to.
+    frames: VecDeque<(u64, Vec<Event>)>,
+    /// Input requests whose frames have not all gone in yet.
+    waiting: Vec<(u64, Reply)>,
+    /// Input requests whose last frame went in at take number `.1`; answered once a later frame
+    /// began, so the input has taken effect.
+    ready: Vec<(Reply, u64)>,
+    next: u64,
+    /// Frames begun (calls of the raw-input hook).
+    takes: u64,
 }
 
 impl Control {
     pub fn new(queue: ControlQueue) -> Self {
-        Self { queue, frames: VecDeque::new(), after_input: Vec::new() }
+        Self { queue, frames: VecDeque::new(), waiting: Vec::new(), ready: Vec::new(), next: 1, takes: 0 }
+    }
+
+    /// Whether request `owner` still has someone waiting for it.
+    fn wanted(&self, owner: u64) -> bool {
+        self.waiting.iter().any(|(o, reply)| *o == owner && !reply.is_closed())
     }
 }
 
@@ -284,19 +307,31 @@ fn input_frames(method: &str, params: &Value) -> Option<Result<Vec<Vec<Event>>, 
 /// Answers the queued requests; called every frame while the control channel is on.
 pub fn process(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(control) = app.control.as_mut() else { return };
-    if !control.frames.is_empty() || !control.after_input.is_empty() {
+    // Input that took effect in a frame that has ended: its answer goes now.
+    let takes = control.takes;
+    let (done, later): (Vec<_>, Vec<_>) = std::mem::take(&mut control.ready).into_iter().partition(|(_, at)| *at < takes);
+    control.ready = later;
+    for (reply, _) in done {
+        let _ = reply.send(Ok(Value::Null));
+    }
+    if !control.frames.is_empty() || !control.waiting.is_empty() || !control.ready.is_empty() {
         // Input waits for the next frames: they must come.
         ctx.request_repaint();
     }
     let requests = control.queue.take();
     for ControlRequest { method, params, reply } in requests {
+        // Nobody waits for it any more (timed out, cancelled, gone): it does nothing.
+        if reply.is_closed() {
+            continue;
+        }
         if let Some(frames) = input_frames(&method, &params) {
             match frames {
                 Ok(frames) => {
                     let Some(control) = app.control.as_mut() else { return };
-                    control.frames.extend(frames);
-                    let at = control.frames.len();
-                    control.after_input.push((at, reply));
+                    let owner = control.next;
+                    control.next = control.next.wrapping_add(1);
+                    control.frames.extend(frames.into_iter().map(|f| (owner, f)));
+                    control.waiting.push((owner, reply));
                     ctx.request_repaint();
                 }
                 Err(e) => {
@@ -360,19 +395,18 @@ impl SshcraftApp {
     /// The input for the next frame (eframe's raw-input hook puts it in front of the frame).
     pub fn take_control_input(&mut self) -> Vec<Event> {
         let Some(control) = self.control.as_mut() else { return Vec::new() };
-        let events = control.frames.pop_front().unwrap_or_default();
-        // Input answered once the frames before it went out.
-        let mut i = 0;
-        while i < control.after_input.len() {
-            if let Some((left, _)) = control.after_input.get_mut(i) {
-                *left = left.saturating_sub(1);
-                if *left == 0 {
-                    let (_, reply) = control.after_input.swap_remove(i);
-                    let _ = reply.send(Ok(Value::Null));
-                    continue;
-                }
-            }
-            i += 1;
+        control.takes = control.takes.wrapping_add(1);
+        // The input of a request nobody waits for any more is dropped, also halfway through.
+        while control.frames.front().is_some_and(|(owner, _)| !control.wanted(*owner)) {
+            control.frames.pop_front();
+        }
+        control.waiting.retain(|(_, reply)| !reply.is_closed());
+        let Some((owner, events)) = control.frames.pop_front() else { return Vec::new() };
+        if !control.frames.iter().any(|(o, _)| *o == owner)
+            && let Some(at) = control.waiting.iter().position(|(o, _)| *o == owner)
+        {
+            let (_, reply) = control.waiting.swap_remove(at);
+            control.ready.push((reply, control.takes));
         }
         events
     }
