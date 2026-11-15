@@ -232,6 +232,8 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
         std::thread::sleep(Duration::from_millis(20));
         t.h.run_steps(1);
     }
+    // The share dialog closes when the window gets the answer, a few frames after the engine.
+    until(&mut t.h, "the share dialog to close", |app| app.ui.share.is_none());
     t.h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
     t.h.run_steps(2);
     // The "Shared." notice may lie over the section tabs: the section is chosen directly.
