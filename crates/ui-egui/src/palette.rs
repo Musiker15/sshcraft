@@ -89,8 +89,19 @@ pub fn entries(app: &SshcraftApp) -> Vec<Entry> {
                 enabled: true,
             })
         }))
+        .chain(app.data.snippets.iter().map(|s| Entry {
+            id: RUN_SNIPPET,
+            arg: Some(s.id.clone()),
+            local: trf("Snippet: {name}", &[("name", &crate::widgets::visible(&s.name))]),
+            english: "Snippet",
+            shortcut: None,
+            enabled: true,
+        }))
         .collect()
 }
+
+/// The palette entry that opens the run dialog of a snippet (its id in `Entry::arg`).
+pub const RUN_SNIPPET: &str = "ui.snippet.run";
 
 /// The palette entry that opens a workspace template (its id in `Entry::arg`).
 pub const OPEN_WORKSPACE: &str = "ui.workspace.open";

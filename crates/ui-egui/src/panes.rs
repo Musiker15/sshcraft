@@ -18,6 +18,7 @@ pub const MIN_SHARE: f32 = 0.1;
 const TITLE_HEIGHT: f32 = 24.0;
 const DIVIDER: f32 = 6.0;
 const LIST_WIDTH: f32 = 200.0;
+const SIDEBAR_WIDTH: f32 = 260.0;
 
 /// Columns and rows for `count` panes: as square as possible, wider than tall.
 pub fn grid(count: usize) -> (usize, usize) {
@@ -228,7 +229,18 @@ fn dividers(app: &mut SshcraftApp, ui: &mut Ui, tab: usize, area: Rect) {
 /// Draws the panes of tab `tab` in the rest of `ui`.
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui, tab: usize) {
     let Some(panes) = app.ui.tabs.get(tab).map(|t| t.panes.clone()) else { return };
-    let area = ui.available_rect_before_wrap();
+    let mut area = ui.available_rect_before_wrap();
+    // Snippets and history beside the terminal (Ctrl+Shift+S).
+    if app.ui.sidebar.open {
+        let side = Rect::from_min_max(pos2(area.max.x - SIDEBAR_WIDTH, area.min.y), area.max);
+        area.max.x = side.min.x - DIVIDER;
+        let focused = match panes.focused_slot() {
+            Some(PaneSlot::Session { session }) => Some(session),
+            _ => None,
+        };
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(side.shrink(4.0)).id_salt("sshcraft-terminal-sidebar"));
+        crate::pages::snippets::sidebar(app, &mut child, focused);
+    }
     let multi = panes.panes.len() > 1;
     let mut action: Option<(usize, PaneAction)> = None;
     let layout: Vec<(usize, Rect)> = if multi && panes.focus_layout {

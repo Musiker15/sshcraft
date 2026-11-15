@@ -316,6 +316,30 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "The SOCKS proxy asks no password: anyone who reaches the port can use it." => {
             "Der SOCKS-Proxy fragt kein Passwort: wer den Port erreicht, kann ihn nutzen."
         }
+        // Snippets
+        "A name is needed; name and package have at most 100 characters." => "Ein Name ist nötig; Name und Paket haben höchstens 100 Zeichen.",
+        "The content has 1 to 10 000 characters." => "Der Inhalt hat 1 bis 10 000 Zeichen.",
+        "The content has no control characters but line breaks and tabs." => "Der Inhalt hat keine Steuerzeichen außer Zeilenumbrüchen und Tabs.",
+        "Snippet: {name}" => "Snippet: {name}",
+        "New snippet" => "Neues Snippet",
+        "Edit snippet" => "Snippet bearbeiten",
+        "No snippets yet. They stay on this device and need the vault." => {
+            "Noch keine Snippets. Sie bleiben auf diesem Gerät und brauchen den Tresor."
+        }
+        "Without package" => "Ohne Paket",
+        "Run" => "Ausführen",
+        "Package" => "Paket",
+        "Content" => "Inhalt",
+        "Default hosts" => "Standard-Hosts",
+        "Run {name}" => "{name} ausführen",
+        "{count} default host was deleted and is left out." => "{count} Standard-Host wurde gelöscht und fällt weg.",
+        "Open panes" => "Offene Bereiche",
+        "New connections" => "Neue Verbindungen",
+        "Paste only" => "Nur einfügen",
+        "Run on {count}" => "Auf {count} ausführen",
+        "Run snippet" => "Snippet ausführen",
+        "Clear" => "Leeren",
+        "Snippets and history beside the terminal" => "Snippets und Verlauf neben dem Terminal",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

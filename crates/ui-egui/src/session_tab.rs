@@ -44,8 +44,9 @@ pub struct SessionTab {
     unseen: bool,
     /// The shell's working directory, as OSC 7 reported it.
     pub cwd: Option<String>,
-    /// A line to type once, when the session first connects (a template's `cd` and command).
-    start: Option<String>,
+    /// Bytes to type once, when the session first connects (a template's `cd` and command, a
+    /// snippet).
+    start: Option<Vec<u8>>,
     /// The bell rang, or the cursor's line asks for a secret or a yes/no.
     waiting: bool,
 }
@@ -111,7 +112,7 @@ pub fn pane_of(app: &SshcraftApp, id: SessionId) -> Option<(usize, usize)> {
 
 /// Each tab's title is the title of its focused pane.
 pub fn refresh_titles(app: &mut SshcraftApp) {
-    for tab in &mut app.ui.tabs {
+    for tab in app.ui.tabs.iter_mut().filter(|t| !t.named) {
         let title = match tab.panes.focused_slot() {
             Some(PaneSlot::Session { session }) => app.terminals.get(&session).map(|t| t.title.clone()).unwrap_or_default(),
             // A new-pane page keeps the tab's title, or names it when it has none.
@@ -135,7 +136,7 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
 }
 
 /// [`open`] with a line to type once the session first connects.
-pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<PaneSlot>, start: Option<String>) {
+pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<PaneSlot>, start: Option<Vec<u8>>) {
     // A connection for this pane (or, without one, to this host) is already on its way: one is
     // enough (a double click asks twice).
     let key = (replace, if replace.is_some() { None } else { host });
@@ -189,7 +190,7 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                     (t, p)
                 }
                 None => {
-                    app.ui.tabs.push(TabState { title: visible(&title), panes: Panes::single(slot) });
+                    app.ui.tabs.push(TabState { title: visible(&title), panes: Panes::single(slot), named: false });
                     (app.ui.tabs.len() - 1, 0)
                 }
             };
@@ -284,6 +285,11 @@ pub fn take_request(app: &mut SshcraftApp) {
     }
 }
 
+/// Types `bytes` into session `id` (a snippet, a paste).
+pub fn send_bytes(app: &SshcraftApp, id: SessionId, bytes: &[u8]) {
+    send(app, id, bytes);
+}
+
 /// Sends what the terminal (or the user) typed to the session.
 fn send(app: &SshcraftApp, id: SessionId, bytes: &[u8]) {
     let params = match std::str::from_utf8(bytes) {
@@ -367,8 +373,8 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             tab.title = title;
         }
     }
-    for (id, line) in starts {
-        send(app, id, format!("{line}\r").as_bytes());
+    for (id, bytes) in starts {
+        send(app, id, &bytes);
     }
     // More output than one frame takes: the next frame continues. New output wakes the window
     // through the engine's terminal waker.

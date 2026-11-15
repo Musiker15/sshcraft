@@ -206,7 +206,7 @@ pub fn open(app: &mut SshcraftApp, template: &Value) {
     panes_state.focus_layout = template.get("layout").and_then(Value::as_str) == Some("focus");
     panes_state.broadcast = false;
     let name = template.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
-    app.ui.tabs.push(TabState { title: visible(&name), panes: panes_state });
+    app.ui.tabs.push(TabState { title: visible(&name), panes: panes_state, named: true });
     app.ui.page = Page::Tab(app.ui.tabs.len() - 1);
     for ((pane, mut target, host), slot) in wanted.into_iter().zip(slots) {
         let text = |key: &str| pane.get(key).and_then(Value::as_str).map(str::to_string);
@@ -223,7 +223,7 @@ pub fn open(app: &mut SshcraftApp, template: &Value) {
             "serial" => start_line(None, command.as_deref(), false),
             _ => start_line(cwd.as_deref(), command.as_deref(), true),
         };
-        crate::session_tab::open_with(app, target, title, host, Some(slot), start);
+        crate::session_tab::open_with(app, target, title, host, Some(slot), start.map(|line| format!("{line}\r").into_bytes()));
     }
 }
 

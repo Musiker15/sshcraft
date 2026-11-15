@@ -48,6 +48,9 @@ pub struct Panes {
 pub struct TabState {
     pub title: String,
     pub panes: Panes,
+    /// The title was given (a template's or a snippet's name) and does not follow the panes.
+    #[serde(default)]
+    pub named: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -92,6 +95,12 @@ pub struct UiState {
     /// The terminal shown in the last frame, to give the keyboard to the next one shown.
     #[serde(skip)]
     pub shown_terminal: Option<sshcraft_engine::SessionId>,
+    #[serde(skip)]
+    pub snippet_form: Option<crate::pages::snippets::SnippetForm>,
+    #[serde(skip)]
+    pub snippet_run: Option<crate::pages::snippets::SnippetRun>,
+    #[serde(skip)]
+    pub sidebar: crate::pages::snippets::Sidebar,
     #[serde(skip)]
     pub forward_form: Option<crate::pages::forwarding::ForwardForm>,
     #[serde(skip)]

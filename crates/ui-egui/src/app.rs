@@ -120,7 +120,7 @@ impl SshcraftApp {
     /// Opens the new-tab page as a tab and shows it.
     pub fn open_new_tab(&mut self) {
         let slot = self.new_pane();
-        self.ui.tabs.push(TabState { title: tr("New tab").to_string(), panes: Panes::single(slot) });
+        self.ui.tabs.push(TabState { title: tr("New tab").to_string(), panes: Panes::single(slot), named: false });
         self.ui.page = Page::Tab(self.ui.tabs.len() - 1);
     }
 
@@ -163,7 +163,7 @@ impl SshcraftApp {
             return;
         }
         let Some(slot) = t.panes.remove(pane) else { return };
-        self.ui.tabs.push(TabState { title: String::new(), panes: Panes::single(slot) });
+        self.ui.tabs.push(TabState { title: String::new(), panes: Panes::single(slot), named: false });
         self.ui.page = Page::Tab(self.ui.tabs.len() - 1);
     }
 
@@ -305,6 +305,7 @@ impl SshcraftApp {
         crate::session_tab::show_picker(self, &ctx);
         crate::session_tab::show_clipboard_question(self, &ctx);
         crate::pages::templates::show_dialog(self, &ctx);
+        crate::pages::snippets::dialogs(self, &ctx);
         crate::prompts::show(self, &ctx);
         // A shortcut recording ends when the user leaves the settings.
         if self.ui.page != Page::Settings {
@@ -316,6 +317,11 @@ impl SshcraftApp {
                     let template = self.data.templates.iter().find(|t| t.get("id").and_then(serde_json::Value::as_str) == arg.as_deref()).cloned();
                     if let Some(template) = template {
                         crate::pages::templates::open(self, &template);
+                    }
+                }
+                crate::palette::RUN_SNIPPET => {
+                    if let Some(snippet) = arg {
+                        crate::pages::snippets::open_run(self, &snippet);
                     }
                 }
                 _ => crate::commands::run(self, id),
