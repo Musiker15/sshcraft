@@ -25,6 +25,8 @@ pub struct Tokens {
     pub danger: Color32,
     pub warning: Color32,
     pub success: Color32,
+    /// Blue: something new to look at (unseen output).
+    pub info: Color32,
     pub radius: u8,
 }
 
@@ -56,6 +58,7 @@ impl Tokens {
             danger: hex(0xff6b6b),
             warning: hex(0xf2c14e),
             success: hex(0x4ccf86),
+            info: hex(0x5aa9ff),
             radius: 6,
         }
     }
@@ -83,6 +86,7 @@ impl Tokens {
             danger: hex(0xc4302b),
             warning: hex(0x9a6b00),
             success: hex(0x1f7a3a),
+            info: hex(0x1f5fbf),
             radius: 6,
         }
     }

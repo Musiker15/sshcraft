@@ -22,8 +22,11 @@ pub struct TerminalView<'a> {
 /// What happened in one frame.
 pub struct TerminalResponse {
     pub response: Response,
-    /// Bytes for the session: typed, pasted, IME text, mouse and focus reports.
+    /// Bytes for the session that the user typed, pasted or composed.
     pub input: Vec<u8>,
+    /// Bytes the terminal sends on its own (mouse, wheel and focus reports): only ever to its
+    /// own session, never to the other panes of a broadcast.
+    pub reports: Vec<u8>,
     /// The terminal was resized to fit; the session should be told.
     pub resize: Option<TermSize>,
     /// The user Ctrl+clicked a link; opening it goes through the engine's checks.
@@ -126,7 +129,7 @@ fn mouse(ui: &Ui, response: &Response, frame: &Frame, term: &mut Terminal, out: 
     let Some(pos) = response.interact_pointer_pos() else { return };
     let (col, row) = frame.cell_at(pos);
     if frame.report_mouse {
-        report_buttons(ui, frame, col, row, &mut out.input);
+        report_buttons(ui, frame, col, row, &mut out.reports);
         let (moved, held) = ui.input(|i| {
             let held = if i.pointer.button_down(egui::PointerButton::Secondary) {
                 MouseButton::Right
@@ -141,7 +144,7 @@ fn mouse(ui: &Ui, response: &Response, frame: &Frame, term: &mut Terminal, out: 
             && moved
             && let Some(bytes) = encode_mouse(held, MouseAction::Drag, col, row, term_mods(frame.modifiers), frame.modes)
         {
-            out.input.extend(bytes);
+            out.reports.extend(bytes);
         }
     } else if response.drag_started() || response.dragged() || response.drag_stopped() {
         if response.drag_started() {
@@ -268,7 +271,8 @@ impl TerminalView<'_> {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let id = response.id;
         let mut state: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let mut out = TerminalResponse { response: response.clone(), input: Vec::new(), resize: None, open_link: None, copy: None };
+        let mut out =
+            TerminalResponse { response: response.clone(), input: Vec::new(), reports: Vec::new(), resize: None, open_link: None, copy: None };
 
         // Fit the terminal to the space. A collapsed area (a hidden split, a tab being laid out)
         // keeps the size: shrinking to 2x1 would reflow the history away and tell the server.
@@ -292,7 +296,7 @@ impl TerminalView<'_> {
             ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
         }
         if focused != state.focused {
-            out.input.extend(encode_focus(focused, modes).unwrap_or_default());
+            out.reports.extend(encode_focus(focused, modes).unwrap_or_default());
             if focused {
                 state.ime_generation = state.ime_generation.wrapping_add(1);
             } else {
@@ -303,7 +307,7 @@ impl TerminalView<'_> {
 
         mouse(ui, &response, &frame, term, &mut out);
         if response.hovered() {
-            wheel(ui, &frame, &mut state, term, &mut out.input);
+            wheel(ui, &frame, &mut state, term, &mut out.reports);
         }
         if focused {
             keyboard(ui, &frame, &mut state, term, &mut out);

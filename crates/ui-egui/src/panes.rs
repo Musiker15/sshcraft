@@ -238,6 +238,10 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, tab: usize) {
         for (i, slot) in panes.panes.iter().enumerate() {
             let tokens = Tokens::get(child.ctx());
             let color = if i == panes.focused { tokens.text_strong } else { tokens.text };
+            if let Some(dot) = crate::session_tab::slot_dot(app, *slot) {
+                let at = child.cursor().min + vec2(-6.0 + 4.0, 9.0);
+                dot.draw(child.painter(), at, &tokens);
+            }
             if elided_label(&mut child, &slot_title(app, *slot), LIST_WIDTH - 12.0, color, egui::FontId::proportional(13.0)).clicked() {
                 action = Some((i, PaneAction::Focus));
             }
@@ -268,8 +272,11 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, tab: usize) {
             PaneSlot::Session { session } => crate::session_tab::show(app, &mut child, session, focused),
             PaneSlot::New { .. } => crate::shell::new_tab_page(app, &mut child),
         }
-        if multi && focused {
-            let tokens = Tokens::get(ui.ctx());
+        let tokens = Tokens::get(ui.ctx());
+        if panes.broadcast {
+            // Every pane typing goes to wears red.
+            ui.painter().rect_stroke(*rect, 0.0, egui::Stroke::new(2.0, tokens.danger), egui::StrokeKind::Inside);
+        } else if multi && focused {
             ui.painter().rect_stroke(*rect, 0.0, egui::Stroke::new(1.0, tokens.accent_dim), egui::StrokeKind::Inside);
         }
     }

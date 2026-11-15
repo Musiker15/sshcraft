@@ -72,6 +72,15 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                 let icon = if tab.panes.sessions().next().is_some() { Icon::Terminal } else { Icon::Plus };
                 let (icon_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                 draw(ui.painter(), icon, icon_rect, tokens.text_dim);
+                if let Some(dot) = crate::status::Dot::most_urgent(tab.panes.panes.iter().filter_map(|s| crate::session_tab::slot_dot(app, *s))) {
+                    let (dot_rect, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                    dot.draw(ui.painter(), dot_rect.center(), &tokens);
+                }
+                if tab.panes.broadcast {
+                    let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                    draw(ui.painter(), Icon::Broadcast, rect, tokens.danger);
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr("Broadcast on")));
+                }
                 let color = if selected { tokens.text_strong } else { tokens.text };
                 if elided_label(ui, &tab.title, MAX_TAB_WIDTH - 50.0, color, FontId::proportional(13.0)).clicked() {
                     select = Some(i);

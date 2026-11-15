@@ -16,6 +16,7 @@ pub mod runner;
 pub mod session_tab;
 pub mod shell;
 pub mod state;
+pub mod status;
 pub mod terminal;
 #[cfg(feature = "testing")]
 pub mod testing;

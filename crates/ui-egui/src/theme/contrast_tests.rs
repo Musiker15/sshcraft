@@ -21,6 +21,8 @@ fn check(name: &str, t: &Tokens) {
         ("danger on panel", t.danger, t.panel, 3.0),
         ("warning on panel", t.warning, t.panel, 3.0),
         ("success on panel", t.success, t.panel, 3.0),
+        ("info on panel", t.info, t.panel, 3.0),
+        ("info on bg", t.info, t.bg, 3.0),
         ("field_border on field", t.field_border, t.field, 1.6),
         ("button_border on panel", t.button_border, t.panel, 1.6),
     ];

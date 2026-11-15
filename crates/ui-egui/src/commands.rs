@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 18] = [
+static COMMANDS: [UiCommand; 19] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
@@ -57,6 +57,7 @@ static COMMANDS: [UiCommand; 18] = [
     UiCommand { enabled: has_tabs, ..cmd("ui.pane.next", "nextPane", "Next pane", &["Ctrl+Shift+PageDown"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.pane.previous", "prevPane", "Previous pane", &["Ctrl+Shift+PageUp"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.pane.layout", "toggleLayout", "Switch between grid and one large pane", &["Ctrl+Shift+M"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.pane.broadcast", "toggleBroadcast", "Broadcast on or off", &["Ctrl+Shift+B"]) },
     cmd("ui.page.snippets", "snippetsPage", "Snippets", &[]),
     cmd("ui.page.forwarding", "forwardingPage", "Port forwarding", &[]),
     cmd("ui.page.logs", "logsPage", "Logs", &[]),
@@ -95,6 +96,7 @@ pub fn run(app: &mut SshcraftApp, id: &str) {
         "ui.pane.next" => app.focus_pane(1),
         "ui.pane.previous" => app.focus_pane(-1),
         "ui.pane.layout" => app.toggle_layout(),
+        "ui.pane.broadcast" => app.toggle_broadcast(),
         "ui.page.hosts" => app.ui.page = Page::Hosts,
         "ui.page.keys" => app.ui.page = Page::Keys,
         "ui.page.snippets" => app.ui.page = Page::Snippets,

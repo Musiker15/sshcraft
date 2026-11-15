@@ -266,6 +266,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Next pane" => "Nächster Bereich",
         "Previous pane" => "Vorheriger Bereich",
         "Switch between grid and one large pane" => "Zwischen Raster und einem großen Bereich wechseln",
+        "Broadcast on" => "Rundsenden an",
+        "Broadcast on or off" => "Rundsenden an oder aus",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

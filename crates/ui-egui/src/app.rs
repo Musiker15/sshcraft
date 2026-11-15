@@ -196,6 +196,15 @@ impl SshcraftApp {
         }
     }
 
+    /// Typing into one pane goes to every connected pane of the shown tab, or stops doing so.
+    pub fn toggle_broadcast(&mut self) {
+        if let Page::Tab(i) = self.ui.page
+            && let Some(t) = self.ui.tabs.get_mut(i)
+        {
+            t.panes.broadcast = !t.panes.broadcast;
+        }
+    }
+
     /// One pane large or all in the grid, in the shown tab.
     pub fn toggle_layout(&mut self) {
         if let Page::Tab(i) = self.ui.page
@@ -285,6 +294,7 @@ impl SshcraftApp {
         }
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
+        crate::session_tab::mark_looked_at(self);
         crate::shell::show(self, ui);
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);

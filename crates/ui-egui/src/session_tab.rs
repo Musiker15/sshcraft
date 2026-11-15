@@ -40,6 +40,56 @@ pub struct SessionTab {
     pub clipboard: Option<String>,
     /// The terminal takes the keyboard the first time it is shown.
     focus: bool,
+    /// Output came while nobody looked at the pane.
+    unseen: bool,
+    /// The bell rang, or the cursor's line asks for a secret or a yes/no.
+    waiting: bool,
+}
+
+impl SessionTab {
+    /// Output arrived: unseen, and waiting if the cursor's line now asks something.
+    pub fn mark_output(&mut self) {
+        self.unseen = true;
+        let screen = self.term.screen();
+        let line = screen.text().lines().nth(usize::from(screen.cursor.row)).map(str::to_string).unwrap_or_default();
+        self.waiting = crate::status::waiting_line(&line);
+    }
+
+    /// The pane is looked at: blue and amber go, red stays.
+    pub fn looked_at(&mut self) {
+        self.unseen = false;
+        self.waiting = false;
+    }
+
+    pub fn dot(&self) -> crate::status::Dot {
+        use crate::status::Dot;
+        match &self.status {
+            Some(SessionStatus::Ended { reason: EndReason::Exited, .. }) => Dot::Ended,
+            Some(SessionStatus::Ended { .. }) => Dot::Error,
+            None | Some(SessionStatus::Connecting | SessionStatus::Reconnecting { .. }) => Dot::Connecting,
+            Some(SessionStatus::Connected { .. }) if self.waiting => Dot::Waiting,
+            Some(SessionStatus::Connected { .. }) if self.unseen => Dot::Unseen,
+            Some(SessionStatus::Connected { .. }) => Dot::Connected,
+        }
+    }
+}
+
+/// The dot of a pane: its session's, or none for a new-pane page.
+pub fn slot_dot(app: &SshcraftApp, slot: PaneSlot) -> Option<crate::status::Dot> {
+    match slot {
+        PaneSlot::Session { session } => app.terminals.get(&session).map(SessionTab::dot),
+        PaneSlot::New { .. } => None,
+    }
+}
+
+/// The focused pane of the shown tab is looked at.
+pub fn mark_looked_at(app: &mut SshcraftApp) {
+    if let Page::Tab(i) = app.ui.page
+        && let Some(PaneSlot::Session { session }) = app.ui.tabs.get(i).and_then(|t| t.panes.focused_slot())
+        && let Some(tab) = app.terminals.get_mut(&session)
+    {
+        tab.looked_at();
+    }
 }
 
 /// A local shell or serial port to choose before connecting.
@@ -152,6 +202,8 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
                 status: None,
                 clipboard: None,
                 focus: follow,
+                unseen: false,
+                waiting: false,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -243,6 +295,9 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
         let Some(tab) = app.terminals.get_mut(&id) else { continue };
         if let Some(pump) = tab.pump.as_mut() {
             let outcome = pump.frame(&mut tab.term, FrameBudget::DEFAULT);
+            if outcome.fed > 0 {
+                tab.mark_output();
+            }
             if let Some(status) = outcome.status {
                 tab.status = Some(status);
             }
@@ -257,7 +312,12 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
         for notice in notices {
             match notice {
                 Notice::Reply(bytes) if can_send => send(app, id, &bytes),
-                Notice::Reply(_) | Notice::Bell => {}
+                Notice::Reply(_) => {}
+                Notice::Bell => {
+                    if let Some(tab) = app.terminals.get_mut(&id) {
+                        tab.waiting = true;
+                    }
+                }
                 Notice::Title(title) => {
                     let title: String = visible(&title).chars().take(MAX_TITLE).collect();
                     if let Some(tab) = app.terminals.get_mut(&id) {
@@ -418,6 +478,17 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
     }
 }
 
+/// Where typing in session `id` goes: with broadcast on in its tab, to every pane of the tab
+/// whose session is connected; else to `id` alone.
+pub fn broadcast_targets(app: &SshcraftApp, id: SessionId) -> Vec<SessionId> {
+    let Some((tab, _)) = pane_of(app, id) else { return vec![id] };
+    let Some(panes) = app.ui.tabs.get(tab).map(|t| &t.panes) else { return vec![id] };
+    if !panes.broadcast {
+        return vec![id];
+    }
+    panes.sessions().filter(|s| app.terminals.get(s).is_some_and(|t| matches!(t.status, Some(SessionStatus::Connected { .. })))).collect()
+}
+
 /// A question or another window is over the terminal: it gets no keys.
 pub fn modal_open(app: &SshcraftApp) -> bool {
     !app.prompts.open.is_empty() || app.ui.picker.is_some() || app.ui.palette.open || app.terminals.values().any(|t| t.clipboard.is_some())
@@ -480,8 +551,14 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         response.response.request_focus();
     }
     let can_send = !ended(tab.status.as_ref()) && !blocked;
+    // The terminal's own reports go to its own session only.
+    if !response.reports.is_empty() && can_send {
+        send(app, id, &response.reports);
+    }
     if !response.input.is_empty() && can_send {
-        send(app, id, &response.input);
+        for target in broadcast_targets(app, id) {
+            send(app, target, &response.input);
+        }
     }
     if let Some(size) = response.resize
         && can_send
