@@ -201,13 +201,10 @@ fn fingerprint_of(identity_file: &str) -> Option<String> {
 }
 
 async fn ssh_config_preview(session: &Session) -> Result<SshConfigPreview, CommandError> {
-    let path = home().map(|h| h.join(".ssh").join("config")).ok_or_else(|| CommandError::failed(ErrorCode::Io, "no home directory"))?;
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(CommandError::failed(ErrorCode::Io, e)),
-    };
-    let parsed = sshconfig::parse(&text);
+    let home = home().ok_or_else(|| CommandError::failed(ErrorCode::Io, "no home directory"))?;
+    let path = home.join(".ssh").join("config");
+    // No file is no hosts, not an error; included files that cannot be read are reported.
+    let parsed = if path.exists() { sshconfig::parse_tree(&sshconfig::RealFs, &path, &home) } else { sshconfig::ParsedConfig::default() };
     // Fingerprints the agent holds, `None` if it cannot be reached or asked.
     let agent: Option<Vec<String>> = session.sessions().agent_keys().await.ok().map(|keys| keys.into_iter().map(|k| k.fingerprint).collect());
     Ok(SshConfigPreview { candidates: sshconfig::plan_import(&parsed.hosts, &fingerprint_of, agent.as_deref()), skipped: parsed.skipped })
