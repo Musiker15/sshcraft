@@ -253,6 +253,9 @@ pub struct Integrations {
     pub allow_agent_control: bool,
     /// The loopback port agents connect on; 0 takes any free port.
     pub agent_port: u16,
+    /// The hosts of `~/.ssh/config` (and the files it includes) are kept in SSHCraft and follow
+    /// the file when it changes. Off until the user turns it on.
+    pub ssh_config_live: bool,
 }
 
 /// Everything in `config.toml`.

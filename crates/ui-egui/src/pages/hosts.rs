@@ -277,6 +277,26 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
             if ui.button(tr("Forget host key")).clicked() {
                 app.run_reported("host.forget_key", json!({ "host_id": id }));
             }
+            if ui.button(tr("Write to ~/.ssh/config")).clicked() {
+                app.runner.run(
+                    "sshconfig.write",
+                    json!({ "host_ids": [id] }),
+                    Box::new(|app, result| match result {
+                        Ok(v) => {
+                            let files: Vec<String> = v
+                                .get("files")
+                                .and_then(serde_json::Value::as_array)
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|f| f.as_str())
+                                .map(visible)
+                                .collect();
+                            app.toasts.info(&trf("Written to {files}; the old file is kept as .sshcraft-bak.", &[("files", &files.join(", "))]));
+                        }
+                        Err(e) => app.toasts.error(&e.to_string()),
+                    }),
+                );
+            }
             if ui.button(tr("Delete")).clicked() {
                 ask_delete_host(app, id);
             }

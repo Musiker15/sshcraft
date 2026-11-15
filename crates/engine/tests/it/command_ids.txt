@@ -93,6 +93,8 @@ share.set_grants
 snippet.delete
 snippet.list
 snippet.save
+sshconfig.refresh
+sshconfig.write
 sync.create_account
 sync.join_account
 sync.remove_server

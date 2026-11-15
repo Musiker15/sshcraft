@@ -120,8 +120,18 @@ const TAURI: &[(&str, Place)] = &[
 
 /// Engine commands with no Tauri command before them: the agent backend's actions and the list
 /// of open questions.
-const NEW: &[&str] =
-    &["host.info", "host.exec", "session.read", "prompt.list", "prompt.proxy_command", "hostkey.list", "hostkey.remove", "hostkey.export"];
+const NEW: &[&str] = &[
+    "host.info",
+    "host.exec",
+    "session.read",
+    "prompt.list",
+    "prompt.proxy_command",
+    "hostkey.list",
+    "hostkey.remove",
+    "hostkey.export",
+    "sshconfig.refresh",
+    "sshconfig.write",
+];
 
 #[test]
 fn every_tauri_command_has_a_place() {

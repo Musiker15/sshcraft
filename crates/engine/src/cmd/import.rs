@@ -186,7 +186,7 @@ fn expand(path: &str) -> PathBuf {
 }
 
 /// SHA256 fingerprint of the public key that belongs to an `IdentityFile` entry.
-fn fingerprint_of(identity_file: &str) -> Option<String> {
+pub(crate) fn fingerprint_of(identity_file: &str) -> Option<String> {
     let path = expand(identity_file);
     let public = if path.extension().is_some_and(|e| e == "pub") {
         path

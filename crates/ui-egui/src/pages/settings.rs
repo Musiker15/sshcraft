@@ -121,6 +121,15 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
             .weak(),
     );
     save(app, |s| s.general.update_host_keys = update);
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new("~/.ssh/config").strong());
+    let mut live = app.data.settings.integrations.ssh_config_live;
+    ui.checkbox(&mut live, tr("Keep the hosts of ~/.ssh/config in step"));
+    ui.label(
+        egui::RichText::new(tr("Its hosts and the files it includes appear in the group ~/.ssh/config and follow the file when it changes. A host that leaves the file stays here. Writing back happens only from a host's menu."))
+            .weak(),
+    );
+    save(app, |s| s.integrations.ssh_config_live = live);
 }
 
 fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {

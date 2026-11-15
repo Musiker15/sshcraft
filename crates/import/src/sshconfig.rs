@@ -27,6 +27,8 @@ pub struct ConfigHost {
     pub set_env: Vec<EnvVar>,
     /// `ProxyCommand` as arguments, when it needs no shell.
     pub proxy_command: Option<Vec<String>>,
+    /// The file of the first `Host` line naming this alias (only with [`parse_tree`]).
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -41,6 +43,8 @@ pub struct ParsedConfig {
 pub use crate::import::{ImportCandidate, ImportWarning, KeyNote};
 
 struct Block {
+    /// Index into the files read; the block came from that file.
+    file: usize,
     patterns: Vec<String>,
     /// `Match` blocks are skipped, together with everything inside them.
     skip: bool,
@@ -109,11 +113,16 @@ struct Reading {
 impl Reading {
     fn new() -> Self {
         // Lines before the first `Host` apply to every host.
-        Self { blocks: vec![Block { patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }], skipped: Vec::new(), files: Vec::new() }
+        Self {
+            blocks: vec![Block { file: 0, patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }],
+            skipped: Vec::new(),
+            files: Vec::new(),
+        }
     }
 
     /// Reads one file's lines; `include` handles an `Include` line's arguments.
     fn lines(&mut self, text: &str, include: &mut dyn FnMut(&mut Self, &str, &str)) {
+        let file = self.files.len().saturating_sub(1);
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         for raw in text.lines() {
             let line = raw.trim();
@@ -125,10 +134,10 @@ impl Reading {
                 continue;
             }
             match keyword.as_str() {
-                "host" => self.blocks.push(Block { patterns: split_args(value), skip: false, entries: Vec::new() }),
+                "host" => self.blocks.push(Block { file, patterns: split_args(value), skip: false, entries: Vec::new() }),
                 "match" => {
                     self.skipped.push(line.to_owned());
-                    self.blocks.push(Block { patterns: Vec::new(), skip: true, entries: Vec::new() });
+                    self.blocks.push(Block { file, patterns: Vec::new(), skip: true, entries: Vec::new() });
                 }
                 // An Include inside a skipped Match block is skipped with it.
                 "include" if self.blocks.last().is_some_and(|b| b.skip) => {}
@@ -156,7 +165,14 @@ impl Reading {
                 }
             }
         }
-        let hosts = aliases.into_iter().map(|alias| collect(&self.blocks, alias)).collect();
+        let hosts = aliases
+            .into_iter()
+            .map(|alias| {
+                let mut host = collect(&self.blocks, alias);
+                host.file = self.blocks.iter().skip(1).find(|b| b.patterns.contains(&host.alias)).and_then(|b| self.files.get(b.file)).cloned();
+                host
+            })
+            .collect();
         ParsedConfig { hosts, skipped: self.skipped, files: self.files }
     }
 }
@@ -222,6 +238,7 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
         forward_agent: None,
         set_env: Vec::new(),
         proxy_command: None,
+        file: None,
     };
     let mut env_seen = false;
     let mut port_seen = false;
@@ -312,7 +329,7 @@ fn glob(pattern: &str, text: &str) -> bool {
 }
 
 /// Splits `Keyword value`, `Keyword=value` and `Keyword = value`; the keyword is lowercased.
-fn split_keyword(line: &str) -> (String, &str) {
+pub(crate) fn split_keyword(line: &str) -> (String, &str) {
     let end = line.find(|c: char| c.is_whitespace() || c == '=').unwrap_or(line.len());
     let keyword = line[..end].to_lowercase();
     let rest = line[end..].trim_start();
@@ -321,7 +338,7 @@ fn split_keyword(line: &str) -> (String, &str) {
 }
 
 /// Splits whitespace-separated arguments, keeping quoted parts together.
-fn split_args(value: &str) -> Vec<String> {
+pub(crate) fn split_args(value: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut quoted = false;

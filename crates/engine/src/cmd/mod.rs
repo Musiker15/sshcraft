@@ -73,6 +73,7 @@ pub mod session;
 pub mod settings;
 pub mod share;
 pub mod snippet;
+pub mod sshconfig;
 pub mod sync;
 pub mod vault;
 pub mod workspace;
@@ -153,6 +154,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(import::specs());
         specs.extend(sync::specs());
         specs.extend(share::specs());
+        specs.extend(sshconfig::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         for spec in &mut specs {

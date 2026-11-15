@@ -21,6 +21,7 @@ pub mod prompts;
 pub mod recording;
 pub mod sessions;
 pub mod settings;
+pub mod ssh_config;
 pub mod sync;
 pub mod terminal;
 #[cfg(any(test, feature = "testing"))]
@@ -170,6 +171,15 @@ impl Drop for Inner {
     }
 }
 
+/// A [`Session`] that is gone once everything else let go of it.
+pub(crate) struct Weak(std::sync::Weak<Inner>);
+
+impl Weak {
+    pub(crate) fn upgrade(&self) -> Option<Session> {
+        self.0.upgrade().map(Session)
+    }
+}
+
 /// One open SSHCraft: the store, the vault, the running sessions. Cheap to clone.
 #[derive(Clone)]
 pub struct Session(Arc<Inner>);
@@ -248,7 +258,13 @@ impl Session {
         };
         let session = Session(Arc::new(inner));
         session.bind_session_hooks();
+        ssh_config::spawn_watch(session.downgrade());
         Ok((session, report))
+    }
+
+    /// A handle that does not keep the engine open, for tasks that run beside it.
+    pub(crate) fn downgrade(&self) -> Weak {
+        Weak(Arc::downgrade(&self.0))
     }
 
     /// Windows Hello missing goes on the bus; an ended session log moves to where its host lives
