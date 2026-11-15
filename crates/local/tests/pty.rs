@@ -7,7 +7,9 @@ fn echo_command() -> ShellCommand {
     if cfg!(windows) {
         ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     } else {
-        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local".into()], label: "echo".into() }
+        // The shell stays a moment after the echo: FreeBSD drops what a terminal still holds when
+        // its shell ends at once (docs/gaps.md), and this test is about the output, not that.
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local; sleep 1".into()], label: "echo".into() }
     }
 }
 

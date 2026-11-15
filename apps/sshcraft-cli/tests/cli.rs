@@ -78,7 +78,8 @@ fn harmless() -> String {
     if cfg!(windows) {
         format!(r"{}\System32\whoami.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
     } else {
-        "/bin/true".into()
+        // Linux has both; macOS and FreeBSD have only /usr/bin/true.
+        ["/usr/bin/true", "/bin/true"].into_iter().find(|p| std::path::Path::new(p).exists()).unwrap_or("/usr/bin/true").into()
     }
 }
 

@@ -1,10 +1,10 @@
 # Architecture
 
-> **Last updated:** 2026-11-15 · **Change:** R6, control from outside
+> **Last updated:** 2026-11-15 · **Change:** R7, platforms and packages
 
-How SSHCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md); the
-design of the rebuild is
-[`superpowers/specs/2026-11-14-sshcraft-craft-neuaufbau-design.md`](superpowers/specs/2026-11-14-sshcraft-craft-neuaufbau-design.md).
+How SSHCraft is built today. Rules for contributors are in [`AGENTS.md`](../AGENTS.md), the
+decisions behind it in [`decisions.md`](decisions.md). The German design of the rebuild left the
+tree with R7; it is in the history at [`docs/superpowers/specs/`](https://github.com/musiker15/sshcraft/tree/e04ce8846d23cd6e2f528c83a06c03248d5d41f5/docs/superpowers/specs).
 
 ## Workspace and layering
 
@@ -98,6 +98,19 @@ reads `config.toml`.
   stale; applies tokens, theme and language; runs the shortcuts; draws the shell (sidebar, tabs,
   page), the palette, the questions and the messages. File dialogs show after the frame
   (`show_dialogs`).
+- **Window frame and menus.** craft-window decides who draws the title bar
+  (`policy::decide_for` with the prefix `SSHCRAFT`): the app's own bar by default, the system's
+  with Settings, General, Use system title bar (read at start) and on tiling window managers.
+  `window.rs` draws the strip: the menu bar (craft-menu, `menus.rs`, built from the `ui.*`
+  commands with their current shortcuts) and, where the app draws the frame, the window buttons.
+  On macOS the menu bar is the native one (`craft_menu::mac`). Nothing runs from a menu while a
+  dialog, a question or the palette is open.
+- **Quitting.** The close button, the system's close and File, Quit end in `quit.rs`, which runs
+  in `logic` (also while the window is hidden): with sessions running it asks first, and
+  craft-quit then quits the platform's way (on macOS through AppKit).
+- **Fonts.** `build.rs` embeds craft-fonts' interface faces when `CRAFT_FONTS_DIR` names a
+  checkout (`fonts.rs`); they come after egui's faces and before the system's. Without a checkout
+  the table is empty.
 - **Runner.** Pages never wait for the engine: `Runner::run` spawns `Session::execute` on the
   engine's runtime and hands the result to a continuation on a later frame.
 - **Data.** `Data` caches hosts, groups, keys, identities and settings; an engine event marks a
@@ -145,5 +158,9 @@ relays them and can read none of them. See [protocol.md](protocol.md) and [sync.
 
 ## Platforms and builds
 
-Windows first; macOS, Linux and FreeBSD follow in R7. The sync server builds as a program and as a
-Docker image (`packaging/docker/Dockerfile`).
+Windows, macOS, Linux and FreeBSD. CI runs the gate on Ubuntu and Windows for every pull
+request, on macOS on `main` and for pull requests with the label `full-ci`, FreeBSD in a VM when
+its files change. `cargo xtask linux` runs clippy and the tests in a Linux container from any
+machine. The packages (`packaging/`, adapted from gridcraft) and how a release is made are in
+[releasing.md](releasing.md). The sync server builds as a program and as a Docker image
+(`packaging/docker/Dockerfile`).

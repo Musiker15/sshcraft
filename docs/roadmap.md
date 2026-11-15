@@ -3,16 +3,15 @@
 > **Last updated:** 2026-11-15
 
 The one-page summary is [ROADMAP.md](../ROADMAP.md). The sub-plans of the rebuild and what comes
-after, with the source of each (the German design
-[`superpowers/specs/2026-11-14-sshcraft-craft-neuaufbau-design.md`](superpowers/specs/2026-11-14-sshcraft-craft-neuaufbau-design.md),
-sections 13 and 16, and the market comparison
-[`superpowers/specs/2026-11-14-sshcraft-marktvergleich.md`](superpowers/specs/2026-11-14-sshcraft-marktvergleich.md)).
+after, with the source of each (the German design of the rebuild, sections 13 and 16, and the
+comparison with other clients, both in the history at [`docs/superpowers/specs/`](https://github.com/musiker15/sshcraft/tree/e04ce8846d23cd6e2f528c83a06c03248d5d41f5/docs/superpowers/specs)).
 
 ## Current focus
 
-R7: macOS, Linux and FreeBSD, the packages, the CI files. R6 (the agent link with its consent,
-the MCP crate, `sshcraft-cli`, the control channel for developers and the acceptance list of
-spec section 10 in [acceptance.md](acceptance.md)) is done, as are R1 to R5.
+The rebuild (R1 to R7) is done: SSHCraft builds and tests on Windows, Linux and macOS in CI and
+on FreeBSD in a VM, has the integrated title bar and menus of the Craft apps, the fonts from
+craft-fonts, and packages for every platform ([releasing.md](releasing.md)). Next is F1, then F2
+and the first release (V1), which Moritz starts.
 
 ## The rebuild
 
@@ -24,7 +23,7 @@ spec section 10 in [acceptance.md](acceptance.md)) is done, as are R1 to R5.
 | R4 | Interface I: window, sidebar, tabs, command palette, tokens and themes, languages, shortcuts; hosts, groups, keys, identities, import and export, connecting |
 | R5 | Interface II: workspaces, broadcast, port forwarding, snippets and completion, session logs, sync, sharing, devices, agent settings and confirmation |
 | R6 | Control channel, MCP crate, `sshcraft-cli`, ArtCraft Launcher connection |
-| R7 | macOS, Linux, FreeBSD; packaging; CI; `docs/superpowers/` leaves the tree, so the links to it in AGENTS.md, docs/architecture.md, docs/security.md and the parity pages move to the English docs first |
+| R7 | macOS, Linux, FreeBSD; packaging; CI; `docs/superpowers/` leaves the tree, its links point to the English docs and the history |
 
 ## Before the first release
 

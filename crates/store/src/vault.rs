@@ -135,13 +135,14 @@ pub struct Vault {
 }
 
 impl Vault {
-    /// Loads the master key, or creates one if no sealed key exists yet. Never replaces a
-    /// missing master key while sealed keys exist: that would make them unreadable for good.
+    /// Loads the master key, or creates one if nothing sealed exists yet. Never replaces a
+    /// missing master key while sealed data exists (keys, passwords, history, snippets, logs):
+    /// that would make it unreadable for good.
     pub fn unlock(store: &Store, provider: Box<dyn MasterKeyProvider>) -> Result<Vault, VaultError> {
         if let Some(master) = provider.load()? {
             return Ok(Vault { master });
         }
-        if store.has_key_records()? {
+        if store.has_sealed_records()? {
             return Err(VaultError::MasterKeyMissing);
         }
         let mut fresh = Zeroizing::new([0u8; 32]);

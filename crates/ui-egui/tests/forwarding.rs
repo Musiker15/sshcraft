@@ -92,7 +92,10 @@ fn a_local_rule_is_created_started_and_stopped() {
     h.get_by_label("Start").click();
     until(&mut h, "the running rule", |app| state_of(app, id) == "running");
     assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(), "the port listens");
-    assert!(h.query_by_label("Edit").is_some_and(|n| n.accesskit_node().is_disabled()), "a running rule cannot be edited");
+    assert!(
+        h.query_by_role_and_label(egui::accesskit::Role::Button, "Edit").is_some_and(|n| n.accesskit_node().is_disabled()),
+        "a running rule cannot be edited"
+    );
     h.get_by_label("Stop").click();
     until(&mut h, "the stopped rule", |app| state_of(app, id) == "stopped");
 }

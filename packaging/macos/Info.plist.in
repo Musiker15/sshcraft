@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: packaging/macos/package.sh substitutes @VERSION@ (full, e.g. 0.2.0-rc.1),
+     @SHORT_VERSION@ (numeric X.Y.Z) and @BUILD_SHA@. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <!-- The interface languages, for AppKit's own dialogs. Keep in sync with crates/ui-egui/src/i18n. -->
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>de</string>
+  </array>
+  <key>CFBundleDisplayName</key>
+  <string>SSHCraft</string>
+  <key>CFBundleName</key>
+  <string>SSHCraft</string>
+  <key>CFBundleExecutable</key>
+  <string>SSHCraft</string>
+  <key>CFBundleIdentifier</key>
+  <string>de.musiker15.sshcraft</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@SHORT_VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHORT_VERSION@</string>
+  <key>SSHCraftVersion</key>
+  <string>@VERSION@</string>
+  <key>SSHCraftBuildCommit</key>
+  <string>@BUILD_SHA@</string>
+  <key>CFBundleIconFile</key>
+  <string>SSHCraft</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+  <!-- Must match MACOSX_DEPLOYMENT_TARGET in package.sh. Big Sur is the first release on
+       Apple silicon and has the Metal feature set wgpu targets. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+  <!-- macOS 15 asks before an app reaches the local network: SSH to a server in the LAN. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>SSHCraft connects to the servers on your local network that you add as hosts.</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © the SSHCraft contributors. MIT OR Apache-2.0.</string>
+  <!-- No document types and no ssh:// URL scheme: links never run anything, and a link handler
+       comes with F1 and only opens the connection dialog. -->
+</dict>
+</plist>

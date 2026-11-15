@@ -1,0 +1,26 @@
+name: FreeBSD
+
+# The gate on FreeBSD in a VM (shared workflow), and the package check: on the release branch,
+# when the FreeBSD packaging changes, and by hand.
+on:
+  push:
+    branches: [release]
+  pull_request:
+    paths:
+      - .github/workflows/freebsd.yml
+      - packaging/freebsd/**
+      - packaging/env.sh
+  workflow_dispatch:
+
+concurrency:
+  group: freebsd-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd:
+    uses: storytold/craft-common-actions/.github/workflows/freebsd.yml@main
+    with:
+      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83

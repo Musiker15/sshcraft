@@ -8,11 +8,16 @@
 //! - `wasm`: the crates that must build for the browser do
 //! - `perf`: the performance budgets of the terminal and the window, in a release build
 //!   (`crates/term/tests/budgets.rs`, `crates/ui-egui/tests/budgets.rs`)
+//! - `linux` (not part of `ci`): clippy and the tests on Linux in a Docker container (`linux.rs`)
+//! - `version [set X.Y.Z[-pre]]` (not part of `ci`): print or set the workspace version
+//!   (`version.rs`)
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod assets;
 mod layers;
+mod linux;
+mod version;
 
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -44,6 +49,15 @@ fn main() -> ExitCode {
     let arg = std::env::args().nth(1);
     let result = match arg.as_deref() {
         Some("ci") => cmd_ci(),
+        Some("linux") => linux::run(),
+        Some("version") => {
+            let rest: Vec<String> = std::env::args().skip(2).collect();
+            let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+            match std::env::current_dir() {
+                Ok(root) => version::run(&root, &rest),
+                Err(e) => Err(format!("the workspace root: {e}")),
+            }
+        }
         Some(name) => match CI.iter().find(|(n, _)| *n == name) {
             Some((_, step)) => step(),
             None => Err(format!("unknown command `{name}`\n{}", usage())),
@@ -61,7 +75,7 @@ fn main() -> ExitCode {
 
 fn usage() -> String {
     let names: Vec<&str> = CI.iter().map(|(n, _)| *n).collect();
-    format!("usage: cargo xtask <ci|{}>", names.join("|"))
+    format!("usage: cargo xtask <ci|linux|version|{}>", names.join("|"))
 }
 
 /// The cargo that runs this tool, so `cargo +toolchain xtask` stays on that toolchain.

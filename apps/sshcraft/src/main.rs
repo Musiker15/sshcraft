@@ -58,13 +58,43 @@ impl eframe::App for Shell {
     /// consent, and the control channel answers.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.app.logic(ctx);
+        // Last, so it sees the quit question's `CancelClose` (craft-quit: macOS quits through
+        // AppKit, not by closing the window).
+        craft_quit::on_close_request(ctx);
     }
 
-    /// The control channel's clicks and keys go in front of the frame, as a person's would.
+    /// The native menu's keys and the control channel's clicks and keys go in front of the
+    /// frame, as a person's would.
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        sshcraft_ui_egui::menus::native_raw_input(&mut self.app, raw_input);
         raw_input.events.extend(self.app.take_control_input());
     }
 }
+
+/// The setting "Use system title bar", read before the window exists. Unreadable settings keep
+/// the app's own bar, the default.
+fn title_bar_pref(runtime: &tokio::runtime::Runtime, session: &Session) -> craft_window::policy::TitleBarPref {
+    let read = runtime.block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", serde_json::json!({})));
+    match read.ok().and_then(|v| serde_json::from_value::<sshcraft_engine::settings::EngineSettings>(v).ok()) {
+        Some(settings) => sshcraft_ui_egui::window::title_bar_pref(&settings),
+        None => craft_window::policy::TitleBarPref::default(),
+    }
+}
+
+/// The main window: its size, icon and frame. The app id names the window to the desktop (the
+/// Wayland app id, the X11 class), so it matches `de.musiker15.sshcraft.desktop` and the Flatpak.
+fn main_viewport(frame: &craft_window::policy::Frame) -> egui::ViewportBuilder {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("SSHCraft")
+        .with_app_id(APP_ID)
+        .with_inner_size([1200.0, 780.0])
+        .with_min_inner_size([720.0, 480.0])
+        .with_icon(sshcraft_ui_egui::widgets::icons::app_icon());
+    craft_window::policy::apply(viewport, frame)
+}
+
+/// SSHCraft's id on every platform: keyring service, data folder, desktop entry, bundle id.
+const APP_ID: &str = "de.musiker15.sshcraft";
 
 /// A small window that explains why SSHCraft did not start.
 struct Problem(String);
@@ -115,21 +145,18 @@ fn main() -> ExitCode {
     let window = WindowHandle::default();
     let config =
         SessionConfig::for_app(data_dir, runtime.handle().clone(), Arc::new(WindowPresence(window.clone())), platform::authenticator(window.clone()));
-    let session = {
+    let (session, vault) = {
         let _inside = runtime.enter();
         match Session::open(config) {
-            Ok((session, _report)) => session,
+            Ok((session, report)) => (session, report.vault),
             Err(e) => return show_problem(start_problem(&e, system_language())),
         }
     };
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("SSHCraft")
-            .with_inner_size([1200.0, 780.0])
-            .with_min_inner_size([720.0, 480.0])
-            .with_icon(sshcraft_ui_egui::widgets::icons::app_icon()),
-        ..Default::default()
-    };
+    // Who draws the title bar: the app's own bar unless the user chose the system's.
+    let pref = title_bar_pref(&runtime, &session);
+    let decision = craft_window::policy::decide_for(craft_window::Prefix::new("SSHCRAFT"), craft_window::policy::Backend::from_env(), pref);
+    let window_frame = decision.frame;
+    let options = eframe::NativeOptions { viewport: main_viewport(&window_frame), ..Default::default() };
     let handle = runtime.handle().clone();
     let result = eframe::run_native(
         "SSHCraft",
@@ -137,6 +164,10 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             window.take_from(cc);
             let mut app = SshcraftApp::new(session.clone(), &cc.egui_ctx);
+            app.window_frame = window_frame;
+            app.report_vault(vault);
+            #[cfg(target_os = "macos")]
+            sshcraft_ui_egui::menus::install_native(&mut app, &cc.egui_ctx);
             let control = match &control_args {
                 Some(control_args) => {
                     let queue = app.enable_control(&cc.egui_ctx);
@@ -164,6 +195,12 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_names_the_app_to_the_desktop() {
+        let viewport = main_viewport(&craft_window::policy::Frame::Native);
+        assert_eq!(viewport.app_id.as_deref(), Some("de.musiker15.sshcraft"));
+    }
 
     /// A second start on the same data does not open it and explains why.
     #[tokio::test(flavor = "multi_thread")]

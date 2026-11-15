@@ -479,3 +479,24 @@ fn certificate_with_broken_signature_is_refused() {
 fn keyring_service_is_unchanged() {
     assert_eq!(KEYRING_SERVICE, "de.musiker15.sshcraft");
 }
+
+/// Passwords, history, snippets, session logs and the agent log are sealed with the same master
+/// key as the keys: a store with any of them never gets a new one either.
+#[test]
+fn unlock_refuses_new_master_key_when_only_a_password_exists() {
+    let store = Store::open_in_memory().unwrap();
+    store.put_password_record(sshcraft_model::model::PasswordId(uuid::Uuid::new_v4()), b"sealed", None).unwrap();
+    let empty = SharedKey::default();
+    assert!(matches!(Vault::unlock(&store, Box::new(empty.clone())), Err(VaultError::MasterKeyMissing)));
+    assert!(empty.0.lock().unwrap().is_none(), "no new master key was saved");
+}
+
+#[test]
+fn unlock_refuses_new_master_key_when_only_history_exists() {
+    let store = Store::open_in_memory().unwrap();
+    let vault = Vault::unlock(&store, Box::new(SharedKey::default())).unwrap();
+    crate::history::record(&vault, &store, "local:pwsh", "echo hi", 1).unwrap();
+    let empty = SharedKey::default();
+    assert!(matches!(Vault::unlock(&store, Box::new(empty.clone())), Err(VaultError::MasterKeyMissing)));
+    assert!(empty.0.lock().unwrap().is_none(), "no new master key was saved");
+}

@@ -1,10 +1,17 @@
 # Decisions
 
-The decisions that carry SSHCraft, newest first. The reasoning is in the design documents under
-[`superpowers/specs/`](superpowers/specs/) (German).
+The decisions that carry SSHCraft, newest first. The reasoning is in the German design documents
+of the rebuild, which left the tree with R7 and are in the history at
+[`docs/superpowers/specs/`](https://github.com/musiker15/sshcraft/tree/e04ce8846d23cd6e2f528c83a06c03248d5d41f5/docs/superpowers/specs): the design of the rebuild
+(`2026-11-14-sshcraft-craft-neuaufbau-design.md`) and the comparison with other clients
+(`2026-11-14-sshcraft-marktvergleich.md`).
 
 | Date | Decision |
 |---|---|
+| 2026-11-15 | The app draws its own title bar and menu bar (craft-window, craft-menu) unless the user picks the system's; while a terminal has the keyboard the menu bar takes no keys. |
+| 2026-11-15 | Quitting with running sessions asks first, also from the menu and the system's close. |
+| 2026-11-15 | Packages install into `Programs\SSHCraft` or `Program Files\SSHCraft` (not an ArtCraft suite folder), register no file types and no `ssh://` handler, and put `sshcraft-cli` on `PATH`. |
+| 2026-11-15 | The German design documents leave the tree; the English docs carry the decisions, the history keeps the documents. |
 | 2026-11-15 | Agents and the control channel share one wire (`sshcraft-link`) with challenge sign-in only; the token never crosses it. |
 | 2026-11-15 | The agent link runs engine commands only; window input and screenshots exist only on `--control`. |
 | 2026-11-15 | `sshcraft-cli` never opens the data; with the app closed, `mcp --when-closed launch` starts it. |

@@ -191,13 +191,18 @@ async fn an_unattached_terminal_stays_bounded_across_a_reconnect() {
     let mut w = world(false, true, crate::EVENT_CAPACITY).await;
     let id = open(&w).await;
     let mut stream = w.session.attach_terminal(id).unwrap();
-    // 400 KiB echoed and never acknowledged: below the watermark, so the session reads on.
-    let echoed = "a".repeat(400 * 1024);
-    send(&w, id, &echoed).await;
+    // 400 KiB echoed and never acknowledged: below the watermark, so the session reads on. Sent
+    // in pieces, each echo read before the next: the test server (russh) and the client both
+    // write without reading meanwhile, and with the small localhost buffers of FreeBSD one
+    // 400 KiB write left both waiting for good (a real sshd reads while it writes).
+    let piece = "a".repeat(16 * 1024);
     let mut held = 0usize;
-    while held < echoed.len() {
-        if let TermEvent::Data(bytes) = tokio::time::timeout(Duration::from_secs(20), stream.recv()).await.unwrap().unwrap() {
-            held += bytes.len();
+    for sent in (1..=25).map(|n| n * piece.len()) {
+        send(&w, id, &piece).await;
+        while held < sent {
+            if let TermEvent::Data(bytes) = tokio::time::timeout(Duration::from_secs(20), stream.recv()).await.unwrap().unwrap() {
+                held += bytes.len();
+            }
         }
     }
     // The connection drops and comes back; the 400 KiB are still not acknowledged.

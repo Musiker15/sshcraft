@@ -86,6 +86,11 @@ impl SessionTab {
         self.selected
     }
 
+    /// The pane's history as loaded, newest first.
+    pub fn history(&self) -> &[String] {
+        &self.history
+    }
+
     /// Fetches this pane's history again.
     pub fn reload_history(&mut self) {
         self.history_loaded = false;
@@ -610,9 +615,13 @@ pub fn broadcast_targets(app: &SshcraftApp, id: SessionId) -> Vec<SessionId> {
         .collect()
 }
 
-/// A question or another window is over the terminal: it gets no keys.
-pub fn modal_open(app: &SshcraftApp) -> bool {
-    !app.prompts.open.is_empty() || app.ui.picker.is_some() || app.ui.palette.open || app.terminals.values().any(|t| t.clipboard.is_some())
+/// A question, another window or an open menu is over the terminal: it gets no keys.
+pub fn modal_open(app: &SshcraftApp, ctx: &egui::Context) -> bool {
+    !app.prompts.open.is_empty()
+        || app.ui.picker.is_some()
+        || app.ui.palette.open
+        || app.terminals.values().any(|t| t.clipboard.is_some())
+        || craft_menu::bar::is_open(ctx)
 }
 
 /// Whether `id` is another terminal than the one shown last frame.
@@ -825,7 +834,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
     let ligatures = appearance.ligatures;
     let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
-    let blocked = modal_open(app);
+    let blocked = modal_open(app, &ctx);
     let Some(tab) = app.terminals.get_mut(&id) else {
         ui.label(tr("This session is gone."));
         return;

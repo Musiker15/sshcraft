@@ -17,6 +17,8 @@ sshcraft-fido = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-ui-egui = { workspace = true }
 sshcraft-link = { workspace = true }
+craft-window = { workspace = true }
+craft-quit = { workspace = true }
 futures = { workspace = true }
 serde_json = { workspace = true }
 eframe = { workspace = true }
@@ -24,6 +26,9 @@ egui = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 raw-window-handle = { workspace = true }
+
+[build-dependencies]
+winresource = "0.1.34"
 
 [dev-dependencies]
 sshcraft-engine = { workspace = true, features = ["testing"] }

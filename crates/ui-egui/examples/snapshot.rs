@@ -4,7 +4,10 @@
 //! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]`
 //!
 //! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab
-//! [--dark|--light] [--language en|de]`
+//! [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic]`
+//!
+//! `--captions` draws the window's own title bar with that family's window buttons, as on a
+//! desktop where the app draws the frame.
 //!
 //! The window runs on an engine in a fresh temp folder with made-up sample data, never on
 //! SSHCraft's own data.
@@ -101,6 +104,7 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     let mut new_tab = false;
     let mut theme = "dark";
     let mut language = "en".to_string();
+    let mut captions = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--page" => match args.next().as_deref() {
@@ -116,6 +120,10 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
             "--dark" => theme = "dark",
             "--light" => theme = "light",
             "--language" => language = args.next().ok_or("--language needs en or de")?,
+            "--captions" => {
+                let name = args.next().unwrap_or_default();
+                captions = Some(craft_window::policy::CaptionFamily::parse(&name).ok_or(format!("unknown caption family {name:?}"))?);
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -128,6 +136,13 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     run(&session, "settings.save", json!({ "settings": settings }))?;
     let app: &mut SshcraftApp = h.state_mut();
     app.ui.page = page;
+    if let Some(family) = captions {
+        let layout = craft_window::Layout {
+            left: Vec::new(),
+            right: vec![craft_window::Button::Minimize, craft_window::Button::Maximize, craft_window::Button::Close],
+        };
+        app.window_frame = craft_window::policy::Frame::Integrated(craft_window::policy::Captions { family, layout });
+    }
     if new_tab {
         app.open_new_tab();
     }
@@ -143,7 +158,9 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(out) = args.next() else {
         eprintln!("usage: snapshot <out.png> [colors|unicode|fullscreen]");
-        eprintln!("       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de]");
+        eprintln!(
+            "       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic]"
+        );
         return ExitCode::FAILURE;
     };
     let name = args.next().unwrap_or_else(|| "colors".into());

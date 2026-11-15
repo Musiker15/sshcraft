@@ -183,6 +183,8 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
 /// Draws the sidebar, the tab bar and the page.
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
+    // The menus and the title bar span the window, above the sidebar.
+    crate::window::strip(app, ui);
     egui::Panel::left("sshcraft-sidebar")
         .exact_size(SIDEBAR_WIDTH)
         .frame(egui::Frame::new().fill(tokens.sidebar).inner_margin(vec2(8.0, 0.0)))

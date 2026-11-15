@@ -526,6 +526,53 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "SSHCraft could not open its data." => "SSHCraft konnte seine Daten nicht öffnen.",
         "SSHCraft could not start." => "SSHCraft konnte nicht starten.",
+        // The menus, the title bar and quitting (R7).
+        "Quit SSHCraft?" => "SSHCraft beenden?",
+        "End sessions and quit" => "Sitzungen beenden und schließen",
+        "Quit" => "Beenden",
+        "Broadcast" => "Übertragen an alle",
+        "About SSHCraft" => "Über SSHCraft",
+        "File" => "Datei",
+        "View" => "Ansicht",
+        "Session" => "Sitzung",
+        "Window" => "Fenster",
+        "Help" => "Hilfe",
+        "Quit SSHCraft" => "SSHCraft beenden",
+        "Exit" => "Beenden",
+        "Preferences…" => "Einstellungen …",
+        "Preferences" => "Einstellungen",
+        "About {app}" => "Über {app}",
+        "Settings…" => "Einstellungen …",
+        "Hide {app}" => "{app} ausblenden",
+        "Hide Others" => "Andere ausblenden",
+        "Quit {app}" => "{app} beenden",
+        "Minimize" => "Minimieren",
+        "Restore" => "Wiederherstellen",
+        "Close window" => "Fenster schließen",
+        "Use system title bar" => "Titelleiste des Systems verwenden",
+        "The desktop draws the title bar. Takes effect after a restart." => "Der Desktop zeichnet die Titelleiste. Wirkt nach einem Neustart.",
+        "Version {version}" => "Version {version}",
+        "An SSH client with end-to-end encrypted, self-hosted sync." => "Ein SSH-Client mit Ende-zu-Ende-verschlüsseltem, selbst gehostetem Sync.",
+        "Licence: {licence}" => "Lizenz: {licence}",
+        "Menu" => "Menü",
+        "Scroll menu up" => "Menü nach oben scrollen",
+        "Scroll menu down" => "Menü nach unten scrollen",
+        "Show All" => "Alle einblenden",
+        "Services" => "Dienste",
+        "Zoom" => "Zoomen",
+        "Bring All to Front" => "Alle nach vorne bringen",
+        "SSHCraft's entry in the system keyring is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: restore the keyring entry or the data folder from a backup." => {
+            "Der Eintrag von SSHCraft im Schlüsselbund des Systems fehlt, deshalb lassen sich gespeicherte Schlüssel, Passwörter und Protokolle nicht lesen. Ersetzt wurde nichts: Stelle den Eintrag oder den Datenordner aus einer Sicherung wieder her."
+        }
+        "The system keyring could not be opened, so keys and passwords are not available. On Linux a Secret Service (GNOME Keyring or KWallet) must run." => {
+            "Der Schlüsselbund des Systems ließ sich nicht öffnen, deshalb sind Schlüssel und Passwörter nicht verfügbar. Unter Linux muss ein Secret Service laufen (GNOME Keyring oder KWallet)."
+        }
+        "Still running: {what}. Quitting ends it." => "Es läuft noch: {what}. Mit dem Beenden endet das.",
+        "1 session" => "1 Sitzung",
+        "{n} sessions" => "{n} Sitzungen",
+        "1 port forward" => "1 Portweiterleitung",
+        "{n} port forwards" => "{n} Portweiterleitungen",
+        " and " => " und ",
         _ => return None,
     })
 }

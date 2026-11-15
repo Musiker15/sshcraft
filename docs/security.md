@@ -6,7 +6,7 @@ How to report a vulnerability is in [SECURITY.md](../SECURITY.md).
 ## Rules against the weaknesses of other clients
 
 A comparison with other SSH clients (the German
-[`superpowers/specs/2026-11-14-sshcraft-marktvergleich.md`](superpowers/specs/2026-11-14-sshcraft-marktvergleich.md),
+[`2026-11-14-sshcraft-marktvergleich.md`](https://github.com/musiker15/sshcraft/blob/e04ce8846d23cd6e2f528c83a06c03248d5d41f5/docs/superpowers/specs/2026-11-14-sshcraft-marktvergleich.md) in the history,
 section 4) found the weaknesses below; these rules keep them out of SSHCraft. Each gets a test
 where it can have one.
 

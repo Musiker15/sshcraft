@@ -1,0 +1,23 @@
+name: Windows ARM64
+
+# The ARM64 build and its installer, on the release branch and by hand.
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-arm64:
+    uses: storytold/craft-common-actions/.github/workflows/windows-arm64.yml@main
+    with:
+      app-name: sshcraft
+      app-dir: SSHCraft
+      install-relative-path: Programs/SSHCraft
+      install-scope: perUser

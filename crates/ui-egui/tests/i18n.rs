@@ -104,3 +104,18 @@ fn every_command_label_has_german() {
         sshcraft_ui_egui::commands::ui_commands().iter().map(|c| c.label).filter(|label| de::translate(label).is_none()).collect();
     assert!(missing.is_empty(), "no German for the labels {missing:?}");
 }
+
+#[test]
+fn each_thread_keeps_its_language() {
+    // The interface runs on one thread; tests run side by side in one process (`cargo test`),
+    // each with its own window and language.
+    sshcraft_ui_egui::i18n::set_language(Lang::De);
+    let other = std::thread::spawn(|| {
+        sshcraft_ui_egui::i18n::set_language(Lang::En);
+        sshcraft_ui_egui::i18n::tr("Close")
+    })
+    .join()
+    .unwrap();
+    assert_eq!(other, "Close");
+    assert_eq!(sshcraft_ui_egui::i18n::tr("Close"), "Schließen", "the other thread's English did not reach this one");
+}

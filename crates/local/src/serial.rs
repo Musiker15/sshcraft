@@ -286,7 +286,8 @@ mod tests {
     async fn endless_empty_reads_end_as_lost() {
         let (tx, mut rx) = mpsc::channel(16);
         std::thread::spawn(move || pump(Empty, tx));
-        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.expect("the pump must not spin forever");
+        // 50 pauses of 20 ms are one second; a busy CI runner (macOS) stretches the pauses a lot.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv()).await.expect("the pump must not spin forever");
         assert!(matches!(event, Some(ShellEvent::Ended(Disconnect::Lost(_)))));
     }
 

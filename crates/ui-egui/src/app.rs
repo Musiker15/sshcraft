@@ -39,13 +39,23 @@ pub struct SshcraftApp {
     pub link: crate::link::LinkWatch,
     /// The control channel (`--control`), when the app was started with it.
     pub control: Option<crate::control::Control>,
+    /// Who draws the window frame (craft-window's decision, made by the app at start).
+    pub window_frame: craft_window::policy::Frame,
+    /// The native menu bar (macOS), when AppKit took it.
+    #[cfg(target_os = "macos")]
+    pub(crate) native_menu: Option<craft_menu::NativeMenu>,
+    /// AppKit's `movable` flag as last set (craft-window's title bar on macOS).
+    #[cfg(target_os = "macos")]
+    pub(crate) movable: Option<bool>,
     /// Kept alive for the app when it owns the runtime (tests); the app binary owns it itself.
     _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
 }
 
 impl SshcraftApp {
     pub fn new(session: Session, ctx: &egui::Context) -> Self {
-        // Names from servers and imports can be in any script: the system's fonts fill in.
+        // The craft-fonts faces of a release build, then the system's fonts for any other script
+        // in names from servers and imports.
+        crate::fonts::install_embedded(ctx, crate::fonts::CRAFT_FONTS);
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
         // Terminal output wakes the window; nothing polls for it.
@@ -71,8 +81,27 @@ impl SshcraftApp {
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
             control: None,
+            window_frame: craft_window::policy::Frame::Native,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
+            #[cfg(target_os = "macos")]
+            movable: None,
             events,
             _runtime: None,
+        }
+    }
+
+    /// Says at the start when the vault did not open (`OpenReport::vault`): keys and passwords
+    /// are then unavailable, and the user should learn why before an action fails.
+    pub fn report_vault(&mut self, vault: Result<(), sshcraft_engine::ErrorCode>) {
+        match vault {
+            Ok(()) => {}
+            Err(sshcraft_engine::ErrorCode::MasterKeyMissing) => self.toasts.error(tr(
+                "SSHCraft's entry in the system keyring is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: restore the keyring entry or the data folder from a backup.",
+            )),
+            Err(_) => self.toasts.error(tr(
+                "The system keyring could not be opened, so keys and passwords are not available. On Linux a Secret Service (GNOME Keyring or KWallet) must run.",
+            )),
         }
     }
 
@@ -294,6 +323,7 @@ impl SshcraftApp {
         }
         crate::link::tick(self, ctx);
         crate::control::process(self, ctx);
+        crate::quit::logic(self, ctx);
     }
 
     /// One frame: results that came back, the engine's events, then drawing.
@@ -322,6 +352,8 @@ impl SshcraftApp {
                 crate::commands::run(self, id);
             }
         }
+        #[cfg(target_os = "macos")]
+        crate::menus::native_frame(self, &ctx);
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
@@ -336,6 +368,8 @@ impl SshcraftApp {
         crate::pages::sharing::remove_dialog(self, &ctx);
         crate::confirm::show(self, &ctx);
         crate::prompts::show(self, &ctx);
+        crate::quit::show(self, &ctx);
+        crate::menus::about(self, &ctx);
         crate::log_viewer::show(self, &ctx);
         // The logs are fetched again on the next visit of their page.
         if self.ui.page != Page::Logs {
@@ -362,6 +396,7 @@ impl SshcraftApp {
             }
         }
         self.toasts.show(&ctx);
+        crate::window::resize_edges(self, &ctx);
         self.forms.observe(crate::forms::shape(&self.ui));
     }
 

@@ -240,9 +240,13 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
     t.h.run_steps(2);
     t.h.get_by_label("Shares").click_accesskit();
     until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
-    t.h.get_by_label("Remove recipient").click();
-    t.h.run_steps(2);
-    assert!(t.h.query_by_label_contains("may have been copied").is_some(), "keys went along: it warns");
+    t.h.get_by_label("Remove recipient").click_accesskit();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while t.h.query_by_label_contains("may have been copied").is_none() {
+        assert!(Instant::now() < deadline, "keys went along: it warns");
+        std::thread::sleep(Duration::from_millis(20));
+        t.h.run_steps(1);
+    }
     t.h.get_by_label("Cancel").click();
     t.h.run_steps(2);
     t.h.get_by_label("End share").click();

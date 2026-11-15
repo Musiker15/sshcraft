@@ -88,3 +88,17 @@ fn the_theme_follows_the_setting() {
     let tokens = sshcraft_ui_egui::theme::Tokens::get(&h.ctx);
     assert_eq!(tokens, sshcraft_ui_egui::theme::Tokens::light());
 }
+
+/// A vault that did not open is said at the start, not only when a key is first needed.
+#[test]
+fn a_vault_that_did_not_open_is_said_at_the_start() {
+    use sshcraft_engine::ErrorCode;
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.state_mut().report_vault(Ok(()));
+    assert!(h.state().toasts.texts().is_empty(), "nothing to say when it opened");
+    h.state_mut().report_vault(Err(ErrorCode::Vault));
+    assert!(h.state().toasts.texts().iter().any(|t| t.contains("keyring")), "{:?}", h.state().toasts.texts());
+    h.state_mut().report_vault(Err(ErrorCode::MasterKeyMissing));
+    assert!(h.state().toasts.texts().iter().any(|t| t.contains("Nothing was replaced")), "{:?}", h.state().toasts.texts());
+}
