@@ -171,6 +171,7 @@ fn search_opens_the_log_at_the_hit() {
     h.get_by_label_contains("logged-text").click();
     until(&mut h, "the viewer", |app| app.log_viewer.is_some());
     assert!(h.state().log_viewer.as_ref().unwrap().text().contains("logged-text"));
+    assert_eq!(h.state().log_viewer.as_ref().unwrap().search, "logged", "the viewer searches for what the page searched");
 }
 
 #[test]
@@ -213,6 +214,19 @@ fn a_long_log_says_its_beginning_is_missing() {
 fn mark_at(bytes: &[u8], line: usize, text: &str) -> Value {
     let offset = bytes.split(|b| *b == b'\n').take(line).map(|l| l.len() + 1).sum::<usize>();
     json!({ "id": uuid::Uuid::new_v4(), "offset": offset, "kind": "bookmark", "text": text, "created_at": 0 })
+}
+
+#[test]
+fn the_viewer_finds_text_and_goes_on_to_the_next() {
+    let mut viewer = LogViewer::from_bytes(String::new(), &numbered(1000), &[]);
+    assert!(!viewer.screen_text().contains("line 123"), "the end is shown first");
+    assert!(viewer.find("LINE 123", true), "found, whatever the case");
+    assert!(viewer.screen_text().contains("line 123"), "{}", viewer.screen_text());
+    assert!(viewer.find("line 5", true));
+    assert!(viewer.screen_text().contains("line 5"));
+    assert!(viewer.find("line 5", true), "the next match");
+    assert!(viewer.screen_text().contains("line 50"), "{}", viewer.screen_text());
+    assert!(!viewer.find("not in the log", true));
 }
 
 #[test]

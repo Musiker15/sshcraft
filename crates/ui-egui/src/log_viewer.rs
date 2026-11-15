@@ -4,7 +4,7 @@
 //! off. The log is read and laid out off the window's thread.
 
 use serde_json::{Value, json};
-use sshcraft_term::{Direction, TermConfig, TermSize, Terminal};
+use sshcraft_term::{Direction, SearchQuery, TermConfig, TermSize, Terminal};
 
 use crate::app::SshcraftApp;
 use crate::i18n::tr;
@@ -31,6 +31,8 @@ pub struct LogViewer {
     beginning_missing: bool,
     /// The comment being written.
     pub comment: Option<String>,
+    /// The text the viewer's search field holds.
+    pub search: String,
 }
 
 impl std::fmt::Debug for LogViewer {
@@ -52,7 +54,7 @@ impl LogViewer {
         marks.sort_by_key(offset_of);
         let term = Terminal::new(TermSize::clamped(160, 40), &TermConfig { scrollback: MAX_LINES, clipboard_write: false });
         let plain = sshcraft_model::logtext::plain_text(bytes);
-        let mut viewer = Self { id, bytes: bytes.to_vec(), term, plain, line_starts, marks, beginning_missing: false, comment: None };
+        let mut viewer = Self { id, bytes: bytes.to_vec(), term, plain, line_starts, marks, beginning_missing: false, comment: None, search: String::new() };
         viewer.lay_out();
         viewer
     }
@@ -111,6 +113,14 @@ impl LogViewer {
         self.line_starts.get(top).copied().unwrap_or(0)
     }
 
+    /// Finds `text` (case-insensitive) after the last match, going `down` or up; whether it
+    /// was found. The match is selected and shown.
+    pub fn find(&mut self, text: &str, down: bool) -> bool {
+        let query = SearchQuery { pattern: text.to_string(), regex: false, case_sensitive: false };
+        let direction = if down { Direction::Down } else { Direction::Up };
+        matches!(self.term.search(&query, direction), Ok(Some(_)))
+    }
+
     /// The marks after one was added or removed; the terminal's own marks follow them.
     pub fn set_marks(&mut self, mut marks: Vec<Value>) {
         marks.sort_by_key(offset_of);
@@ -132,8 +142,8 @@ impl LogViewer {
     }
 }
 
-/// Opens log `id`: reads its output and shows it.
-pub fn open(app: &mut SshcraftApp, id: String) {
+/// Opens log `id`: reads its output and shows it, at the first match of `find` if given.
+pub fn open(app: &mut SshcraftApp, id: String, find: Option<String>) {
     let marks = app
         .data
         .logs
@@ -154,7 +164,12 @@ pub fn open(app: &mut SshcraftApp, id: String) {
             let viewer = tokio::task::spawn_blocking(move || {
                 let bytes =
                     v.get("data_base64").and_then(Value::as_str).and_then(|b| data_encoding::BASE64.decode(b.as_bytes()).ok()).unwrap_or_default();
-                LogViewer::from_bytes(id, &bytes, &marks)
+                let mut viewer = LogViewer::from_bytes(id, &bytes, &marks);
+                if let Some(text) = find {
+                    viewer.find(&text, true);
+                    viewer.search = text;
+                }
+                viewer
             })
             .await
             .map_err(|_| sshcraft_engine::EngineError::Internal { id: "log.read".into() })?;
@@ -195,6 +210,7 @@ fn add_mark(app: &mut SshcraftApp, kind: &str, text: String) {
 
 enum ViewerAction {
     Close,
+    Find(String, bool),
     Bookmark,
     Comment,
     Jump(usize),
@@ -222,6 +238,18 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             if ui.button(tr("Close")).clicked() {
                 action = Some(ViewerAction::Close);
+            }
+        });
+        ui.horizontal(|ui| {
+            let field = ui.add(egui::TextEdit::singleline(&mut viewer.search).hint_text(tr("Search in this log")).desired_width(260.0));
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let text = viewer.search.trim().to_string();
+            let ready = !text.is_empty();
+            if ui.add_enabled(ready, egui::Button::new(tr("Previous"))).clicked() {
+                action = Some(ViewerAction::Find(text.clone(), false));
+            }
+            if ui.add_enabled(ready, egui::Button::new(tr("Next"))).clicked() || (enter && ready) {
+                action = Some(ViewerAction::Find(text, true));
             }
         });
         if viewer.beginning_missing {
@@ -270,6 +298,11 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     match action {
         Some(ViewerAction::Close) => return,
         Some(ViewerAction::Jump(i)) => viewer.jump(i),
+        Some(ViewerAction::Find(text, down)) => {
+            if !viewer.find(&text, down) {
+                app.toasts.info(tr("Not found in this log."));
+            }
+        }
         Some(ViewerAction::Bookmark) => {
             let name: String = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string().chars().take(MAX_BOOKMARK).collect();
             app.log_viewer = Some(viewer);

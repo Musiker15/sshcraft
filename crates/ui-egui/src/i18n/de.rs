@@ -507,6 +507,10 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "A running rule stops; the rule is gone from its host." => "Eine laufende Regel stoppt; die Regel verschwindet von ihrem Host.",
         "Delete rule" => "Regel löschen",
         "The last change is still being saved: try again in a moment." => "Die letzte Änderung wird noch gespeichert: versuch es gleich noch einmal.",
+        "Search in this log" => "In diesem Protokoll suchen",
+        "Previous" => "Vorheriger",
+        "Next" => "Nächster",
+        "Not found in this log." => "In diesem Protokoll nicht gefunden.",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

@@ -189,6 +189,8 @@ fn confirm_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 enum LogAction {
     Open(String),
+    /// Opens the log at the first match of the page's search.
+    Find(String),
     Export(String),
 }
 
@@ -222,7 +224,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         for hit in app.ui.logs.hits.clone() {
             let line = text(&hit, "snippet");
             if elided_label(ui, &line, ui.available_width(), tokens.text, FontId::monospace(12.0)).clicked() {
-                action = Some(LogAction::Open(text(&hit, "log_id")));
+                action = Some(LogAction::Find(text(&hit, "log_id")));
             }
         }
         ui.separator();
@@ -266,7 +268,11 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     confirm_dialog(app, ui.ctx());
     match action {
-        Some(LogAction::Open(id)) => crate::log_viewer::open(app, id),
+        Some(LogAction::Open(id)) => crate::log_viewer::open(app, id, None),
+        Some(LogAction::Find(id)) => {
+            let query = app.ui.logs.searched.clone();
+            crate::log_viewer::open(app, id, Some(query));
+        }
         Some(LogAction::Export(id)) => {
             let name = app.data.logs.iter().find(|l| text(l, "id") == id).map(|l| text(l, "title")).unwrap_or_default();
             let file: String = name.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').take(60).collect();
