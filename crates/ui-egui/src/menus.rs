@@ -173,6 +173,10 @@ fn keyboard(event: &egui::Event) -> bool {
 pub fn install_native(app: &mut SshcraftApp, ctx: &egui::Context) -> bool {
     let bar = craft_menu::mac_layout(&menu_bar(app), &layout_options()).bar;
     app.native_menu = craft_menu::mac::install_with(ctx, &bar, craft_menu::mac::MacOptions::default().window_list(false));
+    if app.native_menu.is_none() {
+        // Without the native menu bar, winit's default one would quit on ⌘Q without asking.
+        let _ = craft_menu::mac::install_app_menu(ctx, APP_NAME);
+    }
     app.native_menu.is_some()
 }
 

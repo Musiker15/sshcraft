@@ -166,11 +166,8 @@ fn main() -> ExitCode {
             let mut app = SshcraftApp::new(session.clone(), &cc.egui_ctx);
             app.window_frame = window_frame;
             app.report_vault(vault);
-            // Without the native menu bar, winit's default one would quit on ⌘Q without asking.
             #[cfg(target_os = "macos")]
-            if !sshcraft_ui_egui::menus::install_native(&mut app, &cc.egui_ctx) {
-                let _ = craft_quit::install_app_menu(&cc.egui_ctx, "SSHCraft");
-            }
+            sshcraft_ui_egui::menus::install_native(&mut app, &cc.egui_ctx);
             let control = match &control_args {
                 Some(control_args) => {
                     let queue = app.enable_control(&cc.egui_ctx);
