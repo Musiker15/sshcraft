@@ -1,6 +1,6 @@
 # SSHCraft roadmap
 
-> **Last updated:** 2026-11-14 · **Stage:** rebuild on the Craft conventions, R3 of R7 next
+> **Last updated:** 2026-11-15 · **Stage:** rebuild on the Craft conventions, R4 of R7 next
 
 SSHCraft reached its first feature set (sub-plans 1 to 15: hosts, keys, connections, workspaces,
 port forwarding, snippets, session logs, sync, sharing, AI agents) as a Tauri app, kept at the tag
@@ -11,7 +11,7 @@ detail is in [docs/roadmap.md](docs/roadmap.md), the open work in [docs/gaps.md]
 |---|---|---|
 | R1 | Scaffold and rules: workspace, licence, AGENTS.md, xtask, lints, core crates moved | done |
 | R2 | Engine: session, command registry, agent gate, crash guard | done |
-| R3 | Terminal: emulation crate and egui renderer | open |
+| R3 | Terminal: emulation crate and egui renderer | done |
 | R4 | Interface I: window, sidebar, tabs, palette, tokens, languages, hosts and keys | open |
 | R5 | Interface II: workspaces, forwarding, snippets, logs, sync, sharing, agent confirmation | open |
 | R6 | Control channel, MCP crate, `sshcraft-cli` | open |

@@ -106,3 +106,37 @@ impl SessionConfig {
         }
     }
 }
+
+/// A test SSH server with a host for it in `session`: the host's key is stored in the vault and
+/// the server's host key is trusted, so `session.open` connects without a question. The server's
+/// shell answers `flood\n` with [`sshcraft_ssh::testing::flood_pattern`].
+pub async fn trusted_test_host(session: &crate::Session) -> (sshcraft_ssh::testing::TestServer, sshcraft_model::model::HostId) {
+    use russh::keys::ssh_key::LineEnding;
+    use russh::keys::{Algorithm, PrivateKey};
+    use sshcraft_model::model::{ConnectionSettings, Host, HostId, KeyRef};
+    use sshcraft_ssh::testing::{TestAuth, TestServer};
+
+    let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let server = TestServer::start_with(TestAuth { key: Some(key.public_key().clone()), quiet: true, ..Default::default() }).await;
+    let store = session.store();
+    let info = session.vault().unwrap().import_key(&store, "test", &key.to_openssh(LineEnding::LF).unwrap(), None).unwrap();
+    let host = Host {
+        forwards: Vec::new(),
+        location: None,
+        id: HostId::new(),
+        name: "test host".into(),
+        group_id: None,
+        settings: ConnectionSettings {
+            address: Some("127.0.0.1".into()),
+            port: Some(server.port),
+            username: Some("tester".into()),
+            key: Some(KeyRef::Stored { id: info.id }),
+            ..Default::default()
+        },
+        tags: Vec::new(),
+        os: None,
+    };
+    store.upsert_host(&host).unwrap();
+    store.set_known_host("127.0.0.1", server.port, &server.host_fingerprint).unwrap();
+    (server, host.id)
+}

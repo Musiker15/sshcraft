@@ -5,6 +5,14 @@ The decisions that carry SSHCraft, newest first. The reasoning is in the design 
 
 | Date | Decision |
 |---|---|
+| 2026-11-15 | The terminal stays on `alacritty_terminal` (Apache-2.0): a trial measured 130 to 170 MiB/s on every kind of output. `term` hides it behind its own types. |
+| 2026-11-15 | Terminal text is drawn in runs of narrow cells (ligatures) and wide cells and clusters on their own (the grid stays exact); a full redraw of 200 by 50 cells took 4.8 ms. |
+| 2026-11-15 | A frame feeds terminal output in 32 KiB slices until 4 MiB or 6 ms and acknowledges only what it fed; budgets are release-build tests (`cargo xtask perf`). |
+| 2026-11-15 | `Session::execute` runs the command on the engine's runtime: the window's frame loop may await it, and dropping the call cancels the command. |
+| 2026-11-15 | Agents get the same answer for an unknown and a hidden session log, before the level is looked at. |
+| 2026-11-15 | Pasted text loses every `ESC` before it is sent; a paste cannot end the bracket or type a sequence. |
+| 2026-11-15 | Per-cell extras of the emulator have a budget of 32 MiB per session; past it the oldest lines lose links and decorations, never their text. |
+| 2026-11-15 | Dependabot's `windows-future` 0.100 is not taken alone: it must move with `windows` 0.100, which is not released. |
 | 2026-11-14 | For agents, "Ask" exempts only lists and status from the question and the log; reading a session log, searching logs and listing snippets ask and are logged like every other action. |
 | 2026-11-14 | A `config.toml` that cannot be read is moved aside by craft-settings; the settings of the Tauri version are then taken over, since nothing of the user's is overwritten. Only a newer `config.toml` blocks the takeover. |
 | 2026-11-14 | `Share` and `Sync` are set back to "deny" once (marker `migration.agent_categories`): before R2 no agent action used them, so a stored "allow" must not start to work silently. Categories added after R2 start at "deny". |

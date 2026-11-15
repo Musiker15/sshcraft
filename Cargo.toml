@@ -22,6 +22,8 @@ sshcraft-sync = { path = "crates/sync" }
 sshcraft-fido = { path = "crates/fido" }
 sshcraft-server-lib = { path = "crates/server" }
 sshcraft-engine = { path = "crates/engine" }
+sshcraft-term = { path = "crates/term" }
+sshcraft-ui-egui = { path = "crates/ui-egui" }
 
 # foundation
 serde = { version = "1.0.229", features = ["derive"] }
@@ -44,6 +46,21 @@ sys-locale = "0.3.2"
 url = "2.5.8"
 winreg = "0.56.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+bitflags = "2.13.2"
+unicode-width = "0.2.3"
+cursor-icon = "1.2.0"
+
+# terminal
+alacritty_terminal = { version = "0.26.0", default-features = false }
+
+# interface: egui from the fork of the Craft family (see [patch.crates-io] below)
+egui = "0.37"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "accesskit"] }
+egui_kittest = "0.37"
+egui_system_font_provider = "0.37"
+# The version egui_system_font_provider of the fork uses, so the font stack is not built twice.
+fontique = { version = "0.11.1", default-features = false, features = ["system"] }
+image = { version = "0.25.10", default-features = false }
 
 # ssh and storage
 russh = "0.65.1"
@@ -75,6 +92,7 @@ craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "cebc8
 
 # tests
 tempfile = "3.27.0"
+memory-stats = "1.2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -101,3 +119,17 @@ opt-level = 3
 
 [profile.dev.package.sha2]
 opt-level = 3
+
+# The egui fork of the Craft family, at the revision craft-libs pins (craft-libs Cargo.toml).
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

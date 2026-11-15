@@ -867,8 +867,9 @@ fn visible_log(view: &GateView, value: &Value) -> Result<sshcraft_model::model::
         .get("id")
         .and_then(|v| serde_json::from_value::<sshcraft_model::model::LogId>(v.clone()).ok())
         .ok_or_else(|| invalid("id is missing"))?;
-    if view.log_hidden(id) {
-        return Err(not_found("log", true).on(&id.0.to_string()));
+    // Hidden and unknown answer alike, so the answer does not tell that a hidden one exists.
+    if view.log_hidden(id) || !view.log_known(id) {
+        return Err(not_found("log", view.log_hidden(id)).on(&id.0.to_string()));
     }
     Ok(id)
 }
@@ -885,8 +886,8 @@ struct LogIds {
 
 fn resolve_log_delete(view: &GateView, _: &Connection, value: Value) -> Result<Resolved, Refusal> {
     let LogIds { ids } = params(value)?;
-    if let Some(hidden) = ids.iter().find(|id| view.log_hidden(**id)) {
-        return Err(not_found("log", true).on(&hidden.0.to_string()));
+    if let Some(refused) = ids.iter().find(|id| view.log_hidden(**id) || !view.log_known(**id)) {
+        return Err(not_found("log", view.log_hidden(*refused)).on(&refused.0.to_string()));
     }
     let target = ids.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(", ");
     Ok(plain(json!({ "ids": ids }), target, String::new()))

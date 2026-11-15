@@ -14,7 +14,8 @@ const MAX_ENTRY_BYTES: usize = 64 * 1024;
 const REDACTED: &str = "<redacted>";
 
 /// Parameter keys whose values never reach the journal, at any depth.
-pub const SECRET_KEYS: &[&str] = &["password", "passphrase", "secret", "api_key", "account_key", "answers", "text", "data"];
+/// Besides secrets, the text of snippets, comments and commands: the journal is not sealed.
+pub const SECRET_KEYS: &[&str] = &["password", "passphrase", "secret", "api_key", "account_key", "answers", "text", "data", "content", "command"];
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct JournalEntry {

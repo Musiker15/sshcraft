@@ -125,7 +125,7 @@ crash on hostile input is a security bug. **This outranks feature work.**
   |---|---|
   | L0 | `proto`, `platform` |
   | L1 | `model` |
-  | L2 | `store` (later `term`) |
+  | L2 | `store`, `term` |
   | L3 | `import`, `ssh`, `local`, `sync`, `server-lib` |
   | L4 | `fido` |
   | L5 | `engine` (R2) |
@@ -178,8 +178,12 @@ Each has a test where it can have one.
 ## Running and looking at it
 
 - `cargo xtask ci` runs every gate; `cargo xtask test` runs the tests alone.
-- The desktop app returns in R4. Until then: `cargo run -p sshcraft-server -- --help` and
-  `docker build -f packaging/docker/Dockerfile -t sshcraft-server .`.
+- The desktop app returns in R4. Until then: `cargo run -p sshcraft-server -- --help`,
+  `docker build -f packaging/docker/Dockerfile -t sshcraft-server .`, a local shell in the
+  terminal with `cargo run -p sshcraft-ui-egui --example terminal_window` (an engine on a temp
+  folder, never the real data), and a picture of the terminal without a window with
+  `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]`.
+- `cargo xtask perf` runs the terminal's performance budgets in a release build.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.
 
 ## Roadmap

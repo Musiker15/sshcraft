@@ -30,7 +30,7 @@ pub enum Via {
 
 /// One connection of an agent or of the control channel; its sessions end with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct ConnId(pub u64);
+pub struct ConnId(pub(crate) u64);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "caller", rename_all = "snake_case")]
@@ -62,3 +62,11 @@ impl Caller {
         matches!(self, Self::User)
     }
 }
+
+/// Connection ids are made by the engine only: embedding code cannot name another connection.
+///
+/// ```compile_fail
+/// let _ = sshcraft_engine::ConnId(7);
+/// ```
+#[cfg(doctest)]
+pub struct ConnIdIsPrivate;
