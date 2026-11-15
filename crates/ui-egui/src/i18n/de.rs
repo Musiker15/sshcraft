@@ -77,6 +77,26 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "{host} verbindet sich über dieses Programm auf deinem Rechner. Es wurde nicht auf diesem Gerät eingerichtet (es kam über Sync, eine Freigabe oder einen Agent, oder es hat sich geändert). Erlaube es nur, wenn du es kennst."
         }
         "Allow on this device" => "Auf diesem Gerät erlauben",
+        "Known hosts" => "Bekannte Server",
+        "Host keys" => "Hostschlüssel",
+        "Take new host keys a server announces" => "Neue Hostschlüssel übernehmen, die ein Server ankündigt",
+        "After sign-in a server may name all its host keys. New ones are kept once the server proved it holds them, and keys it no longer has are dropped (UpdateHostKeys)." => {
+            "Nach der Anmeldung kann ein Server alle seine Hostschlüssel nennen. Neue werden übernommen, sobald der Server bewiesen hat, dass er sie besitzt, und Schlüssel, die er nicht mehr hat, fallen weg (UpdateHostKeys)."
+        }
+        "Import known_hosts" => "known_hosts importieren",
+        "Export known_hosts" => "known_hosts exportieren",
+        "Servers whose host key SSHCraft trusts. Remove a key and the next connection asks again." => {
+            "Server, deren Hostschlüssel SSHCraft vertraut. Wird ein Schlüssel entfernt, fragt die nächste Verbindung wieder nach."
+        }
+        "No known hosts yet." => "Noch keine bekannten Server.",
+        "fingerprint only" => "nur Fingerabdruck",
+        "The next connection asks again" => "Die nächste Verbindung fragt wieder nach",
+        "{added} keys added, {same} already known, {conflicts} servers kept their known key." => {
+            "{added} Schlüssel hinzugefügt, {same} schon bekannt, {conflicts} Server behalten ihren bekannten Schlüssel."
+        }
+        "Exported. {count} keys known only by their fingerprint were left out." => {
+            "Exportiert. {count} Schlüssel, die nur mit Fingerabdruck bekannt sind, fehlen darin."
+        }
         "Proxy command" => "Proxy-Befehl",
         "Runs without a shell. %h, %p, %r and %n stand for address, port, user and name." => {
             "Läuft ohne Shell. %h, %p, %r und %n stehen für Adresse, Port, Benutzer und Name."

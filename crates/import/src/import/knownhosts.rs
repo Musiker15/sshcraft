@@ -13,6 +13,11 @@ pub struct KnownEntry {
     pub port: u16,
     /// In the same form the app stores when connecting (`SHA256:…`).
     pub fingerprint: String,
+    /// The key itself, so it can be exported again.
+    #[serde(default)]
+    pub algorithm: Option<String>,
+    #[serde(default)]
+    pub public_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,25 +108,70 @@ pub fn parse(text: &str) -> KnownHostsImport {
                     ..ImportCandidate::default()
                 });
             }
-            out.entries.push(KnownEntry { address, port, fingerprint: fingerprint.clone() });
+            out.entries.push(KnownEntry {
+                address,
+                port,
+                fingerprint: fingerprint.clone(),
+                algorithm: Some(kind.to_owned()),
+                public_key: Some(data.to_owned()),
+            });
         }
     }
     out
 }
 
-/// Stores the host keys. One that differs from a key already stored is not taken over: the
-/// stored one was confirmed when connecting, a file could be stale or planted.
+/// Stores the host keys. A server new to SSHCraft takes all its keys from the file (one per
+/// algorithm). For a server SSHCraft already knows, a key it does not know is not taken over:
+/// the stored ones were confirmed when connecting, a file could be stale or planted.
 pub fn apply(store: &Store, entries: &[KnownEntry]) -> Result<KnownOutcome, StoreError> {
     let mut outcome = KnownOutcome::default();
+    let mut new_servers: Vec<(String, u16)> = Vec::new();
     for entry in entries {
-        match store.known_host(&entry.address, entry.port)? {
-            None => {
-                store.set_known_host(&entry.address, entry.port, &entry.fingerprint)?;
-                outcome.added += 1;
-            }
-            Some(known) if known == entry.fingerprint => outcome.same += 1,
-            Some(_) => outcome.conflicts.push((entry.address.clone(), entry.port)),
+        let server = (entry.address.clone(), entry.port);
+        let known = store.host_keys(&entry.address, entry.port)?;
+        if known.is_empty() {
+            new_servers.push(server.clone());
+        }
+        let key = sshcraft_store::store::HostKey {
+            address: entry.address.clone(),
+            port: entry.port,
+            algorithm: entry.algorithm.clone(),
+            public_key: entry.public_key.clone(),
+            fingerprint: entry.fingerprint.clone(),
+            added_at: 0,
+        };
+        if known.iter().any(|k| k.fingerprint == entry.fingerprint) {
+            // Fills in the key where only its fingerprint was known.
+            store.add_host_key(&key)?;
+            outcome.same += 1;
+        } else if new_servers.contains(&server) {
+            store.add_host_key(&key)?;
+            outcome.added += 1;
+        } else if !outcome.conflicts.contains(&server) {
+            outcome.conflicts.push(server);
         }
     }
     Ok(outcome)
+}
+
+/// Host keys as `known_hosts` lines (`[address]:port` when the port is not 22). Keys known only
+/// by their fingerprint cannot be written; their number comes back.
+pub fn export(keys: &[sshcraft_store::store::HostKey]) -> (String, usize) {
+    let mut text = String::new();
+    let mut skipped = 0;
+    for key in keys {
+        let (Some(algorithm), Some(public_key)) = (&key.algorithm, &key.public_key) else {
+            skipped += 1;
+            continue;
+        };
+        // Nothing from the store may break the line format.
+        let fine = |s: &str| !s.is_empty() && !s.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, ',' | '#'));
+        if !fine(&key.address) || !fine(algorithm) || !fine(public_key) {
+            skipped += 1;
+            continue;
+        }
+        let name = if key.port == DEFAULT_PORT { key.address.clone() } else { format!("[{}]:{}", key.address, key.port) };
+        text.push_str(&format!("{name} {algorithm} {public_key}\n"));
+    }
+    (text, skipped)
 }

@@ -1801,3 +1801,83 @@ async fn zero_reconnect_attempts_end_at_once() {
     assert_eq!(ended(&sink.statuses()), Some(EndReason::Lost));
     assert!(!sink.statuses().iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. })));
 }
+
+// ---------- host keys kept whole, and UpdateHostKeys
+
+#[tokio::test]
+async fn the_first_key_is_stored_whole() {
+    let f = fixture(true).await;
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    let keys = f.store.lock().unwrap().host_keys("127.0.0.1", f.server.port).unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].fingerprint, f.server.host_fingerprint);
+    assert_eq!(keys[0].algorithm.as_deref(), Some("ssh-ed25519"));
+    assert!(keys[0].public_key.as_deref().is_some_and(|k| k.starts_with("AAAA")));
+    assert!(keys[0].added_at > 0);
+}
+
+#[tokio::test]
+async fn a_key_known_by_fingerprint_gains_its_key_on_connect() {
+    let f = fixture(true).await;
+    f.store.lock().unwrap().set_known_host("127.0.0.1", f.server.port, &f.server.host_fingerprint).unwrap();
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    assert_eq!(f.prompter.asked.load(Ordering::SeqCst), 0);
+    let keys = f.store.lock().unwrap().host_keys("127.0.0.1", f.server.port).unwrap();
+    assert_eq!(keys[0].algorithm.as_deref(), Some("ssh-ed25519"));
+}
+
+fn verifier_on(store: Arc<Mutex<Store>>, update_keys: bool) -> StoreVerifier {
+    let (_alive, abandoned) = tokio::sync::watch::channel(());
+    StoreVerifier {
+        session: None,
+        store,
+        prompter: Arc::new(FixedPrompter { answer: false, asked: AtomicUsize::new(0) }),
+        mismatch: Mutex::new(None),
+        first: Mutex::new(Vec::new()),
+        abandoned,
+        update_keys,
+    }
+}
+
+fn presented(name: &str) -> sshcraft_ssh::hostkeys::PresentedKey {
+    sshcraft_ssh::hostkeys::PresentedKey { algorithm: "ssh-ed25519".into(), public_key: format!("AAAA{name}"), fingerprint: format!("SHA256:{name}") }
+}
+
+fn fingerprints(store: &Mutex<Store>) -> Vec<String> {
+    store.lock().unwrap().host_keys("h", 22).unwrap().into_iter().map(|k| k.fingerprint).collect()
+}
+
+#[test]
+fn keys_no_longer_announced_are_removed_and_new_ones_proven_first() {
+    use sshcraft_ssh::hostkeys::AnnounceAction;
+    let store = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:used").unwrap();
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:old").unwrap();
+    let v = verifier_on(store.clone(), true);
+    let keys = [presented("used"), presented("new")];
+    assert_eq!(v.announced("h", 22, "SHA256:used", &keys), AnnounceAction::Prove(vec![presented("new")]));
+    v.apply("h", 22, "SHA256:used", &keys);
+    let mut now = fingerprints(&store);
+    now.sort();
+    assert_eq!(now, vec!["SHA256:new", "SHA256:used"]);
+    // Only going away: applied without proof.
+    assert_eq!(v.announced("h", 22, "SHA256:used", &[presented("used")]), AnnounceAction::Apply);
+}
+
+#[test]
+fn update_host_keys_off_changes_nothing() {
+    use sshcraft_ssh::hostkeys::AnnounceAction;
+    let store = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:used").unwrap();
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:old").unwrap();
+    let v = verifier_on(store.clone(), false);
+    let keys = [presented("used"), presented("new")];
+    assert_eq!(v.announced("h", 22, "SHA256:used", &keys), AnnounceAction::Ignore);
+    v.apply("h", 22, "SHA256:used", &keys);
+    assert_eq!(fingerprints(&store).len(), 2);
+    assert!(!fingerprints(&store).contains(&"SHA256:new".to_string()));
+}

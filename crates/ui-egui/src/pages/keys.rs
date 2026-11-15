@@ -546,6 +546,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             });
         });
     }
+    ui.add_space(20.0);
+    crate::pages::known_hosts::section(app, ui);
     let ctx = ui.ctx().clone();
     dialog(app, &ctx);
     identity_dialog(app, &ctx);

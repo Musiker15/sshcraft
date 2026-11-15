@@ -112,6 +112,15 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.checkbox(&mut system, tr("Use system title bar"));
     ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
     save(app, |s| s.general.system_title_bar = system);
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("Host keys")).strong());
+    let mut update = app.data.settings.general.update_host_keys;
+    ui.checkbox(&mut update, tr("Take new host keys a server announces"));
+    ui.label(
+        egui::RichText::new(tr("After sign-in a server may name all its host keys. New ones are kept once the server proved it holds them, and keys it no longer has are dropped (UpdateHostKeys)."))
+            .weak(),
+    );
+    save(app, |s| s.general.update_host_keys = update);
 }
 
 fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {

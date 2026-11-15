@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 pub mod agent;
 mod auth;
 pub mod authorized_keys;
+pub mod hostkeys;
 mod proxy;
 pub mod socks;
 mod tunnel;
@@ -178,6 +179,20 @@ pub struct ConnectParams {
 pub trait HostKeyVerifier: Send + Sync {
     async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool;
 
+    /// [`verify`](Self::verify) with the whole key, for a verifier that keeps it.
+    async fn verify_key(&self, host_name: &str, address: &str, port: u16, key: &hostkeys::PresentedKey) -> bool {
+        self.verify(host_name, address, port, &key.fingerprint).await
+    }
+
+    /// The target announced all its host keys after sign-in (`UpdateHostKeys`); `used` is the
+    /// fingerprint this connection was verified with.
+    fn announced(&self, _address: &str, _port: u16, _used: &str, _keys: &[hostkeys::PresentedKey]) -> hostkeys::AnnounceAction {
+        hostkeys::AnnounceAction::Ignore
+    }
+
+    /// Applies an announcement; new keys in it were proven by the server.
+    fn apply(&self, _address: &str, _port: u16, _used: &str, _keys: &[hostkeys::PresentedKey]) {}
+
     /// Whether the host key of this server was trusted only during this connection (a first
     /// contact). A stored password never goes to such a server: the address may have been
     /// changed by someone else, so the user is asked instead.
@@ -265,6 +280,10 @@ struct ClientHandler {
     rejected: Arc<AtomicBool>,
     /// Targets of the remote forwardings on this connection.
     remotes: tunnel::Remotes,
+    /// Where the target's host key announcements go; none for a jump host.
+    announce: Option<mpsc::UnboundedSender<Vec<russh::keys::PublicKey>>>,
+    /// The fingerprint this connection was verified with.
+    used: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl client::Handler for ClientHandler {
@@ -275,12 +294,26 @@ impl client::Handler for ClientHandler {
             PublicKeyOrCertificate::PublicKey { key, .. } => key.key_data(),
             PublicKeyOrCertificate::Certificate(cert) => cert.public_key(),
         };
-        let fingerprint = key_data.fingerprint(HashAlg::Sha256).to_string();
-        let trusted = self.verifier.verify(&self.host_name, &self.address, self.port, &fingerprint).await;
-        if !trusted {
+        let presented = hostkeys::PresentedKey::of(key_data);
+        let trusted = self.verifier.verify_key(&self.host_name, &self.address, self.port, &presented).await;
+        if trusted {
+            *self.used.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(presented.fingerprint);
+        } else {
             self.rejected.store(true, Ordering::SeqCst);
         }
         Ok(trusted)
+    }
+
+    /// Hands the announcement to a task that can ask for proof (the handle is busy here).
+    async fn openssh_ext_host_keys_announced(
+        &mut self,
+        keys: Vec<russh::keys::PublicKey>,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        if let Some(announce) = &self.announce {
+            let _ = announce.send(keys);
+        }
+        Ok(())
     }
 
     /// Only the target with forwarding switched on gets a channel to the agent; dropping the
@@ -468,6 +501,7 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
     let mut connected: Vec<client::Handle<ClientHandler>> = Vec::new();
     let mut certificate_expired = false;
     let remotes = tunnel::Remotes::default();
+    let mut target_announcements = None;
     for (index, hop) in params.hops.into_iter().enumerate() {
         let host_name = hop.host_name.clone();
         let wrap = |error: SshError| {
@@ -490,7 +524,16 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
             }
         };
         let rejected = Arc::new(AtomicBool::new(false));
+        let used = Arc::new(std::sync::Mutex::new(None));
+        let (announce, announcements) = if index == last {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
         let handler = ClientHandler {
+            announce,
+            used: used.clone(),
             agent: if index == last { params.options.agent_forwarding.clone() } else { None },
             host_name: hop.host_name.clone(),
             address: hop.address.clone(),
@@ -524,6 +567,9 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
             credentials.password = None;
         }
         auth::authenticate(&mut handle, &hop.username, &hop.host_name, credentials, prompter.as_ref()).await.map_err(wrap)?;
+        if let Some(announcements) = announcements {
+            target_announcements = Some((announcements, hostkeys::Announced { address: hop.address.clone(), port: hop.port, used }));
+        }
         connected.push(handle);
     }
     // The route always ends at the target, so there is a last hop; an empty route is an error,
@@ -531,8 +577,12 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
     let Some(handle) = connected.pop() else {
         return Err(SshError::Connect("no host to connect to".into()));
     };
+    let handle = Arc::new(handle);
+    if let Some((announcements, about)) = target_announcements {
+        hostkeys::spawn(Arc::downgrade(&handle), verifier.clone(), about, announcements);
+    }
     Ok(Session {
-        handle: Arc::new(handle),
+        handle,
         env: Arc::new(params.options.env),
         forward_agent: params.options.agent_forwarding.is_some(),
         jumps: Arc::new(connected),

@@ -127,7 +127,10 @@ impl SshcraftApp {
     fn take_events(&mut self) {
         loop {
             match self.events.try_recv() {
-                Ok(EngineEvent::DataChanged { .. }) => self.data.dirty |= Refresh::DATA,
+                Ok(EngineEvent::DataChanged { .. }) => {
+                    self.data.dirty |= Refresh::DATA;
+                    self.data.host_keys = None;
+                }
                 Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),

@@ -1130,6 +1130,7 @@ pub(crate) async fn connect_session(
         mismatch: Mutex::new(None),
         first: Mutex::new(Vec::new()),
         abandoned,
+        update_keys: ctx.settings().general.update_host_keys,
     });
     let params = RouteParams { hops, proxy, options, connect_timeout: sshcraft_ssh::CONNECT_TIMEOUT };
     // The sign-in questions may be asked from another task: they carry the session along.
@@ -1258,20 +1259,52 @@ struct StoreVerifier {
     first: Mutex<Vec<(String, u16)>>,
     /// Closes when whoever connects gives up: an open question is then withdrawn.
     abandoned: tokio::sync::watch::Receiver<()>,
+    /// Take the keys a server announces after sign-in (`general.update_host_keys`).
+    update_keys: bool,
 }
 
-#[async_trait::async_trait]
-impl HostKeyVerifier for StoreVerifier {
-    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
-        let known = {
-            let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
-            match store.known_host(address, port) {
-                Ok(k) => k,
-                Err(_) => return false,
-            }
+/// A presented key as the store keeps it.
+fn stored_key(address: &str, port: u16, key: &sshcraft_ssh::hostkeys::PresentedKey) -> sshcraft_store::store::HostKey {
+    sshcraft_store::store::HostKey {
+        address: address.to_owned(),
+        port,
+        algorithm: Some(key.algorithm.clone()),
+        public_key: Some(key.public_key.clone()),
+        fingerprint: key.fingerprint.clone(),
+        added_at: crate::now_ms() / 1000,
+    }
+}
+
+impl StoreVerifier {
+    fn known_fingerprints(&self, address: &str, port: u16) -> Option<Vec<String>> {
+        let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        store.host_keys(address, port).ok().map(|keys| keys.into_iter().map(|k| k.fingerprint).collect())
+    }
+
+    /// Checks a key; with the whole key at hand it is stored whole (also filling in a key
+    /// known only by its fingerprint).
+    async fn check(
+        &self,
+        host_name: &str,
+        address: &str,
+        port: u16,
+        fingerprint: &str,
+        whole: Option<&sshcraft_ssh::hostkeys::PresentedKey>,
+    ) -> bool {
+        let Some(known) = self.known_fingerprints(address, port) else {
+            return false;
         };
-        match check_host_key(known.as_deref(), fingerprint) {
-            HostKeyStatus::Trusted => true,
+        let keep = |store: &Store| match whole {
+            Some(key) => store.add_host_key(&stored_key(address, port, key)),
+            None => store.set_known_host(address, port, fingerprint),
+        };
+        match check_host_key(&known, fingerprint) {
+            HostKeyStatus::Trusted => {
+                if whole.is_some() {
+                    let _ = keep(&self.store.lock().unwrap_or_else(PoisonError::into_inner));
+                }
+                true
+            }
             HostKeyStatus::Mismatch { expected } => {
                 *self.mismatch.lock().unwrap_or_else(PoisonError::into_inner) = Some(format!("expected {expected}, got {fingerprint}"));
                 false
@@ -1290,13 +1323,69 @@ impl HostKeyVerifier for StoreVerifier {
                 };
                 if accepted {
                     let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
-                    if store.set_known_host(address, port, fingerprint).is_err() {
+                    if keep(&store).is_err() {
                         return false;
                     }
                     self.first.lock().unwrap_or_else(PoisonError::into_inner).push((address.to_owned(), port));
                 }
                 accepted
             }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl HostKeyVerifier for StoreVerifier {
+    async fn verify(&self, host_name: &str, address: &str, port: u16, fingerprint: &str) -> bool {
+        self.check(host_name, address, port, fingerprint, None).await
+    }
+
+    async fn verify_key(&self, host_name: &str, address: &str, port: u16, key: &sshcraft_ssh::hostkeys::PresentedKey) -> bool {
+        self.check(host_name, address, port, &key.fingerprint, Some(key)).await
+    }
+
+    fn announced(
+        &self,
+        address: &str,
+        port: u16,
+        used: &str,
+        keys: &[sshcraft_ssh::hostkeys::PresentedKey],
+    ) -> sshcraft_ssh::hostkeys::AnnounceAction {
+        use sshcraft_ssh::hostkeys::AnnounceAction;
+        let announced: Vec<String> = keys.iter().map(|k| k.fingerprint.clone()).collect();
+        let plan = match (self.update_keys, self.known_fingerprints(address, port)) {
+            (true, Some(known)) => sshcraft_model::policy::plan_key_update(&known, &announced, used),
+            _ => None,
+        };
+        match plan {
+            None => AnnounceAction::Ignore,
+            Some(plan) if plan.add.is_empty() => AnnounceAction::Apply,
+            Some(plan) => AnnounceAction::Prove(keys.iter().filter(|k| plan.add.contains(&k.fingerprint)).cloned().collect()),
+        }
+    }
+
+    fn apply(&self, address: &str, port: u16, used: &str, keys: &[sshcraft_ssh::hostkeys::PresentedKey]) {
+        if !self.update_keys {
+            return;
+        }
+        let announced: Vec<String> = keys.iter().map(|k| k.fingerprint.clone()).collect();
+        let store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        let Ok(known) = store.host_keys(address, port) else {
+            return;
+        };
+        let known: Vec<String> = known.into_iter().map(|k| k.fingerprint).collect();
+        let Some(plan) = sshcraft_model::policy::plan_key_update(&known, &announced, used) else {
+            return;
+        };
+        for key in keys.iter().filter(|k| plan.add.contains(&k.fingerprint)) {
+            let _ = store.add_host_key(&stored_key(address, port, key));
+        }
+        for fingerprint in &plan.remove {
+            let _ = store.remove_host_key(address, port, fingerprint);
+        }
+        // The key in use was already known; fill in its algorithm and key if they were missing.
+        for key in keys.iter().filter(|k| k.fingerprint == used) {
+            let _ = store.add_host_key(&stored_key(address, port, key));
         }
     }
 

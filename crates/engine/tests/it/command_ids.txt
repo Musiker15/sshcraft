@@ -22,6 +22,9 @@ host.info
 host.list
 host.recent
 host.save
+hostkey.export
+hostkey.list
+hostkey.remove
 identity.delete
 identity.list
 identity.save

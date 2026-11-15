@@ -60,6 +60,7 @@ pub mod agent;
 pub mod forward;
 pub mod group;
 pub mod host;
+pub mod host_key;
 pub mod identity;
 pub mod import;
 pub mod key;
@@ -135,6 +136,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(settings::specs());
         specs.extend(group::specs());
         specs.extend(host::specs());
+        specs.extend(host_key::specs());
         specs.extend(identity::specs());
         specs.extend(password::specs());
         specs.extend(key::specs());

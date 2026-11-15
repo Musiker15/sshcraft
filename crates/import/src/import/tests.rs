@@ -119,8 +119,10 @@ fn plain_and_bracketed_hosts() {
     let text = format!("example.org,10.0.0.1 {}\n[example.org]:2222 {}\n", public_line(&k1), public_line(&k2));
     let parsed = knownhosts::parse(&text);
     assert_eq!(parsed.entries.len(), 3);
-    assert!(parsed.entries.contains(&knownhosts::KnownEntry { address: "10.0.0.1".into(), port: 22, fingerprint: fingerprint(&k1) }));
-    assert!(parsed.entries.contains(&knownhosts::KnownEntry { address: "example.org".into(), port: 2222, fingerprint: fingerprint(&k2) }));
+    let has = |address: &str, port: u16, fp: String| parsed.entries.iter().any(|e| e.address == address && e.port == port && e.fingerprint == fp);
+    assert!(has("10.0.0.1", 22, fingerprint(&k1)));
+    assert!(has("example.org", 2222, fingerprint(&k2)));
+    assert!(parsed.entries.iter().all(|e| e.algorithm.as_deref() == Some("ssh-ed25519") && e.public_key.is_some()));
     let names: Vec<_> = parsed.candidates.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, vec!["example.org", "example.org:2222"], "one host per line");
     assert_eq!(parsed.candidates[1].settings.port, Some(2222));
@@ -143,7 +145,13 @@ fn known_fingerprint_is_not_overwritten() {
     let store = Store::open_in_memory().unwrap();
     store.set_known_host("example.org", 22, "SHA256:old").unwrap();
     store.set_known_host("same.org", 22, "SHA256:same").unwrap();
-    let entry = |address: &str, fingerprint: &str| knownhosts::KnownEntry { address: address.into(), port: 22, fingerprint: fingerprint.into() };
+    let entry = |address: &str, fingerprint: &str| knownhosts::KnownEntry {
+        address: address.into(),
+        port: 22,
+        fingerprint: fingerprint.into(),
+        algorithm: None,
+        public_key: None,
+    };
     let outcome =
         knownhosts::apply(&store, &[entry("example.org", "SHA256:new"), entry("same.org", "SHA256:same"), entry("fresh.org", "SHA256:fresh")])
             .unwrap();
@@ -152,6 +160,53 @@ fn known_fingerprint_is_not_overwritten() {
     assert_eq!(outcome.conflicts, vec![("example.org".to_owned(), 22)]);
     assert_eq!(store.known_host("example.org", 22).unwrap().as_deref(), Some("SHA256:old"));
     assert_eq!(store.known_host("fresh.org", 22).unwrap().as_deref(), Some("SHA256:fresh"));
+}
+
+/// A server new to SSHCraft takes every key of the file (one per algorithm); a server it knows
+/// takes none it does not know.
+#[test]
+fn a_new_server_takes_all_its_keys() {
+    let store = Store::open_in_memory().unwrap();
+    store.set_known_host("known.org", 22, "SHA256:k").unwrap();
+    let (a, b) = (ed25519(), ed25519());
+    let text = format!("new.org {}\nnew.org {}\nknown.org {}\n", public_line(&a), public_line(&b), public_line(&a));
+    let outcome = knownhosts::apply(&store, &knownhosts::parse(&text).entries).unwrap();
+    assert_eq!(outcome.added, 2);
+    assert_eq!(outcome.conflicts, vec![("known.org".to_owned(), 22)]);
+    assert_eq!(store.host_keys("new.org", 22).unwrap().len(), 2);
+    assert_eq!(store.host_keys("known.org", 22).unwrap().len(), 1);
+}
+
+#[test]
+fn export_writes_known_hosts_lines() {
+    let store = Store::open_in_memory().unwrap();
+    let (a, b) = (ed25519(), ed25519());
+    let text = format!("a.org {}\n[b.org]:2222 {}\n", public_line(&a), public_line(&b));
+    knownhosts::apply(&store, &knownhosts::parse(&text).entries).unwrap();
+    store.set_known_host("old.org", 22, "SHA256:only").unwrap();
+    let (written, skipped) = knownhosts::export(&store.all_host_keys().unwrap());
+    assert_eq!(skipped, 1, "a key known only by its fingerprint cannot be written");
+    assert!(written.contains("[b.org]:2222 ssh-ed25519 "), "{written}");
+    // Reading it back gives the same keys.
+    let again = knownhosts::parse(&written);
+    let mut fps: Vec<String> = again.entries.iter().map(|e| e.fingerprint.clone()).collect();
+    fps.sort();
+    let mut want = vec![fingerprint(&a), fingerprint(&b)];
+    want.sort();
+    assert_eq!(fps, want);
+}
+
+#[test]
+fn export_skips_values_that_would_break_a_line() {
+    let key = sshcraft_store::store::HostKey {
+        address: "evil.org\nother.org".into(),
+        port: 22,
+        algorithm: Some("ssh-ed25519".into()),
+        public_key: Some("AAAA".into()),
+        fingerprint: "SHA256:x".into(),
+        added_at: 0,
+    };
+    assert_eq!(knownhosts::export(&[key]), (String::new(), 1));
 }
 
 #[test]

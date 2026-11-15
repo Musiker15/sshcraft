@@ -420,3 +420,36 @@ async fn a_session_opened_for_a_gone_connection_is_closed() {
     session.own_agent_session(gone, id, host);
     assert_eq!(session.unacknowledged(id), None, "the session is closed");
 }
+
+/// Host keys are listed, removed one by one and written as a `known_hosts` file; none of it is
+/// open to agents (a removed key makes the next connection ask again).
+#[tokio::test]
+async fn host_keys_are_listed_removed_and_exported() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let key = sshcraft_store::store::HostKey {
+        address: "a.org".into(),
+        port: 2222,
+        algorithm: Some("ssh-ed25519".into()),
+        public_key: Some("AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl".into()),
+        fingerprint: "SHA256:x".into(),
+        added_at: 1,
+    };
+    session.store().add_host_key(&key).unwrap();
+    session.store().set_known_host("b.org", 22, "SHA256:y").unwrap();
+    let all = session.execute(Caller::User, "hostkey.list", Value::Null).await.unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    let one = session.execute(Caller::User, "hostkey.list", json!({ "address": "a.org" })).await.unwrap();
+    assert_eq!(one[0]["fingerprint"], "SHA256:x");
+    let path = dir.path().join("known_hosts");
+    let out = session.execute(Caller::User, "hostkey.export", json!({ "path": path.to_string_lossy() })).await.unwrap();
+    assert_eq!(out["skipped"], 1);
+    assert!(std::fs::read_to_string(&path).unwrap().starts_with("[a.org]:2222 ssh-ed25519 AAAA"));
+    for id in ["hostkey.list", "hostkey.remove", "hostkey.export"] {
+        let r = session.execute(agent(), id, json!({ "address": "a.org", "port": 2222, "fingerprint": "SHA256:x", "path": "x" })).await;
+        assert!(r.is_err(), "{id} must not be open to agents");
+    }
+    session.execute(Caller::User, "hostkey.remove", json!({ "address": "a.org", "port": 2222, "fingerprint": "SHA256:x" })).await.unwrap();
+    assert!(session.store().host_keys("a.org", 2222).unwrap().is_empty());
+    assert!(session.execute(Caller::User, "hostkey.remove", json!({ "address": "a.org", "port": 2222, "fingerprint": "SHA256:x" })).await.is_err());
+}

@@ -115,3 +115,16 @@ fn an_identity_uses_a_key() {
     assert_eq!(identity.username.as_deref(), Some("root"));
     assert!(identity.key.as_ref().is_some_and(|k| k.to_string().contains(&key)), "{:?}", identity.key);
 }
+
+#[test]
+fn the_keys_page_lists_known_hosts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    sshcraft_engine::testing::set_known_host(&session, "known.example", 2222, "SHA256:abc");
+    h.state_mut().ui.page = Page::Keys;
+    until(&mut h, "the known hosts", |app| app.data.host_keys.as_ref().is_some_and(|k| k.len() == 1));
+    h.get_by_label("known.example:2222");
+    h.get_by_label("Remove").click();
+    until(&mut h, "the removed key", |app| app.data.host_keys.as_ref().is_some_and(Vec::is_empty));
+    assert!(sshcraft_engine::testing::known_host(&session, "known.example", 2222).is_none());
+}

@@ -12,12 +12,42 @@ pub enum HostKeyStatus {
     Mismatch { expected: String },
 }
 
-pub fn check_host_key(known: Option<&str>, presented: &str) -> HostKeyStatus {
-    match known {
-        None => HostKeyStatus::Unknown,
-        Some(k) if k == presented => HostKeyStatus::Trusted,
-        Some(k) => HostKeyStatus::Mismatch { expected: k.to_owned() },
+/// Checks a presented fingerprint against the ones known for the address. A server may have
+/// several keys (one per algorithm); any of them is trusted. A key beside known ones is a
+/// mismatch, not a new key: someone else may be answering.
+pub fn check_host_key(known: &[String], presented: &str) -> HostKeyStatus {
+    if known.is_empty() {
+        HostKeyStatus::Unknown
+    } else if known.iter().any(|k| k == presented) {
+        HostKeyStatus::Trusted
+    } else {
+        HostKeyStatus::Mismatch { expected: known.join(", ") }
     }
+}
+
+/// The most host keys taken from one announcement (`UpdateHostKeys`).
+pub const MAX_ANNOUNCED_KEYS: usize = 16;
+
+/// What an `UpdateHostKeys` announcement changes: fingerprints to add (after the server proved
+/// it holds them) and fingerprints to drop.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KeyUpdate {
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
+}
+
+/// Plans an `UpdateHostKeys` announcement the way OpenSSH does: only when the key this
+/// connection was verified with is among the announced ones (else the announcement says
+/// nothing about this server), new keys are added and keys no longer announced are dropped.
+/// `None` when nothing changes.
+pub fn plan_key_update(known: &[String], announced: &[String], used: &str) -> Option<KeyUpdate> {
+    if announced.len() > MAX_ANNOUNCED_KEYS || !announced.iter().any(|a| a == used) || !known.iter().any(|k| k == used) {
+        return None;
+    }
+    let mut add: Vec<String> = announced.iter().filter(|a| !known.contains(a)).cloned().collect();
+    add.dedup();
+    let remove: Vec<String> = known.iter().filter(|k| !announced.contains(k)).cloned().collect();
+    (!add.is_empty() || !remove.is_empty()).then_some(KeyUpdate { add, remove })
 }
 
 /// Why a session ended.
@@ -57,19 +87,56 @@ pub fn next_reconnect_delay(reason: &Disconnect, attempt: u32, limit: Option<u32
 mod tests {
     use super::*;
 
+    fn fps(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
     #[test]
     fn unknown_when_nothing_stored() {
-        assert_eq!(check_host_key(None, "SHA256:a"), HostKeyStatus::Unknown);
+        assert_eq!(check_host_key(&[], "SHA256:a"), HostKeyStatus::Unknown);
     }
 
     #[test]
     fn trusted_when_equal() {
-        assert_eq!(check_host_key(Some("SHA256:a"), "SHA256:a"), HostKeyStatus::Trusted);
+        assert_eq!(check_host_key(&fps(&["SHA256:a"]), "SHA256:a"), HostKeyStatus::Trusted);
     }
 
     #[test]
     fn mismatch_when_different() {
-        assert_eq!(check_host_key(Some("SHA256:a"), "SHA256:b"), HostKeyStatus::Mismatch { expected: "SHA256:a".into() });
+        assert_eq!(check_host_key(&fps(&["SHA256:a"]), "SHA256:b"), HostKeyStatus::Mismatch { expected: "SHA256:a".into() });
+    }
+
+    #[test]
+    fn a_matching_key_among_several_is_trusted() {
+        assert_eq!(check_host_key(&fps(&["SHA256:rsa", "SHA256:ed"]), "SHA256:ed"), HostKeyStatus::Trusted);
+    }
+
+    #[test]
+    fn an_unknown_key_beside_known_ones_is_a_mismatch() {
+        assert!(matches!(check_host_key(&fps(&["SHA256:rsa", "SHA256:ed"]), "SHA256:new"), HostKeyStatus::Mismatch { .. }));
+    }
+
+    #[test]
+    fn an_announcement_adds_new_keys_and_drops_old_ones() {
+        let plan = plan_key_update(&fps(&["SHA256:ed", "SHA256:old"]), &fps(&["SHA256:ed", "SHA256:new"]), "SHA256:ed");
+        assert_eq!(plan, Some(KeyUpdate { add: fps(&["SHA256:new"]), remove: fps(&["SHA256:old"]) }));
+    }
+
+    #[test]
+    fn an_announcement_without_the_used_key_changes_nothing() {
+        assert_eq!(plan_key_update(&fps(&["SHA256:ed"]), &fps(&["SHA256:new"]), "SHA256:ed"), None);
+        assert_eq!(plan_key_update(&fps(&["SHA256:x"]), &fps(&["SHA256:ed"]), "SHA256:ed"), None, "the used key must be a known one");
+    }
+
+    #[test]
+    fn the_same_keys_change_nothing() {
+        assert_eq!(plan_key_update(&fps(&["SHA256:ed"]), &fps(&["SHA256:ed"]), "SHA256:ed"), None);
+    }
+
+    #[test]
+    fn too_many_announced_keys_change_nothing() {
+        let many: Vec<String> = (0..=MAX_ANNOUNCED_KEYS).map(|i| format!("SHA256:{i}")).collect();
+        assert_eq!(plan_key_update(&fps(&["SHA256:0"]), &many, "SHA256:0"), None);
     }
 
     #[test]

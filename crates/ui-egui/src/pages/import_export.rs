@@ -113,6 +113,10 @@ pub enum DialogFor {
     LogExport {
         id: String,
     },
+    /// A `known_hosts` file to read host keys from.
+    KnownHostsImport,
+    /// Where to write the known host keys.
+    KnownHostsExport,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +156,7 @@ pub fn take_dialog_answers(app: &mut SshcraftApp) {
         };
         let Some(path) = path else { continue };
         match what {
+            DialogFor::KnownHostsImport | DialogFor::KnownHostsExport => crate::pages::known_hosts::dialog_answer(app, &what, path),
             DialogFor::ImportSource => {
                 if let Some(import) = app.ui.import.as_mut() {
                     import.path = Some(path);

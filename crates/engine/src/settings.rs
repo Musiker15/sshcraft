@@ -136,12 +136,21 @@ pub enum HostView {
     List,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct General {
     pub language: LanguageSetting,
     /// The desktop draws the title bar instead of the app's own bar; read when the app starts.
     pub system_title_bar: bool,
+    /// Keep the host keys a server announces after sign-in (OpenSSH `UpdateHostKeys`): new
+    /// ones once the server proved it holds them, and drop the ones it no longer has.
+    pub update_host_keys: bool,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
