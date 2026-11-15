@@ -157,7 +157,7 @@ mod in_the_window {
             h.run_steps(1);
         }
         // The test shell echoes Enter as a carriage return: a clean screen shows what follows.
-        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"\x1b[2J\x1b[H$ ");
+        fresh_prompt(&mut h, id);
         typed(&mut h, "ec");
         until(&mut h, "the suggestion", |app| app.terminals.get(&id).is_some_and(|t| t.suggestions().iter().any(|s| s.label == "echo kept-line")));
         assert!(!screen(h.state(), id).contains("echo kept-line"), "only what was typed so far");
@@ -202,9 +202,21 @@ mod in_the_window {
         }
     }
 
+    /// A clean screen with the prompt `$ `, once the shell's echo of the last Enter (a carriage
+    /// return) is there: arriving later, it would put the cursor before the prompt.
+    fn fresh_prompt(h: &mut H, id: SessionId) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while h.state().terminals.get(&id).is_some_and(|t| t.term.screen().cursor.col != 0) {
+            assert!(Instant::now() < deadline, "the echo of Enter did not come");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"\x1b[2J\x1b[H$ ");
+    }
+
     /// Types `ec` on a clean prompt and lets the suggestions come.
     fn type_ec(h: &mut H, id: SessionId) {
-        h.state_mut().terminals.get_mut(&id).unwrap().term.feed(b"\x1b[2J\x1b[H$ ");
+        fresh_prompt(h, id);
         typed(h, "ec");
         for _ in 0..30 {
             std::thread::sleep(Duration::from_millis(20));
