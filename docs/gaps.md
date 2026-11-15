@@ -12,5 +12,5 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 3 | The packages are built only by the release workflow, which has not run yet; the installers, the CLI on `PATH`, the Flatpak sandbox and the native macOS menu are untried by hand | V1 |
 | 4 | The MSI stops while the Tauri version is installed and says to uninstall it, instead of removing it itself (spec section 2) | V1 |
 | 4a | FreeBSD: the last output of a local shell that ends at once (a `sh -c` command) can be lost; an interactive shell is not affected | later |
-| 6 | No trash, no versions, no backup file | F2 |
+| 6 | The app lock needs Windows Hello: Touch ID on macOS (through a safe wrapper such as `robius-authentication`) and a way on Linux and FreeBSD are not there yet | later, needs a Mac to try |
 | 7 | No SFTP | S1 |

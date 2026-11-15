@@ -11,6 +11,9 @@ with other clients, with sources, is the German
 | Connections: key, password, keyboard-interactive, identities, jump hosts, proxies, agent forwarding, environment | yes | yes |
 | ProxyCommand, reconnect with backoff after sleep and network changes | no ProxyCommand (ignored on import), reconnect | yes, without a shell and only after it was allowed on the device |
 | `~/.ssh/config` kept in step (with `Include`) and written back; host key management with `UpdateHostKeys` | one-time import | yes |
+| Passwords from a password manager, TOTP | no | yes (Proton Pass, 1Password, Bitwarden, KeePassXC) |
+| Trash, earlier versions, encrypted backup file | no | yes |
+| App lock | yes (PIN, biometrics) | Windows Hello; Touch ID later |
 | Local terminal and serial | yes | yes |
 | Terminal, tabs, command palette, new tab page, menus | yes | yes |
 | Workspaces: split, focus, broadcast, templates | yes | yes |

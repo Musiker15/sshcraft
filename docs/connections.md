@@ -13,8 +13,10 @@ A host signs in with what it has, in this order:
 1. its **key** (`publickey`), from the vault or from the SSH agent (Proton Pass);
 2. its **stored password** (`password`), if the server offers that method;
 3. **keyboard-interactive**, if offered. A stored password answers at most one round, and only a
-   round with exactly one hidden question. Every other round (a visible question, a code, several
-   questions at once) goes to you in a dialog;
+   round with exactly one hidden question that does not ask for a code. A question for a
+   one-time code (`Verification code:`, `Token:`, `OTP`) is answered once by the host's TOTP
+   secret, if it has one, and never by the password. Every other round (a visible question, a
+   wrong code, several questions at once) goes to you in a dialog;
 4. with no stored password and a server that only offers `password`, SSHCraft asks you once.
 
 A server that accepts the key or the password but wants a second factor (partial success) gets
@@ -33,6 +35,28 @@ Passwords are sealed in the vault like keys (see [security.md](security.md)). Th
 whether one is stored, with *Change* and *Remove*; no part of the app ever shows a stored
 password again. Before the first key or password from the vault is used, Windows Hello asks once
 per run.
+
+### Passwords from a password manager
+
+Instead of storing a password, a host can name where it is: *From a password manager* in the
+host form, with Proton Pass (`pass://vault/item/password`), 1Password (`op://vault/item/password`),
+Bitwarden (the item's id, with an unlocked `bw` session) or KeePassXC
+(`<database file>#<entry path>`; its password is asked once per run and kept only in memory).
+When connecting, SSHCraft runs the manager's own program with an argument list and takes what
+it prints; nothing is kept. A reference that could pass an option to the program is refused.
+
+A reference is used for a host's address only after it was allowed on this device: entering it
+in the form allows it. One that came through sync or a share, or whose host now points
+elsewhere, is shown first (*Send a password from your password manager?*), because it could
+otherwise send another of your passwords to a server someone else chose. Copies in a share never
+carry a reference.
+
+### One-time codes
+
+*One-time codes* in the host form takes a TOTP secret, as an authenticator app gets it (Base32,
+or the `otpauth://` link of the QR code). It is sealed in the vault like a password, syncs and
+moves with its host under the same rules, and answers a server's question for a code once per
+connection (RFC 6238: SHA-1, 30 seconds, 6 digits).
 
 ## Identities
 
