@@ -68,7 +68,19 @@ impl Token {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(LinkError::Io(format!("{}: {e}", path.display()))),
         }
-        Self::load_or_create(path)
+        // Made new, never a file that appeared in between: that would be someone else's token.
+        Self::create(path)
+    }
+
+    /// A fresh token in a new file at `path`; an error when a file is there.
+    fn create(path: &Path) -> Result<Self, LinkError> {
+        let token = Self::generate();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| LinkError::Io(format!("{}: {e}", dir.display())))?;
+        }
+        let mut file = private_file(path).map_err(|e| LinkError::Io(format!("{}: {e}", path.display())))?;
+        file.write_all(token.hex().as_bytes()).map_err(|e| LinkError::Io(format!("{}: {e}", path.display())))?;
+        Ok(token)
     }
 
     /// The token in `path`, made (with a fresh token, only the owner may read it) when the file
@@ -76,15 +88,7 @@ impl Token {
     pub fn load_or_create(path: &Path) -> Result<Self, LinkError> {
         match std::fs::read_to_string(path) {
             Ok(text) => Self::parse(&text).ok_or_else(|| LinkError::Io(format!("{} holds no token; delete it to get a new one", path.display()))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let token = Self::generate();
-                if let Some(dir) = path.parent() {
-                    std::fs::create_dir_all(dir).map_err(|e| LinkError::Io(format!("{}: {e}", dir.display())))?;
-                }
-                let mut file = private_file(path).map_err(|e| LinkError::Io(format!("{}: {e}", path.display())))?;
-                file.write_all(token.hex().as_bytes()).map_err(|e| LinkError::Io(format!("{}: {e}", path.display())))?;
-                Ok(token)
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::create(path),
             Err(e) => Err(LinkError::Io(format!("{}: {e}", path.display()))),
         }
     }

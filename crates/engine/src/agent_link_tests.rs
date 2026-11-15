@@ -178,3 +178,19 @@ async fn an_agent_cannot_flood_the_log_through_the_link() {
     assert!(log.len() >= 900, "the newest stay: {}", log.len());
     assert_eq!(c.call("ping", json!({})).await.unwrap(), json!("pong"), "the app still answers");
 }
+
+/// A token per start (AGENTS.md): one read before is no good after the link starts again.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_start_has_a_new_token() {
+    let w = world().await;
+    let file = ConnectionFile::read(w.link.path()).unwrap();
+    let old = Token::load(&file.token_file).unwrap();
+    w.session.stop_agent_link();
+    w.session.start_agent_link(w.link.path(), 0).await.unwrap();
+    let file = ConnectionFile::read(w.link.path()).unwrap();
+    let new = Token::load(&file.token_file).unwrap();
+    assert_ne!(old.hex(), new.hex());
+    let addr = SocketAddr::from(([127, 0, 0, 1], file.port));
+    assert!(Client::connect(addr, &old).await.is_err(), "the old token is no good");
+    assert!(Client::connect(addr, &new).await.is_ok());
+}

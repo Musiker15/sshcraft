@@ -173,7 +173,7 @@ switched on is refused. See [connections.md](connections.md).
 
 - Agents reach SSHCraft only over loopback (`127.0.0.1`), and only while the user allows agent
   control (off on a fresh install; with the suite's AI-MCP flag the ArtCraft Launcher must allow
-  it too). The token stays in a file only the user can read; every connection signs in by
+  it too). The token is new at every start of the link and stays in a file only the user can read; every connection signs in by
   challenge, so the token never crosses the wire and a program on a stale port learns nothing.
   The agent link runs engine commands only: no window input, no screenshots, no journal.
 - The control channel (`--control`) is a developer tool, never on by default: whoever has its

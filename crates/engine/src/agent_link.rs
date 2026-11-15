@@ -134,15 +134,16 @@ impl Handler for LinkHandler {
 }
 
 impl Session {
-    /// Starts serving agents on `127.0.0.1:port` (0: any free port), with the token in
-    /// `dir/agent-control.token` (made when missing) and the port in `dir/agent-connection.json`.
+    /// Starts serving agents on `127.0.0.1:port` (0: any free port), with a fresh token in
+    /// `dir/agent-control.token` and the port in `dir/agent-connection.json`.
     /// Running already, it stays as it is.
     pub async fn start_agent_link(&self, dir: &Path, port: u16) -> Result<AgentLinkStatus, EngineError> {
         if self.agent_link_status().port.is_some() {
             return Ok(self.agent_link_status());
         }
         let token_file = dir.join(TOKEN_FILE);
-        let token = Token::load_or_create(&token_file).map_err(|e| EngineError::Settings(e.to_string()))?;
+        // A token for this start only (AGENTS.md): one read earlier is no good now.
+        let token = Token::create_fresh(&token_file).map_err(|e| EngineError::Settings(e.to_string()))?;
         let handler = Arc::new(LinkHandler { engine: Arc::downgrade(&self.0), agents: Mutex::new(HashMap::new()) });
         let server = Server::bind(port, token, handler.clone()).await.map_err(|e| EngineError::Settings(e.to_string()))?;
         let file = ConnectionFile::new(server.port(), token_file, env!("CARGO_PKG_VERSION").to_string());

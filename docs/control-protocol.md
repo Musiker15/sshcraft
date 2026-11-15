@@ -46,7 +46,7 @@ itself.
 ## The agent link
 
 While agents may connect, the app keeps its token in `agent-control.token` in its settings
-folder (made once, only the user may read it: mode 0600 on Unix, the user's profile on Windows)
+folder (a fresh one at every start of the link, only the user may read it: mode 0600 on Unix, the user's profile on Windows)
 and publishes the connection beside it in `agent-connection.json`:
 
 ```json
