@@ -70,3 +70,21 @@ fn data_follows_data_changed() {
         h.run_steps(1);
     }
 }
+
+#[test]
+fn the_theme_follows_the_setting() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.run_steps(3);
+    let mut settings = session.runtime().block_on(session.execute(Caller::User, "settings.get", json!({}))).unwrap();
+    settings["appearance"]["app_theme"] = json!("light");
+    session.runtime().block_on(session.execute(Caller::User, "settings.save", json!({ "settings": settings }))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.ctx.global_style().visuals.dark_mode {
+        assert!(Instant::now() < deadline, "the light theme never came");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    let tokens = sshcraft_ui_egui::theme::Tokens::get(&h.ctx);
+    assert_eq!(tokens, sshcraft_ui_egui::theme::Tokens::light());
+}

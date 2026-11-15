@@ -79,6 +79,11 @@ impl TermPalette {
         }
     }
 
+    /// The palette that goes with the app's dark or light theme.
+    pub fn for_theme(dark: bool) -> Self {
+        if dark { Self::dark() } else { Self::light() }
+    }
+
     /// Index 0 to 255: the sixteen colours, the 6×6×6 cube, the 24 greys.
     pub fn indexed(&self, index: u8) -> Color32 {
         match index {
