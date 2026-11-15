@@ -16,6 +16,11 @@ pub enum Icon {
     Search,
     Close,
     Warning,
+    Snippet,
+    Forward,
+    Log,
+    Broadcast,
+    Record,
 }
 
 /// Draws `icon` into `rect` (square works best) with lines of `color`.
@@ -80,6 +85,48 @@ pub fn draw(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             painter.add(egui::Shape::closed_line(vec![p(0.0, -0.8), p(0.85, 0.7), p(-0.85, 0.7)], stroke));
             line(p(0.0, -0.3), p(0.0, 0.2));
             painter.circle_filled(p(0.0, 0.45), s * 0.05, color);
+        }
+        Icon::Snippet => {
+            // A page with a prompt on it.
+            painter.rect_stroke(Rect::from_min_max(p(-0.7, -0.8), p(0.7, 0.8)), 2.0, stroke, egui::StrokeKind::Inside);
+            line(p(-0.4, -0.35), p(-0.1, -0.1));
+            line(p(-0.1, -0.1), p(-0.4, 0.15));
+            line(p(0.05, 0.3), p(0.4, 0.3));
+        }
+        Icon::Forward => {
+            // Two arrows, one each way.
+            line(p(-0.8, -0.35), p(0.8, -0.35));
+            line(p(0.5, -0.6), p(0.8, -0.35));
+            line(p(0.5, -0.1), p(0.8, -0.35));
+            line(p(0.8, 0.35), p(-0.8, 0.35));
+            line(p(-0.5, 0.1), p(-0.8, 0.35));
+            line(p(-0.5, 0.6), p(-0.8, 0.35));
+        }
+        Icon::Log => {
+            // Lines of text with a fold.
+            for y in [-0.45, -0.1, 0.25, 0.6] {
+                line(p(-0.7, y), p(0.7, y));
+            }
+        }
+        Icon::Broadcast => {
+            // A mast with waves.
+            line(p(0.0, -0.1), p(0.0, 0.85));
+            painter.circle_filled(p(0.0, -0.2), s * 0.08, color);
+            for r in [0.35, 0.65] {
+                let arc = |sign: f32| {
+                    (0..=8)
+                        .map(|i| {
+                            let a = std::f32::consts::FRAC_PI_4 * (i as f32 / 8.0 * 2.0 - 1.0);
+                            p(sign * r * a.cos(), -0.2 + r * a.sin())
+                        })
+                        .collect::<Vec<_>>()
+                };
+                painter.add(egui::Shape::line(arc(1.0), stroke));
+                painter.add(egui::Shape::line(arc(-1.0), stroke));
+            }
+        }
+        Icon::Record => {
+            painter.circle_filled(c, s * 0.3, color);
         }
     }
 }

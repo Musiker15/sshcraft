@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 10] = [
+static COMMANDS: [UiCommand; 13] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
@@ -52,6 +52,9 @@ static COMMANDS: [UiCommand; 10] = [
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.previous", "prevTab", "Previous tab", &["Ctrl+Shift+Tab", "Ctrl+PageUp"]) },
     cmd("ui.page.hosts", "hostsPage", "Hosts", &[]),
     cmd("ui.page.keys", "keysPage", "Keys", &[]),
+    cmd("ui.page.snippets", "snippetsPage", "Snippets", &[]),
+    cmd("ui.page.forwarding", "forwardingPage", "Port forwarding", &[]),
+    cmd("ui.page.logs", "logsPage", "Logs", &[]),
     cmd("ui.page.settings", "settingsPage", "Settings", &[]),
     UiCommand {
         scope: Scope::Terminal,
@@ -84,6 +87,9 @@ pub fn run(app: &mut SshcraftApp, id: &str) {
         "ui.tab.previous" => app.cycle_tab(-1),
         "ui.page.hosts" => app.ui.page = Page::Hosts,
         "ui.page.keys" => app.ui.page = Page::Keys,
+        "ui.page.snippets" => app.ui.page = Page::Snippets,
+        "ui.page.forwarding" => app.ui.page = Page::Forwarding,
+        "ui.page.logs" => app.ui.page = Page::Logs,
         "ui.page.settings" => app.ui.page = Page::Settings,
         // The terminal tab handles these itself (it has the selection and the clipboard).
         _ => app.ui.pending.push(command.id),

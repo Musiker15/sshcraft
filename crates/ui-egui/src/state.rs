@@ -11,6 +11,9 @@ pub enum Page {
     #[default]
     Hosts,
     Keys,
+    Snippets,
+    Forwarding,
+    Logs,
     Settings,
     /// The tab at this index of [`UiState::tabs`].
     Tab(usize),

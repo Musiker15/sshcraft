@@ -29,9 +29,14 @@ fn sidebar_entry(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> bool {
 
 fn sidebar(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(10.0);
-    for (page, icon, label) in
-        [(Page::Hosts, Icon::Host, tr("Hosts")), (Page::Keys, Icon::Key, tr("Keys")), (Page::Settings, Icon::Settings, tr("Settings"))]
-    {
+    for (page, icon, label) in [
+        (Page::Hosts, Icon::Host, tr("Hosts")),
+        (Page::Keys, Icon::Key, tr("Keys")),
+        (Page::Snippets, Icon::Snippet, tr("Snippets")),
+        (Page::Forwarding, Icon::Forward, tr("Port forwarding")),
+        (Page::Logs, Icon::Log, tr("Logs")),
+        (Page::Settings, Icon::Settings, tr("Settings")),
+    ] {
         if sidebar_entry(ui, icon, label, app.ui.page == page) {
             app.ui.page = page;
         }
@@ -144,6 +149,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     egui::CentralPanel::default().frame(egui::Frame::new().fill(tokens.bg).inner_margin(12.0)).show(ui, |ui| match app.ui.page {
         Page::Hosts => crate::pages::hosts::show(app, ui),
         Page::Keys => crate::pages::keys::show(app, ui),
+        Page::Snippets => crate::pages::snippets::show(app, ui),
+        Page::Forwarding => crate::pages::forwarding::show(app, ui),
+        Page::Logs => crate::pages::logs::show(app, ui),
         Page::Settings => crate::pages::settings::show(app, ui),
         Page::Tab(i) => match app.ui.tabs.get(i).map(|t| t.kind.clone()) {
             Some(TabKind::New) | None => new_tab_page(app, ui),
