@@ -29,6 +29,7 @@ bitflags = { workspace = true }
 sys-locale = { workspace = true }
 uuid = { workspace = true }
 data-encoding = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
 tokio = { workspace = true }
 egui_kittest = { workspace = true, optional = true }
 

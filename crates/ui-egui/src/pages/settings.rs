@@ -162,6 +162,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     let tokens = Tokens::get(ui.ctx());
     let mut t = app.data.settings.terminal.clone();
+    let mut logs = app.data.settings.logs.clone();
     let mut local_shell: Option<Value> = t.local_shell.as_ref().and_then(|s| serde_json::to_value(s).ok());
     let shells = app.ui.settings.shells.clone().unwrap_or_default();
     egui::Grid::new("sshcraft-terminal").num_columns(2).min_col_width(160.0).spacing([16.0, 10.0]).show(ui, |ui| {
@@ -197,6 +198,16 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Suggestions"));
         ui.checkbox(&mut t.autocomplete, tr("Suggest while typing"));
         ui.end_row();
+        ui.label(tr("Session logs"));
+        ui.vertical(|ui| {
+            ui.checkbox(&mut logs.session_logs, tr("Record sessions unless a host or group says otherwise"));
+            egui::ComboBox::from_id_salt("sshcraft-log-retention").selected_text(retention(logs.log_retention_days)).show_ui(ui, |ui| {
+                for days in sshcraft_engine::settings::LOG_RETENTION_DAYS {
+                    ui.selectable_value(&mut logs.log_retention_days, days, retention(days));
+                }
+            });
+        });
+        ui.end_row();
         ui.label(tr("Clipboard"));
         let mut write = t.clipboard_osc52 == Osc52::Write;
         ui.checkbox(&mut write, tr("Programs may write the clipboard (OSC 52), after asking"));
@@ -229,7 +240,15 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     if app.data.settings.terminal.history && !t.history {
         app.run_reported("history.clear", json!({}));
     }
-    save(app, |s| s.terminal = t);
+    save(app, |s| {
+        s.terminal = t;
+        s.logs = logs;
+    });
+}
+
+/// How long finished logs are kept, in words.
+fn retention(days: u32) -> String {
+    if days == 0 { tr("Keep logs until deleted").to_string() } else { trf("Keep logs {days} days", &[("days", &days.to_string())]) }
 }
 
 fn bind_error(text: &str, error: &BindError) -> String {

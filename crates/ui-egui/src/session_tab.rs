@@ -60,6 +60,8 @@ pub struct SessionTab {
     suggested_for: Option<String>,
     paths: crate::completion::PathCache,
     path_pending: Option<String>,
+    /// The session records its output (asked once it connected).
+    recording: Option<bool>,
     /// The bell rang, or the cursor's line asks for a secret or a yes/no.
     waiting: bool,
 }
@@ -263,6 +265,7 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 suggested_for: None,
                 paths: crate::completion::PathCache::default(),
                 path_pending: None,
+                recording: None,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -355,6 +358,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     let mut more = false;
     let mut starts = Vec::new();
+    let mut ask_recording = Vec::new();
     let ids: Vec<SessionId> = app.terminals.keys().copied().collect();
     for id in ids {
         let Some(tab) = app.terminals.get_mut(&id) else { continue };
@@ -369,6 +373,10 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                     && let Some(line) = tab.start.take()
                 {
                     starts.push((id, line));
+                }
+                if matches!(status, SessionStatus::Connected { .. }) && tab.recording.is_none() {
+                    tab.recording = Some(false);
+                    ask_recording.push(id);
                 }
                 tab.status = Some(status);
             }
@@ -420,6 +428,17 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     for (id, bytes) in starts {
         send(app, id, &bytes);
+    }
+    for id in ask_recording {
+        app.runner.run(
+            "session.recording",
+            json!({ "id": id }),
+            Box::new(move |app, result| {
+                if let (Ok(Value::Bool(on)), Some(tab)) = (result, app.terminals.get_mut(&id)) {
+                    tab.recording = Some(on);
+                }
+            }),
+        );
     }
     // More output than one frame takes: the next frame continues. New output wakes the window
     // through the engine's terminal waker.
@@ -581,6 +600,21 @@ fn app_shown_changed(shown: &mut Option<SessionId>, id: SessionId) -> bool {
 }
 
 /// The page of a session tab: the terminal and its status line.
+/// Sets a bookmark named with the time in the recording of the focused pane (Ctrl+Shift+L).
+pub fn bookmark(app: &mut SshcraftApp) {
+    let Page::Tab(i) = app.ui.page else { return };
+    let Some(PaneSlot::Session { session }) = app.ui.tabs.get(i).and_then(|t| t.panes.focused_slot()) else { return };
+    let name = chrono::Local::now().format("%H:%M:%S").to_string();
+    app.runner.run(
+        "session.bookmark",
+        json!({ "id": session, "text": name }),
+        Box::new(|app, result| match result {
+            Ok(_) => app.toasts.info(tr("Bookmark added.")),
+            Err(e) => app.toasts.error(&e.to_string()),
+        }),
+    );
+}
+
 /// The text of the cursor's line: the prompt a new line is typed after.
 fn cursor_line(term: &Terminal) -> String {
     let screen = term.screen();
@@ -799,6 +833,14 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     if focused {
         update_suggestions(app, id);
         draw_suggestions(app, ui, id, response.response.rect, &font);
+    }
+    // "Rec" in the lower right corner while the output is recorded.
+    if app.terminals.get(&id).is_some_and(|t| t.recording == Some(true)) {
+        let tokens = Tokens::get(ui.ctx());
+        let rect = response.response.rect;
+        let at = egui::Rect::from_min_size(rect.right_bottom() - egui::vec2(44.0, 20.0), egui::vec2(40.0, 16.0));
+        let mark = ui.put(at, egui::Label::new(egui::RichText::new(tr("Rec")).small().color(tokens.danger)));
+        mark.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr("Rec")));
     }
     if let Some(size) = response.resize
         && can_send

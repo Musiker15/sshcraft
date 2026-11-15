@@ -96,6 +96,8 @@ pub struct UiState {
     #[serde(skip)]
     pub shown_terminal: Option<sshcraft_engine::SessionId>,
     #[serde(skip)]
+    pub logs: crate::pages::logs::LogsView,
+    #[serde(skip)]
     pub snippet_form: Option<crate::pages::snippets::SnippetForm>,
     #[serde(skip)]
     pub snippet_run: Option<crate::pages::snippets::SnippetRun>,

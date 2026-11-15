@@ -30,6 +30,8 @@ pub struct SshcraftApp {
     urls: Vec<String>,
     /// Which dialogs are open and the command one waits for.
     pub forms: crate::forms::Forms,
+    /// The session log being played back.
+    pub log_viewer: Option<crate::log_viewer::LogViewer>,
     /// The shortcut settings the bindings were built from.
     bindings_from: Option<sshcraft_engine::settings::Shortcuts>,
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
@@ -61,6 +63,7 @@ impl SshcraftApp {
             term_font: None,
             urls: Vec::new(),
             forms: crate::forms::Forms::default(),
+            log_viewer: None,
             bindings_from: None,
             events,
             _runtime: None,
@@ -307,6 +310,11 @@ impl SshcraftApp {
         crate::pages::templates::show_dialog(self, &ctx);
         crate::pages::snippets::dialogs(self, &ctx);
         crate::prompts::show(self, &ctx);
+        crate::log_viewer::show(self, &ctx);
+        // The logs are fetched again on the next visit of their page.
+        if self.ui.page != Page::Logs {
+            self.ui.logs.fresh = false;
+        }
         // A shortcut recording ends when the user leaves the settings.
         if self.ui.page != Page::Settings {
             self.ui.settings.recording = None;

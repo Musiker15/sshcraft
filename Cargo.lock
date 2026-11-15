@@ -5832,6 +5832,7 @@ name = "sshcraft-ui-egui"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
+ "chrono",
  "craft-dialogs",
  "craft-keymap",
  "craft-ui",

@@ -20,7 +20,14 @@ bitflags! {
         const SETTINGS = 1 << 4;
         const TEMPLATES = 1 << 5;
         const SNIPPETS = 1 << 6;
-        const DATA = Self::HOSTS.bits() | Self::GROUPS.bits() | Self::KEYS.bits() | Self::IDENTITIES.bits() | Self::TEMPLATES.bits() | Self::SNIPPETS.bits();
+        const LOGS = 1 << 7;
+        const DATA = Self::HOSTS.bits()
+            | Self::GROUPS.bits()
+            | Self::KEYS.bits()
+            | Self::IDENTITIES.bits()
+            | Self::TEMPLATES.bits()
+            | Self::SNIPPETS.bits()
+            | Self::LOGS.bits();
     }
 }
 
@@ -90,6 +97,8 @@ pub struct Data {
     /// Workspace templates as `workspace.list` returns them.
     pub templates: Vec<Value>,
     pub snippets: Vec<SnippetRow>,
+    /// Session logs as `log.list` returns them.
+    pub logs: Vec<Value>,
     /// The last state of each forwarding rule that ran, as the engine reports it.
     pub forwards: std::collections::HashMap<sshcraft_model::forward::ForwardId, Value>,
     /// The states of running rules were asked for once.
@@ -146,6 +155,9 @@ pub fn refresh(app: &mut SshcraftApp) {
     }
     if due.contains(Refresh::KEYS) {
         fetch(app, Refresh::KEYS, "key.list", |d, v| d.keys = rows(v));
+    }
+    if due.contains(Refresh::LOGS) {
+        fetch(app, Refresh::LOGS, "log.list", |d, v| d.logs = rows(v));
     }
     if due.contains(Refresh::SNIPPETS) {
         fetch(app, Refresh::SNIPPETS, "snippet.list", |d, v| d.snippets = rows(v));

@@ -340,6 +340,40 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Run snippet" => "Snippet ausführen",
         "Clear" => "Leeren",
         "Snippets and history beside the terminal" => "Snippets und Verlauf neben dem Terminal",
+        // Session logs
+        "recording" => "nimmt auf",
+        "Deleted host" => "Gelöschter Host",
+        "A log still recording is not deleted." => "Ein Protokoll, das noch aufnimmt, wird nicht gelöscht.",
+        "All logs" => "Alle Protokolle",
+        "Local and serial" => "Lokal und seriell",
+        "Search in all logs" => "In allen Protokollen suchen",
+        "Delete selected" => "Auswahl löschen",
+        "Delete all shown" => "Alle gezeigten löschen",
+        "{count} hits" => "{count} Treffer",
+        "No session logs. Recording is off unless a host or the settings turn it on." => {
+            "Keine Sitzungsprotokolle. Aufgezeichnet wird nur, wenn ein Host oder die Einstellungen es einschalten."
+        }
+        "This device" => "Dieses Gerät",
+        "Sync server" => "Sync-Server",
+        "Export the log" => "Protokoll exportieren",
+        "Text" => "Text",
+        "Raw output" => "Rohe Ausgabe",
+        "Session log" => "Sitzungsprotokoll",
+        "Bookmark" => "Lesezeichen",
+        "Comment" => "Kommentar",
+        "This log is longer than 100 000 lines: its beginning is not shown, and marks are off." => {
+            "Dieses Protokoll hat mehr als 100 000 Zeilen: sein Anfang wird nicht gezeigt, und Marken sind aus."
+        }
+        "Add comment" => "Kommentar hinzufügen",
+        "Marks" => "Marken",
+        "Remove mark" => "Marke entfernen",
+        "Rec" => "Rec",
+        "Bookmark added." => "Lesezeichen gesetzt.",
+        "Bookmark in the session log" => "Lesezeichen im Sitzungsprotokoll",
+        "Session logs" => "Sitzungsprotokolle",
+        "Record sessions unless a host or group says otherwise" => "Sitzungen aufzeichnen, wenn Host oder Gruppe nichts anderes sagen",
+        "Keep logs until deleted" => "Protokolle behalten, bis sie gelöscht werden",
+        "Keep logs {days} days" => "Protokolle {days} Tage behalten",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."
