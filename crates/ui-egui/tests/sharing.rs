@@ -224,12 +224,16 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
     t.h.get_by_label("I compared the safety number with Bob").click();
     t.h.run_steps(2);
     t.h.get_by_label("Share").click();
+    // A background sync may note the share before its info and keep the strict rules (no keys)
+    // for a moment; the list is read once the engine knows the keys went along.
     let deadline = Instant::now() + Duration::from_secs(20);
-    while shares(&t).is_empty() {
-        assert!(Instant::now() < deadline, "no share");
+    while !shares(&t).iter().any(|s| s["with_keys"] == json!(true)) {
+        assert!(Instant::now() < deadline, "no share with keys");
         std::thread::sleep(Duration::from_millis(20));
         t.h.run_steps(1);
     }
+    // The share dialog closes when the window gets the answer, a few frames after the engine.
+    until(&mut t.h, "the share dialog to close", |app| app.ui.share.is_none());
     t.h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
     t.h.run_steps(2);
     // The "Shared." notice may lie over the section tabs: the section is chosen directly.

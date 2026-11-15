@@ -73,14 +73,29 @@ pub struct ServerClient {
     token: Option<Zeroizing<String>>,
 }
 
+/// Whether `host` (with an optional port) names this computer: `localhost`, `127.x.x.x` or `[::1]`.
+fn loopback(host: &str) -> bool {
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default()
+    } else {
+        host.rsplit_once(':').map_or(host, |(name, _)| name)
+    };
+    name == "localhost" || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
 impl ServerClient {
-    /// `origin` must be an `http://` or `https://` address; it is kept in normal form, which is
-    /// also what login signatures are made for.
+    /// `origin` must be an `https://` address, or `http://` on this computer (the API key and
+    /// the session token go with every request); it is kept in normal form, which is also what
+    /// login signatures are made for.
     pub fn new(origin: &str) -> Result<Self, SyncError> {
         let origin = normalize_origin(origin);
-        let host = origin.strip_prefix("https://").or_else(|| origin.strip_prefix("http://")).unwrap_or_default();
+        let plain = origin.strip_prefix("http://");
+        let host = origin.strip_prefix("https://").or(plain).unwrap_or_default();
         if host.is_empty() || host.contains(['/', '@', ' ']) {
             return Err(SyncError::BadOrigin);
+        }
+        if plain.is_some() && !loopback(host) {
+            return Err(SyncError::PlainHttp);
         }
         let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().map_err(|e| SyncError::Network(e.to_string()))?;
         Ok(Self { http, origin, api_key: None, token: None })

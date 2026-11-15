@@ -21,7 +21,9 @@ to* to change its place:
 
 ## Setting up a server
 
-In *Settings → Sync → Add server* there are two ways:
+In *Settings → Sync → Add server* there are two ways. The server address starts with
+`https://`; plain `http://` works only for a server on this computer (`localhost`, `127.0.0.1`,
+`[::1]`), because the API key and the sign-in travel with every request.
 
 - **New account.** Enter the server address (exactly the address the server was set up for),
   the API key from the operator, your name and email. The app creates the account key on this

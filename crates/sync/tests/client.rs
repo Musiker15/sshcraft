@@ -63,3 +63,15 @@ fn origin_must_be_http() {
     assert_eq!(client.origin(), "https://sync.example.org");
     assert_eq!(client.events_url(), "wss://sync.example.org/v1/events");
 }
+
+/// The API key and the session token travel in every request: plain http:// only where nothing
+/// crosses a network (this computer).
+#[test]
+fn plain_http_only_on_this_computer() {
+    for remote in ["http://sync.example.org", "http://192.168.1.20:8470", "http://localhost.example.org"] {
+        assert!(matches!(ServerClient::new(remote), Err(SyncError::PlainHttp)), "{remote}");
+    }
+    for local in ["http://127.0.0.1:8470", "http://localhost:8470", "http://[::1]:8470", "https://sync.example.org"] {
+        assert!(ServerClient::new(local).is_ok(), "{local}");
+    }
+}

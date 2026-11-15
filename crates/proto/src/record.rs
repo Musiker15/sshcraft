@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -67,8 +66,7 @@ impl SealedRecord {
     // record in memory reaches.
     #[allow(clippy::expect_used)]
     pub fn seal(header: RecordHeader, body: &[u8], key: &AreaKey, keys: &DeviceKeys) -> Self {
-        let mut nonce = [0u8; 24];
-        rand::rng().fill(&mut nonce[..]);
+        let nonce: [u8; 24] = rand::random();
         let ciphertext = cipher(key)
             .encrypt(&XNonce::from(nonce), Payload { msg: body, aad: &header.aad() })
             .expect("XChaCha20-Poly1305 encryption does not fail for in-memory buffers");
