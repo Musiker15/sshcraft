@@ -350,3 +350,10 @@ fn scrollback_is_clamped() {
     assert_eq!(with(|s| s.terminal.scrollback = 50_000).terminal.scrollback, 50_000);
     assert!(EngineSettings::default().appearance.ligatures, "ligatures on by default");
 }
+
+#[test]
+fn integrations_default_off() {
+    let fresh = EngineSettings::default();
+    assert!(!fresh.integrations.allow_agent_control, "agents are off until the user turns them on");
+    assert_eq!(fresh.integrations.agent_port, 0, "any free port");
+}

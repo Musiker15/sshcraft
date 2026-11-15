@@ -224,6 +224,16 @@ pub struct Serial {
     pub last: Option<SerialSettings>,
 }
 
+/// Agents and other programs reaching the running app.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Integrations {
+    /// AI agents may connect (through `sshcraft-cli` and MCP). Off until the user turns it on.
+    pub allow_agent_control: bool,
+    /// The loopback port agents connect on; 0 takes any free port.
+    pub agent_port: u16,
+}
+
 /// Everything in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -234,6 +244,7 @@ pub struct EngineSettings {
     pub shortcuts: Shortcuts,
     pub logs: Logs,
     pub serial: Serial,
+    pub integrations: Integrations,
 }
 
 impl Settings for EngineSettings {

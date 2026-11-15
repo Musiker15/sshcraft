@@ -7,6 +7,7 @@
 pub mod agent_sessions;
 pub mod caller;
 pub mod cmd;
+pub mod consent;
 pub mod error;
 pub mod events;
 pub mod forwards;

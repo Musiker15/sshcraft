@@ -65,7 +65,7 @@ unknown-registry = "deny"
 unknown-git = "deny"
 # The shared libraries of the Craft apps; Cargo.toml pins an immutable revision.
 # The egui and winit forks of the Craft family, at the revisions craft-libs pins.
-allow-git = ["https://github.com/storytold/craft-libs", "https://github.com/storytold/egui.git", "https://github.com/storytold/winit.git"]
+allow-git = ["https://github.com/storytold/craft-libs", "https://github.com/storytold/craft-ai-integrations", "https://github.com/storytold/egui.git", "https://github.com/storytold/winit.git"]
 
 [advisories]
 yanked = "warn"

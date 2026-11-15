@@ -94,6 +94,9 @@ craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "cebc8
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032" }
 craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032", features = ["egui"] }
 craft-dialogs = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032" }
+craft-flags = { git = "https://github.com/storytold/craft-libs", rev = "cebc847ba814208016be3709ae1cf6cdac76e032" }
+# craft-ai-integrations: the launcher's list of apps agents may use, pinned to one revision.
+craft-ai-agents = { git = "https://github.com/storytold/craft-ai-integrations", rev = "db30646d9df2ae5d36d74f3feed6dc6f00d3ef6b" }
 
 # tests
 tempfile = "3.27.0"
