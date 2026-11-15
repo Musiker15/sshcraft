@@ -281,6 +281,7 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
             if let Some(server) = before {
                 share_rights_for_key(&store, server, id)?;
             }
+            store.trash_key(id)?;
             let servers = note_change(&store, ItemKind::Key, &key, before, now_ms())?;
             #[cfg(windows)]
             forget_hello_credential(session, &store, id);

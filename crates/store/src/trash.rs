@@ -132,7 +132,59 @@ fn unb64(text: &str) -> Result<Vec<u8>, StoreError> {
     data_encoding::BASE64.decode(text.as_bytes()).map_err(|e| StoreError::Malformed(e.to_string()))
 }
 
+/// Unix seconds now; the trash only compares them.
+fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
 impl Store {
+    /// Keeps a host in the trash before it is deleted; nothing when it is not there.
+    pub fn trash_host(&self, id: HostId) -> Result<(), StoreError> {
+        if let Some(payload @ TrashPayload::Host { .. }) = self.snapshot_host(id)? {
+            let name = match &payload {
+                TrashPayload::Host { host, .. } => host.name.clone(),
+                _ => String::new(),
+            };
+            self.put_trash(TrashKind::Host, &id.0.to_string(), &name, &payload, now_secs())?;
+        }
+        Ok(())
+    }
+
+    /// Keeps a group with everything below it in the trash before it is deleted.
+    pub fn trash_group(&self, id: GroupId) -> Result<(), StoreError> {
+        if let Some(payload) = self.snapshot_group(id)? {
+            let name = match &payload {
+                TrashPayload::Group { groups, .. } => groups.first().map(|g| g.name.clone()).unwrap_or_default(),
+                _ => String::new(),
+            };
+            self.put_trash(TrashKind::Group, &id.0.to_string(), &name, &payload, now_secs())?;
+        }
+        Ok(())
+    }
+
+    pub fn trash_key(&self, id: KeyId) -> Result<(), StoreError> {
+        if let Some(payload) = self.snapshot_key(id)? {
+            let name = match &payload {
+                TrashPayload::Key { record } => record.name.clone(),
+                _ => String::new(),
+            };
+            self.put_trash(TrashKind::Key, &id.0.to_string(), &name, &payload, now_secs())?;
+        }
+        Ok(())
+    }
+
+    pub fn trash_snippet(&self, id: SnippetId, name: &str) -> Result<(), StoreError> {
+        if let Some(payload) = self.snapshot_snippet(id, name)? {
+            self.put_trash(TrashKind::Snippet, &id.0.to_string(), name, &payload, now_secs())?;
+        }
+        Ok(())
+    }
+
+    /// Removes what was deleted more than `days` ago.
+    pub fn purge_old_trash(&self, days: u32) -> Result<usize, StoreError> {
+        self.purge_trash(Some(now_secs().saturating_sub(i64::from(days).saturating_mul(86_400))))
+    }
+
     fn sealed_passwords(&self, ids: impl IntoIterator<Item = PasswordId>) -> Result<Vec<SealedPassword>, StoreError> {
         let mut out = Vec::new();
         for id in ids {

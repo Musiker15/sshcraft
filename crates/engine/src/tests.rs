@@ -453,3 +453,56 @@ async fn host_keys_are_listed_removed_and_exported() {
     assert!(session.store().host_keys("a.org", 2222).unwrap().is_empty());
     assert!(session.execute(Caller::User, "hostkey.remove", json!({ "address": "a.org", "port": 2222, "fingerprint": "SHA256:x" })).await.is_err());
 }
+
+/// A deleted host waits in the trash; restoring it brings it back and queues it for its sync
+/// server again. Agents can do neither.
+#[tokio::test]
+async fn deleting_a_host_keeps_it_in_the_trash_and_a_restore_syncs_it_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let server = sshcraft_model::model::ServerId::new();
+    session
+        .store()
+        .add_server(&sshcraft_store::store::ServerRow {
+            id: server,
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [7; 32],
+            device_id: uuid::Uuid::new_v4(),
+            sealed_device: Vec::new(),
+            sync_enabled: true,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("web.org".into()), ..Default::default() },
+        location: Some(server),
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    session.store().upsert_host(&host).unwrap();
+    session.execute(Caller::User, "host.delete", json!({ "id": host.id })).await.unwrap();
+    assert!(session.store().list_hosts().unwrap().is_empty());
+    let trash = session.execute(Caller::User, "trash.list", Value::Null).await.unwrap();
+    assert_eq!(trash[0]["kind"], "host");
+    assert_eq!(trash[0]["name"], "web");
+    let queued = session.store().outbox(server).unwrap();
+    for (kind, id) in queued {
+        session.store().dequeue(server, kind, &id).unwrap();
+    }
+    for id in ["trash.list", "trash.restore", "trash.purge"] {
+        assert!(session.execute(agent(), id, json!({ "kind": "host", "id": host.id.0.to_string() })).await.is_err(), "{id}");
+    }
+    session.execute(Caller::User, "trash.restore", json!({ "kind": "host", "id": host.id.0.to_string() })).await.unwrap();
+    assert_eq!(session.store().list_hosts().unwrap(), vec![host.clone()]);
+    assert!(session.store().outbox(server).unwrap().contains(&(sshcraft_store::store::ItemKind::Host, host.id.0.to_string())));
+    assert!(session.store().list_trash().unwrap().is_empty());
+}

@@ -145,11 +145,16 @@ pub struct General {
     /// Keep the host keys a server announces after sign-in (OpenSSH `UpdateHostKeys`): new
     /// ones once the server proved it holds them, and drop the ones it no longer has.
     pub update_host_keys: bool,
+    /// Days a deleted host, group, key or snippet stays in the trash, within [`TRASH_DAYS`].
+    pub trash_days: u32,
 }
+
+/// The allowed range of `general.trash_days`.
+pub const TRASH_DAYS: std::ops::RangeInclusive<u32> = 1..=365;
 
 impl Default for General {
     fn default() -> Self {
-        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true }
+        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true, trash_days: 30 }
     }
 }
 
@@ -294,6 +299,7 @@ impl EngineSettings {
         self.terminal.clipboard_hosts.retain(|h| seen.insert(*h));
         self.terminal.clipboard_hosts.truncate(MAX_CLIPBOARD_HOSTS);
         self.terminal.scrollback = self.terminal.scrollback.clamp(*SCROLLBACK.start(), *SCROLLBACK.end());
+        self.general.trash_days = self.general.trash_days.clamp(*TRASH_DAYS.start(), *TRASH_DAYS.end());
         self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()

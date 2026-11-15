@@ -131,6 +131,9 @@ const NEW: &[&str] = &[
     "hostkey.export",
     "sshconfig.refresh",
     "sshconfig.write",
+    "trash.list",
+    "trash.restore",
+    "trash.purge",
 ];
 
 #[test]

@@ -101,6 +101,9 @@ sync.remove_server
 sync.server_logs
 sync.servers
 sync.set_server
+trash.list
+trash.purge
+trash.restore
 vault.hello
 vault.status
 workspace.delete

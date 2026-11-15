@@ -66,6 +66,14 @@ struct IdParams {
 fn run_delete(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let IdParams { id } = parse("snippet.delete", params)?;
+        let name = ctx
+            .session
+            .vault()
+            .ok()
+            .and_then(|vault| snippets::list(&vault, &ctx.session.store()).ok())
+            .and_then(|all| all.into_iter().find(|s| s.id == id).map(|s| s.name))
+            .unwrap_or_default();
+        ctx.session.store().trash_snippet(id, &name)?;
         snippets::delete(&ctx.session.store(), id)?;
         Ok(Value::Null)
     })

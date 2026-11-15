@@ -83,6 +83,7 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let IdParams { id } = parse("group.delete", params)?;
         share_rights(&ctx.session.store(), Change::DeleteGroup(id))?;
+        ctx.session.store().trash_group(id)?;
         let passwords = tree_passwords(&ctx.session.store(), id)?;
         let mut servers = changed(&ctx.session, ItemKind::Group, id.0.to_string(), |s| {
             // Its hosts go with it; queue them while they still exist.

@@ -189,6 +189,8 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let IdParams { id } = parse("host.delete", params)?;
         share_rights(&ctx.session.store(), Change::DeleteHost(id))?;
+        // Into the trash first: a delete can be taken back.
+        ctx.session.store().trash_host(id)?;
         let passwords = ctx.session.store().list_hosts()?.into_iter().find(|h| h.id == id).map(|h| h.settings.password_ids()).unwrap_or_default();
         let mut servers = changed(&ctx.session, ItemKind::Host, id.0.to_string(), |s| Ok(s.delete_host(id)?))?;
         // The host's commands go with it.
