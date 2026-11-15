@@ -214,16 +214,27 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             app.ui.snippet_form =
                 Some(SnippetForm { id: Some(row.id), name: row.name, package: row.package, content: row.content, targets: row.default_targets });
         }
-        Some((row, RowAction::Delete)) => app.runner.run(
-            "snippet.delete",
-            json!({ "id": row.id }),
-            Box::new(|app, result| match result {
-                Ok(_) => app.data.dirty |= crate::data::Refresh::SNIPPETS,
-                Err(e) => app.toasts.error(&e.to_string()),
-            }),
+        Some((row, RowAction::Delete)) => crate::confirm::ask(
+            app,
+            crate::i18n::trf("Delete {name}?", &[("name", &visible(&row.name))]),
+            tr("The snippet is deleted for good, on your other devices too."),
+            tr("Delete snippet"),
+            crate::confirm::Pending::DeleteSnippet { id: row.id },
         ),
         None => {}
     }
+}
+
+/// Deletes snippet `id` (after the user confirmed it).
+pub fn delete(app: &mut SshcraftApp, id: String) {
+    app.runner.run(
+        "snippet.delete",
+        json!({ "id": id }),
+        Box::new(|app, result| match result {
+            Ok(_) => app.data.dirty |= crate::data::Refresh::SNIPPETS,
+            Err(e) => app.toasts.error(&e.to_string()),
+        }),
+    );
 }
 
 /// The snippet form and the run dialog.

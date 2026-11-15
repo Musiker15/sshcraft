@@ -112,6 +112,8 @@ pub struct UiState {
     #[serde(skip)]
     pub sidebar: crate::pages::snippets::Sidebar,
     #[serde(skip)]
+    pub ask: Option<crate::confirm::Confirm>,
+    #[serde(skip)]
     pub forward_form: Option<crate::pages::forwarding::ForwardForm>,
     #[serde(skip)]
     pub template_form: Option<crate::pages::templates::TemplateForm>,

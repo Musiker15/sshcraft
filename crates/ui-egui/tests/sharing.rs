@@ -174,6 +174,12 @@ fn removing_a_recipient_warns_and_ending_brings_the_group_back() {
     t.h.get_by_label("Cancel").click();
     t.h.run_steps(2);
     t.h.get_by_label("End share").click();
+    for _ in 0..15 {
+        std::thread::sleep(Duration::from_millis(20));
+        t.h.run_steps(1);
+    }
+    assert!(!shares(&t).is_empty(), "nothing ends before the confirmation");
+    t.h.get_by_label("End sharing").click();
     let deadline = Instant::now() + Duration::from_secs(20);
     while !shares(&t).is_empty() {
         assert!(Instant::now() < deadline, "the share did not end");

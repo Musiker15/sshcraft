@@ -320,6 +320,7 @@ impl SshcraftApp {
         crate::pages::sync::dialogs(self, &ctx);
         crate::pages::sharing::dialog(self, &ctx);
         crate::pages::sharing::remove_dialog(self, &ctx);
+        crate::confirm::show(self, &ctx);
         crate::prompts::show(self, &ctx);
         crate::log_viewer::show(self, &ctx);
         // The logs are fetched again on the next visit of their page.

@@ -73,6 +73,31 @@ fn multi_line_uses_bracketed_paste_when_the_shell_has_it() {
     assert_eq!(paste_bytes("x\x1b[201~y", true, false), b"\x1b[200~x[201~y\x1b[201~", "no escape inside the paste");
 }
 
+
+/// Lets a few frames and answers pass.
+fn settle(h: &mut H) {
+    for _ in 0..15 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}
+
+#[test]
+fn deleting_a_snippet_asks_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    save_snippet(&session, "restart", "ops", "sudo systemctl restart app", &[]);
+    h.state_mut().ui.page = Page::Snippets;
+    refresh(&mut h);
+    until(&mut h, "the snippet", |app| !app.data.snippets.is_empty());
+    h.get_by_label("Delete").click();
+    settle(&mut h);
+    let listed = |session: &Session| session.runtime().block_on(session.execute(Caller::User, "snippet.list", json!({}))).unwrap();
+    assert_eq!(listed(&session).as_array().map(Vec::len), Some(1), "nothing is deleted before the confirmation");
+    h.get_by_label("Delete snippet").click();
+    until(&mut h, "the deletion", |_| listed(&session).as_array().is_some_and(Vec::is_empty));
+}
+
 #[test]
 fn a_snippet_is_saved_and_listed_by_package() {
     let dir = tempfile::tempdir().unwrap();

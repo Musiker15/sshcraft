@@ -95,11 +95,23 @@ fn toggle(app: &mut SshcraftApp, host: HostId, rule: ForwardId) {
     app.run_reported(id, json!({ "host_id": host, "rule_id": rule }));
 }
 
+/// Deletes `rule` of `host`, stopping it first (after the user confirmed it).
+pub fn delete_rule(app: &mut SshcraftApp, host: HostId, rule: &ForwardRule) {
+    if running(app, rule.id) {
+        app.run_reported("forward.stop", json!({ "host_id": host, "rule_id": rule.id }));
+    }
+    let id = rule.id;
+    save_rules(app, host, |rules| rules.retain(|r| r.id != id), false);
+}
+
 /// Saves `host` with its rules changed by `change`.
 fn save_rules(app: &mut SshcraftApp, host: HostId, change: impl FnOnce(&mut Vec<ForwardRule>), then_close: bool) {
     let Some(mut stored) = app.data.hosts.iter().find(|r| r.host.id == host).map(|r| r.host.clone()) else { return };
     change(&mut stored.forwards);
-    let Some(generation) = app.forms.start() else { return };
+    let Some(generation) = app.forms.start() else {
+        app.toasts.info(tr("The last change is still being saved: try again in a moment."));
+        return;
+    };
     app.runner.run(
         "host.save",
         json!({ "host": stored }),
@@ -195,13 +207,13 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         match what {
             RuleAction::Toggle => toggle(app, host, rule.id),
             RuleAction::Edit => app.ui.forward_form = Some(ForwardForm { host: Some(host), rule, editing: true }),
-            RuleAction::Delete => {
-                // A rule removed from its host stops.
-                if running(app, rule.id) {
-                    app.run_reported("forward.stop", json!({ "host_id": host, "rule_id": rule.id }));
-                }
-                save_rules(app, host, |rules| rules.retain(|r| r.id != rule.id), false);
-            }
+            RuleAction::Delete => crate::confirm::ask(
+                app,
+                crate::i18n::trf("Delete the rule {name}?", &[("name", &visible(&rule.name))]),
+                tr("A running rule stops; the rule is gone from its host."),
+                tr("Delete rule"),
+                crate::confirm::Pending::DeleteRule { host, rule },
+            ),
         }
     }
     wizard(app, ui.ctx());

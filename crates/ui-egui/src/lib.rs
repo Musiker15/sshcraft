@@ -5,6 +5,7 @@
 pub mod app;
 pub mod commands;
 pub mod completion;
+pub mod confirm;
 pub mod data;
 pub mod forms;
 pub mod history;

@@ -494,6 +494,19 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "Sie werden endgültig gelöscht, auch auf dem Sync-Server und deinen anderen Geräten."
         }
         "Try again" => "Noch einmal",
+        "This device leaves the sync server and forgets its sign-in. Joining again needs the account key, which SSHCraft never keeps." => {
+            "Dieses Gerät verlässt den Sync-Server und vergisst seine Anmeldung. Für einen neuen Beitritt braucht es den Kontoschlüssel, den SSHCraft nie aufbewahrt."
+        }
+        "Remove and sign out" => "Entfernen und abmelden",
+        "Every recipient loses access to these hosts at once." => "Alle Empfänger verlieren sofort den Zugriff auf diese Hosts.",
+        "End sharing" => "Teilen beenden",
+        "Delete {name}?" => "{name} löschen?",
+        "The snippet is deleted for good, on your other devices too." => "Das Snippet wird endgültig gelöscht, auch auf deinen anderen Geräten.",
+        "Delete snippet" => "Snippet löschen",
+        "Delete the rule {name}?" => "Die Regel {name} löschen?",
+        "A running rule stops; the rule is gone from its host." => "Eine laufende Regel stoppt; die Regel verschwindet von ihrem Host.",
+        "Delete rule" => "Regel löschen",
+        "The last change is still being saved: try again in a moment." => "Die letzte Änderung wird noch gespeichert: versuch es gleich noch einmal.",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

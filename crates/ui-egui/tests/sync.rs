@@ -83,6 +83,28 @@ fn create(h: &mut H, origin: &str, api_key: &str) -> String {
 }
 
 #[test]
+fn removing_a_server_asks_first_and_says_what_it_takes() {
+    let dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let (origin, api_key, _stop) = sync_server(&_session, server_dir.path());
+    create(&mut h, &origin, &api_key);
+    h.get_by_label("I have kept the key").click();
+    until(&mut h, "the server", |app| app.data.servers.iter().any(|s| s["name"] == "home"));
+    h.get_by_label("Remove server").click();
+    for _ in 0..15 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert!(h.query_by_label_contains("account key").is_some(), "it says the account key is needed to join again");
+    h.state_mut().data.dirty |= sshcraft_ui_egui::data::Refresh::SERVERS;
+    h.run_steps(5);
+    assert!(h.state().data.servers.iter().any(|s| s["name"] == "home"), "nothing is removed before the confirmation");
+    h.get_by_label("Remove and sign out").click();
+    until(&mut h, "the removal", |app| app.data.servers.is_empty());
+}
+
+#[test]
 fn an_account_is_created_and_its_key_shown_once() {
     let dir = tempfile::tempdir().unwrap();
     let server_dir = tempfile::tempdir().unwrap();
@@ -98,7 +120,13 @@ fn an_account_is_created_and_its_key_shown_once() {
     until(&mut h, "the server", |app| app.data.servers.iter().any(|s| s["name"] == "home"));
     assert!(h.query_by_label(&format!("Sync server {origin}")).is_some(), "the connections SSHCraft makes by itself list the server");
     until(&mut h, "the server's state", |app| app.data.sync_status.values().any(|s| s["state"] == "idle"));
-    assert!(h.query_by_label_contains("Up to date").is_some());
+    // The state may change again (a sync runs at once): the label follows it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.query_by_label_contains("Up to date").is_none() {
+        assert!(Instant::now() < deadline, "the page says it is up to date");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
 }
 
 #[test]

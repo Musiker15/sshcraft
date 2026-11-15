@@ -138,12 +138,23 @@ fn servers(app: &mut SshcraftApp, ui: &mut Ui) {
                     load_devices(app, &id);
                 }
                 if ui.button(tr("Remove server")).clicked() {
-                    app.run_reported("sync.remove_server", json!({ "id": id }));
-                    app.data.dirty |= crate::data::Refresh::DATA;
+                    crate::confirm::ask(
+                        app,
+                        tr("Remove server").to_string(),
+                        tr("This device leaves the sync server and forgets its sign-in. Joining again needs the account key, which SSHCraft never keeps."),
+                        tr("Remove and sign out"),
+                        crate::confirm::Pending::RemoveServer { id: id.clone() },
+                    );
                 }
             });
         });
     }
+}
+
+/// Removes sync server `id` from this device (after the user confirmed it).
+pub fn remove_server(app: &mut SshcraftApp, id: &str) {
+    app.run_reported("sync.remove_server", json!({ "id": id }));
+    app.data.dirty |= crate::data::Refresh::DATA;
 }
 
 fn load_devices(app: &mut SshcraftApp, server: &str) {

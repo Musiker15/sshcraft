@@ -97,6 +97,41 @@ fn a_local_rule_is_created_started_and_stopped() {
     until(&mut h, "the stopped rule", |app| state_of(app, id) == "stopped");
 }
 
+
+/// Lets a few frames and answers pass.
+fn settle(h: &mut H) {
+    for _ in 0..15 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}
+
+#[test]
+fn deleting_a_rule_asks_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, _host) = host(&session, "web");
+    page(&mut h);
+    until(&mut h, "the host", |app| !app.data.hosts.is_empty());
+    let mut stored = h.state().data.hosts[0].host.clone();
+    stored.forwards.push(rule(ForwardKind::Local, "127.0.0.1", free_port()));
+    session.runtime().block_on(session.execute(Caller::User, "host.save", json!({ "host": stored }))).unwrap();
+    page(&mut h);
+    until(&mut h, "the rule", |app| app.data.hosts.iter().any(|r| r.host.forwards.len() == 1));
+    h.get_by_label("Delete").click();
+    settle(&mut h);
+    page(&mut h);
+    settle(&mut h);
+    assert_eq!(h.state().data.hosts[0].host.forwards.len(), 1, "nothing is deleted before the confirmation");
+    h.get_by_label("Delete rule").click();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.hosts.iter().any(|r| !r.host.forwards.is_empty()) {
+        assert!(Instant::now() < deadline, "the rule is still there");
+        page(&mut h);
+        settle(&mut h);
+    }
+}
+
 #[test]
 fn the_wizard_warns_about_0_0_0_0() {
     let dir = tempfile::tempdir().unwrap();

@@ -265,6 +265,19 @@ pub fn list(app: &mut SshcraftApp, ui: &mut Ui) {
         });
     }
     if let Some((server, area)) = end {
+        crate::confirm::ask(
+            app,
+            tr("End share").to_string(),
+            tr("Every recipient loses access to these hosts at once."),
+            tr("End sharing"),
+            crate::confirm::Pending::EndShare { server, area },
+        );
+    }
+}
+
+/// Ends the share of `area` on `server` (after the user confirmed it).
+pub fn end_share(app: &mut SshcraftApp, server: String, area: String) {
+    {
         app.runner.run(
             "share.end",
             json!({ "server": server, "area": area }),
