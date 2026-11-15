@@ -264,8 +264,16 @@ pub fn write_back(session: &Session, host_ids: &[HostId], home: &Path) -> Result
             )));
         }
         let file = links.iter().find(|l| l.host_id == *id).map(|l| PathBuf::from(&l.file)).filter(|f| f.is_file()).unwrap_or_else(|| root.clone());
-        // A linked config (dotfile managers) is written where it points, the link stays.
-        let file = std::fs::canonicalize(&file).unwrap_or(file);
+        // A linked config (dotfile managers) is written where it points, the link stays. A link
+        // whose target cannot be reached (outside a Flatpak sandbox, a removed dotfile folder)
+        // is refused: read as empty, the write would replace the link with one host.
+        let file = match std::fs::canonicalize(&file) {
+            Ok(target) => target,
+            Err(e) if std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink()) => {
+                return Err(failed(format!("{} is a link SSHCraft cannot follow ({e}); nothing was written", file.display())));
+            }
+            Err(_) => file,
+        };
         let text = match std::fs::read_to_string(&file) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),

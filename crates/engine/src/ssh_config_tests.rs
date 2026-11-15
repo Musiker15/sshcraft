@@ -205,3 +205,33 @@ async fn an_unapproved_command_is_not_written() {
     write_back(&w.session, &[host.id], w.home.path()).unwrap();
     assert!(std::fs::read_to_string(w.config()).unwrap().contains("ProxyCommand sh -c 'curl evil'"));
 }
+
+/// A symlinked config whose target cannot be read (a dotfile folder outside the Flatpak sandbox)
+/// is refused: taken as empty, the write would put one host over the link and lose every other.
+#[tokio::test]
+async fn write_back_refuses_a_link_it_cannot_follow() {
+    let w = World::new();
+    let target = w.home.path().join("dotfiles").join("ssh-config");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&target, w.config());
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(&target, w.config());
+    if linked.is_err() {
+        // Windows without the right to create links (no developer mode): nothing to check here.
+        return;
+    }
+    let host = Host {
+        id: HostId::new(),
+        name: "fresh".into(),
+        group_id: None,
+        settings: ConnectionSettings { address: Some("fresh.org".into()), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    w.session.store().upsert_host(&host).unwrap();
+    assert!(write_back(&w.session, &[host.id], w.home.path()).is_err());
+    assert!(std::fs::symlink_metadata(w.config()).unwrap().file_type().is_symlink(), "the link stays");
+    assert!(!target.exists());
+}
