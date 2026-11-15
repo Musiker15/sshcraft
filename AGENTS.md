@@ -200,7 +200,8 @@ Each has a test where it can have one.
 - `cargo xtask linux` runs clippy and the tests on Linux in a Docker container (from Windows or
   macOS); macOS and FreeBSD run in CI.
 - Packages and releases: [`docs/releasing.md`](docs/releasing.md). `cargo xtask version [set X.Y.Z]`
-  prints or sets the one version of the workspace. Never start a release or push to `release`
+  prints or sets the one version of the workspace; `cargo xtask sbom` and `cargo xtask stores`
+  make a release's bill of materials and store entries. Never start a release or push to `release`
   without the maintainer.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.
 

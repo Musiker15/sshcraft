@@ -1,6 +1,6 @@
 # SSHCraft roadmap
 
-> **Last updated:** 2026-11-15 · **Stage:** rebuild on the Craft conventions done; F1 and F2 done, V1 next
+> **Last updated:** 2026-11-15 · **Stage:** rebuild on the Craft conventions done; F1 and F2 done, V1 in progress
 
 SSHCraft reached its first feature set (sub-plans 1 to 15: hosts, keys, connections, workspaces,
 port forwarding, snippets, session logs, sync, sharing, AI agents) as a Tauri app, kept at the tag
@@ -18,7 +18,7 @@ detail is in [docs/roadmap.md](docs/roadmap.md), the open work in [docs/gaps.md]
 | R7 | macOS, Linux, FreeBSD, packaging, CI | done |
 | F1 | Connection and configuration: ProxyCommand, reconnect, live `~/.ssh/config`, host keys | done |
 | F2 | Sign-in and data safety: password manager references, TOTP, app lock, trash, backup | done |
-| V1 | First release: signed packages, winget, Homebrew, Flathub, server program and image | open |
+| V1 | First release: signed packages, winget, Homebrew, Flathub, server program and image | in progress |
 | M1 to M3 | Android, iOS and iPadOS | later |
 | S1 | SFTP | after V1 |
 | F3 to F7 | Terminal comfort, connections, persistent sessions, terminal extras, targets and automation | after V1 |
