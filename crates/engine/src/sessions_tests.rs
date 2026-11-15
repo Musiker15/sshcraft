@@ -2031,3 +2031,19 @@ async fn a_stored_totp_secret_answers_the_code_question() {
     sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
     assert_eq!(connected_count(&sink.statuses()), 1, "{:?}", sink.statuses());
 }
+
+/// Locking the app forgets that the user was verified: the next key asks Windows Hello again.
+#[tokio::test]
+async fn after_a_lock_the_next_key_asks_hello_again() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = f.manager_with_presence(presence.clone());
+    let a = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, a.clone());
+    a.wait_for(connected).await;
+    manager.relock().await;
+    let b = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, b.clone());
+    b.wait_for(connected).await;
+    assert_eq!(presence.asked(), 2);
+}

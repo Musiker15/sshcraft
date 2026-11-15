@@ -17,6 +17,8 @@ pub struct SshcraftApp {
     pub data: Data,
     pub ui: UiState,
     pub toasts: Toasts,
+    /// The app lock after idle time.
+    pub lock: crate::lock::LockState,
     pub bindings: Bindings,
     /// File dialogs: asked in a frame, shown after it, answered on a later frame.
     pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
@@ -69,6 +71,7 @@ impl SshcraftApp {
             data,
             ui: UiState::default(),
             toasts: Toasts::default(),
+            lock: crate::lock::LockState::default(),
             bindings: Bindings::default(),
             dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
             terminals: std::collections::HashMap::new(),
@@ -346,6 +349,14 @@ impl SshcraftApp {
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
+        crate::lock::tick(self, &ctx);
+        if self.lock.locked {
+            // Output keeps flowing into the terminals; only the lock screen is drawn.
+            crate::session_tab::pump_all(self, &ctx);
+            crate::lock::show(self, ui);
+            self.toasts.show(&ctx);
+            return;
+        }
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {
             self.bindings = Bindings::from_settings(&self.data.settings.shortcuts);
             self.bindings_from = Some(self.data.settings.shortcuts.clone());

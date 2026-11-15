@@ -91,6 +91,18 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "{host} möchte dieses Passwort aus deinem Passwortmanager an den Server unten senden. Es wurde auf diesem Gerät nicht für diesen Server eingerichtet (es kam über Sync oder eine Freigabe, oder die Adresse hat sich geändert). Erlaube es nur, wenn das Passwort zu diesem Server gehört."
         }
         "Trash" => "Papierkorb",
+        "App lock" => "App-Sperre",
+        "Lock after" => "Sperren nach",
+        " minutes without input" => " Minuten ohne Eingabe",
+        "0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again." => {
+            "0 sperrt nie. Zum Entsperren fragt Windows Hello, und Schlüssel und Passwörter fragen es erneut."
+        }
+        "Not on this system yet: unlocking needs Windows Hello." => "Auf diesem System noch nicht: zum Entsperren braucht es Windows Hello.",
+        "SSHCraft is locked" => "SSHCraft ist gesperrt",
+        "Sessions keep running. Unlock with Windows Hello to see them." => {
+            "Die Sitzungen laufen weiter. Entsperre mit Windows Hello, um sie zu sehen."
+        }
+        "Unlock" => "Entsperren",
         "Backup" => "Sicherung",
         "One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here." => {
             "Eine Datei mit deinen Hosts, Gruppen, Identitäten, Schlüsseln, Passwörtern, Snippets und Hostschlüsseln, verschlüsselt mit einer Passphrase. Beim Wiederherstellen kommt hinzu, was fehlt; was hier ist, bleibt unverändert."

@@ -138,6 +138,8 @@ const NEW: &[&str] = &[
     "trash.restore_version",
     "backup.create",
     "backup.restore",
+    "app.lock",
+    "app.unlock",
 ];
 
 #[test]

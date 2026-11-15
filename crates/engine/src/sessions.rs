@@ -328,6 +328,11 @@ impl KeyGate {
     }
 
     /// Concurrent callers wait on the same lock, so one prompt serves them all.
+    /// Forgets that the user was verified: the next key or password asks again.
+    async fn relock(&self) {
+        *self.verified.lock().await = false;
+    }
+
     async fn ensure(&self, reason: &str) -> Result<(), ErrorCode> {
         let mut verified = self.verified.lock().await;
         if *verified {
@@ -419,6 +424,21 @@ impl SessionManager {
                 kdbx: Mutex::new(HashMap::new()),
             }),
             sessions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The app was locked: keys and passwords need the user's presence again.
+    pub async fn relock(&self) {
+        self.ctx.gate.relock().await;
+    }
+
+    /// Asks for the user's presence (to unlock the app); a declined one is an error. Where the
+    /// system has none, the lock only hides the window and unlocking needs nothing.
+    pub async fn verify_user(&self) -> Result<(), ErrorCode> {
+        let reason = hello_reason(self.ctx.settings().general.language, sys_locale::get_locale().as_deref());
+        match self.ctx.gate.presence.verify(reason).await {
+            Presence::Verified | Presence::Unavailable => Ok(()),
+            Presence::Declined => Err(ErrorCode::HelloDeclined),
         }
     }
 

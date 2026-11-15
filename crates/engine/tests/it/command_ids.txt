@@ -3,6 +3,8 @@ agent.log_clear
 agent.policy
 agent.set_hidden
 agent.set_level
+app.lock
+app.unlock
 backup.create
 backup.restore
 device.list

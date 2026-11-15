@@ -77,6 +77,16 @@ impl AgentConnector for TestAgents {
     }
 }
 
+/// Windows Hello that always says no.
+pub struct NeverPresent;
+
+#[async_trait::async_trait]
+impl UserPresence for NeverPresent {
+    async fn verify(&self, _reason: &str) -> Presence {
+        Presence::Declined
+    }
+}
+
 /// Windows Hello that always says yes.
 pub struct AlwaysPresent;
 

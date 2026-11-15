@@ -147,14 +147,19 @@ pub struct General {
     pub update_host_keys: bool,
     /// Days a deleted host, group, key or snippet stays in the trash, within [`TRASH_DAYS`].
     pub trash_days: u32,
+    /// Minutes without input until the window locks, within [`LOCK_MINUTES`]; 0 never.
+    pub lock_after_minutes: u32,
 }
+
+/// The allowed range of `general.lock_after_minutes`.
+pub const LOCK_MINUTES: std::ops::RangeInclusive<u32> = 0..=1440;
 
 /// The allowed range of `general.trash_days`.
 pub const TRASH_DAYS: std::ops::RangeInclusive<u32> = 1..=365;
 
 impl Default for General {
     fn default() -> Self {
-        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true, trash_days: 30 }
+        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true, trash_days: 30, lock_after_minutes: 0 }
     }
 }
 
@@ -300,6 +305,7 @@ impl EngineSettings {
         self.terminal.clipboard_hosts.truncate(MAX_CLIPBOARD_HOSTS);
         self.terminal.scrollback = self.terminal.scrollback.clamp(*SCROLLBACK.start(), *SCROLLBACK.end());
         self.general.trash_days = self.general.trash_days.clamp(*TRASH_DAYS.start(), *TRASH_DAYS.end());
+        self.general.lock_after_minutes = self.general.lock_after_minutes.clamp(*LOCK_MINUTES.start(), *LOCK_MINUTES.end());
         self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
