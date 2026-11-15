@@ -125,6 +125,10 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     );
     save(app, |s| s.general.update_host_keys = update);
     ui.add_space(12.0);
+    crate::pages::backup::section(app, ui);
+    let ctx = ui.ctx().clone();
+    crate::pages::backup::dialog(app, &ctx);
+    ui.add_space(12.0);
     ui.label(egui::RichText::new("~/.ssh/config").strong());
     let mut live = app.data.settings.integrations.ssh_config_live;
     ui.checkbox(&mut live, tr("Keep the hosts of ~/.ssh/config in step"));

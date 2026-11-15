@@ -540,3 +540,22 @@ async fn saving_keeps_the_previous_version_and_a_version_restores() {
         assert!(session.execute(agent(), cmd, json!({ "kind": "host", "id": id, "version": 1 })).await.is_err(), "{cmd}");
     }
 }
+
+/// A backup is written and read back by the user; an agent can do neither, and the passphrase
+/// is not in the journal.
+#[tokio::test]
+async fn backups_are_for_the_user_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let path = dir.path().join("sshcraft.backup").to_string_lossy().into_owned();
+    let params = json!({ "path": path, "passphrase": "a long passphrase" });
+    for id in ["backup.create", "backup.restore"] {
+        assert!(session.execute(agent(), id, params.clone()).await.is_err(), "{id}");
+    }
+    assert!(!std::path::Path::new(&path).exists());
+    session.execute(Caller::User, "backup.create", params.clone()).await.unwrap();
+    session.execute(Caller::User, "backup.restore", params).await.unwrap();
+    let journal = serde_json::to_string(&session.journal()).unwrap();
+    assert!(journal.contains("backup.create"), "the call is journaled");
+    assert!(!journal.contains("a long passphrase"));
+}

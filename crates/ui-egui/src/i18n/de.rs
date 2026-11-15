@@ -79,6 +79,26 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Allow on this device" => "Auf diesem Gerät erlauben",
         "Known hosts" => "Bekannte Server",
         "Trash" => "Papierkorb",
+        "Backup" => "Sicherung",
+        "One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here." => {
+            "Eine Datei mit deinen Hosts, Gruppen, Identitäten, Schlüsseln, Passwörtern, Snippets und Hostschlüsseln, verschlüsselt mit einer Passphrase. Beim Wiederherstellen kommt hinzu, was fehlt; was hier ist, bleibt unverändert."
+        }
+        "Create backup…" => "Sicherung erstellen …",
+        "Restore from backup…" => "Aus Sicherung wiederherstellen …",
+        "Restore from backup" => "Aus Sicherung wiederherstellen",
+        "Create backup" => "Sicherung erstellen",
+        "Passphrase again" => "Passphrase wiederholen",
+        "Keep it in your password manager: without it the file cannot be opened." => {
+            "Bewahre sie im Passwortmanager auf: ohne sie lässt sich die Datei nicht öffnen."
+        }
+        "Choose file…" => "Datei wählen …",
+        "Save as…" => "Speichern unter …",
+        "The passphrase needs at least {count} characters." => "Die Passphrase braucht mindestens {count} Zeichen.",
+        "The two passphrases differ." => "Die beiden Passphrasen sind verschieden.",
+        "Restored: {hosts} hosts, {groups} groups, {keys} keys, {passwords} passwords, {snippets} snippets." => {
+            "Wiederhergestellt: {hosts} Hosts, {groups} Gruppen, {keys} Schlüssel, {passwords} Passwörter, {snippets} Snippets."
+        }
+        "The backup is written." => "Die Sicherung ist geschrieben.",
         "Snippet" => "Snippet",
         "Deleted hosts, groups, keys and snippets stay here for {days} days, also when another device deleted them." => {
             "Gelöschte Hosts, Gruppen, Schlüssel und Snippets bleiben {days} Tage hier, auch wenn ein anderes Gerät sie gelöscht hat."

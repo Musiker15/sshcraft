@@ -134,3 +134,29 @@ fn leaving_a_shortcut_recording_keeps_the_shortcuts_working() {
     h.run_steps(2);
     assert_eq!(h.state().ui.tabs.len(), 1, "Ctrl+Shift+T still opens a tab");
 }
+
+/// The backup passphrase is checked before a file is chosen: long enough, and the same twice.
+#[test]
+fn a_backup_needs_a_long_passphrase_given_twice() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    settings_page(&mut h, "General");
+    h.get_by_label("Create backup…").click();
+    h.run_steps(2);
+    h.get_by_label("Passphrase").type_text("short");
+    h.get_by_label("Save as…").click();
+    h.run_steps(2);
+    assert!(h.state().ui.backup.as_ref().and_then(|f| f.error.clone()).is_some_and(|e| e.contains("12")));
+    h.get_by_label("Passphrase").click();
+    h.run_steps(1);
+    h.get_by_label("Passphrase").type_text(" but longer now");
+    h.run_steps(1);
+    h.get_by_label("Passphrase again").click();
+    h.run_steps(1);
+    h.get_by_label("Passphrase again").type_text("something else entirely");
+    h.run_steps(1);
+    h.get_by_label("Save as…").click();
+    h.run_steps(2);
+    assert!(h.state().ui.backup.as_ref().and_then(|f| f.error.clone()).is_some_and(|e| e.contains("differ")));
+    assert!(h.state().ui.backup_passphrase.is_none(), "no file is asked for yet");
+}

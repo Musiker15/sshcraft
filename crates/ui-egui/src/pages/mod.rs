@@ -1,6 +1,7 @@
 //! The pages of the main area.
 
 pub mod agents;
+pub mod backup;
 pub mod forwarding;
 pub mod host_form;
 pub mod hosts;

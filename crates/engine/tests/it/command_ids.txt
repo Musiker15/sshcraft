@@ -3,6 +3,8 @@ agent.log_clear
 agent.policy
 agent.set_hidden
 agent.set_level
+backup.create
+backup.restore
 device.list
 device.revoke
 forward.start

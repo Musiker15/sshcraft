@@ -136,6 +136,8 @@ const NEW: &[&str] = &[
     "trash.purge",
     "trash.versions",
     "trash.restore_version",
+    "backup.create",
+    "backup.restore",
 ];
 
 #[test]
