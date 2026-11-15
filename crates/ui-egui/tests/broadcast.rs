@@ -86,6 +86,30 @@ fn broadcast_skips_ended_panes_and_terminal_replies() {
 }
 
 #[test]
+fn broadcast_keeps_commands_and_passwords_apart() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (ids, _servers) = tab_of(&mut h, &session, &["alpha", "beta"]);
+    sshcraft_ui_egui::commands::run(h.state_mut(), "ui.pane.broadcast");
+    h.run_steps(3);
+    // The second pane asks for a password; the focused one is at its prompt.
+    h.state_mut().terminals.get_mut(&ids[1]).unwrap().term.feed(b"\r\n[sudo] password for me: ");
+    h.event(Event::Text("bc-command".into()));
+    until(&mut h, "the echo in the focused pane", |app| screen(app, ids[0]).contains("bc-command"));
+    std::thread::sleep(Duration::from_millis(200));
+    h.run_steps(5);
+    assert!(!screen(h.state(), ids[1]).contains("bc-command"), "a command never goes into another pane's password question");
+    // Now the focused pane asks and the other is at its prompt.
+    h.state_mut().terminals.get_mut(&ids[0]).unwrap().term.feed(b"\r\nPassword: ");
+    h.state_mut().terminals.get_mut(&ids[1]).unwrap().term.feed(b"\r\n$ ");
+    h.event(Event::Text("s3cret".into()));
+    until(&mut h, "the echo in the focused pane", |app| screen(app, ids[0]).contains("s3cret"));
+    std::thread::sleep(Duration::from_millis(200));
+    h.run_steps(5);
+    assert!(!screen(h.state(), ids[1]).contains("s3cret"), "a password never goes to another pane's prompt");
+}
+
+#[test]
 fn focus_reports_go_only_to_their_own_terminal() {
     use egui::FontId;
     use sshcraft_term::{TermConfig, TermSize, Terminal};

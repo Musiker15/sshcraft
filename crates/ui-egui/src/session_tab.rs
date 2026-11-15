@@ -583,15 +583,28 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
     }
 }
 
+/// Whether the cursor's line of `tab` asks for a secret or a yes/no.
+fn asks(tab: &SessionTab) -> bool {
+    let screen = tab.term.screen();
+    let line = screen.text().lines().nth(usize::from(screen.cursor.row)).map(str::to_string).unwrap_or_default();
+    crate::status::waiting_line(&line)
+}
+
 /// Where typing in session `id` goes: with broadcast on in its tab, to every pane of the tab
-/// whose session is connected; else to `id` alone.
+/// whose session is connected and that asks a question exactly when `id` does (a command never
+/// goes into another pane's password question, a password never to another pane's prompt);
+/// else to `id` alone.
 pub fn broadcast_targets(app: &SshcraftApp, id: SessionId) -> Vec<SessionId> {
     let Some((tab, _)) = pane_of(app, id) else { return vec![id] };
     let Some(panes) = app.ui.tabs.get(tab).map(|t| &t.panes) else { return vec![id] };
     if !panes.broadcast {
         return vec![id];
     }
-    panes.sessions().filter(|s| app.terminals.get(s).is_some_and(|t| matches!(t.status, Some(SessionStatus::Connected { .. })))).collect()
+    let here = app.terminals.get(&id).is_some_and(asks);
+    panes
+        .sessions()
+        .filter(|s| app.terminals.get(s).is_some_and(|t| matches!(t.status, Some(SessionStatus::Connected { .. })) && asks(t) == here))
+        .collect()
 }
 
 /// A question or another window is over the terminal: it gets no keys.
