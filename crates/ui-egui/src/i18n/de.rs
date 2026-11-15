@@ -79,7 +79,9 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Allow on this device" => "Auf diesem Gerät erlauben",
         "Known hosts" => "Bekannte Server",
         "Write to ~/.ssh/config" => "In ~/.ssh/config schreiben",
-        "Written to {files}; the old file is kept as .sshcraft-bak." => "Geschrieben in {files}; die alte Datei liegt als .sshcraft-bak daneben.",
+        "Written to {files}; a copy of the old file is in ~/.ssh/.sshcraft-backup." => {
+            "Geschrieben in {files}; eine Kopie der alten Datei liegt in ~/.ssh/.sshcraft-backup."
+        }
         "Keep the hosts of ~/.ssh/config in step" => "Die Hosts aus ~/.ssh/config laufend übernehmen",
         "Its hosts and the files it includes appear in the group ~/.ssh/config and follow the file when it changes. A host that leaves the file stays here. Writing back happens only from a host's menu." => {
             "Ihre Hosts und die Dateien, die sie einbindet, erscheinen in der Gruppe ~/.ssh/config und folgen der Datei, wenn sie sich ändert. Ein Host, der aus der Datei verschwindet, bleibt hier. Zurückgeschrieben wird nur über das Menü eines Hosts."

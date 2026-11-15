@@ -246,7 +246,7 @@ fn replace_file(path: &Path, text: &str) -> Result<(), CommandError> {
 }
 
 /// Writes hosts into the file their link names, or into `~/.ssh/config`. Each file changed is
-/// backed up once (`<file>.sshcraft-bak`) before.
+/// copied into `~/.ssh/.sshcraft-backup/` before.
 pub fn write_back(session: &Session, host_ids: &[HostId], home: &Path) -> Result<Vec<String>, CommandError> {
     let links = session.store().config_links()?;
     let root = home.join(".ssh").join("config");

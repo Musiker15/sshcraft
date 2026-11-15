@@ -291,7 +291,10 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
                                 .filter_map(|f| f.as_str())
                                 .map(visible)
                                 .collect();
-                            app.toasts.info(&trf("Written to {files}; the old file is kept as .sshcraft-bak.", &[("files", &files.join(", "))]));
+                            app.toasts.info(&trf(
+                                "Written to {files}; a copy of the old file is in ~/.ssh/.sshcraft-backup.",
+                                &[("files", &files.join(", "))],
+                            ));
                         }
                         Err(e) => app.toasts.error(&e.to_string()),
                     }),
