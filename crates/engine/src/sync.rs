@@ -360,7 +360,7 @@ const KNOWN_SERVER_CODES: &[&str] = &[
 /// The window's error code for a sync error.
 pub fn sync_error(err: SyncError) -> CommandError {
     let code = match &err {
-        SyncError::BadOrigin => ErrorCode::SyncBadOrigin,
+        SyncError::BadOrigin | SyncError::PlainHttp => ErrorCode::SyncBadOrigin,
         SyncError::OriginMismatch { .. } => ErrorCode::SyncOriginMismatch,
         SyncError::Network(_) => ErrorCode::SyncNetwork,
         SyncError::Server { code, .. } => match code.as_str() {
