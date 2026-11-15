@@ -179,7 +179,12 @@ switched on is refused. See [connections.md](connections.md).
 - The control channel (`--control`) is a developer tool, never on by default: whoever has its
   token clicks and types like the user. Its engine commands still pass the gate as `control`.
 - A connection's sessions and open questions end with it; an agent cannot flood the log through
-  the link (the newest 1000 entries stay).
+  the link (the newest 1000 entries stay). A request id still running is refused, and connections
+  that never sign in cannot keep a client out.
+- The sign-in proves the token, not the port: a program that could relay a challenge between a
+  client and the real link would be let in. That needs the client to be pointed at it while the
+  link runs, which the connection file (current while the link runs, written only by SSHCraft)
+  does not allow.
 - No action returns key material, passwords or account keys; answers that look like key
   material are blocked. Rights per kind of action (allow, ask, block), questions only in
   SSHCraft's window, hidden hosts answered as unknown, a sealed log of every action.
