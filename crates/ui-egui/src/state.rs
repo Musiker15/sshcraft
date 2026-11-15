@@ -39,6 +39,7 @@ pub struct UiState {
     pub page: Page,
     pub tabs: Vec<TabState>,
     pub hosts: crate::pages::hosts::HostsView,
+    pub settings: crate::pages::settings::SettingsView,
     #[serde(skip)]
     pub palette: PaletteState,
     /// Commands for the active terminal tab, taken by it in the frame.

@@ -4,3 +4,4 @@ pub mod host_form;
 pub mod hosts;
 pub mod import_export;
 pub mod keys;
+pub mod settings;

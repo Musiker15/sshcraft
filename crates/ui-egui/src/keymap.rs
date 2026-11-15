@@ -40,6 +40,11 @@ fn chord_mods(m: &egui::Modifiers) -> Mods {
     Mods { cmd: m.mac_cmd, ctrl: m.ctrl, alt: m.alt, shift: m.shift }
 }
 
+/// The chord of a key pressed with `modifiers`; `None` for a key craft-keymap has no name for.
+pub fn chord_from_egui(key: egui::Key, modifiers: &egui::Modifiers) -> Option<Chord> {
+    Some(Chord { mods: chord_mods(modifiers), key: Key::from_egui(key)? })
+}
+
 /// Whether a terminal lets `chord` through to the interface (Ctrl+Shift without Alt, or Ctrl+Tab).
 pub fn works_in_terminal(chord: &Chord) -> bool {
     let m = chord.mods;

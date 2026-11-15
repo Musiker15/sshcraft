@@ -89,8 +89,7 @@ fn every_command_has_an_action_the_engine_keeps() {
     // What the window stores survives the engine's own check of the settings.
     let mut b = Bindings::default();
     b.assign("ui.page.keys", "Ctrl+Alt+K").unwrap();
-    let mut settings = sshcraft_engine::settings::EngineSettings::default();
-    settings.shortcuts = b.to_settings();
+    let settings = sshcraft_engine::settings::EngineSettings { shortcuts: b.to_settings(), ..Default::default() };
     let kept = settings.sanitized().shortcuts;
     assert_eq!(Bindings::from_settings(&kept).command_for(&chord("Ctrl+Alt+K"), false), Some("ui.page.keys"));
 }

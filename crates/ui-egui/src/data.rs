@@ -82,6 +82,8 @@ pub struct Data {
     pub dirty: Refresh,
     /// What is being fetched now, so a burst of changes starts one fetch each.
     pub loading: Refresh,
+    /// Counts the fetches that came back, so a page can tell its cached lists are old.
+    pub version: u64,
 }
 
 fn rows<T: serde::de::DeserializeOwned>(value: Value) -> Vec<T> {
@@ -107,7 +109,10 @@ pub fn refresh(app: &mut SshcraftApp) {
             Box::new(move |app, result| {
                 app.data.loading -= what;
                 match result {
-                    Ok(value) => apply(&mut app.data, value),
+                    Ok(value) => {
+                        apply(&mut app.data, value);
+                        app.data.version = app.data.version.wrapping_add(1);
+                    }
                     Err(e) => app.toasts.error(&e.to_string()),
                 }
             }),

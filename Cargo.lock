@@ -5842,6 +5842,7 @@ dependencies = [
  "egui_system_font_provider",
  "fontique",
  "image",
+ "memory-stats",
  "rand 0.10.3",
  "raw-window-handle",
  "russh",

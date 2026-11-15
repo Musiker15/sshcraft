@@ -1,6 +1,13 @@
-//! Renders a fixture into a terminal and writes it as PNG, without a window:
+//! Renders a fixture into a terminal, or the whole window on a page, and writes it as PNG, without
+//! a window on screen:
 //!
 //! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]`
+//!
+//! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png --page hosts|keys|settings|newtab
+//! [--dark|--light] [--language en|de]`
+//!
+//! The window runs on an engine in a fresh temp folder with made-up sample data, never on
+//! SSHCraft's own data.
 //!
 //! The fixtures in `tests/fixtures/` are escape sequences written for SSHCraft, in Rust escape
 //! notation (`\x1b`, `\u{…}`, `\r`, `\n`). Pictures belong in a pull request, not in the
@@ -10,7 +17,11 @@ use std::process::ExitCode;
 
 use egui::{FontId, Pos2};
 use egui_kittest::Harness;
+use serde_json::{Value, json};
+use sshcraft_engine::{Caller, Session};
 use sshcraft_term::{TermConfig, TermSize, Terminal};
+use sshcraft_ui_egui::SshcraftApp;
+use sshcraft_ui_egui::state::Page;
 use sshcraft_ui_egui::terminal::{CellMetrics, TermPalette, install_terminal_font, layout, paint};
 
 /// Turns `\x1b`, `\u{…}`, `\r`, `\n` and `\\` into the characters they stand for.
@@ -44,13 +55,97 @@ fn unescape(text: &str) -> String {
     out
 }
 
+fn run(session: &Session, id: &str, params: Value) -> Result<Value, String> {
+    session.runtime().block_on(session.execute(Caller::User, id, params)).map_err(|e| format!("{id}: {e}"))
+}
+
+/// Made-up hosts, groups and a key, so a page has something to show.
+fn sample_data(session: &Session) -> Result<(), String> {
+    let web = uuid::Uuid::new_v4();
+    let db = uuid::Uuid::new_v4();
+    for (id, name) in [(web, "Web servers"), (db, "Databases")] {
+        run(session, "group.save", json!({ "group": { "id": id, "name": name, "defaults": { "username": "deploy" } } }))?;
+    }
+    let hosts = [
+        ("gateway", "198.51.100.1", None, vec!["edge"]),
+        ("build-runner", "198.51.100.20", None, vec!["ci"]),
+        ("web-01", "192.0.2.11", Some(web), vec!["prod"]),
+        ("web-02", "192.0.2.12", Some(web), vec!["prod"]),
+        ("postgres-main", "192.0.2.31", Some(db), vec!["prod", "backup"]),
+        ("raspberry-pi", "pi.home.example", None, vec!["home"]),
+        ("staging", "203.0.113.5", None, vec!["staging"]),
+    ];
+    for (name, address, group, tags) in hosts {
+        let host =
+            json!({ "id": uuid::Uuid::new_v4(), "name": name, "group_id": group, "tags": tags, "settings": { "address": address, "port": 22 } });
+        run(session, "host.save", json!({ "host": host }))?;
+    }
+    run(session, "key.generate", json!({ "name": "laptop", "spec": { "type": "ed25519" }, "passphrase": null }))?;
+    run(session, "key.generate", json!({ "name": "deploy-ci", "spec": { "type": "ecdsa", "curve": "nistp256" }, "passphrase": null }))?;
+    Ok(())
+}
+
+/// The whole window on `page`, after enough frames for the data to arrive.
+fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
+    let mut page = Page::Hosts;
+    let mut new_tab = false;
+    let mut theme = "dark";
+    let mut language = "en".to_string();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--page" => match args.next().as_deref() {
+                Some("hosts") => page = Page::Hosts,
+                Some("keys") => page = Page::Keys,
+                Some("settings") => page = Page::Settings,
+                Some("newtab") => new_tab = true,
+                other => return Err(format!("unknown page {other:?}")),
+            },
+            "--dark" => theme = "dark",
+            "--light" => theme = "light",
+            "--language" => language = args.next().ok_or("--language needs en or de")?,
+            other => return Err(format!("unknown argument {other}")),
+        }
+    }
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let (mut h, session) = sshcraft_ui_egui::testing::app_harness_from(Harness::builder().wgpu(), dir.path());
+    sample_data(&session)?;
+    let mut settings = run(&session, "settings.get", json!({}))?;
+    settings["general"]["language"] = json!(language);
+    settings["appearance"]["app_theme"] = json!(theme);
+    run(&session, "settings.save", json!({ "settings": settings }))?;
+    let app: &mut SshcraftApp = h.state_mut();
+    app.ui.page = page;
+    if new_tab {
+        app.open_new_tab();
+    }
+    for _ in 0..40 {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    let image = h.render().map_err(|e| e.to_string())?;
+    image.save(out).map_err(|e| e.to_string())
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(out) = args.next() else {
         eprintln!("usage: snapshot <out.png> [colors|unicode|fullscreen]");
+        eprintln!("       snapshot <out.png> --page hosts|keys|settings|newtab [--dark|--light] [--language en|de]");
         return ExitCode::FAILURE;
     };
     let name = args.next().unwrap_or_else(|| "colors".into());
+    if name.starts_with("--") {
+        return match window(&out, std::iter::once(name).chain(args)) {
+            Ok(()) => {
+                println!("{out}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let path = format!("{}/tests/fixtures/{name}.txt", env!("CARGO_MANIFEST_DIR"));
     let fixture = match std::fs::read_to_string(&path) {
         Ok(text) => unescape(&text),

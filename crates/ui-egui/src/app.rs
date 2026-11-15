@@ -161,7 +161,8 @@ impl SshcraftApp {
             self.bindings_from = Some(self.data.settings.shortcuts.clone());
         }
         // The palette's own keys (arrows, Enter, Escape) go to it while it is open.
-        if !self.ui.palette.open {
+        // A shortcut being recorded takes the next key itself.
+        if !self.ui.palette.open && self.ui.settings.recording.is_none() {
             for id in self.bindings.dispatch(&ctx, self.in_terminal()) {
                 crate::commands::run(self, id);
             }

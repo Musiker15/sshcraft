@@ -33,6 +33,7 @@ tokio = { workspace = true }
 egui_kittest = { workspace = true, optional = true }
 
 [dev-dependencies]
+memory-stats = { workspace = true }
 russh = { workspace = true }
 rand = { workspace = true }
 sshcraft-ui-egui = { path = ".", features = ["testing"] }

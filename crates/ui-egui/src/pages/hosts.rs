@@ -19,6 +19,9 @@ use crate::widgets::{elided_label, visible};
 
 /// The widest a host or group name is drawn; longer names are cut.
 pub const MAX_NAME_WIDTH: f32 = 260.0;
+/// The height of one row of entries, and the width of an entry in the grid.
+const ROW_HEIGHT: f32 = 26.0;
+const CELL_WIDTH: f32 = 460.0;
 
 /// What the hosts page shows: the group opened, the tags chosen, the search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -27,6 +30,49 @@ pub struct HostsView {
     pub group: Option<GroupId>,
     pub tags: Vec<String>,
     pub search: String,
+    #[serde(skip)]
+    pub cache: HostsCache,
+}
+
+/// The page's lists, worked out again only when the data or the view changed: with thousands of
+/// hosts, filtering and sorting them in every frame would not fit a frame.
+#[derive(Debug, Clone, Default)]
+pub struct HostsCache {
+    key: Option<(u64, Option<GroupId>, Vec<String>, String)>,
+    groups: Vec<Group>,
+    /// The groups shown at this level.
+    sub: Vec<Group>,
+    /// The tags of the hosts at this level or found, for the chips.
+    tags: Vec<String>,
+    /// The hosts shown (indices into `data.hosts`), by name.
+    shown: Vec<usize>,
+}
+
+fn update_cache(app: &mut SshcraftApp) {
+    let view = &app.ui.hosts;
+    let key = (app.data.version, view.group, view.tags.clone(), view.search.clone());
+    if view.cache.key.as_ref() == Some(&key) {
+        return;
+    }
+    let groups: Vec<Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
+    let query = view.search.trim().to_lowercase();
+    let searching = !query.is_empty();
+    let rows: Vec<usize> = app
+        .data
+        .hosts
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| if searching { matches(r, &query, &groups) } else { r.host.group_id == view.group })
+        .map(|(i, _)| i)
+        .collect();
+    let mut tags: Vec<String> = rows.iter().filter_map(|&i| app.data.hosts.get(i)).flat_map(|r| r.host.tags.iter().cloned()).collect();
+    tags.sort_by_cached_key(|t| t.to_lowercase());
+    tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    let mut shown: Vec<usize> = rows.into_iter().filter(|&i| app.data.hosts.get(i).is_some_and(|r| has_all_tags(&r.host.tags, &view.tags))).collect();
+    shown.sort_by_cached_key(|&i| app.data.hosts.get(i).map(|r| r.host.name.to_lowercase()));
+    let mut sub: Vec<Group> = if searching { Vec::new() } else { groups.iter().filter(|g| g.parent_id == view.group).cloned().collect() };
+    sub.sort_by_key(|g| g.name.to_lowercase());
+    app.ui.hosts.cache = HostsCache { key: Some(key), groups, sub, tags, shown };
 }
 
 /// Something that waits for "Delete" to be confirmed.
@@ -34,10 +80,6 @@ pub struct HostsView {
 pub enum Confirm {
     DeleteHost(HostId, String),
     DeleteGroup(GroupId, String),
-}
-
-fn groups(app: &SshcraftApp) -> Vec<Group> {
-    app.data.groups.iter().map(|g| g.group.clone()).collect()
 }
 
 pub fn new_host(app: &mut SshcraftApp) {
@@ -134,10 +176,8 @@ fn path(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
     });
 }
 
-fn tag_chips(app: &mut SshcraftApp, ui: &mut Ui, hosts: &[&HostRow]) {
-    let mut all: Vec<String> = hosts.iter().flat_map(|r| r.host.tags.iter().cloned()).collect();
-    all.sort_by_key(|t| t.to_lowercase());
-    all.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+fn tag_chips(app: &mut SshcraftApp, ui: &mut Ui) {
+    let all = app.ui.hosts.cache.tags.clone();
     if all.is_empty() {
         return;
     }
@@ -252,7 +292,8 @@ fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
 }
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
-    let all_groups = groups(app);
+    update_cache(app);
+    let all_groups = app.ui.hosts.cache.groups.clone();
     ui.horizontal(|ui| {
         ui.heading(tr("Hosts"));
         ui.add_space(16.0);
@@ -279,43 +320,33 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     });
     ui.add_space(6.0);
     path(app, ui, &all_groups);
-    let query = app.ui.hosts.search.trim().to_lowercase();
-    let searching = !query.is_empty();
-    let rows: Vec<HostRow> = app
-        .data
-        .hosts
-        .iter()
-        .filter(|r| if searching { matches(r, &query, &all_groups) } else { r.host.group_id == app.ui.hosts.group })
-        .cloned()
-        .collect();
-    let refs: Vec<&HostRow> = rows.iter().collect();
-    tag_chips(app, ui, &refs);
+    tag_chips(app, ui);
     ui.add_space(6.0);
-    let wanted = app.ui.hosts.tags.clone();
-    let mut shown: Vec<&HostRow> = rows.iter().filter(|r| has_all_tags(&r.host.tags, &wanted)).collect();
-    shown.sort_by_key(|r| r.host.name.to_lowercase());
-    let mut sub: Vec<Group> = if searching { Vec::new() } else { all_groups.iter().filter(|g| g.parent_id == app.ui.hosts.group).cloned().collect() };
-    sub.sort_by_key(|g| g.name.to_lowercase());
+    let sub = app.ui.hosts.cache.sub.clone();
+    let shown = app.ui.hosts.cache.shown.clone();
+    let count = sub.len() + shown.len();
+    if count == 0 {
+        ui.label(egui::RichText::new(tr("No hosts here yet.")).color(Tokens::get(ui.ctx()).text_dim));
+    }
     let grid = app.data.settings.appearance.host_view == HostView::Grid;
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        let mut body = |ui: &mut Ui| {
-            for g in &sub {
-                group_entry(app, ui, g);
-            }
-            for row in &shown {
-                host_entry(app, ui, row, &all_groups);
-            }
-        };
-        if grid {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(24.0, 10.0);
-                body(ui);
+    let per_row = if grid { ((ui.available_width() / CELL_WIDTH).floor() as usize).max(1) } else { 1 };
+    // Only the rows in view are drawn.
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, count.div_ceil(per_row), |ui, range| {
+        for line in range {
+            ui.horizontal(|ui| {
+                ui.set_height(ROW_HEIGHT);
+                for i in line * per_row..((line + 1) * per_row).min(count) {
+                    let width = if grid { CELL_WIDTH } else { ui.available_width() };
+                    ui.allocate_ui_with_layout(vec2(width, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.set_min_width(width);
+                        if let Some(g) = sub.get(i) {
+                            group_entry(app, ui, g);
+                        } else if let Some(row) = i.checked_sub(sub.len()).and_then(|j| shown.get(j)).and_then(|&k| app.data.hosts.get(k)).cloned() {
+                            host_entry(app, ui, &row, &all_groups);
+                        }
+                    });
+                }
             });
-        } else {
-            body(ui);
-        }
-        if sub.is_empty() && shown.is_empty() {
-            ui.label(egui::RichText::new(tr("No hosts here yet.")).color(Tokens::get(ui.ctx()).text_dim));
         }
     });
     let ctx = ui.ctx().clone();

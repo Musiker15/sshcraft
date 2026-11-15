@@ -143,9 +143,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     egui::CentralPanel::default().frame(egui::Frame::new().fill(tokens.bg).inner_margin(12.0)).show(ui, |ui| match app.ui.page {
         Page::Hosts => crate::pages::hosts::show(app, ui),
         Page::Keys => crate::pages::keys::show(app, ui),
-        Page::Settings => {
-            ui.heading(tr("Settings"));
-        }
+        Page::Settings => crate::pages::settings::show(app, ui),
         Page::Tab(i) => match app.ui.tabs.get(i).map(|t| t.kind.clone()) {
             Some(TabKind::New) | None => new_tab_page(app, ui),
             Some(TabKind::Session { session }) => crate::session_tab::show(app, ui, session, i),

@@ -25,8 +25,9 @@ impl raw_window_handle::HasDisplayHandle for NoWindow {
     }
 }
 
-/// The app on a fresh engine in `dir`, 1200 by 800 points, and the engine's session.
-pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
+/// The app on a fresh engine in `dir` (English, whatever the machine's language), its engine
+/// session and the context it was made with, without a harness: for budgets that time frames.
+pub fn app_on(dir: &Path) -> (SshcraftApp, Session, egui::Context) {
     let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap());
     let session = {
         let _inside = runtime.enter();
@@ -39,13 +40,26 @@ pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
     let ctx = egui::Context::default();
     let mut app = SshcraftApp::new(session.clone(), &ctx);
     app.keep_runtime(runtime);
+    (app, session, ctx)
+}
+
+/// The app on a fresh engine in `dir`, 1200 by 800 points, and the engine's session.
+pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
+    app_harness_from(Harness::builder(), dir)
+}
+
+/// [`app_harness`] from `builder` (a renderer for pictures, another size).
+pub fn app_harness_from(builder: egui_kittest::HarnessBuilder<SshcraftApp>, dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
+    let (app, session, _ctx) = app_on(dir);
     // A frame as long as on a 60 Hz display, so double clicks fall inside egui's time for them.
-    let harness = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+    let harness = builder.with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
         |ui, app: &mut SshcraftApp| {
             app.frame(ui);
             app.show_dialogs(None::<&NoWindow>);
         },
         app,
     );
+    // The app was made with a context of its own: the harness's needs the system's fonts too.
+    harness.ctx.add_font_provider(Arc::new(egui_system_font_provider::SystemFontProvider::new()));
     (harness, session)
 }

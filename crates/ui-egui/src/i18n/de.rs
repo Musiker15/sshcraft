@@ -186,6 +186,43 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Accept" => "Annehmen",
         "Sign in to {host}" => "Bei {host} anmelden",
         "Sign in" => "Anmelden",
+        // Settings
+        "General" => "Allgemein",
+        "Appearance" => "Aussehen",
+        "Shortcuts" => "Tastenkürzel",
+        "SSHCraft dark" => "SSHCraft dunkel",
+        "SSHCraft light" => "SSHCraft hell",
+        "Language" => "Sprache",
+        "Theme" => "Farbschema",
+        "Dark" => "Dunkel",
+        "Light" => "Hell",
+        "Terminal colours" => "Terminalfarben",
+        "Terminal font" => "Terminalschrift",
+        "Font size" => "Schriftgröße",
+        "Hosts as" => "Hosts als",
+        "Unknown host" => "Unbekannter Host",
+        "Terminal type" => "Terminaltyp",
+        "Local shell" => "Lokale Shell",
+        "System default" => "Vorgabe des Systems",
+        "History" => "Verlauf",
+        "Keep the commands typed in terminals" => "In Terminals getippte Befehle behalten",
+        "Suggestions" => "Vorschläge",
+        "Suggest while typing" => "Beim Tippen vorschlagen",
+        "Programs may write the clipboard (OSC 52), after asking" => "Programme dürfen nach Rückfrage in die Zwischenablage schreiben (OSC 52)",
+        "Always allowed to write the clipboard" => "Dürfen immer in die Zwischenablage schreiben",
+        "No host yet." => "Noch kein Host.",
+        "{shortcut} is taken by {action}." => "{shortcut} gehört schon zu {action}.",
+        "A shortcut needs Ctrl, Alt or the Windows key, or is a function key." => {
+            "Ein Tastenkürzel braucht Strg, Alt oder die Windows-Taste, oder es ist eine Funktionstaste."
+        }
+        "Not a key combination: {why}" => "Keine Tastenkombination: {why}",
+        "Inside a terminal only Ctrl+Shift and Ctrl+Tab are taken; every other key goes to the server." => {
+            "Im Terminal gelten nur Strg+Umschalt und Strg+Tab; jede andere Taste geht an den Server."
+        }
+        "Press a key combination (Escape cancels)" => "Tastenkombination drücken (Escape bricht ab)",
+        "{shortcut} (outside the terminal only)" => "{shortcut} (nur außerhalb des Terminals)",
+        "Change" => "Ändern",
+        "Default" => "Standard",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

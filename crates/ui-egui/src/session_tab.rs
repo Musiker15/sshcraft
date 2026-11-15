@@ -389,7 +389,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
     }
     let family = app.term_font.as_ref().map_or(egui::FontFamily::Monospace, |(_, f)| f.clone());
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
-    let palette = if crate::theme::is_dark(appearance.app_theme, ctx.system_theme()) { TermPalette::dark() } else { TermPalette::light() };
+    let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
     let Some(tab) = app.terminals.get_mut(&id) else {
         ui.label(tr("This session is gone."));
         return;
