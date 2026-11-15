@@ -78,6 +78,15 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "Allow on this device" => "Auf diesem Gerät erlauben",
         "Known hosts" => "Bekannte Server",
+        "From a password manager" => "Aus einem Passwortmanager",
+        "Reference" => "Verweis",
+        "A {manager} reference looks like {example}" => "Ein Verweis für {manager} sieht so aus: {example}",
+        "The reference holds a control character or starts with '-'" => "Der Verweis enthält ein Steuerzeichen oder beginnt mit '-'",
+        "Fetched with {program} when connecting; SSHCraft keeps no copy." => "Wird beim Verbinden mit {program} geholt; SSHCraft behält keine Kopie.",
+        "Send a password from your password manager?" => "Ein Passwort aus deinem Passwortmanager senden?",
+        "{host} wants this password from your password manager, sent to the server below. It was not set up for this server on this device (it came with sync or a share, or the address changed). Allow it only if the password belongs to this server." => {
+            "{host} möchte dieses Passwort aus deinem Passwortmanager an den Server unten senden. Es wurde auf diesem Gerät nicht für diesen Server eingerichtet (es kam über Sync oder eine Freigabe, oder die Adresse hat sich geändert). Erlaube es nur, wenn das Passwort zu diesem Server gehört."
+        }
         "Trash" => "Papierkorb",
         "Backup" => "Sicherung",
         "One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here." => {

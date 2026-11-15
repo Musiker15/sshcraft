@@ -559,3 +559,34 @@ async fn backups_are_for_the_user_only() {
     assert!(journal.contains("backup.create"), "the call is journaled");
     assert!(!journal.contains("a long passphrase"));
 }
+
+/// A password reference entered in the form is allowed for the host's address; saved without
+/// entering it (a rename) it is not.
+#[tokio::test]
+async fn an_entered_password_reference_is_allowed_for_its_address() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let reference =
+        sshcraft_model::secret_ref::SecretRef { manager: sshcraft_model::secret_ref::Manager::OnePassword, reference: "op://S/web/password".into() };
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings {
+            address: Some("web.org".into()),
+            password_ref: Some(reference.clone()),
+            ..Default::default()
+        },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    let digest = crate::secrets::approval_digest(&reference, "web.org", 22);
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    assert!(!session.store().command_approved(&digest).unwrap());
+    session.execute(Caller::User, "host.save", json!({ "host": host, "approve_secret_ref": true })).await.unwrap();
+    assert!(session.store().command_approved(&digest).unwrap());
+    // Another address is another approval.
+    assert!(!session.store().command_approved(&crate::secrets::approval_digest(&reference, "evil.org", 22)).unwrap());
+}

@@ -88,6 +88,11 @@ pub trait HostKeyPrompter: Send + Sync + 'static {
     async fn ask_command(&self, _host_name: &str, _command: &str) -> bool {
         false
     }
+
+    /// Whether a password may be fetched from a password manager for this host.
+    async fn ask_secret_ref(&self, _host_name: &str, _description: &str) -> bool {
+        false
+    }
 }
 
 /// The UI may hold this many unacknowledged output bytes before SSHCraft stops reading from
@@ -254,6 +259,10 @@ pub(crate) struct Context {
     runtime: tokio::runtime::Handle,
     /// Tells sessions and forwards that the computer woke up or its network changed.
     pub(crate) wake: tokio::sync::broadcast::Sender<WakeEvent>,
+    /// Fetches passwords from password managers.
+    secrets: Mutex<Arc<dyn crate::secrets::SecretSource>>,
+    /// KeePassXC database passwords given this run, by database file; never stored.
+    kdbx: Mutex<HashMap<String, zeroize::Zeroizing<String>>>,
 }
 
 impl Context {
@@ -406,9 +415,16 @@ impl SessionManager {
                 settings: Mutex::new(parts.settings),
                 runtime: parts.runtime,
                 wake: tokio::sync::broadcast::channel(16).0,
+                secrets: Mutex::new(Arc::new(crate::secrets::CliSecrets)),
+                kdbx: Mutex::new(HashMap::new()),
             }),
             sessions: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Where passwords from password managers come from (a fake in tests).
+    pub fn set_secrets(&self, source: Arc<dyn crate::secrets::SecretSource>) {
+        *self.ctx.secrets.lock().unwrap_or_else(PoisonError::into_inner) = source;
     }
 
     /// Checks every connection now and retries every waiting reconnect: the computer woke up or
@@ -971,9 +987,10 @@ async fn hop(ctx: &Context, resolved: &ResolvedHost, opened: &OpenedKeys) -> Res
             agent: ctx.agent.connect().await.map_err(|e| end_error(ErrorCode::AgentUnavailable, Some(e.to_string())))?,
         }),
     };
-    let password = match resolved.password {
-        Some(id) => stored_password(ctx, id).await?,
-        None => None,
+    let password = match (&resolved.password_ref, resolved.password) {
+        (Some(reference), _) => Some(referenced_password(ctx, resolved, reference).await?),
+        (None, Some(id)) => stored_password(ctx, id).await?,
+        (None, None) => None,
     };
     Ok(Hop {
         host_name: resolved.name.clone(),
@@ -1145,6 +1162,62 @@ pub(crate) async fn connect_session(
     let session = sshcraft_ssh::connect_route(params, verifier.clone(), auth).await.map_err(|e| failure(e, &verifier))?;
     let notice = notice.or(session.certificate_expired().then_some(ErrorCode::CertificateExpired));
     Ok((session, notice))
+}
+
+/// A password from a password manager: only for an address it was allowed for on this device
+/// (else the user is asked; a shared host could otherwise have another of the user's secrets
+/// sent to a server of its choosing), then fetched by the manager's program.
+async fn referenced_password(
+    ctx: &Context,
+    resolved: &ResolvedHost,
+    reference: &sshcraft_model::secret_ref::SecretRef,
+) -> Result<zeroize::Zeroizing<String>, Failure> {
+    use sshcraft_model::secret_ref::Manager;
+    reference.check().map_err(|e| end_error(ErrorCode::SecretRefFailed, Some(e.to_string())))?;
+    let digest = crate::secrets::approval_digest(reference, &resolved.address, resolved.port);
+    let store_error = |e: sshcraft_store::store::StoreError| end_error(ErrorCode::Store, Some(e.to_string()));
+    let approved = ctx.store.lock().unwrap_or_else(PoisonError::into_inner).command_approved(&digest).map_err(store_error)?;
+    if !approved {
+        let description = format!("{} {} → {}:{}", reference.manager.label(), reference.reference, resolved.address, resolved.port);
+        if !ctx.prompter.ask_secret_ref(&resolved.name, &description).await {
+            return Err(end_error(ErrorCode::SecretRefNotAllowed, Some(description)));
+        }
+        ctx.store.lock().unwrap_or_else(PoisonError::into_inner).approve_command(&digest).map_err(store_error)?;
+    }
+    let database = match reference.manager {
+        Manager::KeePassXc => reference.reference.split_once('#').map(|(db, _)| db.to_owned()),
+        _ => None,
+    };
+    let mut asked = None;
+    if let Some(db) = &database
+        && !ctx.kdbx.lock().unwrap_or_else(PoisonError::into_inner).contains_key(db)
+    {
+        let request = AuthRequest {
+            host_name: resolved.name.clone(),
+            username: String::new(),
+            name: "KeePassXC".into(),
+            instructions: format!("The password of the KeePassXC database {db}, for this run of SSHCraft."),
+            prompts: vec![AuthPromptLine { text: "Database password:".into(), echo: false }],
+            passphrase_for: None,
+        };
+        let answer = ctx.auth.answer(request).await.and_then(|mut a| a.pop()).ok_or(Failure::End(EndReason::AuthCancelled, None, None))?;
+        asked = Some(answer);
+    }
+    let db_password = match (&database, &asked) {
+        (_, Some(a)) => Some(a.clone()),
+        (Some(db), None) => ctx.kdbx.lock().unwrap_or_else(PoisonError::into_inner).get(db).cloned(),
+        _ => None,
+    };
+    let source = ctx.secrets.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    let password = source
+        .fetch(reference, db_password.as_ref().map(|p| p.as_str()))
+        .await
+        .map_err(|e| Failure::End(EndReason::AuthFailed, Some(ErrorCode::SecretRefFailed), Some(e)))?;
+    // A database password that worked is kept for this run.
+    if let (Some(db), Some(a)) = (database, asked) {
+        ctx.kdbx.lock().unwrap_or_else(PoisonError::into_inner).insert(db, a);
+    }
+    Ok(password)
 }
 
 /// A proxy command runs only when it was set on this device or allowed here once: one that

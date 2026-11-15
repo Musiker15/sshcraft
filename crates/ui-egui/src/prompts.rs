@@ -35,6 +35,8 @@ pub enum PromptKind {
     },
     /// A proxy command that was not set on this device, waiting for the user's yes or no.
     ProxyCommand {
+        /// `proxy_command` or `password_ref`.
+        what: String,
         host_name: String,
         command: String,
     },
@@ -105,7 +107,7 @@ impl PromptView {
                     .unwrap_or_default(),
             },
             "agent" => PromptKind::Agent { agent: text("agent"), action: text("action"), target: text("target"), detail: text("detail") },
-            "proxy_command" => PromptKind::ProxyCommand { host_name: text("host_name"), command: text("command") },
+            "proxy_command" => PromptKind::ProxyCommand { what: text("what"), host_name: text("host_name"), command: text("command") },
             _ => return None,
         };
         let answers = match &kind {
@@ -277,13 +279,22 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                     }
                 });
             }
-            PromptKind::ProxyCommand { host_name, command } => {
-                ui.heading(tr("Run a program to connect?"));
-                ui.add_space(6.0);
-                ui.label(trf(
-                    "{host} connects through this program on your computer. It was not set up on this device (it came with sync, a share or an agent, or it changed). Allow it only if you know it.",
-                    &[("host", &visible(host_name))],
-                ));
+            PromptKind::ProxyCommand { what, host_name, command } => {
+                if what == "password_ref" {
+                    ui.heading(tr("Send a password from your password manager?"));
+                    ui.add_space(6.0);
+                    ui.label(trf(
+                        "{host} wants this password from your password manager, sent to the server below. It was not set up for this server on this device (it came with sync or a share, or the address changed). Allow it only if the password belongs to this server.",
+                        &[("host", &visible(host_name))],
+                    ));
+                } else {
+                    ui.heading(tr("Run a program to connect?"));
+                    ui.add_space(6.0);
+                    ui.label(trf(
+                        "{host} connects through this program on your computer. It was not set up on this device (it came with sync, a share or an agent, or it changed). Allow it only if you know it.",
+                        &[("host", &visible(host_name))],
+                    ));
+                }
                 ui.add_space(6.0);
                 if let Some(warning) = command_warning(command) {
                     ui.label(egui::RichText::new(warning).color(tokens.warning));

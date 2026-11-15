@@ -257,3 +257,23 @@ fn a_deleted_host_is_restored_from_the_trash() {
     until(&mut h, "the restored host", |app| app.data.hosts.iter().any(|r| r.host.name == "gone"));
     until(&mut h, "an empty trash", |app| app.data.trash.as_ref().is_some_and(Vec::is_empty));
 }
+
+#[test]
+fn the_host_form_takes_a_password_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let id = add_host(&session, "vaulted", None, &[]);
+    h.run_steps(3);
+    hosts::edit_host(h.state_mut(), id);
+    h.run_steps(2);
+    h.get_by_label("From a password manager").click();
+    h.run_steps(2);
+    h.get_by_label("Reference").click();
+    h.run_steps(1);
+    h.get_by_label("Reference").type_text("op://Servers/vaulted/password");
+    h.run_steps(2);
+    h.get_by_label("Save").click();
+    until(&mut h, "the saved reference", |app| {
+        app.data.hosts.iter().any(|r| r.host.settings.password_ref.as_ref().is_some_and(|p| p.reference == "op://Servers/vaulted/password"))
+    });
+}

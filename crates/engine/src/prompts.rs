@@ -43,6 +43,8 @@ pub struct HostKeyPrompt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProxyCommandPrompt {
     pub prompt_id: u64,
+    /// `proxy_command`, or `password_ref` (a password from a password manager).
+    pub what: &'static str,
     pub host_name: String,
     /// The command line as it will run, before its tokens are replaced.
     pub command: String,
@@ -278,9 +280,18 @@ impl<E: PromptEmitter> PromptRegistry<E> {
 
     /// Asks whether a proxy command may run. Not delivered or dropped unanswered counts as no.
     pub async fn ask_command(&self, host_name: &str, command: &str) -> bool {
+        self.ask_run("proxy_command", host_name, command).await
+    }
+
+    /// Asks whether a password may be fetched from a password manager for a host.
+    pub async fn ask_secret_ref(&self, host_name: &str, description: &str) -> bool {
+        self.ask_run("password_ref", host_name, description).await
+    }
+
+    async fn ask_run(&self, what: &'static str, host_name: &str, command: &str) -> bool {
         let prompt_id = self.next_id();
         let (tx, rx) = oneshot::channel();
-        let prompt = ProxyCommandPrompt { prompt_id, host_name: host_name.to_owned(), command: command.to_owned(), session: asking_session() };
+        let prompt = ProxyCommandPrompt { prompt_id, what, host_name: host_name.to_owned(), command: command.to_owned(), session: asking_session() };
         self.put_back(prompt_id, Pending { prompt: OpenPrompt::ProxyCommand(prompt.clone()), answer: Answer::ProxyCommand(tx) });
         if !self.emitter.asked_command(&prompt) {
             self.take(prompt_id);
@@ -355,6 +366,10 @@ impl<E: PromptEmitter> HostKeyPrompter for PromptRegistry<E> {
 
     async fn ask_command(&self, host_name: &str, command: &str) -> bool {
         PromptRegistry::ask_command(self, host_name, command).await
+    }
+
+    async fn ask_secret_ref(&self, host_name: &str, description: &str) -> bool {
+        PromptRegistry::ask_secret_ref(self, host_name, description).await
     }
 }
 

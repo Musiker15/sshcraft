@@ -19,6 +19,7 @@ pub mod listing;
 pub mod passcli;
 pub mod prompts;
 pub mod recording;
+pub mod secrets;
 pub mod sessions;
 pub mod settings;
 pub mod ssh_config;

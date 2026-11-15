@@ -202,6 +202,7 @@ pub fn signs_in_with_stored(settings: &ConnectionSettings) -> bool {
         || settings.identity.is_some()
         || settings.agent_forwarding == Some(true)
         || matches!(settings.proxy, Some(sshcraft_model::model::Proxy::Command { .. }))
+        || settings.password_ref.is_some()
 }
 
 /// A name an agent may give: not blank, at most [`MAX_NAME`] characters, no control or bidi

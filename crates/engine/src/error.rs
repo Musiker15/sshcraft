@@ -67,6 +67,10 @@ pub enum ErrorCode {
     ProxyAuthFailed,
     /// A proxy command that is not allowed on this device, and the user said no.
     ProxyCommandNotAllowed,
+    /// A password reference that is not allowed for this address, and the user said no.
+    SecretRefNotAllowed,
+    /// The password manager could not give the password (not installed, locked, no such item).
+    SecretRefFailed,
     PasswordRejected,
     NotSupported,
     LocalShellFailed,

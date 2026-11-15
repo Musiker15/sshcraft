@@ -140,11 +140,15 @@ struct SaveParams {
     /// command changed there); anything else never approves one.
     #[serde(default)]
     approve_command: bool,
+    /// The user entered the password reference in this save; it may then be used for the
+    /// host's address without asking.
+    #[serde(default)]
+    approve_secret_ref: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command } = parse("host.save", params)?;
+        let SaveParams { mut host, approve_command, approve_secret_ref } = parse("host.save", params)?;
         let id = host.id.0.to_string();
         let (orphans, before) = {
             let store = ctx.session.store();
@@ -160,6 +164,18 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         }
         if approve_command {
             approve_commands(&ctx, [&host.settings])?;
+        }
+        if approve_secret_ref
+            && ctx.caller.is_user()
+            && let Some(reference) = &host.settings.password_ref
+        {
+            let store = ctx.session.store();
+            let groups = store.list_groups()?;
+            let chain = host.group_id.map(|g| group_chain(&groups, g)).unwrap_or_default();
+            let refs: Vec<&Group> = chain.iter().collect();
+            if let Ok((address, port)) = effective_endpoint(&host, &refs) {
+                store.approve_command(&crate::secrets::approval_digest(reference, &address, port))?;
+            }
         }
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
         // Rules removed from the host stop forwarding.

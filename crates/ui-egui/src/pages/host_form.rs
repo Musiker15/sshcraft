@@ -5,6 +5,7 @@
 use egui::Ui;
 use serde_json::json;
 use sshcraft_model::model::{ConnectionSettings, EnvVar, Group, GroupId, Host, HostId, HostOs, KeyRef, Proxy, ProxyEndpoint};
+use sshcraft_model::secret_ref::{Manager, SecretRef, SecretRefError};
 
 use crate::app::SshcraftApp;
 use crate::i18n::{tr, trf};
@@ -107,6 +108,8 @@ pub struct HostForm {
     pub error: Option<String>,
     /// The proxy as the form opened; a command that differs at save was entered here.
     pub opened_proxy: Option<Proxy>,
+    /// The password reference as the form opened.
+    pub opened_ref: Option<SecretRef>,
 }
 
 impl HostForm {
@@ -114,7 +117,46 @@ impl HostForm {
         let tags = host.tags.join(", ");
         let port = host.settings.port.map(|p| p.to_string()).unwrap_or_default();
         let opened_proxy = host.settings.proxy.clone();
-        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
+        let opened_ref = host.settings.password_ref.clone();
+        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy, opened_ref }
+    }
+}
+
+/// The password from a password manager: a manager and a reference, checked as typed.
+fn password_ref_field(ui: &mut Ui, reference: &mut Option<SecretRef>) {
+    let mut on = reference.is_some();
+    ui.horizontal(|ui| {
+        ui.label("");
+        if ui.checkbox(&mut on, tr("From a password manager")).changed() {
+            *reference = on.then(|| SecretRef { manager: Manager::OnePassword, reference: String::new() });
+        }
+    });
+    let Some(r) = reference.as_mut() else { return };
+    ui.horizontal(|ui| {
+        ui.label("");
+        egui::ComboBox::from_id_salt("sshcraft-secret-manager").selected_text(r.manager.label()).show_ui(ui, |ui| {
+            for m in [Manager::ProtonPass, Manager::OnePassword, Manager::Bitwarden, Manager::KeePassXc] {
+                ui.selectable_value(&mut r.manager, m, m.label());
+            }
+        });
+        let label = ui.label(tr("Reference"));
+        ui.add(egui::TextEdit::singleline(&mut r.reference).hint_text(r.manager.example()).font(egui::TextStyle::Monospace).desired_width(260.0))
+            .labelled_by(label.id);
+    });
+    if !r.reference.is_empty()
+        && let Err(e) = r.check()
+    {
+        let text = match e {
+            SecretRefError::Shape(manager, example) => {
+                trf("A {manager} reference looks like {example}", &[("manager", manager), ("example", example)])
+            }
+            _ => tr("The reference holds a control character or starts with '-'").to_owned(),
+        };
+        ui.colored_label(ui.visuals().error_fg_color, text);
+    } else {
+        ui.label(
+            egui::RichText::new(trf("Fetched with {program} when connecting; SSHCraft keeps no copy.", &[("program", r.manager.program())])).small(),
+        );
     }
 }
 
@@ -453,6 +495,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.separator();
                 settings_editor(ui, app, &mut form.host.settings, &mut form.port, &inherited, Some(form.host.id));
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
+                password_ref_field(ui, &mut form.host.settings.password_ref);
             },
         );
         if let Some(error) = &form.error {
@@ -482,7 +525,11 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "host.save",
-                    json!({ "host": form.host, "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy) }),
+                    json!({
+                        "host": form.host,
+                        "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy),
+                        "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
+                    }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
