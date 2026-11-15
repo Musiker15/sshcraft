@@ -199,12 +199,21 @@ enum Answer {
     Auth(Option<Vec<String>>),
 }
 
+/// A button that answers a question: it takes a click (or a screen reader's click) but never
+/// the keyboard focus, so Tab and Enter typed for a terminal never answer.
+fn answer_button(ui: &mut egui::Ui, ready: bool, text: &str) -> bool {
+    ui.add_enabled(ready, egui::Button::new(text).sense(egui::Sense::CLICK)).clicked()
+}
+
 pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     // The tab that asks, by number and title (several tabs may show the same host).
     let asking =
         app.prompts.open.first().and_then(|p| p.session).and_then(|id| {
             crate::session_tab::pane_of(app, id).map(|(t, _)| (t, app.terminals.get(&id).map(|s| s.title.clone()).unwrap_or_default()))
         });
+    // The answer field takes the keyboard only when the asking tab is on screen: typing meant for
+    // another page never lands in a question the user has not seen.
+    let on_screen = asking.as_ref().is_some_and(|(index, _)| app.ui.page == crate::state::Page::Tab(*index));
     let Some(prompt) = app.prompts.open.first_mut() else {
         app.prompts.shown = None;
         return;
@@ -253,11 +262,11 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(visible(fingerprint)).monospace().color(tokens.text_strong));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(ready, egui::Button::new(tr("Accept"))).clicked() {
-                        answer = Some(Answer::HostKey(true));
-                    }
-                    if ui.add_enabled(ready, egui::Button::new(tr("Cancel"))).clicked() {
+                    if answer_button(ui, ready, tr("Cancel")) {
                         answer = Some(Answer::HostKey(false));
+                    }
+                    if answer_button(ui, ready, tr("Accept")) {
+                        answer = Some(Answer::HostKey(true));
                     }
                 });
             }
@@ -287,11 +296,11 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(ready, egui::Button::new(tr("Allow"))).clicked() {
-                        answer = Some(Answer::Agent(true));
-                    }
-                    if ui.add_enabled(ready, egui::Button::new(tr("Deny"))).clicked() {
+                    if answer_button(ui, ready, tr("Deny")) {
                         answer = Some(Answer::Agent(false));
+                    }
+                    if answer_button(ui, ready, tr("Allow")) {
+                        answer = Some(Answer::Agent(true));
                     }
                 });
             }
@@ -310,7 +319,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                         ui.label(visible(text));
                         let field = crate::widgets::secret_field(ui, value, answer_id(prompt.id, i), !echo, "", 300.0);
                         // The keyboard goes to the first answer, not to the terminal behind.
-                        if first_frame && i == 0 {
+                        if first_frame && on_screen && i == 0 {
                             field.request_focus();
                         }
                         ui.end_row();

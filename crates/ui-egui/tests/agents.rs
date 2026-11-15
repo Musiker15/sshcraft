@@ -72,6 +72,37 @@ fn an_agent_question_names_agent_action_and_target_and_waits_for_a_click() {
     assert!(result.is_ok(), "{result:?}");
 }
 
+fn press(h: &mut H, key: Key) {
+    for pressed in [true, false] {
+        h.event(Event::Key { key, pressed, modifiers: Modifiers::NONE, repeat: false, physical_key: None });
+        h.run_steps(1);
+    }
+}
+
+#[test]
+fn tab_then_enter_or_space_never_answers_an_agent_question() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.run_steps(2);
+    let task = agent_saves(&session, "db-03");
+    until(&mut h, "the question", agent_question);
+    // Long past the delay: the buttons take clicks now.
+    std::thread::sleep(Duration::from_millis(600));
+    h.run_steps(5);
+    for _ in 0..4 {
+        press(&mut h, Key::Tab);
+        press(&mut h, Key::Enter);
+        press(&mut h, Key::Space);
+    }
+    h.run_steps(10);
+    assert!(agent_question(h.state()), "no key answers the question");
+    assert!(!task.is_finished());
+    h.get_by_label("Deny").click();
+    until(&mut h, "the answer", |app| !agent_question(app));
+    let result = session.runtime().block_on(task).unwrap();
+    assert!(result.is_err(), "denied: {result:?}");
+}
+
 #[test]
 fn a_long_command_carries_a_warning() {
     use sshcraft_ui_egui::prompts::command_warning;

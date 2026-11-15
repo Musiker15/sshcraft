@@ -86,6 +86,23 @@ fn typing_during_a_sign_in_question_never_reaches_the_shell() {
 }
 
 #[test]
+fn a_sign_in_question_of_a_hidden_tab_does_not_take_the_keyboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let auth = TestAuth { key_then_kbd: true, kbd: vec![vec![("Password: ".into(), false, "pw".into())]], ..Default::default() };
+    let (_server, id) = host(&session, "web", auth, true);
+    h.run_steps(2);
+    h.state_mut().ui.connect_request = Some(ConnectRequest::Host(id));
+    h.run_steps(1);
+    // The user went on to another page before the question came.
+    h.state_mut().ui.page = Page::Keys;
+    until(&mut h, "the question", |app| !app.prompts.open.is_empty());
+    assert_eq!(h.state().ui.page, Page::Keys);
+    type_line(&mut h, "meant-elsewhere");
+    assert_eq!(h.state().prompts.open[0].answers[0], "", "typing meant for another place stays out of the answer; page {:?} session {:?}", h.state().ui.page, h.state().prompts.open[0].session);
+}
+
+#[test]
 fn typing_during_a_host_key_question_never_reaches_the_shell() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, session) = app_harness(dir.path());
@@ -100,6 +117,29 @@ fn typing_during_a_host_key_question_never_reaches_the_shell() {
     until(&mut h, "the connection", |app| connected(app, tab));
     settle(&mut h);
     assert!(!screen(h.state(), tab).contains("typed-early"));
+}
+
+#[test]
+fn tab_then_enter_never_accepts_a_host_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, id) = host(&session, "new", TestAuth::default(), false);
+    h.run_steps(2);
+    let tab = connect(&mut h, id);
+    until(&mut h, "the question", |app| !app.prompts.open.is_empty());
+    std::thread::sleep(Duration::from_millis(600));
+    h.run_steps(5);
+    for _ in 0..4 {
+        for key in [Key::Tab, Key::Enter, Key::Space] {
+            for pressed in [true, false] {
+                h.event(Event::Key { key, pressed, modifiers: Modifiers::NONE, repeat: false, physical_key: None });
+                h.run_steps(1);
+            }
+        }
+    }
+    settle(&mut h);
+    assert_eq!(h.state().prompts.open.len(), 1, "no key accepts the host key");
+    assert!(!connected(h.state(), tab));
 }
 
 #[test]
