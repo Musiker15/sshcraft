@@ -511,6 +511,14 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Previous" => "Vorheriger",
         "Next" => "Nächster",
         "Not found in this log." => "In diesem Protokoll nicht gefunden.",
+        "Connection" => "Verbindung",
+        "Copy" => "Kopieren",
+        "Allow agent control" => "Steuerung durch Agenten erlauben",
+        "Port (0: any free port)" => "Port (0: ein freier Port)",
+        "Agents can connect on 127.0.0.1:{port}." => "Agenten können sich über 127.0.0.1:{port} verbinden.",
+        "Agents cannot connect: {error}" => "Agenten können sich nicht verbinden: {error}",
+        "Turned off in the ArtCraft Launcher (Settings › AI agents)." => "Im ArtCraft Launcher ausgeschaltet (Einstellungen › KI-Agenten).",
+        "Agents cannot connect." => "Agenten können sich nicht verbinden.",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

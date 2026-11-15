@@ -35,6 +35,8 @@ pub struct SshcraftApp {
     /// The shortcut settings the bindings were built from.
     bindings_from: Option<sshcraft_engine::settings::Shortcuts>,
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
+    /// Turns the agent link on and off as the consent says.
+    pub link: crate::link::LinkWatch,
     /// Kept alive for the app when it owns the runtime (tests); the app binary owns it itself.
     _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
 }
@@ -65,6 +67,7 @@ impl SshcraftApp {
             forms: crate::forms::Forms::default(),
             log_viewer: None,
             bindings_from: None,
+            link: crate::link::LinkWatch::default(),
             events,
             _runtime: None,
         }
@@ -296,6 +299,7 @@ impl SshcraftApp {
         // A character no font has is drawn as a box, never a panic (tests switch egui to panic).
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
+        crate::link::tick(self, &ctx);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {
             self.bindings = Bindings::from_settings(&self.data.settings.shortcuts);

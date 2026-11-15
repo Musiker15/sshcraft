@@ -63,7 +63,7 @@ pub struct SettingsView {
 }
 
 /// Saves `change` applied to the current settings; the page shows it at once.
-fn save(app: &mut SshcraftApp, change: impl FnOnce(&mut EngineSettings)) {
+pub(crate) fn save(app: &mut SshcraftApp, change: impl FnOnce(&mut EngineSettings)) {
     let mut settings = app.data.settings.clone();
     change(&mut settings);
     if settings == app.data.settings {

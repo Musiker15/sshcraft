@@ -91,12 +91,16 @@ fn removing_a_server_asks_first_and_says_what_it_takes() {
     create(&mut h, &origin, &api_key);
     h.get_by_label("I have kept the key").click();
     until(&mut h, "the server", |app| app.data.servers.iter().any(|s| s["name"] == "home"));
+    // A notice ("Account created") may lie over the button: the notices go first.
+    h.state_mut().toasts = Default::default();
+    h.run_steps(2);
     h.get_by_label("Remove server").click();
-    for _ in 0..15 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.query_by_label_contains("account key").is_none() {
+        assert!(Instant::now() < deadline, "it says the account key is needed to join again");
         std::thread::sleep(Duration::from_millis(20));
         h.run_steps(1);
     }
-    assert!(h.query_by_label_contains("account key").is_some(), "it says the account key is needed to join again");
     h.state_mut().data.dirty |= sshcraft_ui_egui::data::Refresh::SERVERS;
     h.run_steps(5);
     assert!(h.state().data.servers.iter().any(|s| s["name"] == "home"), "nothing is removed before the confirmation");

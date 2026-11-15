@@ -6,7 +6,7 @@ use egui::Ui;
 use serde_json::{Value, json};
 
 use crate::app::SshcraftApp;
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::theme::Tokens;
 use crate::widgets::visible;
 
@@ -112,6 +112,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.spinner();
         return;
     };
+    connection(app, ui, &tokens);
+    ui.add_space(12.0);
     ui.label(
         egui::RichText::new(tr(
             "What AI agents may do through MCP or the command line. \"Ask\" asks in this window; with no window, the answer is no.",
@@ -198,6 +200,39 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         );
         crate::widgets::elided_label(ui, &line, ui.available_width(), tokens.text, egui::FontId::monospace(12.0));
     }
+}
+
+/// The switch that lets agents connect, the port, and where they connect now.
+fn connection(app: &mut SshcraftApp, ui: &mut Ui, tokens: &Tokens) {
+    ui.label(egui::RichText::new(tr("Connection")).strong());
+    let mut integrations = app.data.settings.integrations.clone();
+    let mut changed = ui.checkbox(&mut integrations.allow_agent_control, tr("Allow agent control")).changed();
+    ui.horizontal(|ui| {
+        ui.label(tr("Port (0: any free port)"));
+        changed |= ui.add(egui::DragValue::new(&mut integrations.agent_port).range(0..=65535)).changed();
+    });
+    if changed {
+        crate::pages::settings::save(app, |s| s.integrations = integrations.clone());
+        crate::link::check_soon(app);
+    }
+    let status = app.session.agent_link_status();
+    let consent = app.link.consent;
+    let (text, color) = match (status.port, &app.link.error, consent) {
+        (Some(port), _, _) => (trf("Agents can connect on 127.0.0.1:{port}.", &[("port", &port.to_string())]), tokens.success),
+        (None, Some(error), _) => (trf("Agents cannot connect: {error}", &[("error", &visible(error))]), tokens.danger),
+        (None, None, Some(c)) if c.allow_setting && c.mcp_flag && !c.launcher_allows => {
+            (tr("Turned off in the ArtCraft Launcher (Settings › AI agents).").to_string(), tokens.warning)
+        }
+        _ => (tr("Agents cannot connect.").to_string(), tokens.text_dim),
+    };
+    ui.label(egui::RichText::new(text).color(color));
+    ui.horizontal(|ui| {
+        let line = "claude mcp add sshcraft -- sshcraft-cli mcp";
+        ui.label(egui::RichText::new(line).monospace());
+        if ui.button(tr("Copy")).clicked() {
+            ui.ctx().copy_text(line.to_string());
+        }
+    });
 }
 
 /// Hides host or group `id` from agents, or shows it again.

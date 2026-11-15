@@ -186,3 +186,77 @@ fn the_log_lists_outcomes_and_clears() {
         h.run_steps(1);
     }
 }
+
+mod link {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    use egui_kittest::kittest::Queryable;
+    use serde_json::json;
+    use sshcraft_engine::consent::Consent;
+    use sshcraft_link::{Client, ConnectionFile, Token};
+
+    use super::{H, agents_page};
+    use sshcraft_ui_egui::testing::app_harness;
+
+    /// The suite's flag and the launcher's switch, as the test sets them.
+    #[derive(Default)]
+    struct Suite {
+        flag: AtomicBool,
+        launcher: AtomicBool,
+    }
+
+    fn with_suite(h: &mut H) -> Arc<Suite> {
+        let suite = Arc::new(Suite::default());
+        let seen = suite.clone();
+        h.state_mut().link.source = Arc::new(move |allow| Consent {
+            allow_setting: allow,
+            mcp_flag: seen.flag.load(Ordering::SeqCst),
+            launcher_allows: seen.launcher.load(Ordering::SeqCst),
+        });
+        suite
+    }
+
+    fn wait(h: &mut H, what: &str, done: impl Fn(&H) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !done(h) {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(50));
+            h.run_steps(1);
+        }
+    }
+
+    fn file(h: &H) -> Option<ConnectionFile> {
+        h.state().link.dir.as_deref().and_then(ConnectionFile::read)
+    }
+
+    #[test]
+    fn the_link_follows_the_consent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut h, session) = app_harness(dir.path());
+        let suite = with_suite(&mut h);
+        agents_page(&mut h);
+        h.run_steps(3);
+        assert!(file(&h).is_none(), "off until the user turns it on");
+        h.get_by_label("Allow agent control").click();
+        wait(&mut h, "the link", |h| file(h).is_some());
+        let f = file(&h).unwrap();
+        let token = Token::load_or_create(&f.token_file).unwrap();
+        let client = session.runtime().block_on(Client::connect(std::net::SocketAddr::from(([127, 0, 0, 1], f.port)), &token)).unwrap();
+        assert!(h.query_by_label_contains(&format!("127.0.0.1:{}", f.port)).is_some(), "the page says where agents connect");
+        h.get_by_label("Allow agent control").click();
+        wait(&mut h, "the link to stop", |h| file(h).is_none());
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(session.runtime().block_on(client.call("ping", json!({}))).is_err(), "the agent was cut off");
+        // With the suite's flag, the launcher must name SSHCraft as well.
+        suite.flag.store(true, Ordering::SeqCst);
+        h.get_by_label("Allow agent control").click();
+        std::thread::sleep(Duration::from_millis(2500));
+        h.run_steps(5);
+        assert!(file(&h).is_none(), "the launcher says no");
+        assert!(h.query_by_label_contains("ArtCraft Launcher").is_some(), "the page says why");
+        suite.launcher.store(true, Ordering::SeqCst);
+        wait(&mut h, "the link with the launcher's yes", |h| file(h).is_some());
+    }
+}
