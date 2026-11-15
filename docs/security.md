@@ -171,9 +171,15 @@ switched on is refused. See [connections.md](connections.md).
 
 ## AI agents
 
-- From R6 on, agents reach SSHCraft only over loopback, with a token made at every start and kept
-  in a file only the current user can read; it is off until the user allows agents. Until R6 there
-  is no agent connection on `main`.
+- Agents reach SSHCraft only over loopback (`127.0.0.1`), and only while the user allows agent
+  control (off on a fresh install; with the suite's AI-MCP flag the ArtCraft Launcher must allow
+  it too). The token stays in a file only the user can read; every connection signs in by
+  challenge, so the token never crosses the wire and a program on a stale port learns nothing.
+  The agent link runs engine commands only: no window input, no screenshots, no journal.
+- The control channel (`--control`) is a developer tool, never on by default: whoever has its
+  token clicks and types like the user. Its engine commands still pass the gate as `control`.
+- A connection's sessions and open questions end with it; an agent cannot flood the log through
+  the link (the newest 1000 entries stay).
 - No action returns key material, passwords or account keys; answers that look like key
   material are blocked. Rights per kind of action (allow, ask, block), questions only in
   SSHCraft's window, hidden hosts answered as unknown, a sealed log of every action.

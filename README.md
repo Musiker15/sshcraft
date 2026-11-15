@@ -14,8 +14,9 @@ agents, with rights per action and a confirmation in the app.
 
 **Status:** rebuild in progress (see [ROADMAP.md](ROADMAP.md)). The desktop app has everything of
 the Tauri version again: hosts, keys, terminal tabs with panes and broadcast, workspaces, port
-forwarding, snippets, session logs, sync and sharing, and the rights of AI agents. The control
-channel, MCP and the command line return in R6. There is no release yet.
+forwarding, snippets, session logs, sync and sharing, the rights of AI agents, and MCP and the
+command line for them (`sshcraft-cli`). Packages for macOS, Linux and FreeBSD come in R7. There is
+no release yet.
 
 ## Quick start
 

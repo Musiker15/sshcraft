@@ -188,6 +188,11 @@ Each has a test where it can have one.
   (the whole window on sample data). Both run an engine on a temp folder.
 - Interface tests run the app in egui_kittest on a test engine (`sshcraft_ui_egui::testing`,
   feature `testing`).
+- Agents: `cargo run -p sshcraft-cli -- --help`; with the app's *Allow agent control* on,
+  `cargo run -p sshcraft-cli -- hosts`. `SSHCRAFT_LINK_DIR` moves the link's files (tests).
+- The control channel, for driving the window from a script: `cargo run -p sshcraft -- --control
+  7878 --control-token-file <path>`, then `sshcraft-cli ui --bridge 7878 --control-token-file
+  <path> inspect` ([docs/control-protocol.md](docs/control-protocol.md)).
 - `cargo xtask perf` runs the performance budgets of the terminal and the window in a release
   build.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.

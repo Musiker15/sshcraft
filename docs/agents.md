@@ -1,46 +1,51 @@
 # AI agents
 
-> The desktop app is being rebuilt (R1 to R7); this page describes the behaviour the rebuild keeps. The connection between agents and the app described below changes in R6: a loopback connection with a token per start replaces the named pipe, as the rebuild design (section 9) says.
-
 Claude Code, Codex and other AI agents can work with SSHCraft: list hosts, run commands, keep a
 shell open, add and change hosts and groups, generate and import keys. They do this through the
-`sshcraft` program that comes with the app, either as an **MCP server** (`sshcraft mcp`) or as a
-**command line** for scripts. Agents never see a private key: SSHCraft holds the keys and opens
+`sshcraft-cli` program that comes with the app, either as an **MCP server** (`sshcraft-cli mcp`)
+or as a **command line** for scripts. Agents never see a private key: SSHCraft holds the keys and opens
 the SSH connections itself.
 
 ## Setting it up
 
-`sshcraft.exe` is installed next to the app (`sshcraft-app.exe`): with the setup program in
-`%LOCALAPPDATA%\SSHCraft`, with the MSI package in `C:\Program Files\SSHCraft`. Add that folder
-to `PATH`, or use the full path below.
+1. In SSHCraft, turn on Settings › AI agents › **Allow agent control** (off on a fresh install).
+   The page then says where agents connect.
+2. `sshcraft-cli` is installed next to the app (`sshcraft`). Add that folder to `PATH`, or use
+   the full path below.
 
 **Claude Code:**
 
 ```bash
-claude mcp add sshcraft -- sshcraft mcp
+claude mcp add sshcraft -- sshcraft-cli mcp
 ```
 
 **Codex** (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.sshcraft]
-command = "sshcraft"
+command = "sshcraft-cli"
 args = ["mcp"]
 ```
 
-Any other MCP client: command `sshcraft`, argument `mcp`, transport stdio.
+Any other MCP client: command `sshcraft-cli`, argument `mcp`, transport stdio.
 
-The SSHCraft app must be running. Without it every tool answers *SSHCraft is not running*, and
-the command line exits with code 3.
+A registration of the Tauri version (`claude mcp add sshcraft -- sshcraft mcp`) must be made
+again with `sshcraft-cli`. The SSHCraft app must be running and allow agent control. Without it
+every tool answers *SSHCraft is not running*, and the command line exits with code 3;
+`sshcraft-cli mcp --when-closed launch` starts the app instead and waits for it. With the ArtCraft
+Launcher's AI-MCP flag on, the launcher's switch *Let AI agents use Craft apps* must be on too.
+The tools in detail: [mcp.md](mcp.md).
 
 ## Command line
 
 ```bash
-sshcraft hosts
-sshcraft exec web -- systemctl status nginx
-sshcraft save-host '{"name": "db", "address": "10.0.0.5", "username": "root"}'
-sshcraft save-host '{"id": "<host id>", "username": "deploy"}'
-sshcraft generate-key deploy --type ed25519
+sshcraft-cli hosts
+sshcraft-cli exec web -- systemctl status nginx
+sshcraft-cli save-host '{"name": "db", "address": "10.0.0.5", "username": "root"}'
+sshcraft-cli save-host '{"id": "<host id>", "username": "deploy"}'
+sshcraft-cli generate-key deploy --type ed25519
+sshcraft-cli commands
+sshcraft-cli run --cmd 'forward.status'
 ```
 
 `--agent <name>` sets the name SSHCraft shows in its questions and log (default `cli`; with
@@ -107,7 +112,7 @@ imports, accounts, answers to questions) never is:
   command. Only that window answers, never the agent's chat. Without an answer within two
   minutes it counts as *Deny*; an agent that disconnects takes its question back.
 - Opening a session asks; writing to it and reading from it then follow without asking again.
-  A session belongs to the connection that opened it (one `sshcraft mcp` process) and is closed
+  A session belongs to the connection that opened it (one `sshcraft-cli mcp` process) and is closed
   when that connection ends, or when its host gets hidden. Closing one's own session is always
   allowed. Agents never reach the tabs of the user.
 - The question shows what changes: for a host every changed field with its old and new value.
@@ -161,9 +166,10 @@ start. Give agents a shell only where you would let them act as you.
 
 ## The connection
 
-`sshcraft` talks to the app over a named pipe `\\.\pipe\sshcraft-agent-<your SID>`. Its access
-list admits only your Windows user, remote clients are refused, and SSHCraft creates it as the
-first instance. `sshcraft` checks that the program serving the pipe runs as your user before it
-sends anything. Another account that takes the name first can keep agents from reaching
-SSHCraft, but cannot pose as it. Requests run side by side; an MCP client's cancellation, or the
-client going away, withdraws an open question.
+`sshcraft-cli` talks to the app over loopback (`127.0.0.1`), never over the network. While agents
+may connect, SSHCraft listens on a port and names it in `agent-connection.json` in its settings
+folder, beside a token file only your user can read. Every connection signs in by challenge: the
+token never crosses the wire, and SSHCraft proves it holds the token before `sshcraft-cli` sends
+anything derived from it, so another program on a stale port learns nothing. Requests run side
+by side; an MCP client's cancellation, or the client going away, withdraws an open question and
+ends the agent's sessions. The protocol: [control-protocol.md](control-protocol.md).

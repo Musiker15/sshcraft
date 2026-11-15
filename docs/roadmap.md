@@ -10,11 +10,9 @@ sections 13 and 16, and the market comparison
 
 ## Current focus
 
-R6: the control channel, the MCP crate and `sshcraft-cli`. R5 (the second half of the interface:
-panes with split and focus layout, broadcast and status dots, workspace templates with OSC 7,
-port forwarding, snippets with the terminal sidebar, history and completion, session logs with a
-read-only viewer, sync with accounts and devices, sharing with safety numbers, and the rights of
-AI agents with their question in the window) is done, as are R1 to R4.
+R7: macOS, Linux and FreeBSD, the packages, the CI files. R6 (the agent link with its consent,
+the MCP crate, `sshcraft-cli`, the control channel for developers and the acceptance list of
+spec section 10 in [acceptance.md](acceptance.md)) is done, as are R1 to R5.
 
 ## The rebuild
 
