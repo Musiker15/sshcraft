@@ -43,6 +43,8 @@ pub enum EngineEvent {
         detail: String,
     },
     AgentLogChanged,
+    /// The agent link started or stopped.
+    AgentLinkChanged,
     /// A port forwarding rule started, runs, reconnects, stopped or failed.
     ForwardStatus(crate::forwards::ForwardStatus),
     /// Windows Hello is not set up: stored keys are used without the check.

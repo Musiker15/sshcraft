@@ -24,6 +24,7 @@ sshcraft-proto = { workspace = true }
 zeroize = { workspace = true }
 craft-settings = { workspace = true }
 craft-flags = { workspace = true }
+sshcraft-link = { workspace = true }
 craft-ai-agents = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -4,6 +4,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod agent_link;
 pub mod agent_sessions;
 pub mod caller;
 pub mod cmd;
@@ -150,6 +151,8 @@ struct Inner {
     next_conn: std::sync::atomic::AtomicU64,
     confirmer: Option<Arc<dyn gate::Confirmer>>,
     confirm_timeout: Duration,
+    /// The agent link while it runs.
+    agent_link: Mutex<Option<agent_link::Running>>,
     /// Held for the life of the engine: no other process opens the same data.
     _lock: sshcraft_platform::DataLock,
 }
@@ -236,6 +239,7 @@ impl Session {
             background: Mutex::new(Vec::new()),
             connections: Mutex::new(HashMap::new()),
             next_conn: std::sync::atomic::AtomicU64::new(1),
+            agent_link: Mutex::new(None),
             confirmer: config.confirmer,
             confirm_timeout: config.confirm_timeout,
             _lock: lock,
