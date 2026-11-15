@@ -215,14 +215,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(8.0);
     crate::pages::sharing::list(app, ui);
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(tr("Connections SSHCraft makes by itself")).strong());
-    let origins: Vec<String> = app.data.servers.iter().map(|s| text(s, "origin")).collect();
-    if origins.is_empty() {
-        ui.label(egui::RichText::new(tr("None. SSHCraft connects only where you tell it to.")).color(tokens.text_dim));
-    }
-    for origin in origins {
-        ui.label(trf("Sync server {origin}", &[("origin", &visible(&origin))]));
-    }
+    ui.label(egui::RichText::new(tr("Every connection SSHCraft makes by itself is listed under Settings › Connections.")).color(tokens.text_dim));
 }
 
 /// This computer's name, as a suggestion for the device name.

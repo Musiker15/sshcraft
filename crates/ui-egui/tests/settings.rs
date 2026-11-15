@@ -160,3 +160,16 @@ fn a_backup_needs_a_long_passphrase_given_twice() {
     assert!(h.state().ui.backup.as_ref().and_then(|f| f.error.clone()).is_some_and(|e| e.contains("differ")));
     assert!(h.state().ui.backup_passphrase.is_none(), "no file is asked for yet");
 }
+
+#[test]
+fn the_connections_section_says_there_is_no_update_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    settings_page(&mut h, "Connections");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.query_by_label("SSHCraft does not check for updates and sends no telemetry").is_none() {
+        assert!(Instant::now() < deadline, "the list came");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}

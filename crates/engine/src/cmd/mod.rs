@@ -58,6 +58,7 @@ pub fn needs_vault(session: &Session) -> Result<(), String> {
 
 pub mod agent;
 pub mod backup;
+pub mod connections;
 pub mod forward;
 pub mod group;
 pub mod host;
@@ -159,6 +160,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(sshconfig::specs());
         specs.extend(trash::specs());
         specs.extend(backup::specs());
+        specs.extend(connections::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         for spec in &mut specs {

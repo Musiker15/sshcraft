@@ -613,3 +613,31 @@ async fn a_totp_secret_must_be_base32() {
     assert_eq!(listed[0]["has_totp"], true);
     assert!(listed[0]["settings"].get("totp").is_none(), "the id is not shown");
 }
+
+#[tokio::test]
+async fn the_connection_list_names_every_sync_server_and_no_update_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    session
+        .store()
+        .add_server(&sshcraft_store::store::ServerRow {
+            id: sshcraft_model::model::ServerId::new(),
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [7; 32],
+            device_id: uuid::Uuid::new_v4(),
+            sealed_device: Vec::new(),
+            sync_enabled: true,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    let list = session.execute(Caller::User, "app.connections", Value::Null).await.unwrap();
+    let list = list.as_array().unwrap();
+    assert!(list.iter().any(|c| c["kind"] == "sync" && c["target"] == "https://sync.example.org" && c["active"] == true));
+    assert!(list.iter().any(|c| c["kind"] == "update_check" && c["target"] == "none"));
+    assert!(list.iter().any(|c| c["kind"] == "agent_port" && c["active"] == false), "off until the user turns it on");
+}

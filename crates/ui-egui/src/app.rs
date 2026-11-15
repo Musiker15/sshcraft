@@ -134,8 +134,12 @@ impl SshcraftApp {
                     self.data.dirty |= Refresh::DATA;
                     self.data.host_keys = None;
                     self.data.trash = None;
+                    self.data.connections = None;
                 }
-                Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
+                Ok(EngineEvent::SettingsChanged) => {
+                    self.data.dirty |= Refresh::SETTINGS;
+                    self.data.connections = None;
+                }
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
                 Ok(EngineEvent::AgentPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "agent")),

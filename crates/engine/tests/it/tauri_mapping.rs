@@ -140,6 +140,7 @@ const NEW: &[&str] = &[
     "backup.restore",
     "app.lock",
     "app.unlock",
+    "app.connections",
 ];
 
 #[test]

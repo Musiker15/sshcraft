@@ -91,6 +91,20 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "{host} möchte dieses Passwort aus deinem Passwortmanager an den Server unten senden. Es wurde auf diesem Gerät nicht für diesen Server eingerichtet (es kam über Sync oder eine Freigabe, oder die Adresse hat sich geändert). Erlaube es nur, wenn das Passwort zu diesem Server gehört."
         }
         "Trash" => "Papierkorb",
+        "Connections" => "Verbindungen",
+        "Every connection SSHCraft makes by itself is listed under Settings › Connections." => {
+            "Jede Verbindung, die SSHCraft selbst aufbaut, steht unter Einstellungen › Verbindungen."
+        }
+        "Everything SSHCraft connects to or starts by itself. Your own SSH connections, port forwards and proxy commands are not listed." => {
+            "Alles, womit SSHCraft sich selbst verbindet oder was es selbst startet. Deine eigenen SSH-Verbindungen, Portweiterleitungen und Proxy-Befehle stehen nicht darin."
+        }
+        "Sync with {name}: HTTPS, and a WebSocket for changes" => "Sync mit {name}: HTTPS und ein WebSocket für Änderungen",
+        "{name}: passwords of {count} hosts or groups, fetched when connecting" => {
+            "{name}: Passwörter von {count} Hosts oder Gruppen, beim Verbinden geholt"
+        }
+        "Keys from the SSH agent (Proton Pass), when a host uses one" => "Schlüssel aus dem SSH-Agent (Proton Pass), wenn ein Host einen nutzt",
+        "AI agents connect here, from this computer only" => "KI-Agents verbinden sich hier, nur von diesem Rechner",
+        "SSHCraft does not check for updates and sends no telemetry" => "SSHCraft sucht nicht nach Updates und sendet keine Telemetrie",
         "App lock" => "App-Sperre",
         "Lock after" => "Sperren nach",
         " minutes without input" => " Minuten ohne Eingabe",

@@ -3,6 +3,7 @@ agent.log_clear
 agent.policy
 agent.set_hidden
 agent.set_level
+app.connections
 app.lock
 app.unlock
 backup.create

@@ -2,6 +2,7 @@
 
 pub mod agents;
 pub mod backup;
+pub mod connections;
 pub mod forwarding;
 pub mod host_form;
 pub mod hosts;
