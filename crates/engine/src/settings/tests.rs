@@ -70,6 +70,7 @@ async fn saved_settings_come_back() {
     let dir = tempfile::tempdir().unwrap();
     let wanted = with(|s| {
         s.general.language = LanguageSetting::En;
+        s.general.system_title_bar = true;
         s.appearance = Appearance {
             app_theme: AppTheme::Dark,
             terminal_theme: "nord".into(),
@@ -149,8 +150,8 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 21);
-    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste"] {
+    assert_eq!(SHORTCUT_ACTIONS.len(), 23);
+    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
     assert!(SHORTCUT_ACTIONS.contains(&"bookmark"));
@@ -349,6 +350,7 @@ fn scrollback_is_clamped() {
     assert_eq!(with(|s| s.terminal.scrollback = 10_000_000).terminal.scrollback, 100_000);
     assert_eq!(with(|s| s.terminal.scrollback = 50_000).terminal.scrollback, 50_000);
     assert!(EngineSettings::default().appearance.ligatures, "ligatures on by default");
+    assert!(!EngineSettings::default().general.system_title_bar, "the app's own title bar by default");
 }
 
 #[test]

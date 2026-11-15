@@ -64,6 +64,12 @@ pub struct UiState {
     pub settings: crate::pages::settings::SettingsView,
     #[serde(skip)]
     pub palette: PaletteState,
+    /// Quitting, and the question before it.
+    #[serde(skip)]
+    pub quit: crate::quit::Quit,
+    /// The About window is open.
+    #[serde(skip)]
+    pub about: bool,
     /// Commands for the active terminal tab, taken by it in the frame.
     #[serde(skip)]
     pub pending: Vec<&'static str>,

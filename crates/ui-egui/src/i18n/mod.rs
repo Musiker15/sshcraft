@@ -5,7 +5,7 @@
 
 pub mod de;
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::cell::Cell;
 
 use sshcraft_engine::settings::LanguageSetting;
 
@@ -41,14 +41,18 @@ fn system_locale() -> Option<&'static str> {
     LOCALE.get_or_init(sys_locale::get_locale).as_deref()
 }
 
-static LANGUAGE: AtomicU8 = AtomicU8::new(0);
+thread_local! {
+    /// Per thread: the interface runs on one thread, and tests that run side by side in one
+    /// process (`cargo test`) each keep their own window's language.
+    static LANGUAGE: Cell<Lang> = const { Cell::new(Lang::En) };
+}
 
 pub fn set_language(lang: Lang) {
-    LANGUAGE.store(lang as u8, Ordering::Relaxed);
+    LANGUAGE.with(|l| l.set(lang));
 }
 
 pub fn language() -> Lang {
-    if LANGUAGE.load(Ordering::Relaxed) == Lang::De as u8 { Lang::De } else { Lang::En }
+    LANGUAGE.with(Cell::get)
 }
 
 /// The text in the interface language.

@@ -106,6 +106,12 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.radio_value(&mut language, LanguageSetting::De, "Deutsch");
     });
     save(app, |s| s.general.language = language);
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("Window")).strong());
+    let mut system = app.data.settings.general.system_title_bar;
+    ui.checkbox(&mut system, tr("Use system title bar"));
+    ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
+    save(app, |s| s.general.system_title_bar = system);
 }
 
 fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {

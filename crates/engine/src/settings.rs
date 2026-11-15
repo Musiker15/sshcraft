@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 21] = [
+pub const SHORTCUT_ACTIONS: [&str; 23] = [
     "palette",
     "newTab",
     "closeTab",
@@ -51,6 +51,9 @@ pub const SHORTCUT_ACTIONS: [&str; 21] = [
     "snippetsPage",
     "forwardingPage",
     "logsPage",
+    // Added with the menus (R7).
+    "quit",
+    "about",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
@@ -137,6 +140,8 @@ pub enum HostView {
 #[serde(default)]
 pub struct General {
     pub language: LanguageSetting,
+    /// The desktop draws the title bar instead of the app's own bar; read when the app starts.
+    pub system_title_bar: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

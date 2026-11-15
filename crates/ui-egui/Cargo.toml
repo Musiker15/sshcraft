@@ -24,6 +24,9 @@ egui_system_font_provider = { workspace = true }
 craft-ui = { workspace = true }
 craft-keymap = { workspace = true }
 craft-dialogs = { workspace = true }
+craft-window = { workspace = true }
+craft-menu = { workspace = true }
+craft-quit = { workspace = true }
 raw-window-handle = { workspace = true }
 fontique = { workspace = true }
 serde = { workspace = true }

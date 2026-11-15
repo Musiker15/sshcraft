@@ -39,6 +39,14 @@ pub struct SshcraftApp {
     pub link: crate::link::LinkWatch,
     /// The control channel (`--control`), when the app was started with it.
     pub control: Option<crate::control::Control>,
+    /// Who draws the window frame (craft-window's decision, made by the app at start).
+    pub window_frame: craft_window::policy::Frame,
+    /// The native menu bar (macOS), when AppKit took it.
+    #[cfg(target_os = "macos")]
+    pub(crate) native_menu: Option<craft_menu::NativeMenu>,
+    /// AppKit's `movable` flag as last set (craft-window's title bar on macOS).
+    #[cfg(target_os = "macos")]
+    pub(crate) movable: Option<bool>,
     /// Kept alive for the app when it owns the runtime (tests); the app binary owns it itself.
     _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
 }
@@ -71,6 +79,11 @@ impl SshcraftApp {
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
             control: None,
+            window_frame: craft_window::policy::Frame::Native,
+            #[cfg(target_os = "macos")]
+            native_menu: None,
+            #[cfg(target_os = "macos")]
+            movable: None,
             events,
             _runtime: None,
         }
@@ -294,6 +307,7 @@ impl SshcraftApp {
         }
         crate::link::tick(self, ctx);
         crate::control::process(self, ctx);
+        crate::quit::logic(self, ctx);
     }
 
     /// One frame: results that came back, the engine's events, then drawing.
@@ -322,6 +336,8 @@ impl SshcraftApp {
                 crate::commands::run(self, id);
             }
         }
+        #[cfg(target_os = "macos")]
+        crate::menus::native_frame(self, &ctx);
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
@@ -336,6 +352,8 @@ impl SshcraftApp {
         crate::pages::sharing::remove_dialog(self, &ctx);
         crate::confirm::show(self, &ctx);
         crate::prompts::show(self, &ctx);
+        crate::quit::show(self, &ctx);
+        crate::menus::about(self, &ctx);
         crate::log_viewer::show(self, &ctx);
         // The logs are fetched again on the next visit of their page.
         if self.ui.page != Page::Logs {
