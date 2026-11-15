@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in SSHCraft or sshcraft-server does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A security problem does not belong here: please use
+        [private reporting](https://github.com/Musiker15/sshcraft/security/advisories/new) instead.
+        Leave out passwords, private keys, host names and addresses you don't want public.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Connect to ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The SSHCraft version or commit, or the sshcraft-server version.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - FreeBSD
+        - sshcraft-server (Docker)
+        - sshcraft-server (other)
+    validations:
+      required: true
+  - type: dropdown
+    id: crash
+    attributes:
+      label: Did SSHCraft crash or lose data?
+      description: Crashes are treated as bugs of the highest priority.
+      options:
+        - "No"
+        - It crashed
+        - It lost data
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Error messages or log lines, with secrets removed.
+      render: text
