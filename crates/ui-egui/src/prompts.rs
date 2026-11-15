@@ -12,6 +12,12 @@ use crate::widgets::visible;
 /// How long a new question's answer buttons wait before they take a click, in seconds.
 pub const ANSWER_DELAY: f64 = 0.4;
 
+/// The id of the answer field `line` of question `prompt`: each question has fields of its own,
+/// so nothing typed for one question is in the next one's field.
+pub fn answer_id(prompt: u64, line: usize) -> egui::Id {
+    egui::Id::unique(("sshcraft-prompt-answer", prompt, line))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptKind {
     HostKey { host_name: String, address: String, port: u16, fingerprint: String },
@@ -102,6 +108,27 @@ impl Prompts {
         }
     }
 
+    /// The id of the newest question known, 0 for none.
+    pub fn newest(&self) -> u64 {
+        self.open.iter().map(|p| p.id).max().unwrap_or(0)
+    }
+
+    /// Takes the engine's list of open questions (asked for when `asked_after` was the newest
+    /// known): a question not in it was answered or withdrawn, unless it came by event after the
+    /// list was asked for. What was typed into a question that stays open is kept.
+    pub fn merge_listed(&mut self, listed: Vec<PromptView>, asked_after: u64) {
+        let mut open = listed;
+        for p in &mut open {
+            if let Some(old) = self.open.iter().find(|o| o.id == p.id) {
+                p.answers.clone_from(&old.answers);
+            }
+        }
+        let newer: Vec<PromptView> = self.open.iter().filter(|p| p.id > asked_after && !open.iter().any(|o| o.id == p.id)).cloned().collect();
+        open.extend(newer);
+        open.sort_by_key(|p| p.id);
+        self.open = open;
+    }
+
     pub fn withdraw(&mut self, id: u64) {
         self.open.retain(|p| p.id != id);
     }
@@ -120,19 +147,13 @@ pub fn refresh(app: &mut SshcraftApp) {
         return;
     }
     app.prompts.stale = false;
+    let asked_after = app.prompts.newest();
     app.runner.run(
         "prompt.list",
         json!({}),
-        Box::new(|app, result| {
+        Box::new(move |app, result| {
             if let Ok(Value::Array(list)) = result {
-                let mut open: Vec<PromptView> = list.iter().filter_map(PromptView::from_json).collect();
-                // Keep what was typed into a question that is still open.
-                for p in &mut open {
-                    if let Some(old) = app.prompts.open.iter().find(|o| o.id == p.id) {
-                        p.answers.clone_from(&old.answers);
-                    }
-                }
-                app.prompts.open = open;
+                app.prompts.merge_listed(list.iter().filter_map(PromptView::from_json).collect(), asked_after);
             }
         }),
     );
@@ -149,11 +170,11 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         return;
     };
     let now = ctx.input(|i| i.time);
-    let since = match app.prompts.shown {
-        Some((id, since)) if id == prompt.id => since,
+    let (since, first_frame) = match app.prompts.shown {
+        Some((id, since)) if id == prompt.id => (since, false),
         _ => {
             app.prompts.shown = Some((prompt.id, now));
-            now
+            (now, true)
         }
     };
     let waited = now - since;
@@ -193,13 +214,17 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                     ui.label(visible(name));
                 }
                 if !instructions.is_empty() {
-                    ui.label(egui::RichText::new(visible(instructions)).color(tokens.text_dim));
+                    ui.label(egui::RichText::new(crate::widgets::visible_lines(instructions)).color(tokens.text_dim));
                 }
                 ui.add_space(6.0);
-                egui::Grid::new("sshcraft-prompt-lines").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                    for ((text, echo), value) in lines.iter().zip(prompt.answers.iter_mut()) {
+                egui::Grid::new(("sshcraft-prompt-lines", prompt.id)).num_columns(2).min_col_width(130.0).show(ui, |ui| {
+                    for (i, ((text, echo), value)) in lines.iter().zip(prompt.answers.iter_mut()).enumerate() {
                         ui.label(visible(text));
-                        ui.add(egui::TextEdit::singleline(value).password(!echo).desired_width(300.0));
+                        let field = crate::widgets::secret_field(ui, value, answer_id(prompt.id, i), !echo, "", 300.0);
+                        // The keyboard goes to the first answer, not to the terminal behind.
+                        if first_frame && i == 0 {
+                            field.request_focus();
+                        }
                         ui.end_row();
                     }
                 });

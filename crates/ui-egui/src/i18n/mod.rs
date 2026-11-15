@@ -61,10 +61,24 @@ pub fn tr(text: &'static str) -> &'static str {
 
 /// [`tr`] with `{name}` placeholders filled in.
 pub fn trf(template: &'static str, args: &[(&str, &str)]) -> String {
-    let mut out = tr(template).to_string();
-    for (name, value) in args {
-        out = out.replace(&format!("{{{name}}}"), value);
+    // One pass over the template: a value that holds `{name}` is never filled in itself.
+    let mut out = String::new();
+    let mut rest = tr(template);
+    while let Some(start) = rest.find('{') {
+        out.push_str(rest.get(..start).unwrap_or_default());
+        let after = rest.get(start + 1..).unwrap_or_default();
+        match after.find('}').map(|end| (after.get(..end).unwrap_or_default(), end)) {
+            Some((name, end)) if args.iter().any(|(n, _)| *n == name) => {
+                out.push_str(args.iter().find(|(n, _)| *n == name).map_or("", |(_, v)| v));
+                rest = after.get(end + 1..).unwrap_or_default();
+            }
+            _ => {
+                out.push('{');
+                rest = after;
+            }
+        }
     }
+    out.push_str(rest);
     out
 }
 

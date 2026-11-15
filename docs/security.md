@@ -73,7 +73,12 @@ What a server prints may not reach beyond the terminal on its own:
 - **One click, one answer:** the buttons of a new question take a click only 400 ms after it
   appears, so a click meant for the question before it never answers the next one.
 - **Sign-in questions** show what the server asks and hide the typed answer unless the server
-  says it may be shown.
+  says it may be shown. A question takes the keyboard: while it is open, nothing typed reaches
+  the terminal behind it, so a password typed out of habit never lands in a shell. Answer
+  fields keep no undo history.
+- **Late answers:** a dialog sends one command at a time, and an answer that comes after its
+  dialog was closed never touches the dialog open now. A connection that opens late waits in
+  its tab and does not take the page or the keyboard.
 
 ## Port forwarding
 

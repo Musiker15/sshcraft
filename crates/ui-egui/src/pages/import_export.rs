@@ -196,19 +196,26 @@ fn apply(app: &mut SshcraftApp) {
     let ImportStep::Preview { candidates, .. } = &import.step else { return };
     let chosen: Vec<&ImportCandidate> = candidates.iter().filter(|c| c.checked).map(|c| &c.candidate).collect();
     let keys = (import.source == ImportSourceKind::KnownHosts && import.host_keys).then(|| import.path.clone()).flatten();
+    let params = json!({ "candidates": chosen });
+    let Some(generation) = app.forms.start() else { return };
     app.runner.run(
         "import.apply",
-        json!({ "candidates": chosen }),
-        Box::new(move |app, result| match result {
-            Ok(outcome) => {
-                let created = outcome.get("created").and_then(Value::as_u64).unwrap_or(0).to_string();
-                app.toasts.info(&trf("{count} hosts created.", &[("count", &created)]));
-                if let Some(path) = keys {
-                    app.run_reported("import.known_hosts", json!({ "path": path.to_string_lossy() }));
+        params,
+        Box::new(move |app, result| {
+            let current = app.forms.done(generation);
+            match result {
+                Ok(outcome) => {
+                    let created = outcome.get("created").and_then(Value::as_u64).unwrap_or(0).to_string();
+                    app.toasts.info(&trf("{count} hosts created.", &[("count", &created)]));
+                    if let Some(path) = keys {
+                        app.run_reported("import.known_hosts", json!({ "path": path.to_string_lossy() }));
+                    }
+                    if current {
+                        app.ui.import = None;
+                    }
                 }
-                app.ui.import = None;
+                Err(e) => app.toasts.error(&e.to_string()),
             }
-            Err(e) => app.toasts.error(&e.to_string()),
         }),
     );
 }
@@ -216,6 +223,7 @@ fn apply(app: &mut SshcraftApp) {
 pub fn show_import(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut import) = app.ui.import.take() else { return };
     let tokens = Tokens::get(ctx);
+    let busy = app.forms.busy();
     let (mut keep, mut choose, mut run_preview, mut run_apply) = (true, false, false, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-import")).show(ctx, |ui| {
         ui.set_width(560.0);
@@ -276,7 +284,7 @@ pub fn show_import(app: &mut SshcraftApp, ctx: &egui::Context) {
             let ready = import.source.needs().is_none() || import.path.is_some();
             run_preview = ui.add_enabled(ready, egui::Button::new(tr("Preview"))).clicked();
             let previewed = matches!(import.step, ImportStep::Preview { .. });
-            run_apply = ui.add_enabled(previewed, egui::Button::new(tr("Import hosts"))).clicked();
+            run_apply = ui.add_enabled(previewed && !busy, egui::Button::new(tr("Import hosts"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }

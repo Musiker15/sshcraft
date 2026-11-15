@@ -144,15 +144,21 @@ fn fixed_height(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui)) {
     egui::ScrollArea::vertical().id_salt(salt).max_height(120.0).min_scrolled_height(120.0).auto_shrink([false, false]).show(ui, add);
 }
 
-fn close_on_success(app: &mut SshcraftApp, result: Result<Value, sshcraft_engine::EngineError>) {
-    match result {
-        Ok(_) => app.ui.key_dialog = None,
-        Err(e) => app.toasts.error(&e.to_string()),
-    }
+/// Closes the key dialog that sent the command, if it is still the one open.
+fn close_on_success(generation: u64) -> crate::runner::Then {
+    Box::new(move |app, result| {
+        let current = app.forms.done(generation);
+        match result {
+            Ok(_) if current => app.ui.key_dialog = None,
+            Ok(_) => {}
+            Err(e) => app.toasts.error(&e.to_string()),
+        }
+    })
 }
 
 fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut dialog) = app.ui.key_dialog.take() else { return };
+    let busy = app.forms.busy();
     let mut keep = true;
     let mut submit = false;
     let title = match &dialog {
@@ -181,7 +187,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
                 ui.end_row();
                 ui.label(tr("Passphrase"));
-                ui.add(egui::TextEdit::singleline(&mut form.passphrase).password(true).hint_text(tr("optional")).desired_width(280.0));
+                crate::widgets::secret_field(ui, &mut form.passphrase, egui::Id::unique("sshcraft-key-passphrase"), true, tr("optional"), 280.0);
                 ui.end_row();
             }
             KeyDialog::Import(form) => {
@@ -190,11 +196,20 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.end_row();
                 ui.label(tr("Private key"));
                 fixed_height(ui, "sshcraft-import-text", |ui| {
-                    ui.add(egui::TextEdit::multiline(&mut form.text).desired_rows(6).desired_width(280.0).font(egui::TextStyle::Monospace));
+                    let id = egui::Id::unique("sshcraft-private-key");
+                    ui.add(egui::TextEdit::multiline(&mut form.text).id(id).desired_rows(6).desired_width(280.0).font(egui::TextStyle::Monospace));
+                    crate::widgets::forget_undo(ui.ctx(), id);
                 });
                 ui.end_row();
                 ui.label(tr("Passphrase"));
-                ui.add(egui::TextEdit::singleline(&mut form.passphrase).password(true).hint_text(tr("if the key has one")).desired_width(280.0));
+                crate::widgets::secret_field(
+                    ui,
+                    &mut form.passphrase,
+                    egui::Id::unique("sshcraft-key-passphrase"),
+                    true,
+                    tr("if the key has one"),
+                    280.0,
+                );
                 ui.end_row();
                 ui.label("");
                 ui.checkbox(&mut form.save_passphrase, tr("Save the passphrase"));
@@ -222,7 +237,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             KeyDialog::Passphrase { passphrase, .. } => {
                 ui.label(tr("Passphrase"));
-                ui.add(egui::TextEdit::singleline(passphrase).password(true).desired_width(280.0));
+                crate::widgets::secret_field(ui, passphrase, egui::Id::unique("sshcraft-key-passphrase"), true, "", 280.0);
                 ui.end_row();
             }
             KeyDialog::Certificate { text, .. } => {
@@ -241,9 +256,12 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 KeyDialog::Security(_) => tr("Create"),
                 _ => tr("Save"),
             };
-            submit = ui.button(action).clicked();
+            submit = ui.add_enabled(!busy, egui::Button::new(action)).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
+            }
+            if busy {
+                ui.spinner();
             }
         });
     });
@@ -269,7 +287,9 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             KeyDialog::Passphrase { id, passphrase, .. } => ("key.remember_passphrase", json!({ "id": id, "passphrase": passphrase })),
             KeyDialog::Certificate { id, text } => ("key.attach_certificate", json!({ "id": id, "text": text })),
         };
-        app.runner.run(id, params, Box::new(close_on_success));
+        if let Some(generation) = app.forms.start() {
+            app.runner.run(id, params, close_on_success(generation));
+        }
     }
     if keep {
         app.ui.key_dialog = Some(dialog);
@@ -278,6 +298,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.identity_form.take() else { return };
+    let busy = app.forms.busy();
     let mut keep = true;
     let mut submit = false;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-identity-dialog")).show(ctx, |ui| {
@@ -307,7 +328,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.label(tr("Password"));
             ui.horizontal(|ui| {
                 let hint = if form.has_password { tr("Stored; type to replace") } else { tr("None stored") };
-                ui.add(egui::TextEdit::singleline(&mut form.password).password(true).hint_text(hint).desired_width(200.0));
+                crate::widgets::secret_field(ui, &mut form.password, egui::Id::unique("sshcraft-identity-password"), true, hint, 200.0);
                 if form.has_password {
                     ui.checkbox(&mut form.remove_password, tr("Remove"));
                 }
@@ -318,9 +339,12 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.colored_label(Tokens::get(ui.ctx()).danger, error);
         }
         ui.horizontal(|ui| {
-            submit = ui.button(tr("Save")).clicked();
+            submit = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
+            }
+            if busy {
+                ui.spinner();
             }
         });
     });
@@ -341,18 +365,25 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             let username = if form.username.trim().is_empty() { Value::Null } else { json!(form.username.trim()) };
             let key = form.key.as_ref().map_or(Value::Null, |id| json!({ "kind": "stored", "id": id }));
             let identity = json!({ "id": form.id, "name": form.name.trim(), "username": username, "key": key, "password": password });
-            app.runner.run(
-                "identity.save",
-                json!({ "identity": identity }),
-                Box::new(|app, result| match result {
-                    Ok(_) => app.ui.identity_form = None,
-                    Err(e) => {
-                        if let Some(form) = app.ui.identity_form.as_mut() {
-                            form.error = Some(e.to_string());
+            if let Some(generation) = app.forms.start() {
+                app.runner.run(
+                    "identity.save",
+                    json!({ "identity": identity }),
+                    Box::new(move |app, result| {
+                        let current = app.forms.done(generation);
+                        match result {
+                            Ok(_) if current => app.ui.identity_form = None,
+                            Ok(_) => {}
+                            Err(e) if current => {
+                                if let Some(form) = app.ui.identity_form.as_mut() {
+                                    form.error = Some(e.to_string());
+                                }
+                            }
+                            Err(e) => app.toasts.error(&e.to_string()),
                         }
-                    }
-                }),
-            );
+                    }),
+                );
+            }
         }
     }
     if keep {

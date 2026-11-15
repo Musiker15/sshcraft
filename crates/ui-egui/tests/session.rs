@@ -317,3 +317,61 @@ fn ctrl_shift_c_and_v_copy_and_paste() {
     h.run_steps(1);
     until(&mut h, "the echo", |app| app.terminals.get(&tab).is_some_and(|t| t.term.visible_text().contains("pasted-text")));
 }
+
+#[test]
+fn a_second_request_for_the_same_host_opens_no_second_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, id) = host(&session, "web", true);
+    h.state_mut().open_new_tab();
+    h.run_steps(2);
+    // A double click asks twice before the first answer is back.
+    for _ in 0..2 {
+        let app = h.state_mut();
+        app.ui.connect_request = Some(ConnectRequest::Host(id));
+        sshcraft_ui_egui::session_tab::take_request(app);
+    }
+    until(&mut h, "the session", |app| !app.terminals.is_empty());
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert_eq!(h.state().terminals.len(), 1, "one connection");
+    assert_eq!(h.state().ui.tabs.len(), 1);
+}
+
+#[test]
+fn reconnecting_closes_the_old_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, id) = host(&session, "new", false);
+    h.run_steps(2);
+    let old = connect(&mut h, id);
+    until(&mut h, "the question", |app| !app.prompts.open.is_empty());
+    wait_out_the_delay(&mut h);
+    h.get_by_label("Cancel").click();
+    until(&mut h, "the end", |app| app.terminals.get(&old).is_some_and(|t| matches!(t.status, Some(SessionStatus::Ended { .. }))));
+    h.get_by_label("Reconnect").click();
+    until(&mut h, "the new session", |app| !app.terminals.contains_key(&old) && !app.terminals.is_empty());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.unacknowledged(old).is_some() {
+        assert!(Instant::now() < deadline, "the old session is still open in the engine");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}
+
+#[test]
+fn a_long_end_detail_keeps_reconnect_on_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, id) = host(&session, "web", true);
+    h.run_steps(2);
+    let tab = connect(&mut h, id);
+    until(&mut h, "the connection", |app| connected(app, tab));
+    h.state_mut().terminals.get_mut(&tab).unwrap().status =
+        Some(SessionStatus::Ended { reason: sshcraft_engine::EndReason::Lost, code: None, detail: Some("x".repeat(5000)) });
+    h.run_steps(3);
+    let button = h.get_by_label("Reconnect").rect();
+    assert!(button.max.x <= 1200.0, "Reconnect at {button:?}");
+}

@@ -222,7 +222,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
 fn bind_error(text: &str, error: &BindError) -> String {
     match error {
         BindError::Taken { owner } => trf("{shortcut} is taken by {action}.", &[("shortcut", text), ("action", tr(owner))]),
-        BindError::NeedsModifier => tr("A shortcut needs Ctrl, Alt or the Windows key, or is a function key.").to_string(),
+        BindError::NeedsModifier => tr("A shortcut needs Ctrl or Alt (⌘ on macOS), or is a function key.").to_string(),
         BindError::Invalid(why) => trf("Not a key combination: {why}", &[("why", why)]),
     }
 }

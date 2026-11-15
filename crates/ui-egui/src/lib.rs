@@ -5,6 +5,7 @@
 pub mod app;
 pub mod commands;
 pub mod data;
+pub mod forms;
 pub mod i18n;
 pub mod keymap;
 pub mod pages;

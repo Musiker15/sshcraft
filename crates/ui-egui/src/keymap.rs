@@ -13,7 +13,7 @@ use crate::commands::{Scope, UiCommand, ui_commands};
 pub enum BindError {
     /// Not a key combination (the parser's reason).
     Invalid(String),
-    /// A shortcut needs Ctrl, Alt or the Windows key, or is a function key.
+    /// A shortcut needs Ctrl or Alt (or ⌘ on macOS), or is a function key.
     NeedsModifier,
     /// Another action has it; `owner` is that action's English label.
     Taken { owner: &'static str },
@@ -97,6 +97,8 @@ impl Bindings {
     pub fn assign(&mut self, id: &str, text: &str) -> Result<(), BindError> {
         let chord = Chord::parse(text).map_err(|e| BindError::Invalid(e.to_string()))?;
         let Mods { ctrl, alt, cmd, .. } = chord.mods;
+        // egui reports no Windows or Super key: off macOS a Cmd shortcut could never fire.
+        let cmd = cmd && cfg!(target_os = "macos");
         if !(ctrl || alt || cmd || is_function_key(&chord.key)) {
             return Err(BindError::NeedsModifier);
         }

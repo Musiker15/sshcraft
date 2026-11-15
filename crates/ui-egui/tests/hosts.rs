@@ -182,3 +182,40 @@ fn hostile_names_are_shown_safely() {
     assert!(node.rect().width() <= hosts::MAX_NAME_WIDTH + 1.0, "the name is cut: {}", node.rect().width());
     assert!(sshcraft_ui_egui::widgets::visible(&name).starts_with("ok⟨U+202E⟩evil"));
 }
+
+#[test]
+fn a_failed_save_keeps_the_typed_password() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(3);
+    h.get_by_label("New host").click();
+    h.run_steps(3);
+    {
+        let form = h.state_mut().ui.host_form.as_mut().unwrap();
+        form.host.name = "web".into();
+        form.password = "pw-typed".into();
+        // A sync server this device does not know: the engine refuses the host.
+        form.host.location = Some(sshcraft_model::model::ServerId::new());
+    }
+    h.run_steps(1);
+    h.get_by_label("Save").click();
+    until(&mut h, "the error", |app| app.ui.host_form.as_ref().is_some_and(|f| f.error.is_some()));
+    assert_eq!(h.state().ui.host_form.as_ref().unwrap().password, "pw-typed");
+}
+
+#[test]
+fn long_addresses_and_tags_stay_in_their_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let long = "a".repeat(400);
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "web", "group_id": null, "tags": [long.clone()], "settings": { "address": format!("{long}.example") } } }),
+    );
+    until(&mut h, "the host", |app| !app.data.hosts.is_empty());
+    h.run_steps(3);
+    for node in h.get_all_by_label_contains("aaaaaaaa") {
+        assert!(node.rect().width() <= 400.0, "{:?}", node.rect());
+    }
+}

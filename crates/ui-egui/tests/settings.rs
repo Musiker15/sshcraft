@@ -120,3 +120,17 @@ fn a_clipboard_host_can_be_removed() {
         h.run_steps(1);
     }
 }
+
+#[test]
+fn leaving_a_shortcut_recording_keeps_the_shortcuts_working() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    settings_page(&mut h, "Shortcuts");
+    h.get_all_by_label("Change").nth(row("ui.tab.new")).unwrap().click();
+    h.run_steps(1);
+    h.state_mut().ui.page = Page::Hosts;
+    h.run_steps(2);
+    press(&mut h, Modifiers::CTRL | Modifiers::SHIFT, Key::T);
+    h.run_steps(2);
+    assert_eq!(h.state().ui.tabs.len(), 1, "Ctrl+Shift+T still opens a tab");
+}

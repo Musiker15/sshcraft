@@ -22,6 +22,8 @@ pub const MAX_NAME_WIDTH: f32 = 260.0;
 /// The height of one row of entries, and the width of an entry in the grid.
 const ROW_HEIGHT: f32 = 26.0;
 const CELL_WIDTH: f32 = 460.0;
+/// The most characters a tag chip shows; the whole tag is in its tooltip.
+const MAX_TAG_CHARS: usize = 40;
 
 /// What the hosts page shows: the group opened, the tags chosen, the search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -184,7 +186,9 @@ fn tag_chips(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         for tag in all.iter().take(64) {
             let on = app.ui.hosts.tags.iter().any(|t| t.eq_ignore_ascii_case(tag));
-            if ui.selectable_label(on, visible(tag)).clicked() {
+            let shown: String = visible(tag).chars().take(MAX_TAG_CHARS).collect();
+            let shown = if shown.chars().count() < visible(tag).chars().count() { format!("{shown}…") } else { shown };
+            if ui.selectable_label(on, shown).on_hover_text(visible(tag)).clicked() {
                 if on {
                     app.ui.hosts.tags.retain(|t| !t.eq_ignore_ascii_case(tag));
                 } else {
@@ -226,7 +230,7 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
         draw(ui.painter(), Icon::Host, icon, tokens.text_dim);
         let response = elided_label(ui, &row.host.name, MAX_NAME_WIDTH, tokens.text, FontId::proportional(14.0));
         if let Some(address) = &row.host.settings.address {
-            ui.label(egui::RichText::new(visible(address)).color(tokens.text_dim));
+            elided_label(ui, address, 140.0, tokens.text_dim, FontId::proportional(13.0));
         }
         let id = row.host.id;
         if response.double_clicked() {

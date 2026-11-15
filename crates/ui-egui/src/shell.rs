@@ -7,8 +7,8 @@ use crate::app::SshcraftApp;
 use crate::i18n::tr;
 use crate::state::{Page, TabKind};
 use crate::theme::Tokens;
+use crate::widgets::elided_label;
 use crate::widgets::icons::{Icon, draw};
-use crate::widgets::{elided_label, visible};
 
 /// The widest a tab may be; its title is cut to fit.
 pub const MAX_TAB_WIDTH: f32 = 200.0;
@@ -64,7 +64,9 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                 let (close_rect, close_response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::click());
                 draw(ui.painter(), Icon::Close, close_rect, if close_response.hovered() { tokens.text_strong } else { tokens.text_dim });
                 close_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Close tab")));
-                if close_response.clicked() || (ui.rect_contains_pointer(ui.min_rect()) && ui.input(|i| i.pointer.middle_down())) {
+                // A middle click closes the tab under it once, on release.
+                let middle = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Middle)) && ui.rect_contains_pointer(ui.min_rect());
+                if close_response.clicked() || middle {
                     close = Some(i);
                 }
             });
@@ -80,8 +82,7 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
         app.ui.page = Page::Tab(i);
     }
     if let Some(i) = close {
-        app.ui.page = Page::Tab(i);
-        app.close_tab();
+        app.close_tab_at(i);
     }
 }
 
@@ -123,7 +124,7 @@ fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
                     app.ui.connect_request = Some(crate::state::ConnectRequest::Host(row.host.id));
                 }
                 if let Some(address) = &row.host.settings.address {
-                    ui.label(egui::RichText::new(visible(address)).color(tokens.text_dim));
+                    elided_label(ui, address, 240.0, tokens.text_dim, FontId::proportional(13.0));
                 }
             });
         }

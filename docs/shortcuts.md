@@ -36,7 +36,8 @@ Settings → Shortcuts lists every action. **Change** waits for the next key
 combination and puts it in place of the action's shortcuts, **Remove** leaves the action
 without one, **Default** brings back the ones above.
 
-- A shortcut needs Ctrl, Alt or the Windows key, or it is a function key (F1 to F24).
+- A shortcut needs Ctrl or Alt (or ⌘ on macOS), or it is a function key (F1 to F24). The
+  Windows key cannot be used: the window does not see it.
 - One combination belongs to one action; a combination already in use is refused with the
   name of the action that has it.
 - A combination that is not Ctrl+Shift or Ctrl+Tab works outside the terminal only, and the

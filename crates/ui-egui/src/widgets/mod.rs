@@ -3,4 +3,4 @@
 pub mod elided;
 pub mod icons;
 
-pub use elided::{elided_label, visible};
+pub use elided::{elided_label, forget_undo, secret_field, visible, visible_lines};

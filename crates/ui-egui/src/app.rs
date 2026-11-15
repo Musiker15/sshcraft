@@ -28,6 +28,8 @@ pub struct SshcraftApp {
     pub(crate) term_font: Option<(String, egui::FontFamily)>,
     /// Checked links the engine asked to open.
     urls: Vec<String>,
+    /// Which dialogs are open and the command one waits for.
+    pub forms: crate::forms::Forms,
     /// The shortcut settings the bindings were built from.
     bindings_from: Option<sshcraft_engine::settings::Shortcuts>,
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
@@ -55,6 +57,7 @@ impl SshcraftApp {
             prompts: crate::prompts::Prompts::fetch_first(),
             term_font: None,
             urls: Vec::new(),
+            forms: crate::forms::Forms::default(),
             bindings_from: None,
             events,
             _runtime: None,
@@ -108,7 +111,14 @@ impl SshcraftApp {
 
     /// Closes the shown tab (and its session); the tab before it, or the hosts page, comes next.
     pub fn close_tab(&mut self) {
-        let Page::Tab(i) = self.ui.page else { return };
+        if let Page::Tab(i) = self.ui.page {
+            self.close_tab_at(i);
+        }
+    }
+
+    /// Closes tab `i` (and its session). The shown page stays, one place to the left when it was
+    /// after `i`; when `i` was shown, the tab before it, or the hosts page, comes next.
+    pub fn close_tab_at(&mut self, i: usize) {
         if i >= self.ui.tabs.len() {
             return;
         }
@@ -117,7 +127,17 @@ impl SshcraftApp {
             self.terminals.remove(&session);
             self.run_reported("session.close", serde_json::json!({ "id": session }));
         }
-        self.ui.page = if self.ui.tabs.is_empty() { Page::Hosts } else { Page::Tab(i.saturating_sub(1).min(self.ui.tabs.len() - 1)) };
+        self.ui.page = match self.ui.page {
+            Page::Tab(shown) if shown == i => {
+                if self.ui.tabs.is_empty() {
+                    Page::Hosts
+                } else {
+                    Page::Tab(i.saturating_sub(1).min(self.ui.tabs.len().saturating_sub(1)))
+                }
+            }
+            Page::Tab(shown) if shown > i => Page::Tab(shown - 1),
+            other => other,
+        };
     }
 
     /// Shows the tab `step` places further, wrapping around; from a page, the first or last tab.
@@ -173,10 +193,15 @@ impl SshcraftApp {
         crate::session_tab::show_picker(self, &ctx);
         crate::session_tab::show_clipboard_question(self, &ctx);
         crate::prompts::show(self, &ctx);
+        // A shortcut recording ends when the user leaves the settings.
+        if self.ui.page != Page::Settings {
+            self.ui.settings.recording = None;
+        }
         if let Some(id) = crate::palette::show(self, &ctx) {
             crate::commands::run(self, id);
         }
         self.toasts.show(&ctx);
+        self.forms.observe(crate::forms::shape(&self.ui));
     }
 
     /// Shows the file dialog asked for in this frame. Call it after [`Self::frame`], on the main

@@ -144,6 +144,10 @@ pub fn open_passcli(app: &mut SshcraftApp) {
         "key.passcli_status",
         json!({}),
         Box::new(|app, result| {
+            // The dialog was closed meanwhile: it stays closed.
+            if !matches!(app.ui.passcli, Some(PassCliView::Loading)) {
+                return;
+            }
             let status = result.ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
             let why = match status.as_str() {
                 "ready" => None,
@@ -159,7 +163,7 @@ pub fn open_passcli(app: &mut SshcraftApp) {
                 "key.passcli_list",
                 json!({}),
                 Box::new(|app, result| {
-                    if app.ui.passcli.is_none() {
+                    if !matches!(app.ui.passcli, Some(PassCliView::Loading)) {
                         return;
                     }
                     app.ui.passcli = Some(match result {
@@ -176,6 +180,7 @@ pub fn open_passcli(app: &mut SshcraftApp) {
 pub fn passcli_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(view) = app.ui.passcli.clone() else { return };
     let tokens = Tokens::get(ctx);
+    let busy = app.forms.busy();
     let (mut keep, mut import) = (true, None);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-passcli")).show(ctx, |ui| {
         ui.set_width(480.0);
@@ -195,7 +200,7 @@ pub fn passcli_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 for item in items {
                     ui.horizontal(|ui| {
                         elided_label(ui, &item.title, 300.0, tokens.text, FontId::proportional(14.0));
-                        if ui.button(tr("Import")).clicked() {
+                        if ui.add_enabled(!busy, egui::Button::new(tr("Import"))).clicked() {
                             import = Some(item.clone());
                         }
                     });
@@ -213,16 +218,21 @@ pub fn passcli_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     if !keep {
         app.ui.passcli = None;
     }
-    if let Some(item) = import {
+    if let Some(item) = import
+        && let Some(generation) = app.forms.start()
+    {
         app.runner.run(
             "key.passcli_import",
             json!({ "share_id": item.share_id, "item_id": item.item_id, "name": item.title }),
-            Box::new(|app, result| match result {
-                Ok(_) => {
-                    app.toasts.info(tr("Key imported."));
-                    app.data.dirty |= crate::data::Refresh::KEYS;
+            Box::new(move |app, result| {
+                app.forms.done(generation);
+                match result {
+                    Ok(_) => {
+                        app.toasts.info(tr("Key imported."));
+                        app.data.dirty |= crate::data::Refresh::KEYS;
+                    }
+                    Err(e) => app.toasts.error(&e.to_string()),
                 }
-                Err(e) => app.toasts.error(&e.to_string()),
             }),
         );
     }

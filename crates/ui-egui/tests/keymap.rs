@@ -93,3 +93,11 @@ fn every_command_has_an_action_the_engine_keeps() {
     let kept = settings.sanitized().shortcuts;
     assert_eq!(Bindings::from_settings(&kept).command_for(&chord("Ctrl+Alt+K"), false), Some("ui.page.keys"));
 }
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn a_cmd_only_shortcut_is_refused_where_there_is_no_cmd_key() {
+    let mut b = Bindings::default();
+    assert_eq!(b.assign("ui.page.keys", "Cmd+K"), Err(sshcraft_ui_egui::keymap::BindError::NeedsModifier));
+    assert!(b.assign("ui.page.keys", "Ctrl+Alt+K").is_ok());
+}

@@ -87,3 +87,46 @@ fn labels_never_overflow() {
     let width = tab.rect().width();
     assert!(width <= sshcraft_ui_egui::shell::MAX_TAB_WIDTH + 1.0, "the tab is {width} wide");
 }
+
+#[test]
+fn a_held_middle_click_closes_one_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(2);
+    for _ in 0..3 {
+        h.state_mut().open_new_tab();
+    }
+    h.run_steps(3);
+    let rect = h.get_all_by_label("New tab").next().unwrap().rect();
+    let at = rect.center();
+    h.event(egui::Event::PointerMoved(at));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE });
+    // A click of about 100 ms: several frames with the button down.
+    h.run_steps(6);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().ui.tabs.len(), 2, "one tab closed, not several");
+}
+
+#[test]
+fn closing_another_tab_keeps_the_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(2);
+    for _ in 0..3 {
+        h.state_mut().open_new_tab();
+    }
+    h.state_mut().ui.tabs[2].title = "third".into();
+    h.state_mut().ui.page = Page::Tab(2);
+    h.run_steps(3);
+    h.get_all_by_label("Close tab").next().unwrap().click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.page, Page::Tab(1), "still on the same tab, one place to the left");
+    assert_eq!(h.state().ui.tabs[1].title, "third");
+    h.state_mut().ui.page = Page::Hosts;
+    h.run_steps(2);
+    h.get_all_by_label("Close tab").next().unwrap().click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.page, Page::Hosts, "the hosts page stays");
+}

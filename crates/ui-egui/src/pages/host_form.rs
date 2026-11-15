@@ -317,7 +317,7 @@ fn password_field(ui: &mut Ui, password: &mut String, has_password: bool, remove
     ui.horizontal(|ui| {
         ui.label(tr("Password"));
         let hint = if has_password { tr("Stored; type to replace") } else { tr("None stored") };
-        ui.add(egui::TextEdit::singleline(password).password(true).hint_text(hint).desired_width(220.0));
+        crate::widgets::secret_field(ui, password, egui::Id::unique("sshcraft-form-password"), true, hint, 220.0);
         if has_password {
             ui.checkbox(remove, tr("Remove"));
         }
@@ -354,6 +354,7 @@ fn form_height(ctx: &egui::Context) -> f32 {
 /// Draws the host form when open.
 pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.host_form.take() else { return };
+    let busy = app.forms.busy();
     let groups: Vec<Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
     let inherited = inherited(form.host.group_id, &groups);
     let mut open = true;
@@ -401,7 +402,10 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
         }
         ui.horizontal(|ui| {
-            save = ui.button(tr("Save")).clicked();
+            save = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
+            if busy {
+                ui.spinner();
+            }
             cancel = ui.button(tr("Cancel")).clicked();
         });
     });
@@ -416,16 +420,28 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 form.host.settings.port = port;
                 form.host.tags = split_tags(&form.tags);
                 let owner = json!({ "kind": "host", "id": form.host.id });
-                let (password, remove) = (std::mem::take(&mut form.password), form.remove_password);
+                // The typed password stays in the form until the save went through.
+                let (password, remove) = (form.password.clone(), form.remove_password);
+                let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "host.save",
                     json!({ "host": form.host }),
-                    Box::new(move |app, result| match result {
-                        Ok(_) => after_save(app, owner, password, remove, |app| app.ui.host_form = None),
-                        Err(e) => {
-                            if let Some(form) = app.ui.host_form.as_mut() {
-                                form.error = Some(e.to_string());
+                    Box::new(move |app, result| {
+                        let current = app.forms.done(generation);
+                        match result {
+                            Ok(_) => after_save(
+                                app,
+                                owner,
+                                password,
+                                remove,
+                                if current { |app: &mut SshcraftApp| app.ui.host_form = None } else { |_: &mut SshcraftApp| {} },
+                            ),
+                            Err(e) if current => {
+                                if let Some(form) = app.ui.host_form.as_mut() {
+                                    form.error = Some(e.to_string());
+                                }
                             }
+                            Err(e) => app.toasts.error(&e.to_string()),
                         }
                     }),
                 );
@@ -440,6 +456,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
 /// Draws the group form when open.
 pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.group_form.take() else { return };
+    let busy = app.forms.busy();
     let groups: Vec<Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
     let inherited = inherited(form.group.parent_id, &groups);
     let mut open = true;
@@ -479,7 +496,10 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
         }
         ui.horizontal(|ui| {
-            save = ui.button(tr("Save")).clicked();
+            save = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
+            if busy {
+                ui.spinner();
+            }
             cancel = ui.button(tr("Cancel")).clicked();
         });
     });
@@ -494,16 +514,28 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 form.group.defaults.port = port;
                 form.group.tags = split_tags(&form.tags);
                 let owner = json!({ "kind": "group", "id": form.group.id });
-                let (password, remove) = (std::mem::take(&mut form.password), form.remove_password);
+                // The typed password stays in the form until the save went through.
+                let (password, remove) = (form.password.clone(), form.remove_password);
+                let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "group.save",
                     json!({ "group": form.group }),
-                    Box::new(move |app, result| match result {
-                        Ok(_) => after_save(app, owner, password, remove, |app| app.ui.group_form = None),
-                        Err(e) => {
-                            if let Some(form) = app.ui.group_form.as_mut() {
-                                form.error = Some(e.to_string());
+                    Box::new(move |app, result| {
+                        let current = app.forms.done(generation);
+                        match result {
+                            Ok(_) => after_save(
+                                app,
+                                owner,
+                                password,
+                                remove,
+                                if current { |app: &mut SshcraftApp| app.ui.group_form = None } else { |_: &mut SshcraftApp| {} },
+                            ),
+                            Err(e) if current => {
+                                if let Some(form) = app.ui.group_form.as_mut() {
+                                    form.error = Some(e.to_string());
+                                }
                             }
+                            Err(e) => app.toasts.error(&e.to_string()),
                         }
                     }),
                 );

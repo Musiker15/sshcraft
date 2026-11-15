@@ -62,6 +62,12 @@ fn host_name(app: &SshcraftApp, host: HostId) -> Option<String> {
 /// Opens a session for `target` in the tab `replace` (a new-tab page or the tab being
 /// reconnected), or in a new tab.
 fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<usize>) {
+    // A connection to this host is already on its way (a double click): one is enough.
+    if host.is_some() && app.ui.connecting.contains(&host) {
+        return;
+    }
+    app.ui.connecting.push(host);
+    let asked_from = app.ui.page;
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
     let params = json!({ "target": target, "cols": 100, "rows": 30 });
     let old = replace.and_then(|i| match app.ui.tabs.get(i).map(|t| &t.kind) {
@@ -72,6 +78,9 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
         "session.open",
         params,
         Box::new(move |app, result| {
+            if let Some(i) = app.ui.connecting.iter().position(|h| *h == host) {
+                app.ui.connecting.remove(i);
+            }
             let id = match result.and_then(|v| {
                 serde_json::from_value::<SessionId>(v.get("session").cloned().unwrap_or_default())
                     .map_err(|e| sshcraft_engine::EngineError::bad_params("session.open", e))
@@ -96,8 +105,12 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
                 Some(i) => {
                     if let Some(old) = old {
                         app.terminals.remove(&old);
+                        // The old session ended; closing it finishes its log and frees it.
+                        app.run_reported("session.close", json!({ "id": old }));
                     }
-                    app.ui.tabs[i] = tab;
+                    if let Some(slot) = app.ui.tabs.get_mut(i) {
+                        *slot = tab;
+                    }
                     i
                 }
                 None => {
@@ -105,8 +118,12 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
                     app.ui.tabs.len() - 1
                 }
             };
-            app.ui.page = Page::Tab(index);
-            let session_tab = SessionTab { id, host, target, name, titled: false, term, pump, status: None, clipboard: None, focus: true };
+            // Shown only if the user still is where they asked from; otherwise it waits in its tab.
+            let follow = app.ui.page == asked_from;
+            if follow {
+                app.ui.page = Page::Tab(index);
+            }
+            let session_tab = SessionTab { id, host, target, name, titled: false, term, pump, status: None, clipboard: None, focus: follow };
             app.terminals.insert(id, session_tab);
         }),
     );
@@ -243,7 +260,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     if more {
         ctx.request_repaint();
-    } else {
+    } else if app.terminals.values().any(|t| t.pump.is_some()) {
         ctx.request_repaint_after(POLL);
     }
 }
@@ -364,7 +381,9 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) 
         };
         ui.label(egui::RichText::new(text).color(color));
         if let Some(detail) = detail {
-            ui.label(egui::RichText::new(detail).color(tokens.text_dim).small());
+            // A server's detail can be long: cut, so Reconnect stays on screen.
+            let room = (ui.available_width() - 160.0).max(80.0);
+            crate::widgets::elided_label(ui, &detail, room, tokens.text_dim, egui::FontId::proportional(11.0));
         }
         if is_end && !mismatch && ui.button(tr("Reconnect")).clicked() {
             reconnect = true;
@@ -373,6 +392,18 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) 
     if reconnect && let Some(tab) = app.terminals.get(&id) {
         open(app, tab.target.clone(), tab.name.clone(), tab.host, Some(index));
     }
+}
+
+/// A question or another window is over the terminal: it gets no keys.
+pub fn modal_open(app: &SshcraftApp) -> bool {
+    !app.prompts.open.is_empty() || app.ui.picker.is_some() || app.ui.palette.open || app.terminals.values().any(|t| t.clipboard.is_some())
+}
+
+/// Whether `id` is another terminal than the one shown last frame.
+fn app_shown_changed(shown: &mut Option<SessionId>, id: SessionId) -> bool {
+    let changed = *shown != Some(id);
+    *shown = Some(id);
+    changed
 }
 
 /// The page of a session tab: the terminal and its status line.
@@ -390,6 +421,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
     let family = app.term_font.as_ref().map_or(egui::FontFamily::Monospace, |(_, f)| f.clone());
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
     let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
+    let blocked = modal_open(app);
     let Some(tab) = app.terminals.get_mut(&id) else {
         ui.label(tr("This session is gone."));
         return;
@@ -408,10 +440,16 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, index: usize) {
     let response = ui
         .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| TerminalView { term: &mut tab.term, palette: &palette, font }.show(ui))
         .inner;
-    if std::mem::take(&mut tab.focus) {
+    let first = std::mem::take(&mut tab.focus);
+    let switched = app_shown_changed(&mut app.ui.shown_terminal, id);
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    if blocked {
+        // A question is open: what is typed belongs to it, never to the shell behind it.
+        response.response.surrender_focus();
+    } else if first || switched || ctx.memory(|m| m.focused().is_none()) {
         response.response.request_focus();
     }
-    let can_send = !ended(tab.status.as_ref());
+    let can_send = !ended(tab.status.as_ref()) && !blocked;
     if !response.input.is_empty() && can_send {
         send(app, id, &response.input);
     }

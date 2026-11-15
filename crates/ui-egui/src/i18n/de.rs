@@ -212,8 +212,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Always allowed to write the clipboard" => "Dürfen immer in die Zwischenablage schreiben",
         "No host yet." => "Noch kein Host.",
         "{shortcut} is taken by {action}." => "{shortcut} gehört schon zu {action}.",
-        "A shortcut needs Ctrl, Alt or the Windows key, or is a function key." => {
-            "Ein Tastenkürzel braucht Strg, Alt oder die Windows-Taste, oder es ist eine Funktionstaste."
+        "A shortcut needs Ctrl or Alt (⌘ on macOS), or is a function key." => {
+            "Ein Tastenkürzel braucht Strg oder Alt (⌘ unter macOS), oder es ist eine Funktionstaste."
         }
         "Not a key combination: {why}" => "Keine Tastenkombination: {why}",
         "Inside a terminal only Ctrl+Shift and Ctrl+Tab are taken; every other key goes to the server." => {
