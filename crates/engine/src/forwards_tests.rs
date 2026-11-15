@@ -322,7 +322,19 @@ async fn remote_rule_comes_back_after_the_server_restarts() {
     assert!(echoes(port).await);
     f.server.restart(false).await;
     sink.wait_for(|s| running_count(s) == 2).await;
-    assert!(echoes(port).await);
+    // Right after the restart a connection may still reach the old in-process server's listener,
+    // which is going away: the rule counts as back once it echoes within a few seconds.
+    assert!(echoes_soon(port).await);
+}
+
+async fn echoes_soon(port: u16) -> bool {
+    for _ in 0..25 {
+        if echoes(port).await {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    false
 }
 
 #[tokio::test]

@@ -699,6 +699,7 @@ impl Engine {
             identity: refs.identity,
             proxy_password: refs.proxy_password,
             proxy,
+            totp: refs.totp,
             modified_at,
         });
         for _ in 0..CONFLICT_ROUNDS {

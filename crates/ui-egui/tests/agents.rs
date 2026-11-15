@@ -332,6 +332,8 @@ mod link {
         agents_page(&mut h);
         h.run_steps(3);
         assert!(file(&h).is_none(), "off until the user turns it on");
+        // Under load the page may need a few frames for the settings.
+        wait(&mut h, "the switch", |h| h.query_by_label("Allow agent control").is_some());
         h.get_by_label("Allow agent control").click();
         wait(&mut h, "the link", |h| file(h).is_some());
         let f = file(&h).unwrap();

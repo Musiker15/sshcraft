@@ -5,6 +5,7 @@
 use egui::Ui;
 use serde_json::json;
 use sshcraft_model::model::{ConnectionSettings, EnvVar, Group, GroupId, Host, HostId, HostOs, KeyRef, Proxy, ProxyEndpoint};
+use sshcraft_model::secret_ref::{Manager, SecretRef, SecretRefError};
 
 use crate::app::SshcraftApp;
 use crate::i18n::{tr, trf};
@@ -107,6 +108,12 @@ pub struct HostForm {
     pub error: Option<String>,
     /// The proxy as the form opened; a command that differs at save was entered here.
     pub opened_proxy: Option<Proxy>,
+    /// The password reference as the form opened.
+    pub opened_ref: Option<SecretRef>,
+    /// A new TOTP secret; empty keeps what is stored.
+    pub totp: String,
+    pub has_totp: bool,
+    pub remove_totp: bool,
 }
 
 impl HostForm {
@@ -114,7 +121,60 @@ impl HostForm {
         let tags = host.tags.join(", ");
         let port = host.settings.port.map(|p| p.to_string()).unwrap_or_default();
         let opened_proxy = host.settings.proxy.clone();
-        Self { host, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
+        let opened_ref = host.settings.password_ref.clone();
+        Self {
+            host,
+            editing,
+            password: String::new(),
+            has_password,
+            remove_password: false,
+            tags,
+            port,
+            error: None,
+            opened_proxy,
+            opened_ref,
+            totp: String::new(),
+            has_totp: false,
+            remove_totp: false,
+        }
+    }
+}
+
+/// The password from a password manager: a manager and a reference, checked as typed.
+fn password_ref_field(ui: &mut Ui, reference: &mut Option<SecretRef>) {
+    let mut on = reference.is_some();
+    ui.horizontal(|ui| {
+        ui.label("");
+        if ui.checkbox(&mut on, tr("From a password manager")).changed() {
+            *reference = on.then(|| SecretRef { manager: Manager::OnePassword, reference: String::new() });
+        }
+    });
+    let Some(r) = reference.as_mut() else { return };
+    ui.horizontal(|ui| {
+        ui.label("");
+        egui::ComboBox::from_id_salt("sshcraft-secret-manager").selected_text(r.manager.label()).show_ui(ui, |ui| {
+            for m in [Manager::ProtonPass, Manager::OnePassword, Manager::Bitwarden, Manager::KeePassXc] {
+                ui.selectable_value(&mut r.manager, m, m.label());
+            }
+        });
+        let label = ui.label(tr("Reference"));
+        ui.add(egui::TextEdit::singleline(&mut r.reference).hint_text(r.manager.example()).font(egui::TextStyle::Monospace).desired_width(260.0))
+            .labelled_by(label.id);
+    });
+    if !r.reference.is_empty()
+        && let Err(e) = r.check()
+    {
+        let text = match e {
+            SecretRefError::Shape(manager, example) => {
+                trf("A {manager} reference looks like {example}", &[("manager", manager), ("example", example)])
+            }
+            _ => tr("The reference holds a control character or starts with '-'").to_owned(),
+        };
+        ui.colored_label(ui.visuals().error_fg_color, text);
+    } else {
+        ui.label(
+            egui::RichText::new(trf("Fetched with {program} when connecting; SSHCraft keeps no copy.", &[("program", r.manager.program())])).small(),
+        );
     }
 }
 
@@ -370,6 +430,21 @@ fn proxy_command_field(ui: &mut Ui, argv: &mut Vec<String>, host: Option<HostId>
     ui.data_mut(|d| d.insert_temp(id, line));
 }
 
+/// The secret for one-time codes (TOTP), as an authenticator app gets it.
+fn totp_field(ui: &mut Ui, secret: &mut String, has_totp: bool, remove: &mut bool) {
+    ui.horizontal(|ui| {
+        ui.label(tr("One-time codes"));
+        let hint = if has_totp { tr("Stored; type to replace") } else { tr("TOTP secret or otpauth:// link") };
+        crate::widgets::secret_field(ui, secret, egui::Id::unique("sshcraft-form-totp"), true, hint, 220.0);
+        if has_totp {
+            ui.checkbox(remove, tr("Remove"));
+        }
+    });
+    if !secret.is_empty() && sshcraft_model::totp::decode_secret(secret).is_none() {
+        ui.colored_label(ui.visuals().error_fg_color, tr("This is not a TOTP secret (Base32 or an otpauth:// link)."));
+    }
+}
+
 fn password_field(ui: &mut Ui, password: &mut String, has_password: bool, remove: &mut bool) {
     ui.horizontal(|ui| {
         ui.label(tr("Password"));
@@ -453,6 +528,8 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.separator();
                 settings_editor(ui, app, &mut form.host.settings, &mut form.port, &inherited, Some(form.host.id));
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
+                password_ref_field(ui, &mut form.host.settings.password_ref);
+                totp_field(ui, &mut form.totp, form.has_totp, &mut form.remove_totp);
             },
         );
         if let Some(error) = &form.error {
@@ -479,20 +556,33 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let owner = json!({ "kind": "host", "id": form.host.id });
                 // The typed password stays in the form until the save went through.
                 let (password, remove) = (form.password.clone(), form.remove_password);
+                let (totp, remove_totp) = (form.totp.clone(), form.remove_totp);
+                let totp_owner = json!({ "kind": "host_totp", "id": form.host.id });
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "host.save",
-                    json!({ "host": form.host, "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy) }),
+                    json!({
+                        "host": form.host,
+                        "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy),
+                        "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
+                    }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
-                            Ok(_) => after_save(
-                                app,
-                                owner,
-                                password,
-                                remove,
-                                if current { |app: &mut SshcraftApp| app.ui.host_form = None } else { |_: &mut SshcraftApp| {} },
-                            ),
+                            Ok(_) => {
+                                if !totp.is_empty() {
+                                    app.run_reported("password.set", json!({ "owner": totp_owner, "secret": totp }));
+                                } else if remove_totp {
+                                    app.run_reported("password.clear", json!({ "owner": totp_owner }));
+                                }
+                                after_save(
+                                    app,
+                                    owner,
+                                    password,
+                                    remove,
+                                    if current { |app: &mut SshcraftApp| app.ui.host_form = None } else { |_: &mut SshcraftApp| {} },
+                                );
+                            }
                             Err(e) if current => {
                                 if let Some(form) = app.ui.host_form.as_mut() {
                                     form.error = Some(e.to_string());

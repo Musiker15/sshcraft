@@ -115,7 +115,9 @@ fn term_and_dir_command() -> ShellCommand {
     if cfg!(windows) {
         ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo %TERM% & cd".into()], label: "probe".into() }
     } else {
-        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd".into()], label: "probe".into() }
+        // The shell stays a moment after its output: on FreeBSD the last output of a shell that
+        // ends at once can be lost (docs/gaps.md, 4a), as in the echo test above.
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd; sleep 1".into()], label: "probe".into() }
     }
 }
 

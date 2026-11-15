@@ -247,11 +247,20 @@ pub fn apply_in(
         ItemBody::Deleted { item_kind, item_id } => {
             let uuid = parse_id(item_id)?;
             match item_kind {
-                ItemKind::Group => store.delete_group(GroupId(uuid))?,
-                ItemKind::Host => store.delete_host(HostId(uuid))?,
+                // Local data stays authoritative: what another device deleted goes to the trash
+                // here, not away.
+                ItemKind::Group => {
+                    store.trash_group(GroupId(uuid))?;
+                    store.delete_group(GroupId(uuid))?;
+                }
+                ItemKind::Host => {
+                    store.trash_host(HostId(uuid))?;
+                    store.delete_host(HostId(uuid))?;
+                }
                 // A key bound to this device was never sent; no record may remove it.
                 ItemKind::Key => {
                     if !store.key_record(KeyId(uuid))?.is_some_and(|r| r.kind == KeyKind::Device) {
+                        store.trash_key(KeyId(uuid))?;
                         store.delete_key_record(KeyId(uuid))?;
                     }
                 }

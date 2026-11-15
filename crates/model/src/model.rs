@@ -52,6 +52,12 @@ pub struct ConnectionSettings {
     /// A password sealed in the vault.
     #[serde(default)]
     pub password: Option<PasswordId>,
+    /// A password kept in a password manager; on this level it goes before `password`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_ref: Option<crate::secret_ref::SecretRef>,
+    /// The TOTP secret (Base32) for one-time codes, sealed in the vault like a password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp: Option<PasswordId>,
     /// Fills username, key and password where this level does not set them itself.
     #[serde(default)]
     pub identity: Option<IdentityId>,
@@ -71,13 +77,13 @@ pub struct ConnectionSettings {
 }
 
 impl ConnectionSettings {
-    /// Every password these settings refer to: their own and the proxy's.
+    /// Every password these settings refer to: their own, the proxy's and the TOTP secret.
     pub fn password_ids(&self) -> Vec<PasswordId> {
         let proxy = match &self.proxy {
             Some(Proxy::Http(e) | Proxy::Socks5(e)) => e.password,
             _ => None,
         };
-        self.password.into_iter().chain(proxy).collect()
+        self.password.into_iter().chain(proxy).chain(self.totp).collect()
     }
 }
 
@@ -282,6 +288,10 @@ pub struct ResolvedHost {
     pub username: String,
     pub key: Option<KeyRef>,
     pub password: Option<PasswordId>,
+    /// A password from a password manager, instead of `password`.
+    pub password_ref: Option<crate::secret_ref::SecretRef>,
+    /// The sealed TOTP secret that answers a one-time code question.
+    pub totp: Option<PasswordId>,
     /// Never [`Proxy::Direct`]: that resolves to `None`.
     pub proxy: Option<Proxy>,
     pub agent_forwarding: bool,
@@ -363,7 +373,15 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
         .find_map(|l| non_empty(&l.settings.username).or_else(|| l.identity.and_then(|i| non_empty(&i.username))))
         .ok_or(ResolveError::MissingUsername)?;
     let key = levels.iter().find_map(|l| l.settings.key.clone().or_else(|| l.identity.and_then(|i| i.key.clone())));
-    let password = levels.iter().find_map(|l| l.settings.password.or_else(|| l.identity.and_then(|i| i.password)));
+    // The nearest level with a password decides; a reference there goes before a stored one.
+    let (password, password_ref) = levels
+        .iter()
+        .find_map(|l| match &l.settings.password_ref {
+            Some(r) => Some((None, Some(r.clone()))),
+            None => l.settings.password.or_else(|| l.identity.and_then(|i| i.password)).map(|p| (Some(p), None)),
+        })
+        .unwrap_or((None, None));
+    let totp = levels.iter().find_map(|l| l.settings.totp);
     let proxy = levels.iter().find_map(|l| l.settings.proxy.clone()).filter(|p| *p != Proxy::Direct);
     let agent_forwarding = levels.iter().find_map(|l| l.settings.agent_forwarding).unwrap_or(false);
     let jump_hosts = levels.iter().find_map(|l| l.settings.jump_hosts.clone()).unwrap_or_default();
@@ -376,6 +394,8 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
         username,
         key,
         password,
+        password_ref,
+        totp,
         proxy,
         agent_forwarding,
         env: normalize_env(&env),
@@ -397,6 +417,9 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         username: levels.iter().find_map(|l| non_empty(&l.settings.username).or_else(|| l.identity.and_then(|i| non_empty(&i.username)))),
         key: levels.iter().find_map(|l| l.settings.key.clone().or_else(|| l.identity.and_then(|i| i.key.clone()))),
         password: levels.iter().find_map(|l| l.settings.password.or_else(|| l.identity.and_then(|i| i.password))),
+        // A reference points into the owner's own password manager: never into a copy.
+        password_ref: None,
+        totp: levels.iter().find_map(|l| l.settings.totp),
         identity: None,
         jump_hosts: levels.iter().find_map(|l| l.settings.jump_hosts.clone()),
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),

@@ -15,11 +15,25 @@ use crate::sync::{note_change, now_ms};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PasswordOwner {
-    Host { id: HostId },
-    Group { id: GroupId },
-    HostProxy { id: HostId },
-    GroupProxy { id: GroupId },
-    Identity { id: IdentityId },
+    Host {
+        id: HostId,
+    },
+    Group {
+        id: GroupId,
+    },
+    HostProxy {
+        id: HostId,
+    },
+    /// The TOTP secret of a host.
+    HostTotp {
+        id: HostId,
+    },
+    GroupProxy {
+        id: GroupId,
+    },
+    Identity {
+        id: IdentityId,
+    },
 }
 
 /// What a form wants done with a password.
@@ -40,7 +54,7 @@ fn not_found() -> CommandError {
 
 fn owner_item(owner: PasswordOwner) -> (ItemKind, String) {
     match owner {
-        PasswordOwner::Host { id } | PasswordOwner::HostProxy { id } => (ItemKind::Host, id.0.to_string()),
+        PasswordOwner::Host { id } | PasswordOwner::HostProxy { id } | PasswordOwner::HostTotp { id } => (ItemKind::Host, id.0.to_string()),
         PasswordOwner::Group { id } | PasswordOwner::GroupProxy { id } => (ItemKind::Group, id.0.to_string()),
         PasswordOwner::Identity { id } => (ItemKind::Identity, id.0.to_string()),
     }
@@ -78,6 +92,10 @@ fn current(store: &Store, owner: PasswordOwner) -> Result<(Option<PasswordId>, O
             let h = host(store, id)?;
             (proxy_password(&h.settings)?, h.location)
         }
+        PasswordOwner::HostTotp { id } => {
+            let h = host(store, id)?;
+            (h.settings.totp, h.location)
+        }
         PasswordOwner::Group { id } => {
             let g = group(store, id)?;
             (g.defaults.password, g.location)
@@ -103,6 +121,11 @@ fn point_to(store: &Store, owner: PasswordOwner, password: Option<PasswordId>) -
         PasswordOwner::HostProxy { id } => {
             let mut h = host(store, id)?;
             set_proxy_password(&mut h.settings, password);
+            store.upsert_host(&h)?;
+        }
+        PasswordOwner::HostTotp { id } => {
+            let mut h = host(store, id)?;
+            h.settings.totp = password;
             store.upsert_host(&h)?;
         }
         PasswordOwner::Group { id } => {
@@ -206,6 +229,7 @@ pub(crate) fn queue(store: &Store, touched: Touched) -> CommandResult<Vec<Server
 /// Settings as the UI sees them: without password ids.
 pub(crate) fn hide_passwords(settings: &mut ConnectionSettings) {
     settings.password = None;
+    settings.totp = None;
     set_proxy_password(settings, None);
 }
 
@@ -213,6 +237,7 @@ pub(crate) fn hide_passwords(settings: &mut ConnectionSettings) {
 /// proxy is gone is returned to be dropped.
 pub(crate) fn keep_passwords(stored: Option<&ConnectionSettings>, incoming: &mut ConnectionSettings) -> Vec<PasswordId> {
     incoming.password = stored.and_then(|s| s.password);
+    incoming.totp = stored.and_then(|s| s.totp);
     let old_proxy = stored.and_then(|s| proxy_password(s).ok().flatten());
     let has_proxy = matches!(incoming.proxy, Some(Proxy::Http(_) | Proxy::Socks5(_)));
     // A proxy that now leads elsewhere does not take the old proxy's password along.
@@ -231,6 +256,7 @@ pub struct HostView {
     pub host: Host,
     pub has_password: bool,
     pub proxy_has_password: bool,
+    pub has_totp: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,8 +273,9 @@ fn flags(settings: &ConnectionSettings) -> (bool, bool) {
 
 pub(crate) fn host_view(mut host: Host) -> HostView {
     let (has_password, proxy_has_password) = flags(&host.settings);
+    let has_totp = host.settings.totp.is_some();
     hide_passwords(&mut host.settings);
-    HostView { host, has_password, proxy_has_password }
+    HostView { host, has_password, proxy_has_password, has_totp }
 }
 
 pub(crate) fn group_view(mut group: Group) -> GroupView {
@@ -296,6 +323,10 @@ fn run_set(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let p: SetParams = parse("password.set", params)?;
         let secret = zeroize::Zeroizing::new(p.secret);
+        // A TOTP secret that is not Base32 would only fail when connecting.
+        if matches!(p.owner, PasswordOwner::HostTotp { .. }) && sshcraft_model::totp::decode_secret(&secret).is_none() {
+            return Err(CommandError::bad_params("password.set", "the TOTP secret must be Base32 or an otpauth:// link"));
+        }
         let vault = ctx.session.vault()?;
         let servers = {
             let store = ctx.session.store();

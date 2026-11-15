@@ -21,6 +21,9 @@ pub struct CredentialRefs {
     pub identity: Option<IdentityId>,
     #[serde(default)]
     pub proxy_password: Option<PasswordId>,
+    /// The TOTP secret, a password row like the others.
+    #[serde(default)]
+    pub totp: Option<PasswordId>,
 }
 
 impl CredentialRefs {
@@ -33,6 +36,7 @@ impl CredentialRefs {
                 Some(Proxy::Http(e) | Proxy::Socks5(e)) => e.password,
                 _ => None,
             },
+            totp: settings.totp,
         }
     }
 
@@ -41,6 +45,7 @@ impl CredentialRefs {
         settings.key = self.key.clone();
         settings.password = self.password;
         settings.identity = self.identity;
+        settings.totp = self.totp;
         if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut settings.proxy {
             e.password = self.proxy_password;
         }
@@ -85,7 +90,7 @@ pub(crate) fn strip_unsynced(store: &Store, server: ServerId, refs: &mut Credent
     if !keep_key {
         refs.key = None;
     }
-    for password in [&mut refs.password, &mut refs.proxy_password] {
+    for password in [&mut refs.password, &mut refs.proxy_password, &mut refs.totp] {
         if let Some(id) = *password
             && !goes_with(store, server, ItemKind::Password, &id.0.to_string(), target, personal)?
         {
@@ -175,7 +180,8 @@ pub(crate) fn keep_local(
         };
     }
     let local_proxy = if same_proxy { local.proxy_password } else { None };
-    for (incoming, local) in [(&mut incoming.password, local.password), (&mut incoming.proxy_password, local_proxy)] {
+    for (incoming, local) in [(&mut incoming.password, local.password), (&mut incoming.proxy_password, local_proxy), (&mut incoming.totp, local.totp)]
+    {
         if incoming.is_none()
             && let Some(id) = local
             && foreign(store, server, ItemKind::Password, &id.0.to_string(), area, personal)?

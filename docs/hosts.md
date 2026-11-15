@@ -60,6 +60,25 @@ Limits on purpose:
 - Files over 10 MiB are refused; broken lines are skipped and listed, never the whole import.
 - Key files named in a session (PuTTY, SecureCRT) are pointed out; import them under *Keys*.
 
+## Trash and earlier versions
+
+A deleted host, group (with its subgroups and their hosts), key or snippet goes to *Settings ›
+Trash* for 30 days (1 to 365), also when another device deleted it through sync. *Restore* puts
+it back with its passwords and sends it to its sync server again (a group takes back its hosts
+that came to the trash on their own); one whose id is in use again stays in the trash, and one
+whose share or parent group is gone comes back on this device only. Keys bound to this device
+(Windows Hello) do not go to the trash. Deleting for good also removes the earlier versions. Every save of a host, group or snippet keeps the stand before: *Earlier
+versions…* in a host's menu lists up to 20 and restores one like an edit.
+
+## Backup
+
+*Settings › General › Backup* writes one file with all hosts, groups, identities, keys (as their
+OpenSSH text, still under their own passphrase where they have one), passwords, snippets and
+host keys, encrypted with a passphrase of at least 12 characters (Argon2id, XChaCha20-Poly1305).
+It opens on any device, also after the system's keyring is gone. Keys bound to a device (Windows
+Hello) cannot leave it and are left out. *Restore from backup* adds what is missing and changes
+nothing that is there; a wrong passphrase or a changed file adds nothing.
+
 ## Export
 
 *Hosts → New → Export* writes everything, one place or one group with its subgroups:

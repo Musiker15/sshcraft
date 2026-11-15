@@ -53,7 +53,21 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let SaveParams { snippet } = parse("snippet.save", params)?;
         let vault = ctx.session.vault()?;
+        let before = snippets::list(&vault, &ctx.session.store())?.into_iter().find(|s| s.id == snippet.id);
+        let old = match &before {
+            Some(b) if *b != snippet => ctx.session.store().snapshot_snippet(b.id, &b.name)?,
+            _ => None,
+        };
         snippets::save(&vault, &ctx.session.store(), &snippet)?;
+        if let (Some(payload), Some(b)) = (old, before) {
+            ctx.session.store().put_version(
+                sshcraft_store::trash::TrashKind::Snippet,
+                &b.id.0.to_string(),
+                &b.name,
+                &payload,
+                crate::now_ms() / 1000,
+            )?;
+        }
         to_value(&snippet)
     })
 }
@@ -66,6 +80,14 @@ struct IdParams {
 fn run_delete(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let IdParams { id } = parse("snippet.delete", params)?;
+        let name = ctx
+            .session
+            .vault()
+            .ok()
+            .and_then(|vault| snippets::list(&vault, &ctx.session.store()).ok())
+            .and_then(|all| all.into_iter().find(|s| s.id == id).map(|s| s.name))
+            .unwrap_or_default();
+        ctx.session.store().trash_snippet(id, &name)?;
         snippets::delete(&ctx.session.store(), id)?;
         Ok(Value::Null)
     })

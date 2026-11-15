@@ -70,6 +70,10 @@ fn apply_deleted_removes_the_item() {
     let item = SyncItem { modified_at: 5, body: ItemBody::Deleted { item_kind: ItemKind::Host, item_id: h.id.0.to_string() } };
     apply(&store, &vault, ServerId::new(), &item).unwrap();
     assert!(store.list_hosts().unwrap().is_empty());
+    // Local data stays authoritative: it waits in the trash.
+    let trash = store.list_trash().unwrap();
+    assert_eq!(trash.len(), 1);
+    assert_eq!(trash[0].id, h.id.0.to_string());
 }
 
 #[test]

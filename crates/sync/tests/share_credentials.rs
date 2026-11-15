@@ -340,3 +340,26 @@ async fn device_key_never_shared_even_with_keys() {
     // The password still went with the keys: the share itself worked.
     assert_eq!(secret(&b, route.password).as_deref(), Some(SECRET));
 }
+
+/// A TOTP secret is a password: without keys it does not go into a share.
+#[tokio::test]
+async fn a_totp_secret_does_not_go_into_a_share_without_keys() {
+    let server = TestServer::start().await;
+    let (a, b) = people(&server).await;
+    let s = team(&a).await;
+    let totp = PasswordId::new();
+    let server_id = a.row().id;
+    {
+        let store = a.store.lock().unwrap();
+        a.vault.store_password(&store, totp, "GEZDGNBVGY3TQOJQ", Some(server_id)).unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == s.host.id).unwrap();
+        host.settings.totp = Some(totp);
+        store.upsert_host(&host).unwrap();
+        record_local_change(&store, ItemKind::Password, &totp.0.to_string(), 2).unwrap();
+        record_local_change(&store, ItemKind::Host, &host.id.0.to_string(), 2).unwrap();
+    }
+    sync(&a).await;
+    share_it(&a, &b, ShareWhat::Host(s.host.id), Role::Read, false).await;
+    let route = route_on(&b, "one");
+    assert_eq!(route.totp, None);
+}

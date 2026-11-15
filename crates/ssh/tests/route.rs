@@ -31,7 +31,7 @@ fn hop(name: &str, address: &str, port: u16, password: &str) -> Hop {
         address: address.into(),
         port,
         username: "tester".into(),
-        auth: Auth { key: None, password: Some(Zeroizing::new(password.to_owned())), certificate: None },
+        auth: Auth { key: None, password: Some(Zeroizing::new(password.to_owned())), certificate: None, totp: None },
     }
 }
 

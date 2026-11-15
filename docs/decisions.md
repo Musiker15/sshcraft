@@ -8,6 +8,11 @@ of the rebuild, which left the tree with R7 and are in the history at
 
 | Date | Decision |
 |---|---|
+| 2026-11-15 | A password reference is used for an address only after it was allowed on this device, like a proxy command; copies in a share never carry one. |
+| 2026-11-15 | A TOTP secret is a sealed password row and follows the rules of passwords; a stored password no longer answers a question for a one-time code. |
+| 2026-11-15 | The trash keeps rows with their sealed parts as they were and restores them under their ids; what sync deletes goes there too. Versions come from saves in SSHCraft, at most 20 per item. |
+| 2026-11-15 | The backup file is opened by a passphrase alone (Argon2id, XChaCha20-Poly1305), so it works without the keyring; restoring adds only what is missing. |
+| 2026-11-15 | The app lock unlocks with Windows Hello and is not offered where there is none; Touch ID waits until it can be tried on a Mac. |
 | 2026-11-15 | A proxy command is an argument list split by `sh` rules, never a shell; a line that needs one is refused. It runs only after it was allowed on this device, by its exact command line: entering it in a form or importing the own `~/.ssh/config` allows it; sync, shares, imports and agents never do, and saving a host for another reason does not. Host values that start with `-` never reach it. Agents cannot set one or aim one. |
 | 2026-11-15 | Reconnect waits 1, 2, 4 … 32 seconds, then a minute; terminals up to a setting (10), forwards without a limit. Sleep and network changes are found by reading the clocks and the interface addresses every five seconds, not by system notifications. |
 | 2026-11-15 | Schema 12: several host keys per server with the key itself; `UpdateHostKeys` keeps a new key only after the server proved it, and only from the target, not from jump hosts. A `known_hosts` import never adds a key to a server SSHCraft knows. |

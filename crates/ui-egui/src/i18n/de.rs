@@ -78,6 +78,77 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "Allow on this device" => "Auf diesem Gerät erlauben",
         "Known hosts" => "Bekannte Server",
+        "From a password manager" => "Aus einem Passwortmanager",
+        "One-time codes" => "Einmalcodes",
+        "TOTP secret or otpauth:// link" => "TOTP-Geheimnis oder otpauth://-Link",
+        "This is not a TOTP secret (Base32 or an otpauth:// link)." => "Das ist kein TOTP-Geheimnis (Base32 oder ein otpauth://-Link).",
+        "Reference" => "Verweis",
+        "A {manager} reference looks like {example}" => "Ein Verweis für {manager} sieht so aus: {example}",
+        "The reference holds a control character or starts with '-'" => "Der Verweis enthält ein Steuerzeichen oder beginnt mit '-'",
+        "Fetched with {program} when connecting; SSHCraft keeps no copy." => "Wird beim Verbinden mit {program} geholt; SSHCraft behält keine Kopie.",
+        "Send a password from your password manager?" => "Ein Passwort aus deinem Passwortmanager senden?",
+        "{host} wants this password from your password manager, sent to the server below. It was not set up for this server on this device (it came with sync or a share, or the address changed). Allow it only if the password belongs to this server." => {
+            "{host} möchte dieses Passwort aus deinem Passwortmanager an den Server unten senden. Es wurde auf diesem Gerät nicht für diesen Server eingerichtet (es kam über Sync oder eine Freigabe, oder die Adresse hat sich geändert). Erlaube es nur, wenn das Passwort zu diesem Server gehört."
+        }
+        "Trash" => "Papierkorb",
+        "Connections" => "Verbindungen",
+        "Every connection SSHCraft makes by itself is listed under Settings › Connections." => {
+            "Jede Verbindung, die SSHCraft selbst aufbaut, steht unter Einstellungen › Verbindungen."
+        }
+        "Everything SSHCraft connects to or starts by itself. Your own SSH connections, port forwards and proxy commands are not listed." => {
+            "Alles, womit SSHCraft sich selbst verbindet oder was es selbst startet. Deine eigenen SSH-Verbindungen, Portweiterleitungen und Proxy-Befehle stehen nicht darin."
+        }
+        "Sync with {name}: HTTPS, and a WebSocket for changes" => "Sync mit {name}: HTTPS und ein WebSocket für Änderungen",
+        "{name}: passwords of {count} hosts or groups, fetched when connecting" => {
+            "{name}: Passwörter von {count} Hosts oder Gruppen, beim Verbinden geholt"
+        }
+        "Keys from the SSH agent (Proton Pass), when a host uses one" => "Schlüssel aus dem SSH-Agent (Proton Pass), wenn ein Host einen nutzt",
+        "AI agents connect here, from this computer only" => "KI-Agents verbinden sich hier, nur von diesem Rechner",
+        "SSHCraft does not check for updates and sends no telemetry" => "SSHCraft sucht nicht nach Updates und sendet keine Telemetrie",
+        "App lock" => "App-Sperre",
+        "Lock after" => "Sperren nach",
+        " minutes without input" => " Minuten ohne Eingabe",
+        "0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again." => {
+            "0 sperrt nie. Zum Entsperren fragt Windows Hello, und Schlüssel und Passwörter fragen es erneut."
+        }
+        "Not on this system yet: unlocking needs Windows Hello." => "Auf diesem System noch nicht: zum Entsperren braucht es Windows Hello.",
+        "SSHCraft is locked" => "SSHCraft ist gesperrt",
+        "Sessions keep running. Unlock with Windows Hello to see them." => {
+            "Die Sitzungen laufen weiter. Entsperre mit Windows Hello, um sie zu sehen."
+        }
+        "Unlock" => "Entsperren",
+        "Backup" => "Sicherung",
+        "One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here." => {
+            "Eine Datei mit deinen Hosts, Gruppen, Identitäten, Schlüsseln, Passwörtern, Snippets und Hostschlüsseln, verschlüsselt mit einer Passphrase. Beim Wiederherstellen kommt hinzu, was fehlt; was hier ist, bleibt unverändert."
+        }
+        "Create backup…" => "Sicherung erstellen …",
+        "Restore from backup…" => "Aus Sicherung wiederherstellen …",
+        "Restore from backup" => "Aus Sicherung wiederherstellen",
+        "Create backup" => "Sicherung erstellen",
+        "Passphrase again" => "Passphrase wiederholen",
+        "Keep it in your password manager: without it the file cannot be opened." => {
+            "Bewahre sie im Passwortmanager auf: ohne sie lässt sich die Datei nicht öffnen."
+        }
+        "Choose file…" => "Datei wählen …",
+        "Save as…" => "Speichern unter …",
+        "The passphrase needs at least {count} characters." => "Die Passphrase braucht mindestens {count} Zeichen.",
+        "The two passphrases differ." => "Die beiden Passphrasen sind verschieden.",
+        "Restored: {hosts} hosts, {groups} groups, {keys} keys, {passwords} passwords, {snippets} snippets." => {
+            "Wiederhergestellt: {hosts} Hosts, {groups} Gruppen, {keys} Schlüssel, {passwords} Passwörter, {snippets} Snippets."
+        }
+        "The backup is written." => "Die Sicherung ist geschrieben.",
+        "Snippet" => "Snippet",
+        "Deleted hosts, groups, keys and snippets stay here for {days} days, also when another device deleted them." => {
+            "Gelöschte Hosts, Gruppen, Schlüssel und Snippets bleiben {days} Tage hier, auch wenn ein anderes Gerät sie gelöscht hat."
+        }
+        "Keep for" => "Aufbewahren",
+        " days" => " Tage",
+        "The trash is empty." => "Der Papierkorb ist leer.",
+        "Delete for good" => "Endgültig löschen",
+        "Empty the trash" => "Papierkorb leeren",
+        "Earlier versions…" => "Frühere Fassungen …",
+        "Earlier versions of {name}" => "Frühere Fassungen von {name}",
+        "No earlier versions." => "Keine früheren Fassungen.",
         "Write to ~/.ssh/config" => "In ~/.ssh/config schreiben",
         "Written to {files}; a copy of the old file is in ~/.ssh/.sshcraft-backup." => {
             "Geschrieben in {files}; eine Kopie der alten Datei liegt in ~/.ssh/.sshcraft-backup."

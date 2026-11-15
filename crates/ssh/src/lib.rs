@@ -22,7 +22,7 @@ pub mod hostkeys;
 mod proxy;
 pub mod socks;
 mod tunnel;
-pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, NoPrompter, certificate_valid_now};
+pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, CodeMaker, NoPrompter, certificate_valid_now};
 pub use tunnel::{MAX_TUNNEL_CONNECTIONS, Tunnel};
 
 /// Signs for a key whose private half SSHCraft does not hold (a FIDO2 key, Windows Hello).

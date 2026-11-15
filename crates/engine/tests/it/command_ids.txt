@@ -3,6 +3,11 @@ agent.log_clear
 agent.policy
 agent.set_hidden
 agent.set_level
+app.connections
+app.lock
+app.unlock
+backup.create
+backup.restore
 device.list
 device.revoke
 forward.start
@@ -101,6 +106,11 @@ sync.remove_server
 sync.server_logs
 sync.servers
 sync.set_server
+trash.list
+trash.purge
+trash.restore
+trash.restore_version
+trash.versions
 vault.hello
 vault.status
 workspace.delete

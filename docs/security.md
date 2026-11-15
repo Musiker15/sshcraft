@@ -21,8 +21,8 @@ where it can have one.
 4. **Paths from the network are normalized and bounded** before they touch anything local.
    (Path traversal in Tabby's SFTP.)
 5. **Nothing is left on a server** unless the user asks for it. (iTerm2, CVE-2025-22275.)
-6. **No telemetry.** From F2 on, every connection SSHCraft makes by itself is listed in the
-   settings; an update check runs only after consent. (Warp, Wave.)
+6. **No telemetry.** Every connection SSHCraft makes by itself is listed under *Settings ›
+   Connections*; there is no update check. (Warp, Wave.)
 7. **Cryptography only from reviewed libraries**, signatures with deterministic nonces; strict
    kex is tested against a packet slipped in before the key exchange (`crates/ssh/tests/strict_kex.rs`).
    (PuTTY CVE-2024-31497, Terrapin CVE-2023-48795.)
@@ -30,8 +30,9 @@ where it can have one.
    MCP server.)
 9. **Performance budgets as tests:** 1 GB of output must not freeze the interface; a memory budget
    per session and for the idle app. (Electron clients.)
-10. **Local data stays authoritative:** sync never deletes locally without a tombstone; from F2 on
-    there is a trash and an encrypted backup file. (Termius vaults that emptied after updates.)
+10. **Local data stays authoritative:** sync never deletes locally without a tombstone, and what
+    it deletes goes to the trash; there is an encrypted backup file. (Termius vaults that emptied
+    after updates.)
 11. **Accessibility:** egui with AccessKit, the terminal readable as linear text by screen readers.
 12. **Supply chain:** one official download address, signed packages through winget, Homebrew and
     Flathub, checksums, an SBOM; reproducible builds as a goal. (Xshell backdoor, fake PuTTY
@@ -45,6 +46,31 @@ list and never through a shell, a host name in `%h` stays one argument, and it r
 it was allowed on this device. Saving it in the window or importing it from the user's own
 `~/.ssh/config` allows it; one from sync, a share or an agent is shown in full and asked about
 first, and a changed command line asks again. Agents cannot set one at all.
+
+## Passwords from password managers, one-time codes, the lock
+
+A password reference names an item in the user's password manager; it is fetched by that
+manager's own program with an argument list, and refused when it could pass an option. It is
+used for an address only after it was allowed on this device (entering it there allows it), so a
+shared host cannot have another of the user's passwords sent to a server of the sharer's
+choosing. A TOTP secret is sealed like a password and answers only a question for a code, never
+a password question; a stored password never answers a code question.
+
+The window locks after the idle time set (*Settings › General › App lock*, off by default):
+nothing of the sessions, hosts or terminals is drawn (no toasts either), so neither a screen
+reader nor a screenshot sees them; the control channel answers only `{"locked": true}` and
+refuses to read terminals or switch pages. The idle time is checked also while the window is
+hidden, before the input that brings it back counts. The approval for keys and passwords, and
+KeePassXC database passwords, are asked again; passwords from password managers need Windows
+Hello like stored ones. Unlocking needs Windows Hello; elsewhere the lock is not offered yet.
+
+The backup file holds secrets in plain form inside, sealed with Argon2id (64 MiB, 3 passes) and
+XChaCha20-Poly1305; its header is authenticated and a file cannot ask for more than 256 MiB or 8
+passes. Restoring checks every key and snippet first and trusts a file only with what it holds: a
+host naming a password, key or identity the file does not carry loses that reference, and host
+keys come only for servers of its own hosts that this device does not know. Restoring from the
+trash keeps share rights: what a read-only share would not take back comes back on this device
+only. Backups, the trash and earlier versions are never reachable for agents.
 
 ## Host keys and `~/.ssh/config`
 

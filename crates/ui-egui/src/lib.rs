@@ -14,6 +14,7 @@ pub mod history;
 pub mod i18n;
 pub mod keymap;
 pub mod link;
+pub mod lock;
 pub mod log_viewer;
 pub mod menus;
 pub mod pages;

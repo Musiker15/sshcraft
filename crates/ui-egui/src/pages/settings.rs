@@ -24,10 +24,13 @@ pub enum Section {
     Shortcuts,
     Sync,
     Agents,
+    Connections,
+    Trash,
 }
 
 impl Section {
-    const ALL: [Self; 6] = [Self::General, Self::Appearance, Self::Terminal, Self::Shortcuts, Self::Sync, Self::Agents];
+    const ALL: [Self; 8] =
+        [Self::General, Self::Appearance, Self::Terminal, Self::Shortcuts, Self::Sync, Self::Agents, Self::Connections, Self::Trash];
 
     fn label(self) -> &'static str {
         match self {
@@ -37,6 +40,8 @@ impl Section {
             Self::Shortcuts => tr("Shortcuts"),
             Self::Sync => tr("Sync"),
             Self::Agents => tr("AI agents"),
+            Self::Connections => tr("Connections"),
+            Self::Trash => tr("Trash"),
         }
     }
 }
@@ -93,6 +98,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         Section::Shortcuts => shortcuts(app, ui),
         Section::Sync => crate::pages::sync::show(app, ui),
         Section::Agents => crate::pages::agents::show(app, ui),
+        Section::Connections => crate::pages::connections::show(app, ui),
+        Section::Trash => crate::pages::trash::show(app, ui),
     });
 }
 
@@ -121,6 +128,28 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
             .weak(),
     );
     save(app, |s| s.general.update_host_keys = update);
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("App lock")).strong());
+    let mut minutes = app.data.settings.general.lock_after_minutes;
+    ui.add_enabled_ui(crate::lock::supported(), |ui| {
+        ui.horizontal(|ui| {
+            ui.label(tr("Lock after"));
+            ui.add(egui::DragValue::new(&mut minutes).range(sshcraft_engine::settings::LOCK_MINUTES).suffix(tr(" minutes without input")));
+        });
+    });
+    ui.label(
+        egui::RichText::new(if crate::lock::supported() {
+            tr("0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again.")
+        } else {
+            tr("Not on this system yet: unlocking needs Windows Hello.")
+        })
+        .weak(),
+    );
+    save(app, |s| s.general.lock_after_minutes = minutes);
+    ui.add_space(12.0);
+    crate::pages::backup::section(app, ui);
+    let ctx = ui.ctx().clone();
+    crate::pages::backup::dialog(app, &ctx);
     ui.add_space(12.0);
     ui.label(egui::RichText::new("~/.ssh/config").strong());
     let mut live = app.data.settings.integrations.ssh_config_live;

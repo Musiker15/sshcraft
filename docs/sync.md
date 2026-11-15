@@ -80,7 +80,8 @@ queues local changes; it reconnects on its own (after 1, 2, 4 … up to 60 secon
 them then.
 
 **Conflicts:** when two devices change the same item, the later change wins (by the time of the
-change on the device that made it). A deletion counts as a change.
+change on the device that made it). A deletion counts as a change; what another device deleted
+goes to the trash here first (*Settings › Trash*), so it can be restored.
 
 ## Revoking a device
 

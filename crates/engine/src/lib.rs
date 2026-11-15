@@ -19,6 +19,7 @@ pub mod listing;
 pub mod passcli;
 pub mod prompts;
 pub mod recording;
+pub mod secrets;
 pub mod sessions;
 pub mod settings;
 pub mod ssh_config;
@@ -258,6 +259,8 @@ impl Session {
         };
         let session = Session(Arc::new(inner));
         session.bind_session_hooks();
+        let days = session.settings().get().general.trash_days;
+        let _ = session.store().purge_old_trash(days);
         ssh_config::spawn_watch(session.downgrade());
         Ok((session, report))
     }

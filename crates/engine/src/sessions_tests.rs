@@ -88,6 +88,11 @@ impl HostKeyPrompter for FixedPrompter {
         self.asked.fetch_add(1, Ordering::SeqCst);
         self.answer
     }
+
+    async fn ask_secret_ref(&self, _: &str, _: &str) -> bool {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.answer
+    }
 }
 
 struct Fixture {
@@ -1887,4 +1892,209 @@ fn update_host_keys_off_changes_nothing() {
     v.apply("h", 22, "SHA256:used", &keys, &[presented("new")]);
     assert_eq!(fingerprints(&store).len(), 2);
     assert!(!fingerprints(&store).contains(&"SHA256:new".to_string()));
+}
+
+// ---------- passwords from a password manager
+
+/// A password manager that answers with a fixed password (or an error) and notes each call.
+struct FakeManager {
+    answer: Result<String, String>,
+    calls: Mutex<Vec<(sshcraft_model::secret_ref::SecretRef, Option<String>)>>,
+}
+
+#[async_trait::async_trait]
+impl crate::secrets::SecretSource for FakeManager {
+    async fn fetch(&self, reference: &sshcraft_model::secret_ref::SecretRef, database_password: Option<&str>) -> Result<Zeroizing<String>, String> {
+        self.calls.lock().unwrap().push((reference.clone(), database_password.map(str::to_owned)));
+        self.answer.clone().map(Zeroizing::new)
+    }
+}
+
+fn op_ref() -> sshcraft_model::secret_ref::SecretRef {
+    sshcraft_model::secret_ref::SecretRef { manager: sshcraft_model::secret_ref::Manager::OnePassword, reference: "op://Servers/web/password".into() }
+}
+
+async fn ref_session(
+    w: &PasswordWorld,
+    server: &TestServer,
+    reference: sshcraft_model::secret_ref::SecretRef,
+    answer: Result<String, String>,
+    allow: bool,
+    auth: Arc<dyn sshcraft_ssh::AuthPrompter>,
+) -> (Vec<SessionStatus>, Arc<FakeManager>, usize) {
+    let host = w.host(server.port, None, Vec::new());
+    w.set(host, |s| s.password_ref = Some(reference));
+    let prompter = Arc::new(FixedPrompter { answer: allow, asked: AtomicUsize::new(0) });
+    let manager = w.manager(Some(w.vault.clone()), prompter.clone(), auth, verified());
+    let fake = Arc::new(FakeManager { answer, calls: Mutex::new(Vec::new()) });
+    manager.set_secrets(fake.clone());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+    (sink.statuses(), fake, prompter.asked.load(Ordering::SeqCst))
+}
+
+#[tokio::test]
+async fn the_reference_is_fetched_when_connecting() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    w.store.lock().unwrap().approve_command(&crate::secrets::approval_digest(&op_ref(), "127.0.0.1", server.port)).unwrap();
+    let (statuses, fake, asked) = ref_session(&w, &server, op_ref(), Ok(pw), false, Arc::new(sshcraft_ssh::NoPrompter)).await;
+    assert_eq!(connected_count(&statuses), 1, "{statuses:?}");
+    assert_eq!(asked, 0);
+    assert_eq!(fake.calls.lock().unwrap().len(), 1);
+}
+
+/// A shared or synced host with a reference: the manager is not asked before the user allowed
+/// it for this address (it could send another of the user's passwords to a server of the
+/// sharer's choosing).
+#[tokio::test]
+async fn a_reference_from_elsewhere_asks_first() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let (statuses, fake, asked) = ref_session(&w, &server, op_ref(), Ok(pw.clone()), false, Arc::new(sshcraft_ssh::NoPrompter)).await;
+    assert_eq!(asked, 1);
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::SecretRefNotAllowed));
+    assert!(fake.calls.lock().unwrap().is_empty(), "nothing was fetched");
+    // Counter-check: allowed, it is fetched and connects, and the answer is kept.
+    let (statuses, fake, _) = ref_session(&w, &server, op_ref(), Ok(pw), true, Arc::new(sshcraft_ssh::NoPrompter)).await;
+    assert_eq!(connected_count(&statuses), 1);
+    assert_eq!(fake.calls.lock().unwrap().len(), 1);
+    assert!(w.store.lock().unwrap().command_approved(&crate::secrets::approval_digest(&op_ref(), "127.0.0.1", server.port)).unwrap());
+}
+
+#[tokio::test]
+async fn a_failing_manager_ends_with_its_message() {
+    let server = password_server(&format!("pw-{:016x}", rand::random::<u64>())).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    w.store.lock().unwrap().approve_command(&crate::secrets::approval_digest(&op_ref(), "127.0.0.1", server.port)).unwrap();
+    let (statuses, _, _) = ref_session(&w, &server, op_ref(), Err("[ERROR] not signed in".into()), false, Arc::new(sshcraft_ssh::NoPrompter)).await;
+    assert_eq!(ended_code(&statuses), Some(ErrorCode::SecretRefFailed));
+    assert!(statuses.iter().any(|s| matches!(s, SessionStatus::Ended { detail: Some(d), .. } if d.contains("not signed in"))));
+}
+
+#[tokio::test]
+async fn keepassxc_asks_the_database_password_once() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let kdbx = sshcraft_model::secret_ref::SecretRef {
+        manager: sshcraft_model::secret_ref::Manager::KeePassXc,
+        reference: "/home/me/s.kdbx#Servers/web".into(),
+    };
+    w.store.lock().unwrap().approve_command(&crate::secrets::approval_digest(&kdbx, "127.0.0.1", server.port)).unwrap();
+    let auth = ScriptedAuth::new(&[Some("db-password")]);
+    let host = w.host(server.port, None, Vec::new());
+    w.set(host, |s| s.password_ref = Some(kdbx.clone()));
+    let manager = w.manager(Some(w.vault.clone()), trusting(), auth.clone(), verified());
+    let fake = Arc::new(FakeManager { answer: Ok(pw), calls: Mutex::new(Vec::new()) });
+    manager.set_secrets(fake.clone());
+    for _ in 0..2 {
+        let sink = Arc::new(RecordingSink::default());
+        manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+        assert_eq!(connected_count(&sink.statuses()), 1);
+    }
+    assert_eq!(auth.seen().len(), 1, "asked once per run");
+    let calls = fake.calls.lock().unwrap();
+    assert!(calls.iter().all(|(_, db)| db.as_deref() == Some("db-password")));
+}
+
+// ---------- one-time codes (TOTP)
+
+#[tokio::test]
+async fn a_stored_totp_secret_answers_the_code_question() {
+    // A secret made for this run, stored as Base32 like one typed into the form.
+    let bytes: [u8; 20] = rand::random();
+    let secret = base32(&bytes);
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    // Not right at the end of a 30 second window, so the server's code is still the one sent.
+    if now() % 30 > 24 {
+        tokio::time::sleep(Duration::from_secs(31 - now() % 30)).await;
+    }
+    let code = sshcraft_model::totp::code(&bytes, now());
+    let server = TestServer::start_with(TestAuth { kbd: vec![vec![("Verification code: ".into(), false, code)]], ..Default::default() }).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let host = w.host(server.port, None, Vec::new());
+    let id = PasswordId::new();
+    w.vault.store_password(&w.store.lock().unwrap(), id, &secret, None).unwrap();
+    w.set(host, |s| s.totp = Some(id));
+    let manager = w.manager(Some(w.vault.clone()), trusting(), Arc::new(sshcraft_ssh::NoPrompter), verified());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+    assert_eq!(connected_count(&sink.statuses()), 1, "{:?}", sink.statuses());
+}
+
+/// Locking the app forgets that the user was verified: the next key asks Windows Hello again.
+#[tokio::test]
+async fn after_a_lock_the_next_key_asks_hello_again() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = f.manager_with_presence(presence.clone());
+    let a = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, a.clone());
+    a.wait_for(connected).await;
+    manager.relock().await;
+    let b = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, b.clone());
+    b.wait_for(connected).await;
+    assert_eq!(presence.asked(), 2);
+}
+
+/// After the app was locked, a password from KeePassXC needs Windows Hello and the database
+/// password again.
+#[tokio::test]
+async fn after_a_lock_a_managed_password_asks_again() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let kdbx = sshcraft_model::secret_ref::SecretRef {
+        manager: sshcraft_model::secret_ref::Manager::KeePassXc,
+        reference: "/home/me/s.kdbx#Servers/web".into(),
+    };
+    w.store.lock().unwrap().approve_command(&crate::secrets::approval_digest(&kdbx, "127.0.0.1", server.port)).unwrap();
+    let auth = ScriptedAuth::new(&[Some("db-password"), Some("db-password")]);
+    let host = w.host(server.port, None, Vec::new());
+    w.set(host, |s| s.password_ref = Some(kdbx.clone()));
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = w.manager(Some(w.vault.clone()), trusting(), auth.clone(), presence.clone());
+    manager.set_secrets(Arc::new(FakeManager { answer: Ok(pw), calls: Mutex::new(Vec::new()) }));
+    for round in 0..2 {
+        if round == 1 {
+            manager.relock().await;
+        }
+        let sink = Arc::new(RecordingSink::default());
+        manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+        assert_eq!(connected_count(&sink.statuses()), 1);
+    }
+    assert_eq!(presence.asked(), 2, "Windows Hello before each fetch after a lock");
+    assert_eq!(auth.seen().len(), 2, "the database password is asked again after the lock");
+}
+
+/// RFC 4648 Base32 without padding, for test secrets.
+fn base32(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let (mut out, mut buffer, mut bits) = (String::new(), 0u32, 0u32);
+    for b in bytes {
+        buffer = (buffer << 8) | u32::from(*b);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(char::from(ALPHABET[((buffer >> bits) & 31) as usize]));
+        }
+    }
+    if bits > 0 {
+        out.push(char::from(ALPHABET[((buffer << (5 - bits)) & 31) as usize]));
+    }
+    out
 }

@@ -129,7 +129,8 @@ fn an_account_is_created_and_its_key_shown_once() {
     assert!(h.state().ui.sync.account_key().is_none(), "the window lets the key go");
     assert!(!format!("{:?}", h.state().ui).contains(&key), "nothing keeps the key");
     until(&mut h, "the server", |app| app.data.servers.iter().any(|s| s["name"] == "home"));
-    assert!(h.query_by_label(&format!("Sync server {origin}")).is_some(), "the connections SSHCraft makes by itself list the server");
+    let connections = session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "app.connections", serde_json::Value::Null)).unwrap();
+    assert!(connections.to_string().contains(&origin), "the connections SSHCraft makes by itself list the server");
     until(&mut h, "the server's state", |app| app.data.sync_status.values().any(|s| s["state"] == "idle"));
     // The state may change again (a sync runs at once): the label follows it.
     let deadline = Instant::now() + Duration::from_secs(10);

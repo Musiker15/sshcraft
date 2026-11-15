@@ -453,3 +453,257 @@ async fn host_keys_are_listed_removed_and_exported() {
     assert!(session.store().host_keys("a.org", 2222).unwrap().is_empty());
     assert!(session.execute(Caller::User, "hostkey.remove", json!({ "address": "a.org", "port": 2222, "fingerprint": "SHA256:x" })).await.is_err());
 }
+
+/// A deleted host waits in the trash; restoring it brings it back and queues it for its sync
+/// server again. Agents can do neither.
+#[tokio::test]
+async fn deleting_a_host_keeps_it_in_the_trash_and_a_restore_syncs_it_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let server = sshcraft_model::model::ServerId::new();
+    session
+        .store()
+        .add_server(&sshcraft_store::store::ServerRow {
+            id: server,
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [7; 32],
+            device_id: uuid::Uuid::new_v4(),
+            sealed_device: Vec::new(),
+            sync_enabled: true,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("web.org".into()), ..Default::default() },
+        location: Some(server),
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    session.store().upsert_host(&host).unwrap();
+    session.execute(Caller::User, "host.delete", json!({ "id": host.id })).await.unwrap();
+    assert!(session.store().list_hosts().unwrap().is_empty());
+    let trash = session.execute(Caller::User, "trash.list", Value::Null).await.unwrap();
+    assert_eq!(trash[0]["kind"], "host");
+    assert_eq!(trash[0]["name"], "web");
+    let queued = session.store().outbox(server).unwrap();
+    for (kind, id) in queued {
+        session.store().dequeue(server, kind, &id).unwrap();
+    }
+    for id in ["trash.list", "trash.restore", "trash.purge"] {
+        assert!(session.execute(agent(), id, json!({ "kind": "host", "id": host.id.0.to_string() })).await.is_err(), "{id}");
+    }
+    session.execute(Caller::User, "trash.restore", json!({ "kind": "host", "id": host.id.0.to_string() })).await.unwrap();
+    assert_eq!(session.store().list_hosts().unwrap(), vec![host.clone()]);
+    assert!(session.store().outbox(server).unwrap().contains(&(sshcraft_store::store::ItemKind::Host, host.id.0.to_string())));
+    assert!(session.store().list_trash().unwrap().is_empty());
+}
+
+/// Every save keeps the stand before; restoring one saves it again (and so keeps the newer
+/// stand as a version too).
+#[tokio::test]
+async fn saving_keeps_the_previous_version_and_a_version_restores() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let mut host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("old.org".into()), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    host.settings.address = Some("new.org".into());
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    // Saving the same again keeps no new version.
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    let id = host.id.0.to_string();
+    let versions = session.execute(Caller::User, "trash.versions", json!({ "kind": "host", "id": id })).await.unwrap();
+    assert_eq!(versions.as_array().unwrap().len(), 1);
+    let version = versions[0]["version"].clone();
+    session.execute(Caller::User, "trash.restore_version", json!({ "kind": "host", "id": id, "version": version })).await.unwrap();
+    assert_eq!(session.store().list_hosts().unwrap()[0].settings.address.as_deref(), Some("old.org"));
+    let versions = session.execute(Caller::User, "trash.versions", json!({ "kind": "host", "id": id })).await.unwrap();
+    assert_eq!(versions.as_array().unwrap().len(), 2, "the newer stand is a version now");
+    for cmd in ["trash.versions", "trash.restore_version"] {
+        assert!(session.execute(agent(), cmd, json!({ "kind": "host", "id": id, "version": 1 })).await.is_err(), "{cmd}");
+    }
+}
+
+/// A backup is written and read back by the user; an agent can do neither, and the passphrase
+/// is not in the journal.
+#[tokio::test]
+async fn backups_are_for_the_user_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let path = dir.path().join("sshcraft.backup").to_string_lossy().into_owned();
+    let params = json!({ "path": path, "passphrase": "a long passphrase" });
+    for id in ["backup.create", "backup.restore"] {
+        assert!(session.execute(agent(), id, params.clone()).await.is_err(), "{id}");
+    }
+    assert!(!std::path::Path::new(&path).exists());
+    session.execute(Caller::User, "backup.create", params.clone()).await.unwrap();
+    session.execute(Caller::User, "backup.restore", params).await.unwrap();
+    let journal = serde_json::to_string(&session.journal()).unwrap();
+    assert!(journal.contains("backup.create"), "the call is journaled");
+    assert!(!journal.contains("a long passphrase"));
+}
+
+/// A password reference entered in the form is allowed for the host's address; saved without
+/// entering it (a rename) it is not.
+#[tokio::test]
+async fn an_entered_password_reference_is_allowed_for_its_address() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let reference =
+        sshcraft_model::secret_ref::SecretRef { manager: sshcraft_model::secret_ref::Manager::OnePassword, reference: "op://S/web/password".into() };
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings {
+            address: Some("web.org".into()),
+            password_ref: Some(reference.clone()),
+            ..Default::default()
+        },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    let digest = crate::secrets::approval_digest(&reference, "web.org", 22);
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    assert!(!session.store().command_approved(&digest).unwrap());
+    session.execute(Caller::User, "host.save", json!({ "host": host, "approve_secret_ref": true })).await.unwrap();
+    assert!(session.store().command_approved(&digest).unwrap());
+    // Another address is another approval.
+    assert!(!session.store().command_approved(&crate::secrets::approval_digest(&reference, "evil.org", 22)).unwrap());
+}
+
+#[tokio::test]
+async fn a_totp_secret_must_be_base32() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("web.org".into()), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    let owner = json!({ "kind": "host_totp", "id": host.id });
+    assert!(session.execute(Caller::User, "password.set", json!({ "owner": owner, "secret": "not base32!" })).await.is_err());
+    session.execute(Caller::User, "password.set", json!({ "owner": owner, "secret": "GEZDGNBVGY3TQOJQ" })).await.unwrap();
+    let listed = session.execute(Caller::User, "host.list", Value::Null).await.unwrap();
+    assert_eq!(listed[0]["has_totp"], true);
+    assert!(listed[0]["settings"].get("totp").is_none(), "the id is not shown");
+}
+
+#[tokio::test]
+async fn the_connection_list_names_every_sync_server_and_no_update_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    session
+        .store()
+        .add_server(&sshcraft_store::store::ServerRow {
+            id: sshcraft_model::model::ServerId::new(),
+            name: "home".into(),
+            origin: "https://sync.example.org".into(),
+            account: [7; 32],
+            device_id: uuid::Uuid::new_v4(),
+            sealed_device: Vec::new(),
+            sync_enabled: true,
+            sync_keys: false,
+            revoked: false,
+            log_head: None,
+            tracker: None,
+            created_at: 1,
+        })
+        .unwrap();
+    let list = session.execute(Caller::User, "app.connections", Value::Null).await.unwrap();
+    let list = list.as_array().unwrap();
+    assert!(list.iter().any(|c| c["kind"] == "sync" && c["target"] == "https://sync.example.org" && c["active"] == true));
+    assert!(list.iter().any(|c| c["kind"] == "update_check" && c["target"] == "none"));
+    assert!(list.iter().any(|c| c["kind"] == "agent_port" && c["active"] == false), "off until the user turns it on");
+}
+
+/// A host of a share received to read only, deleted by its owner, comes back from the trash on
+/// this device only: the share would not take it back.
+#[tokio::test]
+async fn a_host_of_a_received_share_comes_back_local() {
+    use sshcraft_store::store::{ShareKind, ShareRole, ShareRow};
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let server = sshcraft_model::model::ServerId::new();
+    let area = uuid::Uuid::new_v4();
+    {
+        let store = session.store();
+        store
+            .add_server(&sshcraft_store::store::ServerRow {
+                id: server,
+                name: "home".into(),
+                origin: "https://sync.example.org".into(),
+                account: [7; 32],
+                device_id: uuid::Uuid::new_v4(),
+                sealed_device: Vec::new(),
+                sync_enabled: true,
+                sync_keys: false,
+                revoked: false,
+                log_head: None,
+                tracker: None,
+                created_at: 1,
+            })
+            .unwrap();
+        store
+            .put_share(
+                server,
+                &ShareRow {
+                    area_id: area,
+                    kind: ShareKind::Selection,
+                    group_id: None,
+                    with_keys: false,
+                    owned: false,
+                    role: Some(ShareRole::Read),
+                    owner: [9; 32],
+                },
+            )
+            .unwrap();
+    }
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "theirs".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("t.org".into()), ..Default::default() },
+        location: Some(server),
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    {
+        let store = session.store();
+        store.upsert_host(&host).unwrap();
+        store.set_item_area(server, sshcraft_store::store::ItemKind::Host, &host.id.0.to_string(), area).unwrap();
+        // What the owner's delete does here.
+        store.trash_host(host.id).unwrap();
+        store.delete_host(host.id).unwrap();
+    }
+    session.execute(Caller::User, "trash.restore", json!({ "kind": "host", "id": host.id.0.to_string() })).await.unwrap();
+    let back = session.store().list_hosts().unwrap();
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].location, None, "local, not back into the share");
+}

@@ -314,7 +314,8 @@ fn schema_11_migrates_known_hosts_to_host_keys() {
     store
         .conn
         .execute_batch(
-            "DROP TABLE approved_commands; DROP TABLE ssh_config_links; DROP TABLE host_keys;
+            "DROP TABLE trash; DROP TABLE versions;
+             DROP TABLE approved_commands; DROP TABLE ssh_config_links; DROP TABLE host_keys;
              CREATE TABLE known_hosts (address TEXT NOT NULL, port INTEGER NOT NULL,
                  fingerprint TEXT NOT NULL, PRIMARY KEY (address, port));
              INSERT INTO known_hosts VALUES ('a.org', 22, 'SHA256:a'), ('b.org', 2222, 'SHA256:b');
@@ -324,7 +325,7 @@ fn schema_11_migrates_known_hosts_to_host_keys() {
     drop(store);
     let store = Store::open(&path).unwrap();
     let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
     let keys = store.all_host_keys().unwrap();
     assert_eq!(keys.len(), 2);
     assert_eq!((keys[0].address.as_str(), keys[0].port, keys[0].fingerprint.as_str()), ("a.org", 22, "SHA256:a"));

@@ -140,20 +140,42 @@ struct SaveParams {
     /// command changed there); anything else never approves one.
     #[serde(default)]
     approve_command: bool,
+    /// The user entered the password reference in this save; it may then be used for the
+    /// host's address without asking.
+    #[serde(default)]
+    approve_secret_ref: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command } = parse("host.save", params)?;
+        let SaveParams { mut host, approve_command, approve_secret_ref } = parse("host.save", params)?;
         let id = host.id.0.to_string();
-        let orphans = {
+        let (orphans, before) = {
             let store = ctx.session.store();
             let stored = store.list_hosts()?.into_iter().find(|h| h.id == host.id);
-            keep_passwords(stored.as_ref().map(|h| &h.settings), &mut host.settings)
+            (keep_passwords(stored.as_ref().map(|h| &h.settings), &mut host.settings), stored)
         };
-        let mut servers = checked(&ctx.session, Change::SaveHost(&host), ItemKind::Host, id, |s| Ok(s.upsert_host(&host)?))?;
+        let mut servers = checked(&ctx.session, Change::SaveHost(&host), ItemKind::Host, id.clone(), |s| Ok(s.upsert_host(&host)?))?;
+        // The stand before stays as an earlier version.
+        if let Some(before) = before.filter(|b| *b != host) {
+            let name = before.name.clone();
+            let payload = sshcraft_store::trash::TrashPayload::Host { host: Box::new(before), passwords: Vec::new() };
+            ctx.session.store().put_version(sshcraft_store::trash::TrashKind::Host, &id, &name, &payload, crate::now_ms() / 1000)?;
+        }
         if approve_command {
             approve_commands(&ctx, [&host.settings])?;
+        }
+        if approve_secret_ref
+            && ctx.caller.is_user()
+            && let Some(reference) = &host.settings.password_ref
+        {
+            let store = ctx.session.store();
+            let groups = store.list_groups()?;
+            let chain = host.group_id.map(|g| group_chain(&groups, g)).unwrap_or_default();
+            let refs: Vec<&Group> = chain.iter().collect();
+            if let Ok((address, port)) = effective_endpoint(&host, &refs) {
+                store.approve_command(&crate::secrets::approval_digest(reference, &address, port))?;
+            }
         }
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
         // Rules removed from the host stop forwarding.
@@ -189,6 +211,8 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let IdParams { id } = parse("host.delete", params)?;
         share_rights(&ctx.session.store(), Change::DeleteHost(id))?;
+        // Into the trash first: a delete can be taken back.
+        ctx.session.store().trash_host(id)?;
         let passwords = ctx.session.store().list_hosts()?.into_iter().find(|h| h.id == id).map(|h| h.settings.password_ids()).unwrap_or_default();
         let mut servers = changed(&ctx.session, ItemKind::Host, id.0.to_string(), |s| Ok(s.delete_host(id)?))?;
         // The host's commands go with it.

@@ -402,6 +402,12 @@ impl Vault {
 
 /// Parses an OpenSSH private key, decrypting it with `passphrase` if it is protected.
 /// Accepts Windows line endings and surrounding whitespace.
+/// Whether an OpenSSH private key text reads (encrypted ones too), without storing anything.
+pub fn check_openssh(text: &str) -> Result<(), VaultError> {
+    let normalized = Zeroizing::new(text.replace("\r\n", "\n"));
+    PrivateKey::from_openssh(normalized.trim()).map(|_| ()).map_err(|e| VaultError::InvalidKey(e.to_string()))
+}
+
 pub fn parse_private_key(openssh_private_key: &str, passphrase: Option<&str>) -> Result<PrivateKey, VaultError> {
     let normalized = Zeroizing::new(openssh_private_key.replace("\r\n", "\n"));
     // PEM (PKCS#1, PKCS#8) and PuTTY keys go through russh, which reads both.

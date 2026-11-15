@@ -62,6 +62,15 @@ pub struct UiState {
     pub next_pane: u64,
     pub hosts: crate::pages::hosts::HostsView,
     pub settings: crate::pages::settings::SettingsView,
+    /// The backup passphrase dialog.
+    #[serde(skip)]
+    pub backup: Option<crate::pages::backup::BackupForm>,
+    /// The passphrase between the dialog and the chosen file.
+    #[serde(skip)]
+    pub backup_passphrase: Option<crate::pages::backup::HeldPassphrase>,
+    /// The earlier versions of an item, while that dialog is open.
+    #[serde(skip)]
+    pub versions: Option<crate::pages::trash::VersionsDialog>,
     #[serde(skip)]
     pub palette: PaletteState,
     /// Quitting, and the question before it.

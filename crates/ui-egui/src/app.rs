@@ -17,6 +17,8 @@ pub struct SshcraftApp {
     pub data: Data,
     pub ui: UiState,
     pub toasts: Toasts,
+    /// The app lock after idle time.
+    pub lock: crate::lock::LockState,
     pub bindings: Bindings,
     /// File dialogs: asked in a frame, shown after it, answered on a later frame.
     pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
@@ -69,6 +71,7 @@ impl SshcraftApp {
             data,
             ui: UiState::default(),
             toasts: Toasts::default(),
+            lock: crate::lock::LockState::default(),
             bindings: Bindings::default(),
             dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
             terminals: std::collections::HashMap::new(),
@@ -130,8 +133,13 @@ impl SshcraftApp {
                 Ok(EngineEvent::DataChanged { .. }) => {
                     self.data.dirty |= Refresh::DATA;
                     self.data.host_keys = None;
+                    self.data.trash = None;
+                    self.data.connections = None;
                 }
-                Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
+                Ok(EngineEvent::SettingsChanged) => {
+                    self.data.dirty |= Refresh::SETTINGS;
+                    self.data.connections = None;
+                }
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
                 Ok(EngineEvent::AgentPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "agent")),
@@ -326,6 +334,7 @@ impl SshcraftApp {
             then(self, result);
         }
         crate::link::tick(self, ctx);
+        crate::lock::tick(self, ctx);
         crate::control::process(self, ctx);
         crate::quit::logic(self, ctx);
     }
@@ -345,6 +354,15 @@ impl SshcraftApp {
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
+        if self.lock.locked {
+            // Output keeps flowing into the terminals; only the lock screen is drawn, and the
+            // quit question (no toasts: they can name hosts and addresses).
+            crate::session_tab::pump_all(self, &ctx);
+            crate::lock::show(self, ui);
+            crate::quit::show(self, &ctx);
+            crate::window::resize_edges(self, &ctx);
+            return;
+        }
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {
             self.bindings = Bindings::from_settings(&self.data.settings.shortcuts);
             self.bindings_from = Some(self.data.settings.shortcuts.clone());
