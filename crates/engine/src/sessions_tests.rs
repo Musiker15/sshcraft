@@ -1860,7 +1860,11 @@ fn keys_no_longer_announced_are_removed_and_new_ones_proven_first() {
     let v = verifier_on(store.clone(), true);
     let keys = [presented("used"), presented("new")];
     assert_eq!(v.announced("h", 22, "SHA256:used", &keys), AnnounceAction::Prove(vec![presented("new")]));
-    v.apply("h", 22, "SHA256:used", &keys);
+    // Not proven: nothing is added (the old key still goes, the server no longer names it).
+    v.apply("h", 22, "SHA256:used", &keys, &[]);
+    assert!(!fingerprints(&store).contains(&"SHA256:new".to_string()));
+    store.lock().unwrap().set_known_host("h", 22, "SHA256:old").unwrap();
+    v.apply("h", 22, "SHA256:used", &keys, &[presented("new")]);
     let mut now = fingerprints(&store);
     now.sort();
     assert_eq!(now, vec!["SHA256:new", "SHA256:used"]);
@@ -1877,7 +1881,7 @@ fn update_host_keys_off_changes_nothing() {
     let v = verifier_on(store.clone(), false);
     let keys = [presented("used"), presented("new")];
     assert_eq!(v.announced("h", 22, "SHA256:used", &keys), AnnounceAction::Ignore);
-    v.apply("h", 22, "SHA256:used", &keys);
+    v.apply("h", 22, "SHA256:used", &keys, &[presented("new")]);
     assert_eq!(fingerprints(&store).len(), 2);
     assert!(!fingerprints(&store).contains(&"SHA256:new".to_string()));
 }

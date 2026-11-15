@@ -36,7 +36,10 @@ pub(crate) struct Probe {
 
 impl Probe {
     pub(crate) fn now() -> Self {
-        let mut addresses: Vec<IpAddr> = sshcraft_platform::interface_addresses().into_iter().filter(|a| !a.is_loopback()).collect();
+        // Loopback and IPv6 link-local addresses come and go without the network changing.
+        let link_local = |a: &IpAddr| matches!(a, IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80);
+        let mut addresses: Vec<IpAddr> =
+            sshcraft_platform::interface_addresses().into_iter().filter(|a| !a.is_loopback() && !link_local(a)).collect();
         addresses.sort_unstable();
         addresses.dedup();
         Self { wall_ms: crate::now_ms(), mono: Instant::now(), addresses }
@@ -52,24 +55,43 @@ pub(crate) fn detect(prev: &Probe, now: &Probe) -> Option<WakeEvent> {
     if mono.max(wall) > TICK + SLEPT {
         return Some(WakeEvent::Resumed);
     }
-    (now.addresses != prev.addresses).then_some(WakeEvent::NetworkChanged)
+    // No addresses at all is no network (or a failed read): nothing to reconnect to yet.
+    (!now.addresses.is_empty() && now.addresses != prev.addresses).then_some(WakeEvent::NetworkChanged)
 }
 
-/// Reads the clocks and addresses every [`TICK`] and sends what it notices, for as long as the
-/// runtime runs.
-pub(crate) fn spawn(runtime: &tokio::runtime::Handle, wake: tokio::sync::broadcast::Sender<WakeEvent>) {
+/// At most one "network changed" per this time: interfaces that flap (VPNs, containers,
+/// temporary IPv6 addresses) must not use up the reconnect attempts.
+const NETWORK_QUIET: Duration = Duration::from_secs(60);
+
+/// Reads the clocks and addresses every [`TICK`] and sends what it notices, until the engine is
+/// gone.
+pub(crate) fn spawn(runtime: &tokio::runtime::Handle, context: std::sync::Weak<crate::sessions::Context>) {
     runtime.spawn(async move {
         let mut prev = tokio::task::spawn_blocking(Probe::now).await.ok();
+        let mut last_network: Option<Instant> = None;
         loop {
             tokio::time::sleep(TICK).await;
             let Ok(now) = tokio::task::spawn_blocking(Probe::now).await else {
                 continue;
             };
-            if let Some(prev) = &prev
-                && let Some(event) = detect(prev, &now)
+            let event = prev.as_ref().and_then(|p| detect(p, &now));
+            let quiet = last_network.is_some_and(|t| t.elapsed() < NETWORK_QUIET);
+            let event = match event {
+                Some(WakeEvent::NetworkChanged) if quiet => None,
+                Some(WakeEvent::NetworkChanged) => {
+                    last_network = Some(Instant::now());
+                    Some(WakeEvent::NetworkChanged)
+                }
+                other => other,
+            };
             {
-                // Without a session or forward listening, nobody needs to know.
-                let _ = wake.send(event);
+                let Some(context) = context.upgrade() else {
+                    return;
+                };
+                if let Some(event) = event {
+                    // Without a session or forward listening, nobody needs to know.
+                    let _ = context.wake.send(event);
+                }
             }
             prev = Some(now);
         }
@@ -103,6 +125,6 @@ mod tests {
     fn new_addresses_mean_network_changed() {
         let t = Instant::now();
         assert_eq!(detect(&probe(0, t, &["10.0.0.2"]), &probe(5_000, t + TICK, &["192.168.1.7"])), Some(WakeEvent::NetworkChanged));
-        assert_eq!(detect(&probe(0, t, &["10.0.0.2"]), &probe(5_000, t + TICK, &[])), Some(WakeEvent::NetworkChanged));
+        assert_eq!(detect(&probe(0, t, &["10.0.0.2"]), &probe(5_000, t + TICK, &[])), None, "no addresses is no network to move to");
     }
 }

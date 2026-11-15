@@ -76,12 +76,12 @@ pub(crate) async fn take(prover: &dyn KeyProver, verifier: &dyn HostKeyVerifier,
     let presented: Vec<PresentedKey> = keys.iter().map(|k| PresentedKey::of(k.key_data())).collect();
     match verifier.announced(&about.address, about.port, &used, &presented) {
         AnnounceAction::Ignore => {}
-        AnnounceAction::Apply => verifier.apply(&about.address, about.port, &used, &presented),
+        AnnounceAction::Apply => verifier.apply(&about.address, about.port, &used, &presented, &[]),
         AnnounceAction::Prove(new) => {
             let to_prove: Vec<PublicKey> =
                 keys.iter().filter(|k| new.iter().any(|n| n.fingerprint == k.key_data().fingerprint(HashAlg::Sha256).to_string())).cloned().collect();
             if to_prove.len() == new.len() && prover.prove(to_prove).await {
-                verifier.apply(&about.address, about.port, &used, &presented);
+                verifier.apply(&about.address, about.port, &used, &presented, &new);
             }
         }
     }
@@ -137,7 +137,7 @@ mod tests {
         fn announced(&self, _: &str, _: u16, used: &str, keys: &[PresentedKey]) -> AnnounceAction {
             AnnounceAction::Prove(keys.iter().filter(|k| k.fingerprint != used).cloned().collect())
         }
-        fn apply(&self, _: &str, _: u16, _: &str, keys: &[PresentedKey]) {
+        fn apply(&self, _: &str, _: u16, _: &str, keys: &[PresentedKey], _proven: &[PresentedKey]) {
             self.applied.lock().unwrap().push(keys.iter().map(|k| k.fingerprint.clone()).collect());
         }
     }

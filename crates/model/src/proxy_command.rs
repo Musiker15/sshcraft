@@ -95,6 +95,8 @@ pub fn split(line: &str) -> Result<Vec<String>, ProxyCommandError> {
                     Some(_) => word.push('\\'),
                 }
             }
+            // As in `sh`: a word that starts with `#` begins a comment to the end of the line.
+            '#' if !in_word => break,
             c if shell_only(c) => return Err(ProxyCommandError::ShellSyntax(c)),
             c => {
                 in_word = true;

@@ -73,17 +73,24 @@ hop and the host's name; `%%` is a `%`.
 
 - **No shell.** The line is split once, by the quoting rules of `sh`, and the program starts
   with that argument list. A line that needs a shell (`|`, `;`, `&`, `<`, `>`, `$`, backticks,
-  parentheses) is refused. A replaced token stays one argument, whatever the host name holds.
-- **Only after it was allowed on this device.** A command you save in the window, or that comes
-  from your own `~/.ssh/config`, runs without asking. One that arrived through sync, a share or
-  an AI agent, or that changed, is shown in full first (*Allow on this device* or *Cancel*); the
-  answer is kept per command line. AI agents can neither set nor change a proxy command.
+  parentheses) is refused; a word starting with `#` begins a comment. A replaced token stays one
+  argument, whatever the host name holds, and the program itself is never made from a token. An
+  address, user or name that starts with `-` (it would be an option to the program) or holds a
+  control character is refused when the command uses it.
+- **Only after it was allowed on this device.** A command you enter in the host or group form, or
+  that comes from your own `~/.ssh/config`, runs without asking. One that arrived through sync, a
+  share, an import or an AI agent, or that changed, is shown in full first (*Allow on this
+  device* or *Cancel*); the answer is kept per command line. Saving such a host for another
+  reason (renaming, a forwarding rule, moving it) does not allow it. AI agents can neither set
+  nor change a proxy command, nor create or move a host under one.
 - What the program writes to standard error (up to 4 KiB) is shown when the connection fails.
 
 ## Reconnecting
 
 A terminal whose connection drops tries again after 1, 2, 4, 8, 16 and 32 seconds, then every
-minute, up to *Settings › Terminal › Reconnect* times (10 by default, 0 switches it off). Port
+minute, up to *Settings › Terminal › Reconnect* times (10 by default, 0 switches it off).
+A network change is acted on at most once a minute, so flapping interfaces do not use up the
+attempts. Port
 forwarding tries for as long as the rule is on. SSHCraft checks the clock and the network every
 five seconds: after sleep or when the network changed (another Wi-Fi, a VPN, a cable), every
 connection is pinged at once and given up after five seconds without an answer, instead of
@@ -157,4 +164,11 @@ until the entry changes in the file, and a host that leaves the file stays in SS
 its link. *Write to ~/.ssh/config* in a host's menu writes it back: into its own `Host` block
 where it came from (only the lines SSHCraft manages change; comments, `IdentityFile` and every
 other line stay), or as a new block before the first `Host` line of `~/.ssh/config`. The file is
-replaced in one step and the old one is kept as `config.sshcraft-bak`. AI agents can do neither.
+replaced in one step (a symbolic link stays a link) and a copy of the old one goes to
+`~/.ssh/.sshcraft-backup/`, one per write-back, where no `Include` pattern reads it. A line
+SSHCraft has no value for (a `ProxyCommand` that needs a shell, a `ProxyJump` to a host it does
+not know) stays as it was; `ForwardAgent no` and a `Port` set in SSHCraft are written out. A
+proxy command that is not allowed on this device is not written. When the file is missing or
+empty for a moment (an editor saving), the links stay; a host that comes back into the file
+takes its old place instead of a second one. At most 4 MiB, 10 000 blocks and 2 000 hosts are
+read. AI agents can do neither.

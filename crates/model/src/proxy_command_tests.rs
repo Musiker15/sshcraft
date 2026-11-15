@@ -10,6 +10,8 @@ fn quotes_are_split_like_ssh() {
     assert_eq!(split(r#"  "C:\Program Files\nc.exe"  'a b'  c\ d "x\"y" "#).unwrap(), s(&[r"C:\Program Files\nc.exe", "a b", "c d", "x\"y"]));
     assert_eq!(split("exec nc %h %p").unwrap(), s(&["nc", "%h", "%p"]), "a leading exec is dropped");
     assert_eq!(split("''").unwrap(), s(&[""]));
+    assert_eq!(split("nc %h %p # via the gateway").unwrap(), s(&["nc", "%h", "%p"]), "a comment ends the line");
+    assert_eq!(split("nc a#b").unwrap(), s(&["nc", "a#b"]), "inside a word # is a character");
 }
 
 #[test]

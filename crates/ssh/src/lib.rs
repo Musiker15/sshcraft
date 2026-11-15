@@ -190,8 +190,9 @@ pub trait HostKeyVerifier: Send + Sync {
         hostkeys::AnnounceAction::Ignore
     }
 
-    /// Applies an announcement; new keys in it were proven by the server.
-    fn apply(&self, _address: &str, _port: u16, _used: &str, _keys: &[hostkeys::PresentedKey]) {}
+    /// Applies an announcement: `proven` are the new keys the server proved it holds; only
+    /// they may be added.
+    fn apply(&self, _address: &str, _port: u16, _used: &str, _keys: &[hostkeys::PresentedKey], _proven: &[hostkeys::PresentedKey]) {}
 
     /// Whether the host key of this server was trusted only during this connection (a first
     /// contact). A stored password never goes to such a server: the address may have been
@@ -310,7 +311,9 @@ impl client::Handler for ClientHandler {
         keys: Vec<russh::keys::PublicKey>,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        if let Some(announce) = &self.announce {
+        // One announcement per connection, as in OpenSSH: a server sending more gets nothing
+        // queued, proved or written for them.
+        if let Some(announce) = self.announce.take() {
             let _ = announce.send(keys);
         }
         Ok(())

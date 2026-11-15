@@ -8,7 +8,7 @@ of the rebuild, which left the tree with R7 and are in the history at
 
 | Date | Decision |
 |---|---|
-| 2026-11-15 | A proxy command is an argument list split by `sh` rules, never a shell; a line that needs one is refused. It runs only after it was allowed on this device, by its exact command line: saving it in the window or importing the own `~/.ssh/config` allows it, sync, shares and agents never do. Agents cannot set one. |
+| 2026-11-15 | A proxy command is an argument list split by `sh` rules, never a shell; a line that needs one is refused. It runs only after it was allowed on this device, by its exact command line: entering it in a form or importing the own `~/.ssh/config` allows it; sync, shares, imports and agents never do, and saving a host for another reason does not. Host values that start with `-` never reach it. Agents cannot set one or aim one. |
 | 2026-11-15 | Reconnect waits 1, 2, 4 … 32 seconds, then a minute; terminals up to a setting (10), forwards without a limit. Sleep and network changes are found by reading the clocks and the interface addresses every five seconds, not by system notifications. |
 | 2026-11-15 | Schema 12: several host keys per server with the key itself; `UpdateHostKeys` keeps a new key only after the server proved it, and only from the target, not from jump hosts. A `known_hosts` import never adds a key to a server SSHCraft knows. |
 | 2026-11-15 | `~/.ssh/config` is kept in step only when the user turns it on; a host that leaves the file stays in SSHCraft. Writing back happens only on request, edits only the managed lines of the host's own block and keeps a backup. |

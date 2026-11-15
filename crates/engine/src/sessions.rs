@@ -1108,11 +1108,13 @@ pub(crate) async fn connect_session(
             sshcraft_model::proxy_command::check_tokens(argv, &tokens)
                 .map_err(|e| end_error(ErrorCode::ProxyCommandNotAllowed, Some(e.to_string())))?;
             let mut argv = sshcraft_model::proxy_command::expand(argv, &tokens);
-            if let Some(program) = argv.first_mut()
-                && let Some(rest) = program.strip_prefix("~/")
-                && let Some(home) = sshcraft_platform::home_dir()
-            {
-                *program = home.join(rest).to_string_lossy().into_owned();
+            // `~/` at the start of an argument is the home folder, as `sh` reads it.
+            if let Some(home) = sshcraft_platform::home_dir() {
+                for arg in &mut argv {
+                    if let Some(rest) = arg.strip_prefix("~/") {
+                        *arg = home.join(rest).to_string_lossy().into_owned();
+                    }
+                }
             }
             Some(ProxyConfig::Command { argv })
         }
@@ -1366,7 +1368,14 @@ impl HostKeyVerifier for StoreVerifier {
         }
     }
 
-    fn apply(&self, address: &str, port: u16, used: &str, keys: &[sshcraft_ssh::hostkeys::PresentedKey]) {
+    fn apply(
+        &self,
+        address: &str,
+        port: u16,
+        used: &str,
+        keys: &[sshcraft_ssh::hostkeys::PresentedKey],
+        proven: &[sshcraft_ssh::hostkeys::PresentedKey],
+    ) {
         if !self.update_keys {
             return;
         }
@@ -1379,7 +1388,9 @@ impl HostKeyVerifier for StoreVerifier {
         let Some(plan) = sshcraft_model::policy::plan_key_update(&known, &announced, used) else {
             return;
         };
-        for key in keys.iter().filter(|k| plan.add.contains(&k.fingerprint)) {
+        // The plan is made again (the user may have changed the keys meanwhile), but only keys
+        // the server proved are added.
+        for key in proven.iter().filter(|k| plan.add.contains(&k.fingerprint)) {
             let _ = store.add_host_key(&stored_key(address, port, key));
         }
         for fingerprint in &plan.remove {
