@@ -27,6 +27,7 @@ pub mod terminal;
 pub mod testing;
 #[cfg(test)]
 mod tests;
+pub mod waker;
 pub mod workspaces;
 
 use std::collections::HashMap;
@@ -216,6 +217,7 @@ impl Session {
             runtime: config.runtime.clone(),
             delay_scale: 1.0,
         });
+        waker::spawn(&config.runtime, sessions.context().wake.clone());
         let forwards = Arc::new(forwards::ForwardManager::new(sessions.context(), Arc::new(forwards::BusSink(events.clone()))));
         // A host or rule that sync removed (or a share that ended) stops forwarding.
         let observer = sync::BusObserver { events: events.clone(), forwards: forwards.clone() };

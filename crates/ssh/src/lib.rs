@@ -397,6 +397,24 @@ async fn run_on(handle: &client::Handle<ClientHandler>, command: &str, limit: us
     Ok(result)
 }
 
+/// Checks whether a connection still answers, after the computer slept or its network changed.
+#[derive(Clone)]
+pub struct Prober {
+    handle: Arc<client::Handle<ClientHandler>>,
+}
+
+impl Prober {
+    /// Whether the server answers a ping within `timeout`.
+    pub async fn alive(&self, timeout: Duration) -> bool {
+        matches!(tokio::time::timeout(timeout, self.handle.send_ping()).await, Ok(Ok(()))) && !self.handle.is_closed()
+    }
+
+    /// Gives the connection up (it did not answer).
+    pub async fn close(&self) {
+        let _ = self.handle.disconnect(russh::Disconnect::ByApplication, "no answer", "").await;
+    }
+}
+
 /// An authenticated SSH connection. Shells opened from it keep it alive.
 pub struct Session {
     handle: Arc<client::Handle<ClientHandler>>,
@@ -541,6 +559,11 @@ impl Session {
     /// `target_host:target_port` as seen from here (`ssh -R`).
     pub async fn forward_remote(&self, bind_address: &str, bind_port: u16, target_host: &str, target_port: u16) -> Result<Tunnel, SshError> {
         tunnel::remote(self.handle.clone(), self.jumps.clone(), self.remotes.clone(), bind_address, bind_port, target_host, target_port).await
+    }
+
+    /// Checks the connection to the target.
+    pub fn prober(&self) -> Prober {
+        Prober { handle: self.handle.clone() }
     }
 
     /// Completes once the connection to the target or to a jump host is gone.

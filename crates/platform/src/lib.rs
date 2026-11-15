@@ -46,6 +46,11 @@ const QUALIFIER: &str = "de";
 const ORGANIZATION: &str = "musiker15";
 const APPLICATION: &str = "SSHCraft";
 
+/// The addresses of this computer's network interfaces; empty when they cannot be read.
+pub fn interface_addresses() -> Vec<std::net::IpAddr> {
+    if_addrs::get_if_addrs().map(|list| list.into_iter().map(|i| i.ip()).collect()).unwrap_or_default()
+}
+
 /// The user's home folder, if the operating system reports one.
 pub fn home_dir() -> Option<PathBuf> {
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())

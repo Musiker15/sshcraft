@@ -189,7 +189,13 @@ pub struct Terminal {
     /// The shell a local terminal starts; none means the system default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_shell: Option<ShellCommand>,
+    /// How often a terminal tries to reconnect after its connection dropped, within
+    /// [`RECONNECT_ATTEMPTS`]; 0 turns reconnecting off. Port forwarding always tries again.
+    pub reconnect_attempts: u32,
 }
+
+/// The allowed range of `terminal.reconnect_attempts`.
+pub const RECONNECT_ATTEMPTS: std::ops::RangeInclusive<u32> = 0..=100;
 
 impl Default for Terminal {
     fn default() -> Self {
@@ -201,6 +207,7 @@ impl Default for Terminal {
             history: true,
             autocomplete: true,
             local_shell: None,
+            reconnect_attempts: 10,
         }
     }
 }
@@ -275,6 +282,7 @@ impl EngineSettings {
         self.terminal.clipboard_hosts.retain(|h| seen.insert(*h));
         self.terminal.clipboard_hosts.truncate(MAX_CLIPBOARD_HOSTS);
         self.terminal.scrollback = self.terminal.scrollback.clamp(*SCROLLBACK.start(), *SCROLLBACK.end());
+        self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

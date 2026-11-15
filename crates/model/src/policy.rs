@@ -39,20 +39,18 @@ pub enum ShellEvent {
     Ended(Disconnect),
 }
 
-/// Delay before reconnect attempt `attempt` (1-based), or `None` to give up.
-/// Only a lost connection is retried.
-pub fn next_reconnect_delay(reason: &Disconnect, attempt: u32) -> Option<Duration> {
-    if !matches!(reason, Disconnect::Lost(_)) {
+/// The longest wait between two reconnect attempts.
+pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(60);
+
+/// Delay before reconnect attempt `attempt` (1-based), or `None` to give up: 1, 2, 4, 8, 16,
+/// 32 seconds, then every minute, for at most `limit` attempts (`None`: without end, for port
+/// forwarding). Only a lost connection is retried.
+pub fn next_reconnect_delay(reason: &Disconnect, attempt: u32, limit: Option<u32>) -> Option<Duration> {
+    if !matches!(reason, Disconnect::Lost(_)) || attempt == 0 || limit.is_some_and(|limit| attempt > limit) {
         return None;
     }
-    let secs = match attempt {
-        1 => 1,
-        2 => 2,
-        3 => 5,
-        4 | 5 => 10,
-        _ => return None,
-    };
-    Some(Duration::from_secs(secs))
+    let secs = 1u64.checked_shl(attempt - 1).unwrap_or(u64::MAX);
+    Some(Duration::from_secs(secs).min(MAX_RECONNECT_DELAY))
 }
 
 #[cfg(test)]
@@ -75,25 +73,43 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_delays_for_lost_connection() {
+    fn backoff_doubles_up_to_a_minute() {
         let lost = Disconnect::Lost("reset".into());
-        let delays: Vec<_> = (1..=6).map(|a| next_reconnect_delay(&lost, a)).collect();
+        let delays: Vec<_> = (1..=9).map(|a| next_reconnect_delay(&lost, a, None)).collect();
         let secs = |s| Some(Duration::from_secs(s));
-        assert_eq!(delays, vec![secs(1), secs(2), secs(5), secs(10), secs(10), None]);
+        assert_eq!(delays, vec![secs(1), secs(2), secs(4), secs(8), secs(16), secs(32), secs(60), secs(60), secs(60)]);
+        assert_eq!(next_reconnect_delay(&lost, u32::MAX, None), secs(60), "no overflow");
+    }
+
+    #[test]
+    fn terminals_stop_at_the_limit() {
+        let lost = Disconnect::Lost("reset".into());
+        assert_eq!(next_reconnect_delay(&lost, 10, Some(10)), Some(Duration::from_secs(60)));
+        assert_eq!(next_reconnect_delay(&lost, 11, Some(10)), None);
+    }
+
+    #[test]
+    fn zero_attempts_means_no_reconnect() {
+        assert_eq!(next_reconnect_delay(&Disconnect::Lost("reset".into()), 1, Some(0)), None);
+    }
+
+    #[test]
+    fn forwards_retry_without_limit() {
+        assert!(next_reconnect_delay(&Disconnect::Lost("reset".into()), 10_000, None).is_some());
     }
 
     #[test]
     fn no_reconnect_after_exit() {
-        assert_eq!(next_reconnect_delay(&Disconnect::Exited(Some(0)), 1), None);
+        assert_eq!(next_reconnect_delay(&Disconnect::Exited(Some(0)), 1, None), None);
     }
 
     #[test]
     fn no_reconnect_after_host_key_rejected() {
-        assert_eq!(next_reconnect_delay(&Disconnect::HostKeyRejected, 1), None);
+        assert_eq!(next_reconnect_delay(&Disconnect::HostKeyRejected, 1, None), None);
     }
 
     #[test]
     fn no_reconnect_after_auth_failed() {
-        assert_eq!(next_reconnect_delay(&Disconnect::AuthFailed, 1), None);
+        assert_eq!(next_reconnect_delay(&Disconnect::AuthFailed, 1, None), None);
     }
 }

@@ -259,6 +259,9 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Ligatures" => "Ligaturen",
         "Join characters where the font has ligatures (->, !=)" => "Zeichen verbinden, wo die Schrift Ligaturen hat (->, !=)",
         "Scrollback" => "Zeilenspeicher",
+        "attempts after a dropped connection, waiting up to a minute between them; 0 turns it off" => {
+            "Versuche nach einem Verbindungsabbruch, mit bis zu einer Minute Pause dazwischen; 0 schaltet es aus"
+        }
         "lines, for new tabs" => "Zeilen, für neue Tabs",
         "Snippets" => "Snippets",
         "Port forwarding" => "Portweiterleitung",

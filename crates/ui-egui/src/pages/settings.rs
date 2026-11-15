@@ -204,6 +204,15 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             ui.label(egui::RichText::new(tr("lines, for new tabs")).color(tokens.text_dim));
         });
         ui.end_row();
+        ui.label(tr("Reconnect"));
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut t.reconnect_attempts).range(sshcraft_engine::settings::RECONNECT_ATTEMPTS));
+            ui.label(
+                egui::RichText::new(tr("attempts after a dropped connection, waiting up to a minute between them; 0 turns it off"))
+                    .color(tokens.text_dim),
+            );
+        });
+        ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));
         ui.end_row();

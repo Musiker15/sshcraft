@@ -1651,3 +1651,153 @@ async fn a_changed_command_asks_again() {
     assert_eq!(asked, 1);
     assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
 }
+
+// ---------- reconnect after sleep and network changes
+
+impl Fixture {
+    fn manager_scaled(&self, delay_scale: f32) -> SessionManager {
+        test_manager(
+            self.store.clone(),
+            Some(self.vault.clone()),
+            self.prompter.clone(),
+            Arc::new(sshcraft_ssh::NoPrompter),
+            Arc::new(TestAgents { keys: vec![self.key.clone()], reachable: true }),
+            Arc::new(FakePresence::new(&[Presence::Verified])),
+            delay_scale,
+        )
+    }
+
+    fn set_port(&self, port: u16) {
+        let store = self.store.lock().unwrap();
+        let mut h = store.list_hosts().unwrap().into_iter().find(|h| h.id == self.host_id).unwrap();
+        h.settings.port = Some(port);
+        store.upsert_host(&h).unwrap();
+    }
+}
+
+/// A TCP relay in front of the test server whose open connections can be frozen: they stay
+/// open but nothing passes any more, like a connection after sleep or on a network that is gone.
+struct FreezingRelay {
+    port: u16,
+    /// Connections numbered below this are frozen.
+    frozen_below: Arc<std::sync::atomic::AtomicU64>,
+    opened: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl FreezingRelay {
+    async fn start(target: u16) -> Self {
+        use std::sync::atomic::AtomicU64;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let frozen_below = Arc::new(AtomicU64::new(0));
+        let opened = Arc::new(AtomicU64::new(0));
+        let (frozen, count) = (frozen_below.clone(), opened.clone());
+        tokio::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                let number = count.fetch_add(1, Ordering::SeqCst);
+                let server = tokio::net::TcpStream::connect(("127.0.0.1", target)).await.unwrap();
+                let (cr, cw) = client.into_split();
+                let (sr, sw) = server.into_split();
+                for (mut from, mut to) in [
+                    (Box::new(cr) as Box<dyn tokio::io::AsyncRead + Send + Unpin>, Box::new(sw) as Box<dyn tokio::io::AsyncWrite + Send + Unpin>),
+                    (Box::new(sr), Box::new(cw)),
+                ] {
+                    let frozen = frozen.clone();
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                        let mut buf = [0u8; 16 * 1024];
+                        loop {
+                            let Ok(n) = from.read(&mut buf).await else { return };
+                            if n == 0 {
+                                return;
+                            }
+                            if number < frozen.load(Ordering::SeqCst) {
+                                // Swallow everything, keep the socket open.
+                                std::future::pending::<()>().await;
+                            }
+                            if to.write_all(&buf[..n]).await.is_err() {
+                                return;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        Self { port, frozen_below, opened }
+    }
+
+    fn freeze_open_connections(&self) {
+        self.frozen_below.store(self.opened.load(Ordering::SeqCst), Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn a_dead_connection_is_found_after_wake() {
+    let f = fixture(true).await;
+    let relay = FreezingRelay::start(f.server.port).await;
+    f.set_port(relay.port);
+    let manager = f.manager_scaled(0.01);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    relay.freeze_open_connections();
+    manager.wake(crate::waker::WakeEvent::Resumed);
+    // Found dead within the ping time (50 ms here), not after the 45 s of keep-alive, and
+    // connected again through a new connection.
+    tokio::time::timeout(Duration::from_secs(10), sink.wait_for(|s| connected_count(s) == 2)).await.expect("reconnected after the wake event");
+}
+
+#[tokio::test]
+async fn a_live_connection_stays_after_wake() {
+    let f = fixture(true).await;
+    let manager = f.manager_scaled(0.01);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    manager.wake(crate::waker::WakeEvent::NetworkChanged);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(connected_count(&sink.statuses()), 1);
+    assert!(!sink.statuses().iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. })));
+}
+
+#[tokio::test]
+async fn a_wake_event_retries_a_waiting_reconnect_at_once() {
+    let mut f = fixture(true).await;
+    // Unscaled: the first reconnect would wait a full second, the second two.
+    let manager = f.manager_scaled(100.0);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.server.restart(false).await;
+    sink.wait_for(|s| s.iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. }))).await;
+    manager.wake(crate::waker::WakeEvent::Resumed);
+    tokio::time::timeout(Duration::from_secs(10), sink.wait_for(|s| connected_count(s) == 2)).await.expect("retried at once");
+}
+
+#[tokio::test]
+async fn zero_reconnect_attempts_end_at_once() {
+    let mut f = fixture(true).await;
+    let manager = SessionManager::new(ManagerParts {
+        store: f.store.clone(),
+        vault: Some(f.vault.clone()),
+        prompter: f.prompter.clone(),
+        auth: Arc::new(sshcraft_ssh::NoPrompter),
+        agent: Arc::new(TestAgents { keys: vec![f.key.clone()], reachable: true }),
+        presence: Arc::new(FakePresence::new(&[Presence::Verified])),
+        security: None,
+        settings: Arc::new(|| {
+            let mut s = crate::settings::EngineSettings::default();
+            s.terminal.reconnect_attempts = 0;
+            s
+        }),
+        runtime: tokio::runtime::Handle::current(),
+        delay_scale: 0.01,
+    });
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.server.restart(false).await;
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended(&sink.statuses()), Some(EndReason::Lost));
+    assert!(!sink.statuses().iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. })));
+}

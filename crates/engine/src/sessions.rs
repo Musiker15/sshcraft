@@ -13,6 +13,8 @@ use sshcraft_fido::{Attachment, Authenticator, SkSigner};
 use sshcraft_model::keytypes::KeyKind;
 use sshcraft_model::model::{Directory, HostId, KeyId, KeyRef, PasswordId, Proxy, ProxyEndpoint, ResolveError, ResolvedHost, Route, resolve_route};
 use sshcraft_model::policy::{Disconnect, HostKeyStatus, check_host_key, next_reconnect_delay};
+
+use crate::waker::{PING_TIMEOUT, WakeEvent};
 use sshcraft_ssh::authorized_keys::{InstallOutcome, install_command, parse_outcome};
 use sshcraft_ssh::{
     Auth, AuthPromptLine, AuthPrompter, AuthRequest, Credential, Hop, HostKeyVerifier, ProxyConfig, ProxyTarget, RouteParams, SessionOptions,
@@ -250,6 +252,8 @@ pub(crate) struct Context {
     settings: Mutex<ReadSettings>,
     /// Where sessions run, also when `open` is called from a thread outside the runtime.
     runtime: tokio::runtime::Handle,
+    /// Tells sessions and forwards that the computer woke up or its network changed.
+    pub(crate) wake: tokio::sync::broadcast::Sender<WakeEvent>,
 }
 
 impl Context {
@@ -401,9 +405,16 @@ impl SessionManager {
                 log_finished: Mutex::new(None),
                 settings: Mutex::new(parts.settings),
                 runtime: parts.runtime,
+                wake: tokio::sync::broadcast::channel(16).0,
             }),
             sessions: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Checks every connection now and retries every waiting reconnect: the computer woke up or
+    /// its network changed.
+    pub fn wake(&self, event: WakeEvent) {
+        let _ = self.ctx.wake.send(event);
     }
 
     fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<SessionId, Live>> {
@@ -667,10 +678,11 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let mut attempt = 0u32;
     let mut ever_connected = false;
     let opened = OpenedKeys::default();
+    let mut wake = ctx.wake.subscribe();
     loop {
         sink.status(SessionStatus::Connecting);
         let reason = match connect_target(&ctx, &target, &shared.size, &opened).await {
-            Ok((writer, mut events, notice)) => {
+            Ok((writer, mut events, notice, prober)) => {
                 *shared.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(writer.clone());
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
                 // Output from before the drop may still wait in the stream unacknowledged: it keeps
@@ -684,7 +696,21 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                 let mut reason = Disconnect::Lost("connection closed".into());
                 loop {
                     shared.flow.wait_below_watermark().await;
-                    match events.recv().await {
+                    let event = tokio::select! {
+                        event = events.recv() => event,
+                        woke = wake.recv() => {
+                            if woke_up(&woke)
+                                && let Some(prober) = &prober
+                                && !prober.alive(PING_TIMEOUT.mul_f32(ctx.delay_scale)).await
+                            {
+                                prober.close().await;
+                                reason = Disconnect::Lost("no answer after the computer woke up or the network changed".into());
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+                    match event {
                         Some(ShellEvent::Data(bytes)) => {
                             shared.flow.add(bytes.len());
                             sink.data(bytes);
@@ -713,12 +739,12 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
         // A local shell that ended is not started again.
         let retry = match &target {
             SessionTarget::Local { .. } => None,
-            _ => next_reconnect_delay(&reason, attempt),
+            _ => next_reconnect_delay(&reason, attempt, Some(ctx.settings().terminal.reconnect_attempts)),
         };
         match retry {
             Some(delay) => {
                 sink.status(SessionStatus::Reconnecting { attempt, delay_secs: delay.as_secs() });
-                tokio::time::sleep(delay.mul_f32(ctx.delay_scale)).await;
+                wait_or_wake(delay.mul_f32(ctx.delay_scale), &mut wake).await;
             }
             None => {
                 let (reason, code, detail) = match reason {
@@ -993,7 +1019,28 @@ fn failure(e: SshError, verifier: &StoreVerifier) -> Failure {
     }
 }
 
-type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>);
+/// Whether a wake event arrived (a missed one counts too); a closed channel never wakes.
+pub(crate) fn woke_up(received: &Result<WakeEvent, tokio::sync::broadcast::error::RecvError>) -> bool {
+    !matches!(received, Err(tokio::sync::broadcast::error::RecvError::Closed))
+}
+
+/// Waits before the next reconnect attempt, or less when the computer woke up or the network
+/// changed: then the attempt is worth making now.
+pub(crate) async fn wait_or_wake(delay: std::time::Duration, wake: &mut tokio::sync::broadcast::Receiver<WakeEvent>) {
+    let sleep = tokio::time::sleep(delay);
+    tokio::pin!(sleep);
+    tokio::select! {
+        () = &mut sleep => {}
+        woke = wake.recv() => {
+            // Closed: nobody will wake us, so the delay is waited out.
+            if !woke_up(&woke) {
+                sleep.await;
+            }
+        }
+    }
+}
+
+type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>, Option<sshcraft_ssh::Prober>);
 
 async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
     match target {
@@ -1003,14 +1050,14 @@ async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32
             let term = ctx.settings().terminal.terminal_type;
             let (writer, events) = sshcraft_local::pty::spawn(shell, to_u16(cols), to_u16(rows), &term, cwd.as_deref().map(std::path::Path::new))
                 .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
-            Ok((Arc::new(writer), events, None))
+            Ok((Arc::new(writer), events, None, None))
         }
         SessionTarget::Serial { settings } => {
             settings.validate().map_err(|e| end_error(ErrorCode::SerialFailed, Some(e.to_string())))?;
             // A port that is gone may come back (an adapter plugged in again): retried like a
             // lost connection once it was open.
             let (writer, events) = sshcraft_local::serial::open(settings).map_err(|e| Failure::Lost(ErrorCode::SerialFailed, e.to_string()))?;
-            Ok((Arc::new(writer), events, None))
+            Ok((Arc::new(writer), events, None, None))
         }
     }
 }
@@ -1021,11 +1068,12 @@ async fn connect_once(ctx: &Context, host_id: HostId, size: &Mutex<(u32, u32)>, 
     // Read on every connect, so a reconnect uses the type set now.
     let term = ctx.settings().terminal.terminal_type;
     let shell = session.open_shell(cols, rows, &term).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    let prober = Some(session.prober());
     if needs_os(&ctx.store, host_id) {
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
     }
     let (writer, events) = shell.split();
-    Ok((Arc::new(writer), events, notice))
+    Ok((Arc::new(writer), events, notice, prober))
 }
 
 /// Connects to a host along its route and signs in on every hop; no shell yet. The notice is
