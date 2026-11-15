@@ -641,3 +641,69 @@ async fn the_connection_list_names_every_sync_server_and_no_update_check() {
     assert!(list.iter().any(|c| c["kind"] == "update_check" && c["target"] == "none"));
     assert!(list.iter().any(|c| c["kind"] == "agent_port" && c["active"] == false), "off until the user turns it on");
 }
+
+/// A host of a share received to read only, deleted by its owner, comes back from the trash on
+/// this device only: the share would not take it back.
+#[tokio::test]
+async fn a_host_of_a_received_share_comes_back_local() {
+    use sshcraft_store::store::{ShareKind, ShareRole, ShareRow};
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let server = sshcraft_model::model::ServerId::new();
+    let area = uuid::Uuid::new_v4();
+    {
+        let store = session.store();
+        store
+            .add_server(&sshcraft_store::store::ServerRow {
+                id: server,
+                name: "home".into(),
+                origin: "https://sync.example.org".into(),
+                account: [7; 32],
+                device_id: uuid::Uuid::new_v4(),
+                sealed_device: Vec::new(),
+                sync_enabled: true,
+                sync_keys: false,
+                revoked: false,
+                log_head: None,
+                tracker: None,
+                created_at: 1,
+            })
+            .unwrap();
+        store
+            .put_share(
+                server,
+                &ShareRow {
+                    area_id: area,
+                    kind: ShareKind::Selection,
+                    group_id: None,
+                    with_keys: false,
+                    owned: false,
+                    role: Some(ShareRole::Read),
+                    owner: [9; 32],
+                },
+            )
+            .unwrap();
+    }
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "theirs".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("t.org".into()), ..Default::default() },
+        location: Some(server),
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    {
+        let store = session.store();
+        store.upsert_host(&host).unwrap();
+        store.set_item_area(server, sshcraft_store::store::ItemKind::Host, &host.id.0.to_string(), area).unwrap();
+        // What the owner's delete does here.
+        store.trash_host(host.id).unwrap();
+        store.delete_host(host.id).unwrap();
+    }
+    session.execute(Caller::User, "trash.restore", json!({ "kind": "host", "id": host.id.0.to_string() })).await.unwrap();
+    let back = session.store().list_hosts().unwrap();
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].location, None, "local, not back into the share");
+}

@@ -137,6 +137,26 @@ fn now_secs() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+impl TrashPayload {
+    /// Everything in it stays on this device only (it comes back where its server or share
+    /// would not take it).
+    pub fn make_local(&mut self) {
+        match self {
+            Self::Host { host, passwords } => {
+                host.location = None;
+                passwords.iter_mut().for_each(|p| p.location = None);
+            }
+            Self::Group { groups, hosts, passwords } => {
+                groups.iter_mut().for_each(|g| g.location = None);
+                hosts.iter_mut().for_each(|h| h.location = None);
+                passwords.iter_mut().for_each(|p| p.location = None);
+            }
+            Self::Key { record } => record.location = None,
+            Self::Snippet { .. } => {}
+        }
+    }
+}
+
 impl Store {
     /// Keeps a host in the trash before it is deleted; nothing when it is not there.
     pub fn trash_host(&self, id: HostId) -> Result<(), StoreError> {
@@ -162,7 +182,12 @@ impl Store {
         Ok(())
     }
 
+    /// Keys bound to this device are not kept: their Windows Hello credential goes when they
+    /// are deleted, so a restored record could not sign anyway.
     pub fn trash_key(&self, id: KeyId) -> Result<(), StoreError> {
+        if self.key_record(id)?.is_some_and(|r| r.kind == sshcraft_model::keytypes::KeyKind::Device) {
+            return Ok(());
+        }
         if let Some(payload) = self.snapshot_key(id)? {
             let name = match &payload {
                 TrashPayload::Key { record } => record.name.clone(),
@@ -281,17 +306,54 @@ impl Store {
         json.map(|j| serde_json::from_str(&j).map_err(|e| StoreError::Malformed(e.to_string()))).transpose()
     }
 
-    /// Removes one entry for good; whether there was one.
+    /// Takes one entry out after it was restored; its versions stay with the item.
     pub fn remove_trash(&self, kind: TrashKind, id: &str) -> Result<bool, StoreError> {
         Ok(self.conn.execute("DELETE FROM trash WHERE kind = ?1 AND id = ?2", rusqlite::params![kind.as_str(), id])? > 0)
     }
 
-    /// Removes the entries deleted before `before` (Unix seconds), or all with `None`.
+    /// Deletes one entry for good, with the earlier versions of what it held.
+    pub fn purge_one(&self, kind: TrashKind, id: &str) -> Result<bool, StoreError> {
+        let gone = self.forget_trashed_versions(&format!("WHERE kind = '{}' AND id = ?1", kind.as_str()), [id])?;
+        Ok(self.remove_trash(kind, id)? || gone)
+    }
+
+    /// Deletes the entries deleted before `before` (Unix seconds), or all with `None`, with the
+    /// earlier versions of what they held.
     pub fn purge_trash(&self, before: Option<i64>) -> Result<usize, StoreError> {
         Ok(match before {
-            Some(t) => self.conn.execute("DELETE FROM trash WHERE deleted_at < ?1", [t])?,
-            None => self.conn.execute("DELETE FROM trash", [])?,
+            Some(t) => {
+                self.forget_trashed_versions("WHERE deleted_at < ?1", [t])?;
+                self.conn.execute("DELETE FROM trash WHERE deleted_at < ?1", [t])?
+            }
+            None => {
+                self.forget_trashed_versions("", [])?;
+                self.conn.execute("DELETE FROM trash", [])?
+            }
         })
+    }
+
+    /// Forgets the versions of the items held by the trash entries `filter` picks (a group's
+    /// subgroups and hosts too); whether there were entries.
+    fn forget_trashed_versions(&self, filter: &str, params: impl rusqlite::Params) -> Result<bool, StoreError> {
+        let mut stmt = self.conn.prepare(&format!("SELECT payload FROM trash {filter}"))?;
+        let payloads: Vec<String> = stmt.query_map(params, |r| r.get(0))?.collect::<Result<_, _>>()?;
+        for json in &payloads {
+            let Ok(payload) = serde_json::from_str::<TrashPayload>(json) else { continue };
+            match payload {
+                TrashPayload::Host { host, .. } => self.forget_versions(TrashKind::Host, &host.id.0.to_string())?,
+                TrashPayload::Group { groups, hosts, .. } => {
+                    for g in groups {
+                        self.forget_versions(TrashKind::Group, &g.id.0.to_string())?;
+                    }
+                    for h in hosts {
+                        self.forget_versions(TrashKind::Host, &h.id.0.to_string())?;
+                    }
+                }
+                TrashPayload::Snippet { id, .. } => self.forget_versions(TrashKind::Snippet, &id.0.to_string())?,
+                TrashPayload::Key { .. } => {}
+            }
+        }
+        Ok(!payloads.is_empty())
     }
 
     /// Puts the rows of an entry back under their ids. Refused when one of the ids is in use
@@ -315,12 +377,15 @@ impl Store {
                 if hosts_now.iter().any(|h| h.id == host.id) {
                     return Err(taken("the host"));
                 }
-                put_passwords(passwords, &mut restored)?;
                 let mut host = (**host).clone();
+                let mut passwords = passwords.clone();
                 if host.group_id.is_some_and(|g| !groups_now.iter().any(|k| k.id == g)) {
+                    // At the top, on this device: with its passwords.
                     host.group_id = None;
                     host.location = None;
+                    passwords.iter_mut().for_each(|p| p.location = None);
                 }
+                put_passwords(&passwords, &mut restored)?;
                 self.upsert_host(&host)?;
                 restored.hosts.push(host.id);
             }
@@ -328,18 +393,26 @@ impl Store {
                 if groups.iter().any(|g| groups_now.iter().any(|k| k.id == g.id)) || hosts.iter().any(|h| hosts_now.iter().any(|k| k.id == h.id)) {
                     return Err(taken("a group or host"));
                 }
-                put_passwords(passwords, &mut restored)?;
+                // The top group's parent may be gone: then the whole tree comes back at the
+                // top, on this device.
+                let orphan = groups.first().is_some_and(|g| g.parent_id.is_some_and(|p| !groups_now.iter().any(|k| k.id == p)));
+                let mut tree = TrashPayload::Group { groups: groups.clone(), hosts: hosts.clone(), passwords: passwords.clone() };
+                if orphan {
+                    tree.make_local();
+                }
+                let TrashPayload::Group { groups, hosts, passwords } = tree else {
+                    return Err(StoreError::Malformed("not a group".into()));
+                };
+                put_passwords(&passwords, &mut restored)?;
                 for (i, group) in groups.iter().enumerate() {
                     let mut group = group.clone();
-                    // The top group's parent may be gone: then it goes to the top.
-                    if i == 0 && group.parent_id.is_some_and(|p| !groups_now.iter().any(|k| k.id == p)) {
+                    if i == 0 && orphan {
                         group.parent_id = None;
-                        group.location = None;
                     }
                     self.upsert_group(&group)?;
                     restored.groups.push(group.id);
                 }
-                for host in hosts {
+                for host in &hosts {
                     self.upsert_host(host)?;
                     restored.hosts.push(host.id);
                 }

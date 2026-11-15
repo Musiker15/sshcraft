@@ -4,7 +4,9 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sshcraft_store::store::ItemKind;
-use sshcraft_store::trash::{Restored, TrashKind};
+use sshcraft_store::trash::{Restored, TrashKind, TrashPayload};
+
+use crate::sync::{Change, share_rights};
 
 use super::{CommandError, CommandSpec, command, parse, query, sync_run, to_value};
 use crate::Ctx;
@@ -59,14 +61,60 @@ pub(crate) fn send_again(ctx: &Ctx, restored: &Restored) -> Result<Vec<sshcraft_
     Ok(servers)
 }
 
+/// Whether the item may go back to where it lived: a share received without the right to
+/// change it (or one whose owner deleted the item) does not take it, so it comes back local.
+fn may_return(ctx: &Ctx, payload: &TrashPayload) -> Result<bool, CommandError> {
+    let store = ctx.session.store();
+    let shared = |kind: ItemKind, id: String, location: Option<sshcraft_model::model::ServerId>| -> Result<bool, CommandError> {
+        Ok(match location {
+            Some(server) => store.received_share_of(server, kind, &id)?.is_some(),
+            None => false,
+        })
+    };
+    Ok(match payload {
+        TrashPayload::Host { host, .. } => {
+            !shared(ItemKind::Host, host.id.0.to_string(), host.location)? && share_rights(&store, Change::SaveHost(host)).is_ok()
+        }
+        TrashPayload::Group { groups, .. } => match groups.first() {
+            Some(g) => !shared(ItemKind::Group, g.id.0.to_string(), g.location)? && share_rights(&store, Change::SaveGroup(g)).is_ok(),
+            None => true,
+        },
+        TrashPayload::Key { record } => !shared(ItemKind::Key, record.id.0.to_string(), record.location)?,
+        TrashPayload::Snippet { .. } => true,
+    })
+}
+
 fn run_restore(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let EntryParams { kind, id } = parse("trash.restore", params)?;
-        let payload =
+        let mut payload =
             ctx.session.store().trash_payload(kind, &id)?.ok_or_else(|| CommandError::NotFound(format!("{} {id} in the trash", kind.as_str())))?;
-        let restored = ctx.session.store().restore_payload(&payload)?;
-        ctx.session.store().remove_trash(kind, &id)?;
+        if !may_return(&ctx, &payload)? {
+            payload.make_local();
+        }
+        let mut restored = ctx.session.store().restore_payload(&payload)?;
+        // Hosts whose deletion arrived before their group's are entries of their own: they
+        // come back with the group.
+        if let TrashPayload::Group { .. } = &payload {
+            let entries = ctx.session.store().list_trash()?;
+            for entry in entries.iter().filter(|e| e.kind == TrashKind::Host) {
+                let Some(mut host_payload) = ctx.session.store().trash_payload(TrashKind::Host, &entry.id)? else { continue };
+                let belongs = matches!(&host_payload, TrashPayload::Host { host, .. } if host.group_id.is_some_and(|g| restored.groups.contains(&g)));
+                if belongs {
+                    if !may_return(&ctx, &host_payload)? {
+                        host_payload.make_local();
+                    }
+                    if let Ok(more) = ctx.session.store().restore_payload(&host_payload) {
+                        restored.hosts.extend(more.hosts);
+                        restored.passwords.extend(more.passwords);
+                        ctx.session.store().remove_trash(TrashKind::Host, &entry.id)?;
+                    }
+                }
+            }
+        }
         let servers = send_again(&ctx, &restored)?;
+        // Out of the trash only once it is queued again.
+        ctx.session.store().remove_trash(kind, &id)?;
         ctx.session.sync().nudge(&servers);
         ctx.session.announce(&servers);
         Ok(Value::Null)
@@ -134,7 +182,7 @@ fn run_purge(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let PurgeParams { kind, id } = parse("trash.purge", params)?;
         let removed = match (kind, id) {
-            (Some(kind), Some(id)) => usize::from(ctx.session.store().remove_trash(kind, &id)?),
+            (Some(kind), Some(id)) => usize::from(ctx.session.store().purge_one(kind, &id)?),
             (None, None) => ctx.session.store().purge_trash(None)?,
             _ => return Err(CommandError::bad_params("trash.purge", "both kind and id, or neither")),
         };

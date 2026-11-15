@@ -134,3 +134,51 @@ fn a_key_and_a_snippet_come_back_sealed_as_they_were() {
     let sealed: Vec<u8> = store.conn.query_row("SELECT sealed FROM snippets", [], |r| r.get(0)).unwrap();
     assert_eq!(sealed, b"s");
 }
+
+#[test]
+fn device_keys_are_not_kept_and_purging_forgets_versions() {
+    let store = Store::open_in_memory().unwrap();
+    let vault = crate::vault::Vault::unlock(&store, Box::new(crate::vault::MemoryMasterKey::default())).unwrap();
+    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let info = vault.store_device_key(&store, "hello", &key).unwrap();
+    store.trash_key(info.id).unwrap();
+    assert!(store.list_trash().unwrap().is_empty(), "a device key cannot come back");
+
+    let h = host("web", None);
+    store.upsert_host(&h).unwrap();
+    let payload = TrashPayload::Host { host: Box::new(h.clone()), passwords: Vec::new() };
+    store.put_version(TrashKind::Host, &h.id.0.to_string(), "web", &payload, 1).unwrap();
+    store.trash_host(h.id).unwrap();
+    store.delete_host(h.id).unwrap();
+    store.purge_trash(None).unwrap();
+    assert!(store.list_versions(TrashKind::Host, &h.id.0.to_string()).unwrap().is_empty());
+}
+
+#[test]
+fn a_group_whose_parent_is_gone_comes_back_local_with_all_it_holds() {
+    let store = Store::open_in_memory().unwrap();
+    let server = ServerId::new();
+    let parent = group("parent", None);
+    store.upsert_group(&parent).unwrap();
+    let mut child = group("child", Some(parent.id));
+    child.location = None;
+    store.upsert_group(&child).unwrap();
+    let mut h = host("in-child", Some(child.id));
+    let pw = PasswordId::new();
+    store.put_password_record(pw, b"sealed", None).unwrap();
+    h.settings.password = Some(pw);
+    store.upsert_host(&h).unwrap();
+    let mut payload = store.snapshot_group(child.id).unwrap().unwrap();
+    // As if it lived at a server.
+    if let TrashPayload::Group { groups, hosts, passwords } = &mut payload {
+        groups.iter_mut().for_each(|g| g.location = Some(server));
+        hosts.iter_mut().for_each(|h| h.location = Some(server));
+        passwords.iter_mut().for_each(|p| p.location = Some(server));
+    }
+    store.delete_group(parent.id).unwrap();
+    store.delete_password(pw).unwrap();
+    store.restore_payload(&payload).unwrap();
+    assert!(store.list_groups().unwrap().iter().all(|g| g.location.is_none() && g.parent_id.is_none()));
+    assert!(store.list_hosts().unwrap().iter().all(|h| h.location.is_none()));
+    assert_eq!(store.password_record(pw).unwrap().unwrap().1, None);
+}
