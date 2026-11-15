@@ -512,6 +512,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Next" => "Nächster",
         "Not found in this log." => "In diesem Protokoll nicht gefunden.",
         "Connection" => "Verbindung",
+        "The port is a number from 0 to 65535." => "Der Port ist eine Zahl von 0 bis 65535.",
         "Copy" => "Kopieren",
         "Allow agent control" => "Steuerung durch Agenten erlauben",
         "Port (0: any free port)" => "Port (0: ein freier Port)",

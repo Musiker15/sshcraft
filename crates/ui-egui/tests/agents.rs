@@ -286,6 +286,44 @@ mod link {
         }
     }
 
+    /// A drag over the port does not change it (each change would restart the link and cut the
+    /// agents off); a typed port counts when the field is left.
+    #[test]
+    fn the_port_changes_only_when_typed_and_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut h, session) = app_harness(dir.path());
+        agents_page(&mut h);
+        h.run_steps(3);
+        let port = |session: &sshcraft_engine::Session| {
+            session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", json!({}))).unwrap()["integrations"]["agent_port"].clone()
+        };
+        let field = h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Port (0: any free port)").rect();
+        let from = field.center();
+        for (pos, pressed) in [(from, Some(true)), (from + egui::vec2(60.0, 0.0), None), (from + egui::vec2(120.0, 0.0), Some(false))] {
+            h.event(egui::Event::PointerMoved(pos));
+            if let Some(pressed) = pressed {
+                h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            }
+            h.run_steps(1);
+        }
+        h.run_steps(5);
+        assert_eq!(port(&session), json!(0), "a drag changed nothing");
+        h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Port (0: any free port)").click();
+        h.run_steps(1);
+        h.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
+        h.event(egui::Event::Text("5123".into()));
+        h.run_steps(2);
+        assert_eq!(port(&session), json!(0), "not while typing");
+        h.event(egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(3);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while port(&session) != json!(5123) {
+            assert!(Instant::now() < deadline, "the typed port was not saved");
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+    }
+
     #[test]
     fn the_link_follows_the_consent() {
         let dir = tempfile::tempdir().unwrap();

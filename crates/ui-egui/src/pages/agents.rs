@@ -42,6 +42,8 @@ pub struct AgentsView {
     loading: u8,
     /// Why the rights could not be read.
     failed: Option<String>,
+    /// The port as it is being typed.
+    port_text: Option<String>,
 }
 
 /// Fetches the policy and the log again.
@@ -207,9 +209,25 @@ fn connection(app: &mut SshcraftApp, ui: &mut Ui, tokens: &Tokens) {
     ui.label(egui::RichText::new(tr("Connection")).strong());
     let mut integrations = app.data.settings.integrations.clone();
     let mut changed = ui.checkbox(&mut integrations.allow_agent_control, tr("Allow agent control")).changed();
+    // Typed, and taken when the field is left: every change restarts the link and cuts agents off.
     ui.horizontal(|ui| {
-        ui.label(tr("Port (0: any free port)"));
-        changed |= ui.add(egui::DragValue::new(&mut integrations.agent_port).range(0..=65535)).changed();
+        let label = ui.label(tr("Port (0: any free port)"));
+        let current = integrations.agent_port;
+        let text = app.ui.agents.port_text.get_or_insert_with(|| current.to_string());
+        let field = ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(5)).labelled_by(label.id);
+        if field.lost_focus() {
+            match text.trim().parse::<u16>() {
+                Ok(port) if port != current => {
+                    integrations.agent_port = port;
+                    changed = true;
+                }
+                Ok(_) => {}
+                Err(_) => app.toasts.error(tr("The port is a number from 0 to 65535.")),
+            }
+        }
+        if !field.has_focus() {
+            app.ui.agents.port_text = None;
+        }
     });
     if changed {
         crate::pages::settings::save(app, |s| s.integrations = integrations.clone());
