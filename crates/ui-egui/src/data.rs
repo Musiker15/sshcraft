@@ -75,6 +75,9 @@ pub struct Data {
     pub keys: Vec<KeyRow>,
     pub identities: Vec<IdentityRow>,
     pub settings: EngineSettings,
+    /// What this device can make besides vault keys; asked once.
+    pub security: Option<crate::pages::keys::SecuritySupport>,
+    pub security_loading: bool,
     /// What to fetch again; set by the engine's events, cleared when the fetch starts.
     pub dirty: Refresh,
     /// What is being fetched now, so a burst of changes starts one fetch each.

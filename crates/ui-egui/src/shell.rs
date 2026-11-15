@@ -142,9 +142,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     egui::CentralPanel::default().frame(egui::Frame::new().fill(tokens.bg).inner_margin(12.0)).show(ui, |ui| match app.ui.page {
         Page::Hosts => crate::pages::hosts::show(app, ui),
-        Page::Keys => {
-            ui.heading(tr("Keys"));
-        }
+        Page::Keys => crate::pages::keys::show(app, ui),
         Page::Settings => {
             ui.heading(tr("Settings"));
         }

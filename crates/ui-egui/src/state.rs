@@ -55,6 +55,13 @@ pub struct UiState {
     pub group_form: Option<crate::pages::host_form::GroupForm>,
     #[serde(skip)]
     pub confirm: Option<crate::pages::hosts::Confirm>,
+    #[serde(skip)]
+    pub key_dialog: Option<crate::pages::keys::KeyDialog>,
+    #[serde(skip)]
+    pub identity_form: Option<crate::pages::keys::IdentityForm>,
+    /// A key waiting for its deletion to be confirmed: id and name.
+    #[serde(skip)]
+    pub key_confirm: Option<(String, String)>,
 }
 
 /// What a page asked to connect to.

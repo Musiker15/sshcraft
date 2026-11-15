@@ -29,6 +29,8 @@ tokio = { workspace = true }
 egui_kittest = { workspace = true, optional = true }
 
 [dev-dependencies]
+russh = { workspace = true }
+rand = { workspace = true }
 sshcraft-ui-egui = { path = ".", features = ["testing"] }
 sshcraft-engine = { workspace = true, features = ["testing"] }
 sshcraft-ssh = { workspace = true, features = ["testing"] }
