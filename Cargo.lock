@@ -5716,6 +5716,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcraft-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "sshcraft-engine",
+ "sshcraft-link",
+ "sshcraft-ssh",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "sshcraft-model"
 version = "0.1.0"
 dependencies = [

@@ -51,6 +51,16 @@ impl Token {
         &self.0
     }
 
+    /// The token in `path`; `None` when the file is missing or holds no token. Clients read it
+    /// this way: only the app makes the file.
+    pub fn load(path: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        if meta.len() > 1024 {
+            return None;
+        }
+        Self::parse(&std::fs::read_to_string(path).ok()?)
+    }
+
     /// The token in `path`, made (with a fresh token, only the owner may read it) when the file
     /// is missing. A file that holds no token is an error: deleting it gives a new one.
     pub fn load_or_create(path: &Path) -> Result<Self, LinkError> {

@@ -25,6 +25,7 @@ sshcraft-engine = { path = "crates/engine" }
 sshcraft-term = { path = "crates/term" }
 sshcraft-ui-egui = { path = "crates/ui-egui" }
 sshcraft-link = { path = "crates/link" }
+sshcraft-mcp = { path = "crates/mcp" }
 
 # foundation
 serde = { version = "1.0.229", features = ["derive"] }
