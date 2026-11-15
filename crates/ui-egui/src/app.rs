@@ -286,11 +286,19 @@ impl SshcraftApp {
         matches!(self.ui.page, Page::Tab(i) if matches!(self.ui.tabs.get(i).and_then(|t| t.panes.focused_slot()), Some(PaneSlot::Session { .. })))
     }
 
-    /// One frame: results that came back, the engine's events, then drawing.
-    pub fn frame(&mut self, ui: &mut egui::Ui) {
+    /// What runs also while the window is hidden (minimized or covered): eframe then calls only
+    /// `App::logic`, no frame.
+    pub fn logic(&mut self, ctx: &egui::Context) {
         for (then, result) in self.runner.take_done() {
             then(self, result);
         }
+        crate::link::tick(self, ctx);
+        crate::control::process(self, ctx);
+    }
+
+    /// One frame: results that came back, the engine's events, then drawing.
+    pub fn frame(&mut self, ui: &mut egui::Ui) {
+        self.logic(&ui.ctx().clone());
         self.take_events();
         crate::pages::import_export::take_dialog_answers(self);
         data::refresh(self);
@@ -302,8 +310,6 @@ impl SshcraftApp {
         // A character no font has is drawn as a box, never a panic (tests switch egui to panic).
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
-        crate::link::tick(self, &ctx);
-        crate::control::process(self, &ctx);
         crate::i18n::set_language(crate::i18n::Lang::resolve(self.data.settings.general.language));
         if self.bindings_from.as_ref() != Some(&self.data.settings.shortcuts) {
             self.bindings = Bindings::from_settings(&self.data.settings.shortcuts);

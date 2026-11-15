@@ -54,6 +54,12 @@ impl eframe::App for Shell {
         self.app.show_dialogs(Some(&*frame));
     }
 
+    /// Also while the window is minimized or covered (no frame then): the agent link follows the
+    /// consent, and the control channel answers.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.app.logic(ctx);
+    }
+
     /// The control channel's clicks and keys go in front of the frame, as a person's would.
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         raw_input.events.extend(self.app.take_control_input());

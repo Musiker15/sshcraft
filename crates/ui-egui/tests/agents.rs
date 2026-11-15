@@ -231,6 +231,61 @@ mod link {
         h.state().link.dir.as_deref().and_then(ConnectionFile::read)
     }
 
+    /// With the window minimized eframe runs no frame, only `App::logic`: the consent is still
+    /// followed.
+    #[test]
+    fn the_link_follows_the_consent_while_the_window_is_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, session, ctx) = sshcraft_ui_egui::testing::app_on(dir.path());
+        let mut settings = session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", json!({}))).unwrap();
+        settings["integrations"]["allow_agent_control"] = json!(true);
+        session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.save", json!({ "settings": settings }))).unwrap();
+        let allowed = Arc::new(AtomicBool::new(true));
+        let seen = allowed.clone();
+        app.link.source = Arc::new(move |_| Consent { allow_setting: seen.load(Ordering::SeqCst), mcp_flag: false, launcher_allows: false });
+        let dir_of = app.link.dir.clone().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ConnectionFile::read(&dir_of).is_none() {
+            assert!(Instant::now() < deadline, "the link did not start without a frame");
+            app.logic(&ctx);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        allowed.store(false, Ordering::SeqCst);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ConnectionFile::read(&dir_of).is_some() {
+            assert!(Instant::now() < deadline, "the link did not stop without a frame");
+            app.logic(&ctx);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Consent taken back while the link is starting: it stops as soon as the start is done, not
+    /// two seconds later.
+    #[test]
+    fn consent_taken_back_during_the_start_stops_the_link_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, _session, ctx) = sshcraft_ui_egui::testing::app_on(dir.path());
+        let allowed = Arc::new(AtomicBool::new(true));
+        let seen = allowed.clone();
+        app.link.source = Arc::new(move |_| Consent { allow_setting: seen.load(Ordering::SeqCst), mcp_flag: false, launcher_allows: false });
+        let dir_of = app.link.dir.clone().unwrap();
+        // This look starts the link; the consent goes before the start is done.
+        app.logic(&ctx);
+        allowed.store(false, Ordering::SeqCst);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ConnectionFile::read(&dir_of).is_none() {
+            assert!(Instant::now() < deadline, "the start never finished");
+            app.logic(&ctx);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let started = Instant::now();
+        while ConnectionFile::read(&dir_of).is_some() {
+            assert!(started.elapsed() < Duration::from_millis(1000), "the link ran on without consent");
+            app.logic(&ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn the_link_follows_the_consent() {
         let dir = tempfile::tempdir().unwrap();

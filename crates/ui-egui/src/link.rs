@@ -74,7 +74,15 @@ pub fn tick(app: &mut SshcraftApp, ctx: &egui::Context) {
         async move { session.start_agent_link(&dir, integrations.agent_port).await.map(|_| Value::Null) },
         Box::new(|app, result| {
             app.link.starting = false;
-            app.link.error = result.err().map(|e| e.to_string());
+            match result {
+                // The consent may have changed while it started: look again at once.
+                Ok(_) => {
+                    app.link.error = None;
+                    check_soon(app);
+                }
+                // A port in use: try again at the next look, not every frame.
+                Err(e) => app.link.error = Some(e.to_string()),
+            }
         }),
     );
 }
