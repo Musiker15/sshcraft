@@ -302,17 +302,92 @@ fn saving_an_invalid_rule_is_refused() {
     assert!(store.list_hosts().unwrap().is_empty());
 }
 
-/// A database the Tauri version left at schema 11 opens again without a migration: the rebuild
-/// keeps the data format, so existing hosts, keys and logs stay where they are.
+/// A database the Tauri version left at schema 11 opens with one migration to 12: its known host
+/// fingerprints move to `host_keys`, without the key itself, and nothing else changes.
 #[test]
-fn schema_11_reopens_without_migration() {
+fn schema_11_migrates_known_hosts_to_host_keys() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sshcraft.db");
     let store = Store::open(&path).unwrap();
     store.put_setting("app", "{}").unwrap();
+    // Back to schema 11 as the Tauri version and R1 to R7 left it.
+    store
+        .conn
+        .execute_batch(
+            "DROP TABLE approved_commands; DROP TABLE ssh_config_links; DROP TABLE host_keys;
+             CREATE TABLE known_hosts (address TEXT NOT NULL, port INTEGER NOT NULL,
+                 fingerprint TEXT NOT NULL, PRIMARY KEY (address, port));
+             INSERT INTO known_hosts VALUES ('a.org', 22, 'SHA256:a'), ('b.org', 2222, 'SHA256:b');
+             PRAGMA user_version = 11;",
+        )
+        .unwrap();
     drop(store);
     let store = Store::open(&path).unwrap();
     let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
+    let keys = store.all_host_keys().unwrap();
+    assert_eq!(keys.len(), 2);
+    assert_eq!((keys[0].address.as_str(), keys[0].port, keys[0].fingerprint.as_str()), ("a.org", 22, "SHA256:a"));
+    assert_eq!((keys[1].address.as_str(), keys[1].port, keys[1].fingerprint.as_str()), ("b.org", 2222, "SHA256:b"));
+    assert!(keys.iter().all(|k| k.public_key.is_none() && k.algorithm.is_none()));
     assert_eq!(store.get_setting("app").unwrap().as_deref(), Some("{}"));
+    let tables: i64 =
+        store.conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'known_hosts'", [], |r| r.get(0)).unwrap();
+    assert_eq!(tables, 0);
+}
+
+fn key(address: &str, port: u16, fingerprint: &str) -> HostKey {
+    HostKey {
+        address: address.into(),
+        port,
+        algorithm: Some("ssh-ed25519".into()),
+        public_key: Some(format!("AAAA{fingerprint}")),
+        fingerprint: fingerprint.into(),
+        added_at: 5,
+    }
+}
+
+#[test]
+fn several_keys_per_address() {
+    let store = Store::open_in_memory().unwrap();
+    store.add_host_key(&key("a", 22, "SHA256:1")).unwrap();
+    store.add_host_key(&key("a", 22, "SHA256:2")).unwrap();
+    store.add_host_key(&key("a", 2222, "SHA256:3")).unwrap();
+    let fps: Vec<String> = store.host_keys("a", 22).unwrap().into_iter().map(|k| k.fingerprint).collect();
+    assert_eq!(fps, vec!["SHA256:1", "SHA256:2"]);
+    assert!(store.remove_host_key("a", 22, "SHA256:1").unwrap());
+    assert!(!store.remove_host_key("a", 22, "SHA256:1").unwrap());
+    assert_eq!(store.host_keys("a", 22).unwrap().len(), 1);
+    store.forget_host_keys("a", 22).unwrap();
+    assert!(store.host_keys("a", 22).unwrap().is_empty());
+    assert_eq!(store.host_keys("a", 2222).unwrap().len(), 1);
+}
+
+/// A fingerprint known without its key (from schema 11 or a fingerprint-only import) gets the
+/// key once it is seen; a key already stored is not replaced by a fingerprint-only write.
+#[test]
+fn a_known_fingerprint_gains_its_key() {
+    let store = Store::open_in_memory().unwrap();
+    store.set_known_host("a", 22, "SHA256:1").unwrap();
+    store.add_host_key(&key("a", 22, "SHA256:1")).unwrap();
+    let k = store.host_keys("a", 22).unwrap();
+    assert_eq!(k.len(), 1);
+    assert_eq!(k[0].public_key.as_deref(), Some("AAAASHA256:1"));
+    store.set_known_host("a", 22, "SHA256:1").unwrap();
+    assert_eq!(store.host_keys("a", 22).unwrap()[0].public_key.as_deref(), Some("AAAASHA256:1"));
+}
+
+#[test]
+fn deleting_a_host_drops_its_approval_and_link() {
+    let store = Store::open_in_memory().unwrap();
+    let h = host("web", None);
+    store.upsert_host(&h).unwrap();
+    store.approve_command(h.id, "d1").unwrap();
+    store.set_config_link(&ConfigLink { host_id: h.id, alias: "web".into(), file: "/x/config".into(), digest: "c1".into() }).unwrap();
+    assert!(store.command_approved(h.id, "d1").unwrap());
+    assert!(!store.command_approved(h.id, "d2").unwrap());
+    assert_eq!(store.config_links().unwrap().len(), 1);
+    store.delete_host(h.id).unwrap();
+    assert!(!store.command_approved(h.id, "d1").unwrap());
+    assert!(store.config_links().unwrap().is_empty());
 }

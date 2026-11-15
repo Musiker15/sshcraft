@@ -51,7 +51,7 @@ pub struct Store {
     pub(crate) conn: rusqlite::Connection,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 11;
+pub(crate) const SCHEMA_VERSION: i64 = 12;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -80,6 +80,60 @@ CREATE TABLE keys (
     sealed_secret BLOB NOT NULL
 );
 ";
+
+/// Version 12: several host keys per address with the key itself (for `UpdateHostKeys` and
+/// export), the proxy commands approved on this device, and the hosts kept in step with
+/// `~/.ssh/config`. The last two are device-local and never sync.
+pub(crate) const SCHEMA_V12: &str = "
+CREATE TABLE host_keys (
+    address TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    algorithm TEXT,
+    public_key TEXT,
+    added_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (address, port, fingerprint)
+);
+INSERT INTO host_keys (address, port, fingerprint) SELECT address, port, fingerprint FROM known_hosts;
+DROP TABLE known_hosts;
+CREATE TABLE approved_commands (
+    host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    digest TEXT NOT NULL,
+    PRIMARY KEY (host_id, digest)
+);
+CREATE TABLE ssh_config_links (
+    host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
+    alias TEXT NOT NULL,
+    file TEXT NOT NULL,
+    digest TEXT NOT NULL
+);
+";
+
+/// A host key known for an address and port. Keys from schema 11 and from fingerprint-only
+/// sources have no algorithm and no key; they still match by fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HostKey {
+    pub address: String,
+    pub port: u16,
+    pub algorithm: Option<String>,
+    /// The key in OpenSSH base64, as in a `known_hosts` line.
+    pub public_key: Option<String>,
+    pub fingerprint: String,
+    /// Unix seconds; 0 when not known.
+    pub added_at: i64,
+}
+
+/// A host kept in step with an entry of `~/.ssh/config` on this device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigLink {
+    pub host_id: HostId,
+    pub alias: String,
+    /// The file the entry was read from, as a display path.
+    pub file: String,
+    /// The digest of the entry when it was last applied, so an unchanged entry is not applied
+    /// again over edits made in SSHCraft.
+    pub digest: String,
+}
 
 /// Version 2: app settings and the hosts connected to most recently.
 pub(crate) const SCHEMA_V2: &str = "
@@ -278,6 +332,12 @@ impl Store {
         if version < 11 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(crate::agent::SCHEMA_V11)?;
+            tx.pragma_update(None, "user_version", 11)?;
+            tx.commit()?;
+        }
+        if version < 12 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA_V12)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -471,24 +531,123 @@ impl Store {
         .collect()
     }
 
+    /// The first fingerprint known for an address, for callers that need only one.
     pub fn known_host(&self, address: &str, port: u16) -> Result<Option<String>, StoreError> {
-        Ok(self
-            .conn
-            .query_row("SELECT fingerprint FROM known_hosts WHERE address = ?1 AND port = ?2", rusqlite::params![address, port], |r| r.get(0))
-            .optional()?)
+        Ok(self.host_keys(address, port)?.into_iter().next().map(|k| k.fingerprint))
     }
 
+    /// Trusts a fingerprint alone, keeping any key already stored for it.
     pub fn set_known_host(&self, address: &str, port: u16, fingerprint: &str) -> Result<(), StoreError> {
+        self.add_host_key(&HostKey {
+            address: address.to_owned(),
+            port,
+            algorithm: None,
+            public_key: None,
+            fingerprint: fingerprint.to_owned(),
+            added_at: 0,
+        })
+    }
+
+    pub fn forget_known_host(&self, address: &str, port: u16) -> Result<(), StoreError> {
+        self.forget_host_keys(address, port)
+    }
+
+    pub fn host_keys(&self, address: &str, port: u16) -> Result<Vec<HostKey>, StoreError> {
+        self.read_host_keys("WHERE address = ?1 AND port = ?2", rusqlite::params![address, port])
+    }
+
+    pub fn all_host_keys(&self) -> Result<Vec<HostKey>, StoreError> {
+        self.read_host_keys("", [])
+    }
+
+    fn read_host_keys(&self, filter: &str, params: impl rusqlite::Params) -> Result<Vec<HostKey>, StoreError> {
+        let sql = format!(
+            "SELECT address, port, fingerprint, algorithm, public_key, added_at FROM host_keys {filter}
+             ORDER BY address, port, added_at, fingerprint"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params, |r| {
+            Ok(HostKey {
+                address: r.get(0)?,
+                port: r.get(1)?,
+                fingerprint: r.get(2)?,
+                algorithm: r.get(3)?,
+                public_key: r.get(4)?,
+                added_at: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Adds a trusted key; for a fingerprint already known, fills in a missing algorithm, key or
+    /// time and keeps what is there.
+    pub fn add_host_key(&self, key: &HostKey) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO known_hosts (address, port, fingerprint) VALUES (?1, ?2, ?3)
-             ON CONFLICT(address, port) DO UPDATE SET fingerprint = excluded.fingerprint",
-            rusqlite::params![address, port, fingerprint],
+            "INSERT INTO host_keys (address, port, fingerprint, algorithm, public_key, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(address, port, fingerprint) DO UPDATE SET
+                 algorithm = coalesce(host_keys.algorithm, excluded.algorithm),
+                 public_key = coalesce(host_keys.public_key, excluded.public_key),
+                 added_at = CASE WHEN host_keys.added_at = 0 THEN excluded.added_at ELSE host_keys.added_at END",
+            rusqlite::params![key.address, key.port, key.fingerprint, key.algorithm, key.public_key, key.added_at],
         )?;
         Ok(())
     }
 
-    pub fn forget_known_host(&self, address: &str, port: u16) -> Result<(), StoreError> {
-        self.conn.execute("DELETE FROM known_hosts WHERE address = ?1 AND port = ?2", rusqlite::params![address, port])?;
+    /// Whether a key was there to remove.
+    pub fn remove_host_key(&self, address: &str, port: u16, fingerprint: &str) -> Result<bool, StoreError> {
+        let n = self
+            .conn
+            .execute("DELETE FROM host_keys WHERE address = ?1 AND port = ?2 AND fingerprint = ?3", rusqlite::params![address, port, fingerprint])?;
+        Ok(n > 0)
+    }
+
+    pub fn forget_host_keys(&self, address: &str, port: u16) -> Result<(), StoreError> {
+        self.conn.execute("DELETE FROM host_keys WHERE address = ?1 AND port = ?2", rusqlite::params![address, port])?;
+        Ok(())
+    }
+
+    /// Marks a proxy command (by its digest) as allowed to run for a host on this device.
+    pub fn approve_command(&self, host: HostId, digest: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("INSERT OR IGNORE INTO approved_commands (host_id, digest) VALUES (?1, ?2)", rusqlite::params![host.0.to_string(), digest])?;
+        Ok(())
+    }
+
+    pub fn command_approved(&self, host: HostId, digest: &str) -> Result<bool, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT 1 FROM approved_commands WHERE host_id = ?1 AND digest = ?2",
+                rusqlite::params![host.0.to_string(), digest],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    pub fn config_links(&self) -> Result<Vec<ConfigLink>, StoreError> {
+        let mut stmt = self.conn.prepare("SELECT host_id, alias, file, digest FROM ssh_config_links ORDER BY file, alias")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        rows.map(|row| {
+            let (id, alias, file, digest) = row?;
+            let id = uuid::Uuid::parse_str(&id).map_err(|e| StoreError::Malformed(e.to_string()))?;
+            Ok(ConfigLink { host_id: HostId(id), alias, file, digest })
+        })
+        .collect()
+    }
+
+    pub fn set_config_link(&self, link: &ConfigLink) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO ssh_config_links (host_id, alias, file, digest) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(host_id) DO UPDATE SET alias = excluded.alias, file = excluded.file, digest = excluded.digest",
+            rusqlite::params![link.host_id.0.to_string(), link.alias, link.file, link.digest],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_config_link(&self, host: HostId) -> Result<(), StoreError> {
+        self.conn.execute("DELETE FROM ssh_config_links WHERE host_id = ?1", [host.0.to_string()])?;
         Ok(())
     }
 
