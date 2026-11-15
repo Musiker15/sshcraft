@@ -62,20 +62,35 @@ fn a_shortcut_needs_a_modifier_or_a_function_key() {
 
 #[test]
 fn own_bindings_round_trip_through_the_settings() {
+    // Stored under the engine's action names (the Tauri version's), not the command ids.
     let mut stored = BTreeMap::new();
-    stored.insert("ui.tab.new".to_string(), vec!["Ctrl+Alt+N".to_string()]);
-    stored.insert("ui.unknown".to_string(), vec!["Ctrl+Alt+U".to_string()]);
+    stored.insert("newTab".to_string(), vec!["Ctrl+Alt+N".to_string()]);
+    stored.insert("unknownAction".to_string(), vec!["Ctrl+Alt+U".to_string()]);
     let b = Bindings::from_settings(&Shortcuts { bindings: stored });
     assert_eq!(b.command_for(&chord("Ctrl+Alt+N"), false), Some("ui.tab.new"));
     assert_eq!(b.command_for(&chord("Ctrl+Shift+T"), false), None);
     let saved = b.to_settings();
-    assert_eq!(saved.bindings.get("ui.tab.new"), Some(&vec!["Ctrl+Alt+N".to_string()]));
-    assert!(!saved.bindings.contains_key("ui.unknown"), "unknown ids are dropped");
-    assert!(!saved.bindings.contains_key("ui.palette"), "defaults are not stored");
+    assert_eq!(saved.bindings.get("newTab"), Some(&vec!["Ctrl+Alt+N".to_string()]));
+    assert!(!saved.bindings.contains_key("unknownAction"), "unknown actions are dropped");
+    assert!(!saved.bindings.contains_key("palette"), "defaults are not stored");
     let mut b = b;
     b.reset("ui.tab.new");
     assert_eq!(b.command_for(&chord("Ctrl+Shift+T"), false), Some("ui.tab.new"));
     b.remove("ui.tab.new");
     assert_eq!(b.command_for(&chord("Ctrl+Shift+T"), false), None);
-    assert_eq!(b.to_settings().bindings.get("ui.tab.new"), Some(&Vec::new()), "a removed binding is stored as none");
+    assert_eq!(b.to_settings().bindings.get("newTab"), Some(&Vec::new()), "a removed binding is stored as none");
+}
+
+#[test]
+fn every_command_has_an_action_the_engine_keeps() {
+    for command in sshcraft_ui_egui::commands::ui_commands() {
+        assert!(sshcraft_engine::settings::SHORTCUT_ACTIONS.contains(&command.action), "{} ({})", command.id, command.action);
+    }
+    // What the window stores survives the engine's own check of the settings.
+    let mut b = Bindings::default();
+    b.assign("ui.page.keys", "Ctrl+Alt+K").unwrap();
+    let mut settings = sshcraft_engine::settings::EngineSettings::default();
+    settings.shortcuts = b.to_settings();
+    let kept = settings.sanitized().shortcuts;
+    assert_eq!(Bindings::from_settings(&kept).command_for(&chord("Ctrl+Alt+K"), false), Some("ui.page.keys"));
 }

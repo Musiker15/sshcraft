@@ -16,6 +16,9 @@ pub enum Scope {
 
 pub struct UiCommand {
     pub id: &'static str,
+    /// The name its own shortcuts are stored under (`shortcuts.bindings`, one of the engine's
+    /// `SHORTCUT_ACTIONS`); the Tauri version's names where it had the action.
+    pub action: &'static str,
     /// English; shown through `tr`.
     pub label: &'static str,
     pub defaults: &'static [&'static str],
@@ -37,21 +40,26 @@ fn in_terminal(app: &SshcraftApp) -> bool {
     matches!(app.ui.page, Page::Tab(_))
 }
 
-const fn cmd(id: &'static str, label: &'static str, defaults: &'static [&'static str]) -> UiCommand {
-    UiCommand { id, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
+const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaults: &'static [&'static str]) -> UiCommand {
+    UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
 static COMMANDS: [UiCommand; 10] = [
-    cmd("ui.palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
-    cmd("ui.tab.new", "New tab", &["Ctrl+Shift+T"]),
-    UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "Close the current tab", &["Ctrl+Shift+W"]) },
-    UiCommand { enabled: has_tabs, ..cmd("ui.tab.next", "Next tab", &["Ctrl+Tab", "Ctrl+PageDown"]) },
-    UiCommand { enabled: has_tabs, ..cmd("ui.tab.previous", "Previous tab", &["Ctrl+Shift+Tab", "Ctrl+PageUp"]) },
-    cmd("ui.page.hosts", "Hosts", &[]),
-    cmd("ui.page.keys", "Keys", &[]),
-    cmd("ui.page.settings", "Settings", &[]),
-    UiCommand { scope: Scope::Terminal, enabled: in_terminal, in_palette: false, ..cmd("ui.terminal.copy", "Copy the selection", &["Ctrl+Shift+C"]) },
-    UiCommand { scope: Scope::Terminal, enabled: in_terminal, in_palette: false, ..cmd("ui.terminal.paste", "Paste", &["Ctrl+Shift+V"]) },
+    cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
+    cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
+    UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.tab.next", "nextTab", "Next tab", &["Ctrl+Tab", "Ctrl+PageDown"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.tab.previous", "prevTab", "Previous tab", &["Ctrl+Shift+Tab", "Ctrl+PageUp"]) },
+    cmd("ui.page.hosts", "hostsPage", "Hosts", &[]),
+    cmd("ui.page.keys", "keysPage", "Keys", &[]),
+    cmd("ui.page.settings", "settingsPage", "Settings", &[]),
+    UiCommand {
+        scope: Scope::Terminal,
+        enabled: in_terminal,
+        in_palette: false,
+        ..cmd("ui.terminal.copy", "copy", "Copy the selection", &["Ctrl+Shift+C"])
+    },
+    UiCommand { scope: Scope::Terminal, enabled: in_terminal, in_palette: false, ..cmd("ui.terminal.paste", "paste", "Paste", &["Ctrl+Shift+V"]) },
 ];
 
 pub fn ui_commands() -> &'static [UiCommand] {

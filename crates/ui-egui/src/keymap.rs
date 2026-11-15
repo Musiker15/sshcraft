@@ -1,5 +1,5 @@
 //! Keyboard shortcuts: the defaults of `docs/shortcuts.md`, own bindings from the settings
-//! (`shortcuts.bindings`), key presses matched with craft-keymap's chords. Inside a terminal only
+//! (`shortcuts.bindings`, by action name), key presses matched with craft-keymap's chords. Inside a terminal only
 //! Ctrl+Shift (without Alt) and Ctrl+Tab are taken, so every other key reaches the server.
 
 use std::collections::BTreeMap;
@@ -58,7 +58,7 @@ impl Bindings {
     pub fn from_settings(shortcuts: &Shortcuts) -> Self {
         let mut bindings = Self::default();
         for (command, chords) in &mut bindings.table {
-            if let Some(stored) = shortcuts.bindings.get(command.id) {
+            if let Some(stored) = shortcuts.bindings.get(command.action) {
                 *chords = stored.iter().filter_map(|t| Chord::parse(t).ok()).collect();
             }
         }
@@ -70,7 +70,7 @@ impl Bindings {
         let mut stored = BTreeMap::new();
         for (command, chords) in &self.table {
             if *chords != parse_all(command.defaults) {
-                stored.insert(command.id.to_string(), chords.iter().map(ToString::to_string).collect());
+                stored.insert(command.action.to_string(), chords.iter().map(ToString::to_string).collect());
             }
         }
         Shortcuts { bindings: stored }

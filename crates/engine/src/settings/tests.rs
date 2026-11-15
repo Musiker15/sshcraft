@@ -148,7 +148,10 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 13);
+    assert_eq!(SHORTCUT_ACTIONS.len(), 18);
+    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste"] {
+        assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
+    }
     assert!(SHORTCUT_ACTIONS.contains(&"bookmark"));
     assert!(SHORTCUT_ACTIONS.contains(&"toggleSidebar"));
     assert!(SHORTCUT_ACTIONS.contains(&"toggleBroadcast"));

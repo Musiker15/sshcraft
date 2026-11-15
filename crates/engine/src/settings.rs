@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 13] = [
+pub const SHORTCUT_ACTIONS: [&str; 18] = [
     "palette",
     "newTab",
     "closeTab",
@@ -42,6 +42,12 @@ pub const SHORTCUT_ACTIONS: [&str; 13] = [
     "toggleBroadcast",
     "toggleSidebar",
     "bookmark",
+    // Added by the egui window (R4); the names above are the Tauri version's.
+    "hostsPage",
+    "keysPage",
+    "settingsPage",
+    "copy",
+    "paste",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
