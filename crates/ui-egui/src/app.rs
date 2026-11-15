@@ -9,7 +9,6 @@ use crate::i18n::tr;
 use crate::keymap::Bindings;
 use crate::runner::Runner;
 use crate::state::{Page, TabKind, TabState, UiState};
-use crate::theme::Tokens;
 use crate::toasts::Toasts;
 
 pub struct SshcraftApp {
@@ -133,22 +132,7 @@ impl SshcraftApp {
                 crate::commands::run(self, id);
             }
         }
-        let tokens = Tokens::get(&ctx);
-        egui::Panel::left("sshcraft-sidebar").exact_size(180.0).show(ui, |ui| {
-            for (page, label) in [(Page::Hosts, tr("Hosts")), (Page::Keys, tr("Keys")), (Page::Settings, tr("Settings"))] {
-                if ui.selectable_label(self.ui.page == page, label).clicked() {
-                    self.ui.page = page;
-                }
-            }
-        });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(tokens.bg)).show(ui, |ui| {
-            ui.heading(match self.ui.page {
-                Page::Hosts => tr("Hosts"),
-                Page::Keys => tr("Keys"),
-                Page::Settings => tr("Settings"),
-                Page::Tab(_) => tr("Terminal"),
-            });
-        });
+        crate::shell::show(self, ui);
         if let Some(id) = crate::palette::show(self, &ctx) {
             crate::commands::run(self, id);
         }

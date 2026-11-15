@@ -9,6 +9,7 @@ pub mod i18n;
 pub mod keymap;
 pub mod palette;
 pub mod runner;
+pub mod shell;
 pub mod state;
 pub mod terminal;
 #[cfg(feature = "testing")]

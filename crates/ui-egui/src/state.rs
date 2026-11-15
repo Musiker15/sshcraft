@@ -43,4 +43,17 @@ pub struct UiState {
     /// Commands for the active terminal tab, taken by it in the frame.
     #[serde(skip)]
     pub pending: Vec<&'static str>,
+    /// A connection asked for on a page, opened by the frame loop.
+    #[serde(skip)]
+    pub connect_request: Option<ConnectRequest>,
+    #[serde(skip)]
+    pub new_tab_query: String,
+}
+
+/// What a page asked to connect to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectRequest {
+    Host(sshcraft_model::model::HostId),
+    Local,
+    Serial,
 }

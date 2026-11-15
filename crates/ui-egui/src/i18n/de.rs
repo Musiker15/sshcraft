@@ -18,6 +18,10 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Previous tab" => "Vorheriger Tab",
         "Copy the selection" => "Auswahl kopieren",
         "Paste" => "Einfügen",
+        "Close tab" => "Tab schließen",
+        "Local terminal" => "Lokales Terminal",
+        "Serial port" => "Serieller Port",
+        "Search hosts" => "Hosts suchen",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

@@ -1,5 +1,89 @@
 //! Icons drawn in code: no image files, nothing taken from another product.
 
+use egui::{Color32, Painter, Pos2, Rect, Stroke, pos2};
+
+/// The icons of the interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Icon {
+    Host,
+    Group,
+    Key,
+    Identity,
+    Settings,
+    Terminal,
+    Serial,
+    Plus,
+    Search,
+    Close,
+    Warning,
+}
+
+/// Draws `icon` into `rect` (square works best) with lines of `color`.
+pub fn draw(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
+    let s = rect.width().min(rect.height());
+    let c = rect.center();
+    let p = |x: f32, y: f32| -> Pos2 { pos2(c.x + x * s / 2.0, c.y + y * s / 2.0) };
+    let stroke = Stroke::new((s / 12.0).max(1.2), color);
+    let line = |a: Pos2, b: Pos2| painter.line_segment([a, b], stroke);
+    match icon {
+        Icon::Host => {
+            painter.rect_stroke(Rect::from_min_max(p(-0.8, -0.7), p(0.8, 0.35)), 2.0, stroke, egui::StrokeKind::Inside);
+            line(p(-0.35, 0.75), p(0.35, 0.75));
+            line(p(0.0, 0.35), p(0.0, 0.75));
+        }
+        Icon::Group => {
+            let points = vec![p(-0.85, -0.55), p(-0.3, -0.55), p(-0.15, -0.35), p(0.85, -0.35), p(0.85, 0.7), p(-0.85, 0.7)];
+            painter.add(egui::Shape::closed_line(points, stroke));
+        }
+        Icon::Key => {
+            painter.circle_stroke(p(-0.45, 0.0), s * 0.2, stroke);
+            line(p(-0.2, 0.0), p(0.85, 0.0));
+            line(p(0.55, 0.0), p(0.55, 0.35));
+            line(p(0.8, 0.0), p(0.8, 0.3));
+        }
+        Icon::Identity => {
+            painter.circle_stroke(p(0.0, -0.35), s * 0.18, stroke);
+            painter.add(egui::Shape::line(vec![p(-0.65, 0.8), p(-0.5, 0.25), p(0.5, 0.25), p(0.65, 0.8)], stroke));
+        }
+        Icon::Settings => {
+            painter.circle_stroke(c, s * 0.18, stroke);
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                let (x, y) = (a.cos(), a.sin());
+                line(p(x * 0.5, y * 0.5), p(x * 0.8, y * 0.8));
+            }
+        }
+        Icon::Terminal => {
+            painter.rect_stroke(Rect::from_min_max(p(-0.85, -0.7), p(0.85, 0.7)), 2.0, stroke, egui::StrokeKind::Inside);
+            painter.add(egui::Shape::line(vec![p(-0.5, -0.25), p(-0.2, 0.0), p(-0.5, 0.25)], stroke));
+            line(p(0.0, 0.3), p(0.45, 0.3));
+        }
+        Icon::Serial => {
+            painter.rect_stroke(Rect::from_min_max(p(-0.7, -0.35), p(0.7, 0.35)), 2.0, stroke, egui::StrokeKind::Inside);
+            for x in [-0.35, 0.0, 0.35] {
+                painter.circle_filled(p(x, 0.0), s * 0.05, color);
+            }
+        }
+        Icon::Plus => {
+            line(p(-0.6, 0.0), p(0.6, 0.0));
+            line(p(0.0, -0.6), p(0.0, 0.6));
+        }
+        Icon::Search => {
+            painter.circle_stroke(p(-0.15, -0.15), s * 0.25, stroke);
+            line(p(0.2, 0.2), p(0.7, 0.7));
+        }
+        Icon::Close => {
+            line(p(-0.5, -0.5), p(0.5, 0.5));
+            line(p(-0.5, 0.5), p(0.5, -0.5));
+        }
+        Icon::Warning => {
+            painter.add(egui::Shape::closed_line(vec![p(0.0, -0.8), p(0.85, 0.7), p(-0.85, 0.7)], stroke));
+            line(p(0.0, -0.3), p(0.0, 0.2));
+            painter.circle_filled(p(0.0, 0.45), s * 0.05, color);
+        }
+    }
+}
+
 /// The app icon: a prompt (`>_`) in SSHCraft's green on a dark rounded square, 64 by 64 pixels.
 pub fn app_icon() -> egui::IconData {
     const SIZE: usize = 64;
