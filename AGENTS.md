@@ -195,6 +195,8 @@ Each has a test where it can have one.
   <path> inspect` ([docs/control-protocol.md](docs/control-protocol.md)).
 - `cargo xtask perf` runs the performance budgets of the terminal and the window in a release
   build.
+- `cargo xtask linux` runs clippy and the tests on Linux in a Docker container (from Windows or
+  macOS); macOS and FreeBSD run in CI.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.
 
 ## Roadmap
