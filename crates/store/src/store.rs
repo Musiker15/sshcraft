@@ -44,6 +44,9 @@ pub struct KeyRecord {
     pub certificate: Option<String>,
 }
 
+/// The tables whose rows are sealed with the vault's master key.
+pub const SEALED_TABLES: [&str; 7] = ["keys", "passwords", "command_history", "snippets", "session_logs", "session_log_chunks", "agent_log"];
+
 pub struct Store {
     pub(crate) conn: rusqlite::Connection,
 }
@@ -559,6 +562,17 @@ impl Store {
 
     pub fn has_key_records(&self) -> Result<bool, StoreError> {
         Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM keys)", [], |r| r.get(0))?)
+    }
+
+    /// Whether anything sealed with the vault's master key is stored: keys, passwords, command
+    /// history, snippets, session logs or the agent log. Without the master key all of it would
+    /// be unreadable, so a new master key must never be made while any of it exists.
+    pub fn has_sealed_records(&self) -> Result<bool, StoreError> {
+        let mut any = false;
+        for table in SEALED_TABLES {
+            any |= self.conn.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table})"), [], |r| r.get::<_, bool>(0))?;
+        }
+        Ok(any)
     }
 
     fn query_keys(&self, tail: &str, params: &[&dyn rusqlite::ToSql]) -> Result<Vec<KeyRecord>, StoreError> {

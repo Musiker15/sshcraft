@@ -563,6 +563,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Services" => "Dienste",
         "Zoom" => "Zoomen",
         "Bring All to Front" => "Alle nach vorne bringen",
+        "SSHCraft's entry in the system keyring is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: restore the keyring entry or the data folder from a backup." => {
+            "Der Eintrag von SSHCraft im Schlüsselbund des Systems fehlt, deshalb lassen sich gespeicherte Schlüssel, Passwörter und Protokolle nicht lesen. Ersetzt wurde nichts: Stelle den Eintrag oder den Datenordner aus einer Sicherung wieder her."
+        }
+        "The system keyring could not be opened, so keys and passwords are not available. On Linux a Secret Service (GNOME Keyring or KWallet) must run." => {
+            "Der Schlüsselbund des Systems ließ sich nicht öffnen, deshalb sind Schlüssel und Passwörter nicht verfügbar. Unter Linux muss ein Secret Service laufen (GNOME Keyring oder KWallet)."
+        }
         _ => return None,
     })
 }

@@ -91,6 +91,20 @@ impl SshcraftApp {
         }
     }
 
+    /// Says at the start when the vault did not open (`OpenReport::vault`): keys and passwords
+    /// are then unavailable, and the user should learn why before an action fails.
+    pub fn report_vault(&mut self, vault: Result<(), sshcraft_engine::ErrorCode>) {
+        match vault {
+            Ok(()) => {}
+            Err(sshcraft_engine::ErrorCode::MasterKeyMissing) => self.toasts.error(tr(
+                "SSHCraft's entry in the system keyring is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: restore the keyring entry or the data folder from a backup.",
+            )),
+            Err(_) => self.toasts.error(tr(
+                "The system keyring could not be opened, so keys and passwords are not available. On Linux a Secret Service (GNOME Keyring or KWallet) must run.",
+            )),
+        }
+    }
+
     /// Keeps `runtime` alive as long as the app (for tests that build the runtime themselves).
     pub fn keep_runtime(&mut self, runtime: std::sync::Arc<tokio::runtime::Runtime>) {
         self._runtime = Some(runtime);

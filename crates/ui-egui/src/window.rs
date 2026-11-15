@@ -161,7 +161,7 @@ pub fn resize_edges(app: &SshcraftApp, ctx: &egui::Context) {
         return;
     }
     let full = ctx.content_rect();
-    let id = egui::Id::new("sshcraft-resize-edges");
+    let id = egui::Id::unique("sshcraft-resize-edges");
     egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(full.min).interactable(true).show(ctx, |ui| {
         for (i, (direction, band)) in bands(full).into_iter().enumerate() {
             let response = ui.interact(band, id.with(i), Sense::click_and_drag()).on_hover_cursor(cursor(direction));

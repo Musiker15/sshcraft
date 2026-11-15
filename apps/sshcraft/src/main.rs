@@ -145,10 +145,10 @@ fn main() -> ExitCode {
     let window = WindowHandle::default();
     let config =
         SessionConfig::for_app(data_dir, runtime.handle().clone(), Arc::new(WindowPresence(window.clone())), platform::authenticator(window.clone()));
-    let session = {
+    let (session, vault) = {
         let _inside = runtime.enter();
         match Session::open(config) {
-            Ok((session, _report)) => session,
+            Ok((session, report)) => (session, report.vault),
             Err(e) => return show_problem(start_problem(&e, system_language())),
         }
     };
@@ -165,6 +165,7 @@ fn main() -> ExitCode {
             window.take_from(cc);
             let mut app = SshcraftApp::new(session.clone(), &cc.egui_ctx);
             app.window_frame = window_frame;
+            app.report_vault(vault);
             #[cfg(target_os = "macos")]
             sshcraft_ui_egui::menus::install_native(&mut app, &cc.egui_ctx);
             let control = match &control_args {
