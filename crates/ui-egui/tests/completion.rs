@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use sshcraft_ui_egui::completion::{PathCache, Suggestion, path_word, suggest};
+use sshcraft_ui_egui::completion::{PathCache, Suggestion, path_word, resolve_dir, suggest};
 use sshcraft_ui_egui::data::SnippetRow;
 
 fn snippet(name: &str, content: &str) -> SnippetRow {
@@ -61,6 +61,15 @@ fn paths_need_a_slash() {
     assert_eq!(path_word("vim conf/app.y"), Some(("conf/".to_string(), "app.y".to_string())));
     assert_eq!(path_word("ls foo"), None);
     assert_eq!(path_word("ls "), None);
+}
+
+#[test]
+fn relative_paths_start_at_the_shell_directory() {
+    assert_eq!(resolve_dir("src/", Some("/srv/app")).as_deref(), Some("/srv/app/src/"));
+    assert_eq!(resolve_dir("./", Some("/srv/app/")).as_deref(), Some("/srv/app/./"));
+    assert_eq!(resolve_dir("/etc/", Some("/srv")).as_deref(), Some("/etc/"));
+    assert_eq!(resolve_dir("~/x/", None).as_deref(), Some("~/x/"));
+    assert_eq!(resolve_dir("src/", None), None, "without the shell's directory a relative path is not guessed");
 }
 
 #[test]

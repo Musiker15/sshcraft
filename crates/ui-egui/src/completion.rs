@@ -75,6 +75,15 @@ pub fn path_word(line: &str) -> Option<(String, String)> {
     Some((dir.to_string(), prefix.to_string()))
 }
 
+/// The directory to list for the path word's `dir`: as it is when absolute or under `~`,
+/// else under the shell's directory `cwd` (from OSC 7); `None` without one.
+pub fn resolve_dir(dir: &str, cwd: Option<&str>) -> Option<String> {
+    if dir.starts_with('/') || dir.starts_with('~') {
+        return Some(dir.to_string());
+    }
+    cwd.map(|cwd| format!("{}/{dir}", cwd.trim_end_matches('/')))
+}
+
 /// Directory listings of one pane, each used for [`PATH_TTL`].
 #[derive(Debug, Clone, Default)]
 pub struct PathCache {

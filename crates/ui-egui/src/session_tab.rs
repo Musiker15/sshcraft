@@ -753,7 +753,7 @@ fn update_suggestions(app: &mut SshcraftApp, id: SessionId) {
     };
     let now = std::time::Instant::now();
     let mut paths: Vec<String> = Vec::new();
-    if let Some((dir, _)) = crate::completion::path_word(&line) {
+    if let Some(dir) = crate::completion::path_word(&line).and_then(|(dir, _)| crate::completion::resolve_dir(&dir, tab.cwd.as_deref())) {
         match tab.paths.get(&dir, now) {
             Some(names) => paths = names.to_vec(),
             None if tab.path_pending.as_deref() != Some(dir.as_str()) => {
