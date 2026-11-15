@@ -97,3 +97,10 @@ fn the_interface_speaks_the_chosen_language() {
     assert_eq!(sshcraft_ui_egui::i18n::tr("Settings"), "Settings");
     assert_eq!(sshcraft_ui_egui::i18n::trf("{count} hosts", &[("count", "3")]), "3 hosts");
 }
+
+#[test]
+fn every_command_label_has_german() {
+    let missing: Vec<&str> =
+        sshcraft_ui_egui::commands::ui_commands().iter().map(|c| c.label).filter(|label| de::translate(label).is_none()).collect();
+    assert!(missing.is_empty(), "no German for the labels {missing:?}");
+}

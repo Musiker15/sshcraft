@@ -8,6 +8,16 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Settings" => "Einstellungen",
         "Terminal" => "Terminal",
         "{count} hosts" => "{count} Hosts",
+        "Open the command palette" => "Befehlspalette öffnen",
+        "Command palette" => "Befehlspalette",
+        "Type a command" => "Befehl eingeben",
+        "No command matches" => "Kein Befehl passt",
+        "New tab" => "Neuer Tab",
+        "Close the current tab" => "Aktuellen Tab schließen",
+        "Next tab" => "Nächster Tab",
+        "Previous tab" => "Vorheriger Tab",
+        "Copy the selection" => "Auswahl kopieren",
+        "Paste" => "Einfügen",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

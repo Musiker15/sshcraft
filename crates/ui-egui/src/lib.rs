@@ -3,8 +3,11 @@
 //! engine's state and act through [`runner::Runner`]; nothing here blocks a frame on the engine.
 
 pub mod app;
+pub mod commands;
 pub mod data;
 pub mod i18n;
+pub mod keymap;
+pub mod palette;
 pub mod runner;
 pub mod state;
 pub mod terminal;

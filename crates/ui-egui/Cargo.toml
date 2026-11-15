@@ -18,6 +18,7 @@ sshcraft-model = { workspace = true }
 egui = { workspace = true, features = ["default_fonts"] }
 egui_system_font_provider = { workspace = true }
 craft-ui = { workspace = true }
+craft-keymap = { workspace = true }
 fontique = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
