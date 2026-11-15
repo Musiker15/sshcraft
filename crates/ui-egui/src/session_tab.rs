@@ -64,6 +64,8 @@ pub struct SessionTab {
     recording: Option<bool>,
     /// The bell rang, or the cursor's line asks for a secret or a yes/no.
     waiting: bool,
+    /// The terminal view's widget, to know whether it has the keyboard.
+    view: Option<egui::Id>,
 }
 
 impl SessionTab {
@@ -261,6 +263,7 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 focus: follow,
                 unseen: false,
                 waiting: false,
+                view: None,
                 cwd: None,
                 start,
                 capture: crate::history::Capture::default(),
@@ -838,8 +841,10 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             _ => {}
         }
     }
-    // The suggestion list takes its keys before the terminal sees them.
-    let taken = if focused && !blocked { completion_keys(&ctx, tab) } else { None };
+    // The suggestion list takes its keys before the terminal sees them, and only while the
+    // terminal has the keyboard (not a search field or a dialog).
+    let has_keys = tab.view.is_some_and(|v| ctx.memory(|m| m.has_focus(v)));
+    let taken = if focused && !blocked && has_keys { completion_keys(&ctx, tab) } else { None };
     let line_context = crate::history::LineContext {
         prompt: before_cursor(&tab.term).0,
         above: before_cursor(&tab.term).1,
@@ -855,6 +860,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let first = focused && std::mem::take(&mut tab.focus);
     let switched = focused && app_shown_changed(&mut app.ui.shown_terminal, id);
     let Some(tab) = app.terminals.get_mut(&id) else { return };
+    tab.view = Some(response.response.id);
     if blocked || (!focused && response.response.has_focus()) {
         // A question is open: what is typed belongs to it, never to the shell behind it.
         response.response.surrender_focus();

@@ -276,6 +276,29 @@ mod in_the_window {
     }
 
     #[test]
+    fn the_list_leaves_keys_alone_while_the_keyboard_is_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut h, session) = app_harness(dir.path());
+        let (id, host, _server) = connected_pane(&mut h, &session);
+        kept_line(&mut h, &session, host, "echo kept-line");
+        sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.sidebar");
+        h.run_steps(3);
+        type_ec(&mut h, id);
+        until(&mut h, "the suggestion", |app| suggests(app, id, "echo kept-line"));
+        // The keyboard goes to the sidebar's search field.
+        h.get_by_role(egui::accesskit::Role::TextInput).click();
+        h.run_steps(2);
+        key(&mut h, Key::ArrowDown);
+        key(&mut h, Key::Enter);
+        for _ in 0..15 {
+            std::thread::sleep(Duration::from_millis(20));
+            h.run_steps(1);
+        }
+        assert_eq!(h.state().terminals[&id].selected(), None, "Down went to the search field");
+        assert!(!screen(h.state(), id).contains("echo kept-line"), "Enter took nothing into the terminal");
+    }
+
+    #[test]
     fn history_off_keeps_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let (mut h, session) = app_harness(dir.path());
