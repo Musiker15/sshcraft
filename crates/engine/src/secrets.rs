@@ -75,9 +75,11 @@ impl SecretSource for CliSecrets {
         };
         let (status, out, err) =
             tokio::time::timeout(FETCH_TIMEOUT, run).await.map_err(|_| format!("{} did not answer in time", reference.manager.program()))??;
+        // What the program says on failure stays out of the result: it can name vaults and
+        // items, and the result may reach an agent. The program shows it in a terminal.
         if !status.success() {
-            let said = String::from_utf8_lossy(&err).trim().to_owned();
-            return Err(if said.is_empty() { format!("{} failed ({status})", reference.manager.program()) } else { said });
+            let _ = err;
+            return Err(format!("{} could not give the password ({status}); run it in a terminal to see why", reference.manager.program()));
         }
         let text = std::str::from_utf8(&out).map_err(|_| "the password is not text".to_owned())?;
         let password = text.trim_end_matches(['\r', '\n']);

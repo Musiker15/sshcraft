@@ -25,7 +25,23 @@ pub fn code(secret: &[u8], unix: u64) -> String {
 pub fn decode_secret(text: &str) -> Option<Vec<u8>> {
     let text = text.trim();
     let base32 = match text.strip_prefix("otpauth://") {
-        Some(rest) => rest.split_once('?')?.1.split('&').find_map(|p| p.strip_prefix("secret="))?,
+        Some(rest) => {
+            let query = rest.split_once('?')?.1;
+            // Only the setting the codes are made with: SHA-1, 6 digits, 30 seconds. A link that
+            // asks for another would give wrong codes, so it is refused.
+            for (name, value) in query.split('&').filter_map(|p| p.split_once('=')) {
+                let fine = match name.to_ascii_lowercase().as_str() {
+                    "algorithm" => value.eq_ignore_ascii_case("SHA1"),
+                    "digits" => value == "6",
+                    "period" => value == "30",
+                    _ => true,
+                };
+                if !fine {
+                    return None;
+                }
+            }
+            query.split('&').find_map(|p| p.strip_prefix("secret="))?
+        }
         None => text,
     };
     let clean: String = base32.chars().filter(|c| !c.is_whitespace() && *c != '-' && *c != '=').map(|c| c.to_ascii_uppercase()).collect();
@@ -83,6 +99,10 @@ mod tests {
         assert_eq!(decode_secret("gezd gnbv gy3t qojq gezd gnbv gy3t qojq").unwrap(), b"12345678901234567890");
         assert_eq!(decode_secret(&format!("otpauth://totp/me@web?secret={b32}&issuer=web")).unwrap(), b"12345678901234567890");
         assert!(decode_secret("not base32 1890!").is_none());
+        assert!(decode_secret(&format!("otpauth://totp/x?secret={b32}&algorithm=SHA1&digits=6&period=30")).is_some());
+        for other in ["algorithm=SHA256", "digits=8", "period=60"] {
+            assert!(decode_secret(&format!("otpauth://totp/x?secret={b32}&{other}")).is_none(), "{other}");
+        }
         assert!(decode_secret("").is_none());
         assert!(decode_secret(&"A".repeat(MAX_SECRET + 1)).is_none());
     }
