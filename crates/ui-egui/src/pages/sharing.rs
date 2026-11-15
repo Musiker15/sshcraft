@@ -324,22 +324,25 @@ pub fn remove_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     if go {
         app.ui.shares.removing = None;
-        let remaining: Vec<Value> = app
-            .ui
-            .shares
-            .list
-            .iter()
-            .flatten()
-            .find(|s| text(s, "area") == area)
-            .and_then(|s| s.get("grants").and_then(Value::as_array).cloned())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|g| g.get("account") != Some(&account))
-            .map(|g| json!({ "account": g.get("account"), "role": g.get("role") }))
-            .collect();
-        app.runner.run(
-            "share.set_grants",
-            json!({ "server": server, "area": area, "grants": remaining }),
+        let session = app.session.clone();
+        app.runner.run_future(
+            async move {
+                // The recipients as they are now, not as the list showed them: one added on
+                // another device since stays.
+                let list = session.execute(sshcraft_engine::Caller::User, "share.list", json!({ "server": server })).await?;
+                let remaining: Vec<Value> = list
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|s| text(s, "area") == area)
+                    .and_then(|s| s.get("grants").and_then(Value::as_array).cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|g| g.get("account") != Some(&account))
+                    .map(|g| json!({ "account": g.get("account"), "role": g.get("role") }))
+                    .collect();
+                session.execute(sshcraft_engine::Caller::User, "share.set_grants", json!({ "server": server, "area": area, "grants": remaining })).await
+            },
             Box::new(|app, result| {
                 if let Err(e) = result {
                     app.toasts.error(&e.to_string());

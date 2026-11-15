@@ -69,6 +69,8 @@ struct Two {
     server: String,
     group: String,
     _bob: (tempfile::TempDir, Session),
+    origin: String,
+    api_key: String,
     _stop: tokio::sync::oneshot::Sender<()>,
     _dirs: (tempfile::TempDir, tempfile::TempDir),
 }
@@ -93,7 +95,7 @@ fn two() -> Two {
         json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "web-01", "group_id": group, "settings": { "address": "192.0.2.1" } } }),
     );
     run(&alice, "item.move", json!({ "kind": "group", "item_id": group, "location": server }));
-    Two { h, alice, server, group, _bob: (bob_dir, bob), _stop: stop, _dirs: (dir, server_dir) }
+    Two { h, alice, server, group, _bob: (bob_dir, bob), origin, api_key, _stop: stop, _dirs: (dir, server_dir) }
 }
 
 fn find_bob(t: &mut Two) {
@@ -127,6 +129,66 @@ fn a_group_is_shared_after_the_safety_number_is_ticked() {
         t.h.run_steps(1);
     }
     assert_eq!(shares(&t)[0]["grants"].as_array().map(Vec::len), Some(1));
+}
+
+/// Shares the group with Bob through the dialog.
+fn share_with_bob(t: &mut Two) {
+    find_bob(t);
+    t.h.get_by_label("I compared the safety number with Bob").click();
+    t.h.run_steps(2);
+    t.h.get_by_label("Share").click();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while shares(t).is_empty() {
+        assert!(Instant::now() < deadline, "no share; messages: {:?}", t.h.state().toasts.texts());
+        std::thread::sleep(Duration::from_millis(20));
+        t.h.run_steps(1);
+    }
+}
+
+#[test]
+fn removing_a_recipient_keeps_one_added_since_the_list_was_read() {
+    let mut t = two();
+    let carol_dir = tempfile::tempdir().unwrap();
+    let carol = {
+        let _in = t.alice.runtime().enter();
+        Session::open(sshcraft_engine::SessionConfig::for_tests(carol_dir.path())).unwrap().0
+    };
+    account(&carol, &t.origin, &t.api_key, "Carol", "carol@example.org");
+    share_with_bob(&mut t);
+    t.h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
+    t.h.state_mut().ui.settings.section = sshcraft_ui_egui::pages::settings::Section::Sync;
+    t.h.run_steps(2);
+    t.h.get_by_label("Shares").click();
+    until(&mut t.h, "the shares", |app| app.ui.shares.list.as_ref().is_some_and(|l| !l.is_empty()));
+    // Another device adds Carol; the window still shows only Bob.
+    let found = run(&t.alice, "share.find_recipient", json!({ "server": t.server, "email": "carol@example.org" }));
+    run(&t.alice, "share.confirm_recipient", json!({ "server": t.server, "email": "carol@example.org", "account": found["account"] }));
+    let share = shares(&t)[0].clone();
+    let bob = share["grants"][0].clone();
+    run(
+        &t.alice,
+        "share.set_grants",
+        json!({ "server": t.server, "area": share["area"], "grants": [
+            { "account": bob["account"], "role": bob["role"] },
+            { "account": found["account"], "role": "read" },
+        ] }),
+    );
+    assert_eq!(shares(&t)[0]["grants"].as_array().map(Vec::len), Some(2));
+    t.h.get_by_label("Remove recipient").click();
+    t.h.run_steps(2);
+    t.h.get_by_label("Remove").click();
+    let emails = |t: &Two| -> Vec<String> {
+        shares(t).iter().flat_map(|s| s["grants"].as_array().cloned().unwrap_or_default()).filter_map(|g| g["email"].as_str().map(str::to_string)).collect()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while emails(&t).contains(&"bob@example.org".to_string()) {
+        assert!(Instant::now() < deadline, "Bob is still a recipient");
+        std::thread::sleep(Duration::from_millis(20));
+        t.h.run_steps(1);
+    }
+    until(&mut t.h, "the removal", |app| app.runner.busy() == 0);
+    assert_eq!(emails(&t), ["carol@example.org"], "Carol stays, Bob goes");
+    drop(carol);
 }
 
 #[test]
