@@ -11,6 +11,9 @@ use zeroize::Zeroizing;
 
 use crate::{AGENT_SIGN_TIMEOUT, Credential, SIGNER_TIMEOUT, SshError, agent_identities, protocol};
 
+/// Makes the current one-time code (TOTP) when a server asks for one.
+pub type CodeMaker = std::sync::Arc<dyn Fn() -> Zeroizing<String> + Send + Sync>;
+
 /// How to sign in on one host: a key, a stored password, both or neither (then the user is asked
 /// where the server allows it).
 #[derive(Default)]
@@ -20,6 +23,8 @@ pub struct Auth {
     /// An OpenSSH user certificate for `key`. Offered first while it is valid; the key alone
     /// follows when the server turns it down.
     pub certificate: Option<Certificate>,
+    /// Answers one question for a one-time code.
+    pub totp: Option<CodeMaker>,
 }
 
 impl Auth {
@@ -209,6 +214,7 @@ pub(crate) async fn authenticate<H: client::Handler>(
     }
 
     let mut stored = auth.password;
+    let mut totp = auth.totp;
     if let Some(password) = &stored
         && flow.offers(MethodKind::Password)
     {
@@ -239,9 +245,17 @@ pub(crate) async fn authenticate<H: client::Handler>(
                 }
                 KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts } => {
                     let single_hidden = prompts.len() == 1 && !prompts[0].echo;
+                    // A question for a one-time code is answered by the TOTP secret once; it
+                    // never gets the stored password, and a password question never the code.
+                    let code_prompt = prompts.len() == 1 && sshcraft_model::totp::is_code_prompt(&prompts[0].prompt);
                     let answers: Vec<Zeroizing<String>> = if prompts.is_empty() {
                         Vec::new()
-                    } else if single_hidden && let Some(password) = stored.take() {
+                    } else if code_prompt && let Some(make) = totp.take() {
+                        vec![make()]
+                    } else if single_hidden
+                        && !code_prompt
+                        && let Some(password) = stored.take()
+                    {
                         vec![password]
                     } else {
                         asked += 1;

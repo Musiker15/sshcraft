@@ -5842,8 +5842,10 @@ name = "sshcraft-model"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "hmac",
  "serde",
  "serde_json",
+ "sha1 0.11.0",
  "thiserror 2.0.21",
  "uuid",
 ]

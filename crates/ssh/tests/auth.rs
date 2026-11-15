@@ -56,7 +56,7 @@ fn params(port: u16, auth: Auth) -> ConnectParams {
 }
 
 fn with_password(password: &str) -> Auth {
-    Auth { key: None, password: Some(Zeroizing::new(password.to_owned())), certificate: None }
+    Auth { key: None, password: Some(Zeroizing::new(password.to_owned())), certificate: None, totp: None }
 }
 
 fn round(lines: &[(&str, bool, &str)]) -> Vec<(String, bool, String)> {
@@ -128,7 +128,7 @@ async fn key_then_otp_partial_success() {
     })
     .await;
     let prompter = Recording::new(vec![Some(vec!["424242"])]);
-    let auth = Auth { key: Some(Credential::Key(k)), password: None, certificate: None };
+    let auth = Auth { key: Some(Credential::Key(k)), password: None, certificate: None, totp: None };
     run(&server, auth, prompter.clone()).await.unwrap();
     assert_eq!(prompter.asked(), 1);
 }
@@ -137,7 +137,7 @@ async fn key_then_otp_partial_success() {
 async fn cancel_gives_auth_cancelled() {
     let server = TestServer::start_with(TestAuth { kbd: vec![round(&[("Code: ", true, "1")])], ..Default::default() }).await;
     let prompter = Recording::new(vec![None]);
-    let err = run(&server, Auth { key: None, password: None, certificate: None }, prompter).await.unwrap_err();
+    let err = run(&server, Auth { key: None, password: None, certificate: None, totp: None }, prompter).await.unwrap_err();
     assert_eq!(err, SshError::AuthCancelled);
 }
 
@@ -145,7 +145,7 @@ async fn cancel_gives_auth_cancelled() {
 async fn no_stored_password_asks_once_for_password_method() {
     let server = TestServer::start_with(TestAuth { password: Some("typed".into()), ..Default::default() }).await;
     let prompter = Recording::new(vec![Some(vec!["typed"])]);
-    run(&server, Auth { key: None, password: None, certificate: None }, prompter.clone()).await.unwrap();
+    run(&server, Auth { key: None, password: None, certificate: None, totp: None }, prompter.clone()).await.unwrap();
     let seen = prompter.seen.lock().unwrap();
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].prompts.len(), 1);
@@ -156,7 +156,7 @@ async fn no_stored_password_asks_once_for_password_method() {
 async fn wrong_typed_password_is_rejected() {
     let server = TestServer::start_with(TestAuth { password: Some("typed".into()), ..Default::default() }).await;
     let prompter = Recording::new(vec![Some(vec!["nope"])]);
-    let err = run(&server, Auth { key: None, password: None, certificate: None }, prompter).await.unwrap_err();
+    let err = run(&server, Auth { key: None, password: None, certificate: None, totp: None }, prompter).await.unwrap_err();
     assert_eq!(err, SshError::PasswordRejected);
 }
 
@@ -165,7 +165,7 @@ async fn key_auth_unchanged() {
     let k = key();
     let server = TestServer::start(k.public_key().clone()).await;
     let prompter = Recording::new(vec![]);
-    let auth = Auth { key: Some(Credential::Key(k)), password: None, certificate: None };
+    let auth = Auth { key: Some(Credential::Key(k)), password: None, certificate: None, totp: None };
     run(&server, auth, prompter.clone()).await.unwrap();
     assert_eq!(prompter.asked(), 0);
 }
@@ -173,7 +173,7 @@ async fn key_auth_unchanged() {
 #[tokio::test]
 async fn wrong_key_without_other_methods_fails() {
     let server = TestServer::start(key().public_key().clone()).await;
-    let auth = Auth { key: Some(Credential::Key(key())), password: None, certificate: None };
+    let auth = Auth { key: Some(Credential::Key(key())), password: None, certificate: None, totp: None };
     let err = run(&server, auth, Recording::new(vec![])).await.unwrap_err();
     assert_eq!(err, SshError::AuthFailed);
 }
@@ -314,4 +314,34 @@ async fn rsa_certificate_signs_with_sha2() {
     let auth = Auth { key: Some(Credential::Key(k)), certificate: Some(cert), ..Default::default() };
     run(&server, auth, Recording::new(vec![])).await.unwrap();
     assert_eq!(server.received_certificates(), 1);
+}
+
+fn with_code(code: &'static str) -> Auth {
+    Auth { totp: Some(Arc::new(move || Zeroizing::new(code.to_owned()))), ..Default::default() }
+}
+
+#[tokio::test]
+async fn a_code_prompt_gets_the_totp() {
+    let server = TestServer::start_with(TestAuth { kbd: vec![round(&[("Verification code: ", false, "123456")])], ..Default::default() }).await;
+    let prompter = Recording::new(vec![]);
+    run(&server, with_code("123456"), prompter.clone()).await.unwrap();
+    assert_eq!(prompter.asked(), 0);
+}
+
+#[tokio::test]
+async fn a_password_prompt_never_gets_the_code() {
+    let server = TestServer::start_with(TestAuth { kbd: vec![round(&[("Password: ", false, "typed")])], ..Default::default() }).await;
+    let prompter = Recording::new(vec![Some(vec!["typed"])]);
+    run(&server, with_code("123456"), prompter.clone()).await.unwrap();
+    assert_eq!(prompter.asked(), 1, "the password was asked, not answered with the code");
+}
+
+/// A stored password never answers a one-time code question (it used to, as a single hidden
+/// question).
+#[tokio::test]
+async fn a_code_prompt_never_gets_the_stored_password() {
+    let server = TestServer::start_with(TestAuth { kbd: vec![round(&[("Verification code: ", false, "654321")])], ..Default::default() }).await;
+    let prompter = Recording::new(vec![Some(vec!["654321"])]);
+    run(&server, with_password(STORED), prompter.clone()).await.unwrap();
+    assert_eq!(prompter.asked(), 1);
 }

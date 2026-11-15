@@ -100,7 +100,9 @@ pub fn new_host(app: &mut SshcraftApp) {
 
 pub fn edit_host(app: &mut SshcraftApp, id: HostId) {
     if let Some(row) = app.data.hosts.iter().find(|r| r.host.id == id) {
-        app.ui.host_form = Some(HostForm::new(row.host.clone(), true, row.has_password));
+        let mut form = HostForm::new(row.host.clone(), true, row.has_password);
+        form.has_totp = row.has_totp;
+        app.ui.host_form = Some(form);
     }
 }
 

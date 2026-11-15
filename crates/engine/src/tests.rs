@@ -590,3 +590,26 @@ async fn an_entered_password_reference_is_allowed_for_its_address() {
     // Another address is another approval.
     assert!(!session.store().command_approved(&crate::secrets::approval_digest(&reference, "evil.org", 22)).unwrap());
 }
+
+#[tokio::test]
+async fn a_totp_secret_must_be_base32() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("web.org".into()), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    let owner = json!({ "kind": "host_totp", "id": host.id });
+    assert!(session.execute(Caller::User, "password.set", json!({ "owner": owner, "secret": "not base32!" })).await.is_err());
+    session.execute(Caller::User, "password.set", json!({ "owner": owner, "secret": "GEZDGNBVGY3TQOJQ" })).await.unwrap();
+    let listed = session.execute(Caller::User, "host.list", Value::Null).await.unwrap();
+    assert_eq!(listed[0]["has_totp"], true);
+    assert!(listed[0]["settings"].get("totp").is_none(), "the id is not shown");
+}

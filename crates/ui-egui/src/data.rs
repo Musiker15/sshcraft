@@ -41,6 +41,8 @@ pub struct HostRow {
     pub has_password: bool,
     #[serde(default)]
     pub proxy_has_password: bool,
+    #[serde(default)]
+    pub has_totp: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

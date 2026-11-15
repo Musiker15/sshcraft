@@ -987,6 +987,22 @@ async fn hop(ctx: &Context, resolved: &ResolvedHost, opened: &OpenedKeys) -> Res
             agent: ctx.agent.connect().await.map_err(|e| end_error(ErrorCode::AgentUnavailable, Some(e.to_string())))?,
         }),
     };
+    // The TOTP secret becomes a maker of the code of the moment it is asked for.
+    let totp = match resolved.totp {
+        Some(id) => match stored_password(ctx, id).await? {
+            Some(text) => {
+                let secret =
+                    zeroize::Zeroizing::new(sshcraft_model::totp::decode_secret(&text).ok_or_else(|| end_error(ErrorCode::TotpInvalid, None))?);
+                let make: sshcraft_ssh::CodeMaker = Arc::new(move || {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                    zeroize::Zeroizing::new(sshcraft_model::totp::code(&secret, now))
+                });
+                Some(make)
+            }
+            None => None,
+        },
+        None => None,
+    };
     let password = match (&resolved.password_ref, resolved.password) {
         (Some(reference), _) => Some(referenced_password(ctx, resolved, reference).await?),
         (None, Some(id)) => stored_password(ctx, id).await?,
@@ -997,7 +1013,7 @@ async fn hop(ctx: &Context, resolved: &ResolvedHost, opened: &OpenedKeys) -> Res
         address: resolved.address.clone(),
         port: resolved.port,
         username: resolved.username.clone(),
-        auth: Auth { key, password, certificate },
+        auth: Auth { key, password, certificate, totp },
     })
 }
 

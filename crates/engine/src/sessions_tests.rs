@@ -2005,3 +2005,29 @@ async fn keepassxc_asks_the_database_password_once() {
     let calls = fake.calls.lock().unwrap();
     assert!(calls.iter().all(|(_, db)| db.as_deref() == Some("db-password")));
 }
+
+// ---------- one-time codes (TOTP)
+
+#[tokio::test]
+async fn a_stored_totp_secret_answers_the_code_question() {
+    // "12345678901234567890" in Base32 (the secret of RFC 6238).
+    let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    // Not right at the end of a 30 second window, so the server's code is still the one sent.
+    if now() % 30 > 24 {
+        tokio::time::sleep(Duration::from_secs(31 - now() % 30)).await;
+    }
+    let code = sshcraft_model::totp::code(b"12345678901234567890", now());
+    let server = TestServer::start_with(TestAuth { kbd: vec![vec![("Verification code: ".into(), false, code)]], ..Default::default() }).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let host = w.host(server.port, None, Vec::new());
+    let id = PasswordId::new();
+    w.vault.store_password(&w.store.lock().unwrap(), id, secret, None).unwrap();
+    w.set(host, |s| s.totp = Some(id));
+    let manager = w.manager(Some(w.vault.clone()), trusting(), Arc::new(sshcraft_ssh::NoPrompter), verified());
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+    assert_eq!(connected_count(&sink.statuses()), 1, "{:?}", sink.statuses());
+}

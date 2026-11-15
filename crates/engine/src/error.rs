@@ -71,6 +71,8 @@ pub enum ErrorCode {
     SecretRefNotAllowed,
     /// The password manager could not give the password (not installed, locked, no such item).
     SecretRefFailed,
+    /// The stored TOTP secret is not Base32.
+    TotpInvalid,
     PasswordRejected,
     NotSupported,
     LocalShellFailed,

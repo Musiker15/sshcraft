@@ -25,7 +25,7 @@ fn hop(name: &str, port: u16) -> Hop {
         address: "127.0.0.1".into(),
         port,
         username: "tester".into(),
-        auth: Auth { key: None, password: Some(Zeroizing::new("pw".into())), certificate: None },
+        auth: Auth { key: None, password: Some(Zeroizing::new("pw".into())), certificate: None, totp: None },
     }
 }
 
