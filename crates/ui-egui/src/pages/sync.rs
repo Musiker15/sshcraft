@@ -79,6 +79,11 @@ pub struct SyncView {
 }
 
 impl SyncView {
+    /// Which of the page's dialogs are open, for [`crate::forms::shape`].
+    pub fn dialogs(&self) -> (bool, bool, bool, bool, bool) {
+        (self.create.is_some(), self.join.is_some(), self.created.is_some(), self.revoke.is_some(), self.moving.is_some())
+    }
+
     /// The account key shown now, if one is.
     pub fn account_key(&self) -> Option<&str> {
         self.created.as_ref().map(|c| c.key.as_str())

@@ -34,6 +34,13 @@ pub struct SharesView {
     removing: Option<(String, String, Value, bool)>,
 }
 
+impl SharesView {
+    /// Whether the removal of a recipient waits for its confirmation.
+    pub fn removing_open(&self) -> bool {
+        self.removing.is_some()
+    }
+}
+
 fn text(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
 }

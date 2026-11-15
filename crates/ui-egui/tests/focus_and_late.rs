@@ -270,3 +270,32 @@ fn a_secret_field_keeps_no_undo_history() {
     let current = (egui::text::CCursorRange::one(egui::text::CCursor::new(6)), "s3cret".to_string());
     assert!(!state.undoer().has_undo(&current), "nothing to undo back to");
 }
+
+#[test]
+fn every_dialog_counts_for_late_answers() {
+    use sshcraft_ui_egui::forms::shape;
+    use sshcraft_ui_egui::state::UiState;
+    let closed = shape(&UiState::default());
+    let opened: [(&str, fn(&mut UiState)); 4] = [
+        ("create account", |ui| ui.sync.create = Some(Default::default())),
+        ("join account", |ui| ui.sync.join = Some(Default::default())),
+        ("delete logs", |ui| ui.logs.confirm_delete = Some(vec!["a".into()])),
+        ("a confirmation", |ui| {
+            ui.ask = Some(sshcraft_ui_egui::confirm::Confirm {
+                title: String::new(),
+                body: String::new(),
+                button: "Go",
+                pending: sshcraft_ui_egui::confirm::Pending::DeleteSnippet { id: String::new() },
+            })
+        }),
+    ];
+    for (what, open) in opened {
+        let mut ui = UiState::default();
+        open(&mut ui);
+        assert_ne!(shape(&ui), closed, "{what}");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    sshcraft_ui_egui::pages::sync::ask_move(h.state_mut(), "host", "x", "web");
+    assert_ne!(shape(&h.state().ui), closed, "move to a server");
+}
