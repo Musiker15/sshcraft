@@ -20,8 +20,38 @@ pub fn answer_id(prompt: u64, line: usize) -> egui::Id {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptKind {
-    HostKey { host_name: String, address: String, port: u16, fingerprint: String },
-    Auth { host_name: String, username: String, name: String, instructions: String, lines: Vec<(String, bool)> },
+    HostKey {
+        host_name: String,
+        address: String,
+        port: u16,
+        fingerprint: String,
+    },
+    Auth {
+        host_name: String,
+        username: String,
+        name: String,
+        instructions: String,
+        lines: Vec<(String, bool)>,
+    },
+    /// An AI agent's action waiting for the user's yes or no.
+    Agent {
+        agent: String,
+        action: String,
+        target: String,
+        detail: String,
+    },
+}
+
+/// Why a command an agent wants to run deserves a second look: several lines, over 300
+/// characters, or characters that hide or reorder text.
+pub fn command_warning(detail: &str) -> Option<&'static str> {
+    if detail.contains('\n') || detail.contains('\r') {
+        return Some(tr("This command has more than one line: read every line."));
+    }
+    if detail.chars().count() > 300 {
+        return Some(tr("This command is long: read all of it."));
+    }
+    (crate::widgets::visible(detail) != detail).then_some(tr("This command has hidden or reordering characters, shown as ⟨U+…⟩."))
 }
 
 #[derive(Debug, Clone)]
@@ -69,11 +99,12 @@ impl PromptView {
                     })
                     .unwrap_or_default(),
             },
+            "agent" => PromptKind::Agent { agent: text("agent"), action: text("action"), target: text("target"), detail: text("detail") },
             _ => return None,
         };
         let answers = match &kind {
             PromptKind::Auth { lines, .. } => vec![String::new(); lines.len()],
-            PromptKind::HostKey { .. } => Vec::new(),
+            PromptKind::HostKey { .. } | PromptKind::Agent { .. } => Vec::new(),
         };
         let session = v.get("session").and_then(|s| serde_json::from_value(s.clone()).ok());
         Some(Self { id, session, kind, answers })
@@ -163,6 +194,7 @@ pub fn refresh(app: &mut SshcraftApp) {
 }
 
 enum Answer {
+    Agent(bool),
     HostKey(bool),
     Auth(Option<Vec<String>>),
 }
@@ -229,6 +261,40 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                     }
                 });
             }
+            PromptKind::Agent { agent, action, target, detail } => {
+                ui.heading(tr("An AI agent asks"));
+                ui.add_space(6.0);
+                egui::Grid::new(("sshcraft-agent-question", prompt.id)).num_columns(2).min_col_width(90.0).show(ui, |ui| {
+                    ui.label(tr("Agent"));
+                    ui.label(egui::RichText::new(visible(agent)).strong());
+                    ui.end_row();
+                    ui.label(tr("Action"));
+                    ui.label(visible(action));
+                    ui.end_row();
+                    if !target.is_empty() {
+                        ui.label(tr("Target"));
+                        ui.label(visible(target));
+                        ui.end_row();
+                    }
+                });
+                if !detail.is_empty() {
+                    if let Some(warning) = command_warning(detail) {
+                        ui.label(egui::RichText::new(warning).color(tokens.warning));
+                    }
+                    egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                        ui.label(egui::RichText::new(crate::widgets::visible_lines(detail)).monospace());
+                    });
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(ready, egui::Button::new(tr("Allow"))).clicked() {
+                        answer = Some(Answer::Agent(true));
+                    }
+                    if ui.add_enabled(ready, egui::Button::new(tr("Deny"))).clicked() {
+                        answer = Some(Answer::Agent(false));
+                    }
+                });
+            }
             PromptKind::Auth { host_name, username, name, instructions, lines } => {
                 let who = if username.is_empty() { visible(host_name) } else { format!("{}@{}", visible(username), visible(host_name)) };
                 ui.heading(trf("Sign in to {host}", &[("host", &who)]));
@@ -269,6 +335,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let id = prompt.id;
     app.prompts.withdraw(id);
     match answer {
+        Answer::Agent(allow) => app.run_reported("prompt.agent", json!({ "prompt_id": id, "allow": allow })),
         Answer::HostKey(accept) => app.run_reported("prompt.host_key", json!({ "prompt_id": id, "accept": accept })),
         Answer::Auth(answers) => app.run_reported("prompt.auth", json!({ "prompt_id": id, "answers": answers })),
     }

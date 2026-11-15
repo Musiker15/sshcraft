@@ -23,10 +23,11 @@ pub enum Section {
     Terminal,
     Shortcuts,
     Sync,
+    Agents,
 }
 
 impl Section {
-    const ALL: [Self; 5] = [Self::General, Self::Appearance, Self::Terminal, Self::Shortcuts, Self::Sync];
+    const ALL: [Self; 6] = [Self::General, Self::Appearance, Self::Terminal, Self::Shortcuts, Self::Sync, Self::Agents];
 
     fn label(self) -> &'static str {
         match self {
@@ -35,6 +36,7 @@ impl Section {
             Self::Terminal => tr("Terminal"),
             Self::Shortcuts => tr("Shortcuts"),
             Self::Sync => tr("Sync"),
+            Self::Agents => tr("AI agents"),
         }
     }
 }
@@ -90,6 +92,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         Section::Terminal => terminal(app, ui),
         Section::Shortcuts => shortcuts(app, ui),
         Section::Sync => crate::pages::sync::show(app, ui),
+        Section::Agents => crate::pages::agents::show(app, ui),
     });
 }
 

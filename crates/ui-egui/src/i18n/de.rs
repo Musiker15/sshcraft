@@ -453,6 +453,42 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "Mit dieser Freigabe gingen Schlüssel mit: sie können kopiert worden sein. Ändere sie auf den Servern."
         }
         "Share…" => "Teilen…",
+        // AI agents
+        "View hosts, groups and key names" => "Hosts, Gruppen und Schlüsselnamen ansehen",
+        "Connect and run commands" => "Verbinden und Befehle ausführen",
+        "Create and change hosts and groups" => "Hosts und Gruppen anlegen und ändern",
+        "Import and generate keys" => "Schlüssel importieren und erzeugen",
+        "Sync servers and devices" => "Sync-Server und Geräte",
+        "allowed" => "erlaubt",
+        "asked and allowed" => "gefragt und erlaubt",
+        "asked and denied" => "gefragt und abgelehnt",
+        "blocked" => "gesperrt",
+        "hidden" => "verborgen",
+        "cancelled" => "abgebrochen",
+        "failed" => "fehlgeschlagen",
+        "What AI agents may do through MCP or the command line. \"Ask\" asks in this window; with no window, the answer is no." => {
+            "Was KI-Agenten über MCP oder die Kommandozeile dürfen. \"Fragen\" fragt in diesem Fenster; ohne Fenster ist die Antwort nein."
+        }
+        "Allow" => "Erlauben",
+        "Ask" => "Fragen",
+        "Block" => "Sperren",
+        "Hidden from agents" => "Vor Agenten verborgen",
+        "Nothing. Hide a host or group from its context menu." => "Nichts. Verbirg einen Host oder eine Gruppe über sein Kontextmenü.",
+        "Show again" => "Wieder zeigen",
+        "Log" => "Protokoll",
+        "Clear the log" => "Protokoll leeren",
+        "AI agents" => "KI-Agenten",
+        "This command has more than one line: read every line." => "Dieser Befehl hat mehr als eine Zeile: lies jede Zeile.",
+        "This command is long: read all of it." => "Dieser Befehl ist lang: lies ihn ganz.",
+        "This command has hidden or reordering characters, shown as ⟨U+…⟩." => {
+            "Dieser Befehl hat verborgene oder umordnende Zeichen, gezeigt als ⟨U+…⟩."
+        }
+        "An AI agent asks" => "Ein KI-Agent fragt",
+        "Agent" => "Agent",
+        "Action" => "Aktion",
+        "Target" => "Ziel",
+        "Deny" => "Ablehnen",
+        "Hide from agents" => "Vor Agenten verbergen",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

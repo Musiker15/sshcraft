@@ -96,6 +96,8 @@ impl SshcraftApp {
                 Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
                 Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
+                Ok(EngineEvent::AgentPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "agent")),
+                Ok(EngineEvent::AgentLogChanged) => self.ui.agents.log = None,
                 Ok(EngineEvent::PromptWithdrawn { prompt_id }) => self.prompts.withdraw(prompt_id),
                 Ok(EngineEvent::SyncStatus { server, status }) => {
                     if let Ok(value) = serde_json::to_value(&status) {

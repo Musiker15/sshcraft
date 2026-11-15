@@ -222,6 +222,9 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
             if ui.button(tr("Share…")).clicked() {
                 crate::pages::sharing::ask_share(app, &id.0.to_string(), None);
             }
+            if ui.button(tr("Hide from agents")).clicked() {
+                crate::pages::agents::set_hidden(app, &id.0.to_string(), true);
+            }
             if ui.button(tr("Delete")).clicked() {
                 ask_delete_group(app, id);
             }
@@ -252,6 +255,9 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
             if ui.button(tr("Share…")).clicked() {
                 let group = row.host.group_id.map(|g| g.0.to_string()).unwrap_or_default();
                 crate::pages::sharing::ask_share(app, &group, Some(&id.0.to_string()));
+            }
+            if ui.button(tr("Hide from agents")).clicked() {
+                crate::pages::agents::set_hidden(app, &id.0.to_string(), true);
             }
             if ui.button(tr("Edit")).clicked() {
                 edit_host(app, id);
