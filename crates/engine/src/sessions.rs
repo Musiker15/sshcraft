@@ -430,6 +430,8 @@ impl SessionManager {
     /// The app was locked: keys and passwords need the user's presence again.
     pub async fn relock(&self) {
         self.ctx.gate.relock().await;
+        // KeePassXC database passwords of this run are asked again too.
+        self.ctx.kdbx.lock().unwrap_or_else(PoisonError::into_inner).clear();
     }
 
     /// Asks for the user's presence (to unlock the app); a declined one is an error. Where the
@@ -1220,6 +1222,10 @@ async fn referenced_password(
         }
         ctx.store.lock().unwrap_or_else(PoisonError::into_inner).approve_command(&digest).map_err(store_error)?;
     }
+    // A password from a manager is a secret like a stored one: Windows Hello first (it needs
+    // no vault, so the gate is asked directly).
+    let reason = hello_reason(ctx.settings().general.language, sys_locale::get_locale().as_deref());
+    ctx.gate.ensure(reason).await.map_err(|code| end_error(code, None))?;
     let database = match reference.manager {
         Manager::KeePassXc => reference.reference.split_once('#').map(|(db, _)| db.to_owned()),
         _ => None,

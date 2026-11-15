@@ -2047,3 +2047,35 @@ async fn after_a_lock_the_next_key_asks_hello_again() {
     b.wait_for(connected).await;
     assert_eq!(presence.asked(), 2);
 }
+
+/// After the app was locked, a password from KeePassXC needs Windows Hello and the database
+/// password again.
+#[tokio::test]
+async fn after_a_lock_a_managed_password_asks_again() {
+    let pw = format!("pw-{:016x}", rand::random::<u64>());
+    let server = password_server(&pw).await;
+    let w = PasswordWorld::new();
+    w.trust(&server);
+    let kdbx = sshcraft_model::secret_ref::SecretRef {
+        manager: sshcraft_model::secret_ref::Manager::KeePassXc,
+        reference: "/home/me/s.kdbx#Servers/web".into(),
+    };
+    w.store.lock().unwrap().approve_command(&crate::secrets::approval_digest(&kdbx, "127.0.0.1", server.port)).unwrap();
+    let auth = ScriptedAuth::new(&[Some("db-password"), Some("db-password")]);
+    let host = w.host(server.port, None, Vec::new());
+    w.set(host, |s| s.password_ref = Some(kdbx.clone()));
+    let presence = Arc::new(FakePresence::new(&[Presence::Verified]));
+    let manager = w.manager(Some(w.vault.clone()), trusting(), auth.clone(), presence.clone());
+    manager.set_secrets(Arc::new(FakeManager { answer: Ok(pw), calls: Mutex::new(Vec::new()) }));
+    for round in 0..2 {
+        if round == 1 {
+            manager.relock().await;
+        }
+        let sink = Arc::new(RecordingSink::default());
+        manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+        assert_eq!(connected_count(&sink.statuses()), 1);
+    }
+    assert_eq!(presence.asked(), 2, "Windows Hello before each fetch after a lock");
+    assert_eq!(auth.seen().len(), 2, "the database password is asked again after the lock");
+}

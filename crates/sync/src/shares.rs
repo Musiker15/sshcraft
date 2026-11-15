@@ -61,12 +61,21 @@ pub struct KeyAssignment {
     /// leads there.
     #[serde(default)]
     pub proxy: Option<sshcraft_model::model::Proxy>,
+    /// The owner's TOTP secret for the item.
+    #[serde(default)]
+    pub totp: Option<sshcraft_model::model::PasswordId>,
     pub modified_at: i64,
 }
 
 impl KeyAssignment {
     pub fn refs(&self) -> crate::creds::CredentialRefs {
-        crate::creds::CredentialRefs { key: self.key.clone(), password: self.password, identity: self.identity, proxy_password: self.proxy_password }
+        crate::creds::CredentialRefs {
+            key: self.key.clone(),
+            password: self.password,
+            identity: self.identity,
+            proxy_password: self.proxy_password,
+            totp: self.totp,
+        }
     }
 }
 
@@ -308,6 +317,8 @@ fn to_copy_refs(store: &Store, server: ServerId, area: Uuid, settings: &mut Conn
         _ => None,
     };
     settings.password = password(settings.password)?;
+    // The TOTP secret is a password: it goes along only with keys, as its copy.
+    settings.totp = password(settings.totp)?;
     if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut settings.proxy {
         e.password = password(e.password)?;
     }
