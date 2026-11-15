@@ -262,6 +262,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         if ui.button(tr("New group")).clicked() {
             new_group(app);
         }
+        if ui.button(tr("Import")).clicked() {
+            app.ui.import = Some(crate::pages::import_export::ImportState::default());
+        }
+        if ui.button(tr("Export")).clicked() {
+            app.ui.export = Some(crate::pages::import_export::ExportState { group: app.ui.hosts.group, ..Default::default() });
+        }
         ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.search).hint_text(tr("Search")).desired_width(220.0));
         let grid = app.data.settings.appearance.host_view == HostView::Grid;
         let toggle = if grid { tr("List") } else { tr("Grid") };
@@ -316,4 +322,6 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     host_form::show_host(app, &ctx);
     host_form::show_group(app, &ctx);
     confirm(app, &ctx);
+    crate::pages::import_export::show_import(app, &ctx);
+    crate::pages::import_export::show_export(app, &ctx);
 }

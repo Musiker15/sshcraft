@@ -33,8 +33,9 @@ struct Shell {
 }
 
 impl eframe::App for Shell {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.frame(ui);
+        self.app.show_dialogs(Some(&*frame));
     }
 }
 

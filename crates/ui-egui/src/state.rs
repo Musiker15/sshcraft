@@ -62,6 +62,10 @@ pub struct UiState {
     /// A key waiting for its deletion to be confirmed: id and name.
     #[serde(skip)]
     pub key_confirm: Option<(String, String)>,
+    #[serde(skip)]
+    pub import: Option<crate::pages::import_export::ImportState>,
+    #[serde(skip)]
+    pub export: Option<crate::pages::import_export::ExportState>,
 }
 
 /// What a page asked to connect to.

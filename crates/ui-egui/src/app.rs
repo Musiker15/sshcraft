@@ -18,6 +18,8 @@ pub struct SshcraftApp {
     pub ui: UiState,
     pub toasts: Toasts,
     pub bindings: Bindings,
+    /// File dialogs: asked in a frame, shown after it, answered on a later frame.
+    pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
     /// The shortcut settings the bindings were built from.
     bindings_from: Option<sshcraft_engine::settings::Shortcuts>,
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
@@ -31,6 +33,7 @@ impl SshcraftApp {
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
         let data = Data { dirty: Refresh::DATA | Refresh::SETTINGS, ..Data::default() };
+        let wake = ctx.clone();
         Self {
             runner: Runner::new(session.clone(), ctx.clone()),
             session,
@@ -38,6 +41,7 @@ impl SshcraftApp {
             ui: UiState::default(),
             toasts: Toasts::default(),
             bindings: Bindings::default(),
+            dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
             bindings_from: None,
             events,
             _runtime: None,
@@ -120,6 +124,7 @@ impl SshcraftApp {
             then(self, result);
         }
         self.take_events();
+        crate::pages::import_export::take_dialog_answers(self);
         data::refresh(self);
         let ctx = ui.ctx().clone();
         // A character no font has is drawn as a box, never a panic (tests switch egui to panic).
@@ -141,5 +146,11 @@ impl SshcraftApp {
             crate::commands::run(self, id);
         }
         self.toasts.show(&ctx);
+    }
+
+    /// Shows the file dialog asked for in this frame. Call it after [`Self::frame`], on the main
+    /// thread, with the window as `parent`.
+    pub fn show_dialogs<W: raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle>(&mut self, parent: Option<&W>) {
+        self.dialogs.show_pending(parent);
     }
 }

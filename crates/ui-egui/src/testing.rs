@@ -10,6 +10,21 @@ use sshcraft_engine::{Session, SessionConfig};
 
 use crate::app::SshcraftApp;
 
+/// No window: tests answer dialogs through `dialogs.set_override`.
+struct NoWindow;
+
+impl raw_window_handle::HasWindowHandle for NoWindow {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        Err(raw_window_handle::HandleError::Unavailable)
+    }
+}
+
+impl raw_window_handle::HasDisplayHandle for NoWindow {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Err(raw_window_handle::HandleError::Unavailable)
+    }
+}
+
 /// The app on a fresh engine in `dir`, 1200 by 800 points, and the engine's session.
 pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
     let runtime = Arc::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap());
@@ -25,9 +40,12 @@ pub fn app_harness(dir: &Path) -> (Harness<'static, SshcraftApp>, Session) {
     let mut app = SshcraftApp::new(session.clone(), &ctx);
     app.keep_runtime(runtime);
     // A frame as long as on a 60 Hz display, so double clicks fall inside egui's time for them.
-    let harness = Harness::builder()
-        .with_size(egui::vec2(1200.0, 800.0))
-        .with_step_dt(1.0 / 60.0)
-        .build_ui_state(|ui, app: &mut SshcraftApp| app.frame(ui), app);
+    let harness = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut SshcraftApp| {
+            app.frame(ui);
+            app.show_dialogs(None::<&NoWindow>);
+        },
+        app,
+    );
     (harness, session)
 }
