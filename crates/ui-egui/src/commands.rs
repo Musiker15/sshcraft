@@ -58,7 +58,7 @@ static COMMANDS: [UiCommand; 21] = [
     UiCommand { enabled: has_tabs, ..cmd("ui.pane.previous", "prevPane", "Previous pane", &["Ctrl+Shift+PageUp"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.pane.layout", "toggleLayout", "Switch between grid and one large pane", &["Ctrl+Shift+M"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.pane.broadcast", "toggleBroadcast", "Broadcast on or off", &["Ctrl+Shift+B"]) },
-    UiCommand { enabled: has_tabs, ..cmd("ui.terminal.sidebar", "snippetSidebar", "Snippets and history beside the terminal", &["Ctrl+Shift+S"]) },
+    UiCommand { enabled: has_tabs, ..cmd("ui.terminal.sidebar", "toggleSidebar", "Snippets and history beside the terminal", &["Ctrl+Shift+S"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.terminal.bookmark", "bookmark", "Bookmark in the session log", &["Ctrl+Shift+L"]) },
     cmd("ui.page.snippets", "snippetsPage", "Snippets", &[]),
     cmd("ui.page.forwarding", "forwardingPage", "Port forwarding", &[]),
