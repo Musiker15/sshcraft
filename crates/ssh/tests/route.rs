@@ -248,3 +248,38 @@ async fn proxy_user_with_line_break_or_colon_is_refused() {
     }
     assert_eq!(proxy.connects(), 0);
 }
+
+fn pipe_command(args: &[&str]) -> ProxyConfig {
+    let mut argv = vec![env!("CARGO_BIN_EXE_sshcraft-pipe-test").to_owned()];
+    argv.extend(args.iter().map(|a| (*a).to_owned()));
+    ProxyConfig::Command { argv }
+}
+
+#[tokio::test]
+async fn through_a_proxy_command() {
+    let server = password_server("pw").await;
+    let port = server.port.to_string();
+    let params = route(vec![hop("t", "127.0.0.1", server.port, "pw")], Some(pipe_command(&["127.0.0.1", &port])));
+    let session = go(params, Arc::default()).await.unwrap();
+    echoes(&session).await;
+}
+
+#[tokio::test]
+async fn a_failing_proxy_command_reports_its_stderr() {
+    let server = password_server("pw").await;
+    let params = route(vec![hop("t", "127.0.0.1", server.port, "pw")], Some(pipe_command(&["fail"])));
+    match go(params, Arc::default()).await {
+        Err(SshError::Proxy(text)) => assert!(text.contains("no route to the bastion"), "{text}"),
+        other => panic!("expected a proxy error, got {:?}", other.err()),
+    }
+}
+
+#[tokio::test]
+async fn a_missing_proxy_program_says_so() {
+    let server = password_server("pw").await;
+    let params = route(vec![hop("t", "127.0.0.1", server.port, "pw")], Some(ProxyConfig::Command { argv: vec!["sshcraft-no-such-program".into()] }));
+    match go(params, Arc::default()).await {
+        Err(SshError::Proxy(text)) => assert!(text.contains("sshcraft-no-such-program"), "{text}"),
+        other => panic!("expected a proxy error, got {:?}", other.err()),
+    }
+}

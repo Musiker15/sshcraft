@@ -72,6 +72,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Port" => "Port",
         "Proxy" => "Proxy",
         "Proxy address" => "Proxy-Adresse",
+        "Runs without a shell. %h, %p, %r and %n stand for address, port, user and name." => {
+            "Läuft ohne Shell. %h, %p, %r und %n stehen für Adresse, Port, Benutzer und Name."
+        }
+        "This needs a shell ({sign}); SSHCraft runs the command without one" => "Das braucht eine Shell ({sign}); SSHCraft startet den Befehl ohne",
+        "the proxy command is too long" => "Der Proxy-Befehl ist zu lang",
+        "a quote or a backslash is not closed" => "Ein Anführungszeichen oder Backslash ist nicht geschlossen",
         "Record sessions" => "Sitzungen aufzeichnen",
         "Remove" => "Entfernen",
         "Save" => "Speichern",

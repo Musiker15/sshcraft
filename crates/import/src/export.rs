@@ -60,6 +60,7 @@ enum ProxyOut {
     Direct,
     Http(ProxyEndpointOut),
     Socks5(ProxyEndpointOut),
+    Command { argv: Vec<String> },
 }
 
 #[derive(Serialize)]
@@ -82,6 +83,7 @@ fn proxy_out(proxy: &Option<sshcraft_model::model::Proxy>) -> Option<ProxyOut> {
         Proxy::Direct => ProxyOut::Direct,
         Proxy::Http(e) => ProxyOut::Http(endpoint(e)),
         Proxy::Socks5(e) => ProxyOut::Socks5(endpoint(e)),
+        Proxy::Command { argv } => ProxyOut::Command { argv: argv.clone() },
     })
 }
 

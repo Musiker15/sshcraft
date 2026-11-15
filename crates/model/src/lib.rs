@@ -9,3 +9,4 @@ pub mod logtext;
 pub mod model;
 pub mod os_detect;
 pub mod policy;
+pub mod proxy_command;

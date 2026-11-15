@@ -125,6 +125,11 @@ pub struct Hop {
 pub enum ProxyConfig {
     Http(ProxyTarget),
     Socks5(ProxyTarget),
+    /// A local program whose standard input and output carry the connection; `argv` has its
+    /// tokens already replaced and is started without a shell.
+    Command {
+        argv: Vec<String>,
+    },
 }
 
 pub struct ProxyTarget {
@@ -450,8 +455,13 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
         let wrap = |error: SshError| {
             if index < last { SshError::Hop { index, host_name: host_name.clone(), error: Box::new(error) } } else { error }
         };
+        let mut command_errors = None;
         let stream: Box<dyn Io> = match connected.last() {
-            None => proxy::open(params.proxy.as_ref(), &hop.address, hop.port, timeout).await.map_err(wrap)?,
+            None => {
+                let opened = proxy::open(params.proxy.as_ref(), &hop.address, hop.port, timeout).await.map_err(wrap)?;
+                command_errors = opened.stderr;
+                opened.stream
+            }
             Some(before) => {
                 let opened = before.channel_open_direct_tcpip(hop.address.clone(), u32::from(hop.port), "127.0.0.1", 0);
                 let channel = tokio::time::timeout(timeout, opened)
@@ -472,9 +482,24 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
             // Only the target forwards ports for us.
             remotes: if index == last { remotes.clone() } else { tunnel::Remotes::default() },
         };
-        let mut handle = client::connect_stream(config.clone(), stream, handler)
-            .await
-            .map_err(|e| wrap(if rejected.load(Ordering::SeqCst) { SshError::HostKeyRejected } else { SshError::Connect(e.to_string()) }))?;
+        let mut handle = match client::connect_stream(config.clone(), stream, handler).await {
+            Ok(handle) => handle,
+            Err(e) if rejected.load(Ordering::SeqCst) => {
+                drop(e);
+                return Err(wrap(SshError::HostKeyRejected));
+            }
+            Err(e) => {
+                // A proxy command that gave up usually said why on its standard error.
+                let said = match command_errors.take() {
+                    Some(errors) => proxy::command_said(errors).await,
+                    None => None,
+                };
+                return Err(wrap(match said {
+                    Some(text) => SshError::Proxy(format!("the proxy command failed: {text}")),
+                    None => SshError::Connect(e.to_string()),
+                }));
+            }
+        };
         let mut credentials = hop.auth;
         certificate_expired = credentials.certificate.as_ref().is_some_and(|c| !certificate_valid_now(c));
         if verifier.first_contact(&hop.address, hop.port) {

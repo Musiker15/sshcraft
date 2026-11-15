@@ -261,6 +261,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                 Some(Proxy::Direct) => 1,
                 Some(Proxy::Http(_)) => 2,
                 Some(Proxy::Socks5(_)) => 3,
+                Some(Proxy::Command { .. }) => 4,
             };
             let mut chosen = kind;
             ui.horizontal(|ui| {
@@ -268,6 +269,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                 ui.radio_value(&mut chosen, 1, tr("Direct"));
                 ui.radio_value(&mut chosen, 2, "HTTP");
                 ui.radio_value(&mut chosen, 3, "SOCKS5");
+                ui.radio_value(&mut chosen, 4, tr("Command"));
             });
             if chosen != kind {
                 let endpoint = || ProxyEndpoint { address: String::new(), port: 1080, username: None, password: None };
@@ -275,6 +277,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                     1 => Some(Proxy::Direct),
                     2 => Some(Proxy::Http(endpoint())),
                     3 => Some(Proxy::Socks5(endpoint())),
+                    4 => Some(Proxy::Command { argv: Vec::new() }),
                     _ => None,
                 };
             }
@@ -283,6 +286,9 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                     ui.add(egui::TextEdit::singleline(&mut e.address).hint_text(tr("Proxy address")).desired_width(180.0));
                     ui.add(egui::DragValue::new(&mut e.port).range(1..=65535));
                 });
+            }
+            if let Some(Proxy::Command { argv }) = &mut s.proxy {
+                proxy_command_field(ui, argv, own_host);
             }
         });
         ui.end_row();
@@ -311,6 +317,42 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
         });
         ui.end_row();
     });
+}
+
+/// The proxy command as one line. It is kept as typed while it does not split; the arguments
+/// change only when it does.
+fn proxy_command_field(ui: &mut Ui, argv: &mut Vec<String>, host: Option<HostId>) {
+    use sshcraft_model::proxy_command;
+    let id = egui::Id::unique("sshcraft-proxy-command").with(host);
+    // A line kept from another form (it splits into other arguments) starts over.
+    let mut line = ui
+        .data(|d| d.get_temp::<String>(id))
+        .filter(|line| proxy_command::split(line).map_or(true, |words| words == *argv))
+        .unwrap_or_else(|| proxy_command::join(argv));
+    let edit = ui.add(egui::TextEdit::singleline(&mut line).hint_text("ssh -W %h:%p bastion").font(egui::TextStyle::Monospace).desired_width(320.0));
+    let parsed = proxy_command::split(&line);
+    if edit.changed()
+        && let Ok(words) = &parsed
+    {
+        argv.clone_from(words);
+    }
+    match parsed {
+        Err(proxy_command::ProxyCommandError::Empty) => {}
+        Err(e) => {
+            let text = match e {
+                proxy_command::ProxyCommandError::ShellSyntax(c) => {
+                    trf("This needs a shell ({sign}); SSHCraft runs the command without one", &[("sign", &c.escape_default().to_string())])
+                }
+                proxy_command::ProxyCommandError::TooLong => tr("the proxy command is too long").to_owned(),
+                _ => tr("a quote or a backslash is not closed").to_owned(),
+            };
+            ui.colored_label(ui.visuals().error_fg_color, text);
+        }
+        Ok(_) => {
+            ui.label(egui::RichText::new(tr("Runs without a shell. %h, %p, %r and %n stand for address, port, user and name.")).small());
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(id, line));
 }
 
 fn password_field(ui: &mut Ui, password: &mut String, has_password: bool, remove: &mut bool) {
