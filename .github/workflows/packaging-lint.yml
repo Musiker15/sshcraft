@@ -1,0 +1,21 @@
+name: Packaging lint
+
+# Lints the workflows and packaging scripts (actionlint, shellcheck and the family's checks).
+on:
+  push:
+    branches: [main, release]
+    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
+  pull_request:
+    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    uses: storytold/craft-common-actions/.github/workflows/packaging-lint.yml@main
