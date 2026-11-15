@@ -70,6 +70,13 @@ The unit runs the server as `sshcraft` with a read-only system and only `/var/li
 writable. For an update, replace the binary and `systemctl restart sshcraft-server`; the
 database migrates on start.
 
+The operator commands below read the same environment file. Run them as the service user with it
+loaded, or they open a new SQLite file in the current folder and show its API key instead:
+
+```bash
+sudo -u sshcraft sh -c 'set -a; . /etc/sshcraft-server.env; exec sshcraft-server api-key show'
+```
+
 ## PostgreSQL
 
 SQLite is the default and enough for a few dozen users. For PostgreSQL create an empty database

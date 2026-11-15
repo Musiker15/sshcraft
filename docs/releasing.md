@@ -82,7 +82,7 @@ its signing jobs stop there.
 | Platform | Artifacts |
 |---|---|
 | macOS 11+ (Apple silicon and Intel) | `sshcraft-<v>-macos-universal.dmg`, `sshcraft-cli-<v>-macos-universal.zip` |
-| Windows 10+ x64, x86, ARM64 | `sshcraft-<v>-windows-<arch>.msi`, `sshcraft-<v>-windows-<arch>-portable.zip` |
+| Windows 10+ x64, ARM64 | `sshcraft-<v>-windows-<arch>.msi`, `sshcraft-<v>-windows-<arch>-portable.zip` |
 | Linux x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
 | Flatpak x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
 | FreeBSD 15 x86_64, aarch64 | `sshcraft-<v>-freebsd-<arch>.tar.gz` |

@@ -34,7 +34,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     let sums = parse_sums(&std::fs::read_to_string(&sums_path).map_err(|e| format!("{}: {e}", sums_path.display()))?)?;
     let manifest = std::fs::read_to_string(root.join("Cargo.toml")).map_err(|e| format!("Cargo.toml: {e}"))?;
     let version = crate::version::read(&manifest)?;
-    crate::version::validate(&version)?;
+    stable(&version)?;
     for (template, target) in TEMPLATES {
         let text = std::fs::read_to_string(root.join(template)).map_err(|e| format!("{template}: {e}"))?;
         let filled = render(&text, &version, &sums).map_err(|e| format!("{template}: {e}"))?;
@@ -44,6 +44,15 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         }
         std::fs::write(&path, filled).map_err(|e| format!("{}: {e}", path.display()))?;
         println!("{}", path.display());
+    }
+    Ok(())
+}
+
+/// The stores get stable releases only; a pre-release (`1.0.0-rc.1`) stays on GitHub.
+pub fn stable(version: &str) -> Result<(), String> {
+    crate::version::validate(version)?;
+    if version.contains('-') {
+        return Err(format!("{version} is a pre-release; the stores get stable releases only"));
     }
     Ok(())
 }
@@ -120,6 +129,12 @@ mod tests {
     }
 
     #[test]
+    fn only_stable_versions_go_to_the_stores() {
+        assert!(stable("1.0.0").is_ok());
+        assert!(stable("1.0.0-rc.1").is_err());
+    }
+
+    #[test]
     fn checksum_lines_must_be_well_formed() {
         assert!(parse_sums("abc  file.msi").is_err(), "short hash");
         assert!(parse_sums(&format!("{A}  ../file.msi")).is_err(), "path");
@@ -134,7 +149,8 @@ mod tests {
     fn the_shipped_templates_render() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let v = "1.0.0";
-        let files = ["windows-x64.msi", "windows-x86.msi", "windows-arm64.msi", "macos-universal.dmg"];
+        // What the shared release workflow builds for these stores: Windows x64 and arm64, macOS universal.
+        let files = ["windows-x64.msi", "windows-arm64.msi", "macos-universal.dmg"];
         let text: String = files.iter().map(|f| format!("{A}  sshcraft-{v}-{f}\n")).collect();
         let sums = parse_sums(&text).unwrap();
         for (template, _) in TEMPLATES {

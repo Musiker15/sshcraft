@@ -16,6 +16,8 @@ Group=sshcraft
 # SSHCRAFT_PUBLIC_ORIGIN, SSHCRAFT_DATABASE_URL and SSHCRAFT_LISTEN. The database URL can hold a
 # password, so the file is readable only by the service user.
 EnvironmentFile=/etc/sshcraft-server.env
+# systemd creates /var/lib/sshcraft for the service user if it is missing.
+StateDirectory=sshcraft
 WorkingDirectory=/var/lib/sshcraft
 ExecStart=/usr/local/bin/sshcraft-server serve
 Restart=on-failure

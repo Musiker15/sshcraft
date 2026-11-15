@@ -137,6 +137,11 @@ pub fn build(meta: &Value, roots: &[&str], version: &str, shipped: &BTreeSet<(St
         on.dedup();
         dependencies.push(json!({ "ref": id, "dependsOn": on }));
     }
+    // The release itself depends on the programs it ships.
+    let mut programs = start.clone();
+    programs.sort_unstable();
+    programs.dedup();
+    dependencies.push(json!({ "ref": "sshcraft-release", "dependsOn": programs }));
     Ok(json!({
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
@@ -147,7 +152,6 @@ pub fn build(meta: &Value, roots: &[&str], version: &str, shipped: &BTreeSet<(St
                 "bom-ref": "sshcraft-release",
                 "name": "SSHCraft",
                 "version": version,
-                "components": start.iter().map(|id| json!({ "type": "application", "bom-ref": format!("{id}#root"), "name": packages.get(id).map_or("", |p| p.name) })).collect::<Vec<_>>(),
             },
             "tools": { "components": [{ "type": "application", "name": "cargo xtask sbom" }] },
         },
@@ -162,9 +166,18 @@ fn component(id: &str, p: &Package<'_>) -> Value {
         "bom-ref": id,
         "name": p.name,
         "version": p.version,
-        "purl": format!("pkg:cargo/{}@{}", p.name, p.version),
     });
     if let Some(obj) = c.as_object_mut() {
+        // A purl names where a package comes from: crates.io by default, a repository with
+        // vcs_url. A workspace crate is published nowhere, so it has none.
+        if !p.workspace {
+            let mut purl = format!("pkg:cargo/{}@{}", p.name, encode(p.version));
+            if let Some(src) = p.source.filter(|s| s.starts_with("git+")) {
+                purl.push_str("?vcs_url=");
+                purl.push_str(&encode(src));
+            }
+            obj.insert("purl".into(), json!(purl));
+        }
         if let Some(license) = p.license {
             obj.insert("licenses".into(), json!([{ "expression": license }]));
         }
@@ -173,6 +186,19 @@ fn component(id: &str, p: &Package<'_>) -> Value {
         }
     }
     c
+}
+
+/// Percent-encoding for a purl version or qualifier value: everything but the unreserved set.
+fn encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for b in text.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -244,8 +270,10 @@ both v0.9.0 (https://github.com/storytold/craft-libs?rev=abc#abc)
         assert_eq!(lib["licenses"][0]["expression"], "MIT");
         let app = by_name("app");
         assert_eq!(app["type"], "application");
+        assert!(app.get("purl").is_none(), "a workspace crate is not on crates.io");
         assert_eq!(app["licenses"][0]["expression"], "MIT OR Apache-2.0");
         let both = by_name("both");
+        assert_eq!(both["purl"], "pkg:cargo/both@0.9.0?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Fstorytold%2Fcraft-libs%3Frev%3Dabc%23abc");
         assert!(both.get("licenses").is_none());
         assert_eq!(both["externalReferences"][0]["url"], "https://github.com/storytold/craft-libs?rev=abc#abc");
     }
@@ -282,6 +310,20 @@ noversion
         assert!(set.contains(&("async-trait".into(), "0.1.92".into())));
         assert!(set.contains(&("x".into(), "1.0.0".into())));
         assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn purl_values_are_percent_encoded() {
+        assert_eq!(encode("0.38.0+1.3.281"), "0.38.0%2B1.3.281");
+        assert_eq!(encode("1.2.3-rc.1"), "1.2.3-rc.1");
+    }
+
+    #[test]
+    fn the_release_depends_on_its_programs() {
+        let bom = build(&fixture(), &["app"], "0.1.0", &shipped()).unwrap();
+        let deps = bom["dependencies"].as_array().unwrap();
+        let release = deps.iter().find(|d| d["ref"] == "sshcraft-release").unwrap();
+        assert_eq!(release["dependsOn"], json!(["app 0.1.0 (path+file:///w)"]));
     }
 
     #[test]

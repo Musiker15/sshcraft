@@ -23,16 +23,6 @@ Installers:
     InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x64.msi}}
     InstallerSwitches:
       Custom: ALLUSERS=1
-  - Architecture: x86
-    Scope: user
-    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-x86.msi
-    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x86.msi}}
-  - Architecture: x86
-    Scope: machine
-    InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-x86.msi
-    InstallerSha256: {{sha256:sshcraft-{{version}}-windows-x86.msi}}
-    InstallerSwitches:
-      Custom: ALLUSERS=1
   - Architecture: arm64
     Scope: user
     InstallerUrl: https://github.com/Musiker15/sshcraft/releases/download/v{{version}}/sshcraft-{{version}}-windows-arm64.msi
