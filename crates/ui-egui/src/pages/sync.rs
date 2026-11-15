@@ -30,6 +30,20 @@ pub struct JoinForm {
     pub device_name: String,
 }
 
+// The API key and the account key are wiped when a form goes.
+impl Drop for CreateForm {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.api_key);
+    }
+}
+
+impl Drop for JoinForm {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.api_key);
+        zeroize::Zeroize::zeroize(&mut self.account_key);
+    }
+}
+
 // Secrets never show in a debug print of the window's state.
 impl std::fmt::Debug for CreateForm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,6 +61,8 @@ impl std::fmt::Debug for JoinForm {
 #[derive(Clone)]
 struct Created {
     key: zeroize::Zeroizing<String>,
+    /// The key's QR code, encoded once.
+    qr: Option<crate::widgets::qr::QrModules>,
 }
 
 impl std::fmt::Debug for Created {
@@ -180,10 +196,18 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         if ui.button(tr("Create account")).clicked() {
-            app.ui.sync.create = Some(CreateForm { device_name: device_name(), ..CreateForm::default() });
+            app.ui.sync.create = Some({
+                let mut form = CreateForm::default();
+                form.device_name = device_name();
+                form
+            });
         }
         if ui.button(tr("Join an account")).clicked() {
-            app.ui.sync.join = Some(JoinForm { device_name: device_name(), ..JoinForm::default() });
+            app.ui.sync.join = Some({
+                let mut form = JoinForm::default();
+                form.device_name = device_name();
+                form
+            });
         }
     });
     ui.add_space(8.0);
@@ -267,7 +291,8 @@ fn create_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                         if current {
                             app.ui.sync.create = None;
                         }
-                        app.ui.sync.created = Some(Created { key });
+                        let qr = crate::widgets::qr::QrModules::new(&key);
+                        app.ui.sync.created = Some(Created { key, qr });
                         app.data.dirty |= crate::data::Refresh::DATA;
                     }
                     Err(e) => app.toasts.error(&e.to_string()),
@@ -334,7 +359,9 @@ fn join_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 }
 
 fn key_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
-    let Some(key) = app.ui.sync.account_key().map(str::to_string) else { return };
+    // Shown from where it is kept: no copy of the key is made for a frame.
+    let Some(created) = app.ui.sync.created.as_ref() else { return };
+    let key: &str = &created.key;
     let tokens = Tokens::get(ctx);
     let mut close = false;
     egui::Modal::new(egui::Id::unique("sshcraft-account-key-shown")).show(ctx, |ui| {
@@ -342,8 +369,10 @@ fn key_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         ui.heading(tr("Your account key"));
         ui.label(tr("Keep it in your password manager now. SSHCraft does not store it and shows it only this once. Every new device needs it."));
         ui.add_space(6.0);
-        ui.label(egui::RichText::new(&key).monospace().color(tokens.text_strong));
-        crate::widgets::qr::show(ui, &key, 220.0, tr("Account key as QR code"));
+        ui.label(egui::RichText::new(key).monospace().color(tokens.text_strong));
+        if let Some(qr) = &created.qr {
+            crate::widgets::qr::show(ui, qr, 220.0, tr("Account key as QR code"));
+        }
         if ui.button(tr("I have kept the key")).clicked() {
             close = true;
         }
