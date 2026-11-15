@@ -156,6 +156,18 @@ fn a_hidden_host_is_listed_and_shown_again() {
 }
 
 #[test]
+fn the_open_log_takes_in_what_an_agent_just_did() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let conn = session.agent_connection("claude", Via::Mcp).unwrap();
+    let _ = session.runtime().block_on(session.execute(conn.caller(), "host.delete", json!({ "id": uuid::Uuid::new_v4() })));
+    agents_page(&mut h);
+    until(&mut h, "the log", |app| app.ui.agents.log.as_ref().is_some_and(|l| l.len() == 1));
+    let _ = session.runtime().block_on(session.execute(conn.caller(), "host.delete", json!({ "id": uuid::Uuid::new_v4() })));
+    until(&mut h, "the second entry", |app| app.ui.agents.log.as_ref().is_some_and(|l| l.len() == 2));
+}
+
+#[test]
 fn the_log_lists_outcomes_and_clears() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, session) = app_harness(dir.path());

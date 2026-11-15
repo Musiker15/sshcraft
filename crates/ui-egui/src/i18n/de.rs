@@ -493,6 +493,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "They are deleted for good, on the sync server and your other devices too." => {
             "Sie werden endgültig gelöscht, auch auf dem Sync-Server und deinen anderen Geräten."
         }
+        "Try again" => "Noch einmal",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

@@ -38,27 +38,37 @@ fn default_level(category: &str) -> &'static str {
 pub struct AgentsView {
     pub policy: Option<Value>,
     pub log: Option<Vec<Value>>,
-    loading: bool,
+    /// Requests still on their way.
+    loading: u8,
+    /// Why the rights could not be read.
+    failed: Option<String>,
 }
 
 /// Fetches the policy and the log again.
 pub fn reload(app: &mut SshcraftApp) {
-    app.ui.agents.loading = true;
+    app.ui.agents.loading = 2;
+    app.ui.agents.failed = None;
     app.runner.run(
         "agent.policy",
         json!({}),
-        Box::new(|app, result| match result {
-            Ok(policy) => app.ui.agents.policy = Some(policy),
-            Err(e) => app.toasts.error(&e.to_string()),
+        Box::new(|app, result| {
+            app.ui.agents.loading = app.ui.agents.loading.saturating_sub(1);
+            match result {
+                Ok(policy) => app.ui.agents.policy = Some(policy),
+                Err(e) => app.ui.agents.failed = Some(e.to_string()),
+            }
         }),
     );
     app.runner.run(
         "agent.log",
         json!({}),
         Box::new(|app, result| {
-            if let Ok(Value::Array(log)) = result {
-                app.ui.agents.log = Some(log);
-            }
+            app.ui.agents.loading = app.ui.agents.loading.saturating_sub(1);
+            // A log that cannot be read shows as empty rather than asking again every frame.
+            app.ui.agents.log = Some(match result {
+                Ok(Value::Array(log)) => log,
+                _ => Vec::new(),
+            });
         }),
     );
 }
@@ -86,10 +96,18 @@ fn name_of(app: &SshcraftApp, id: &str) -> String {
 }
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
-    if app.ui.agents.policy.is_none() && !app.ui.agents.loading {
+    let wanted = app.ui.agents.policy.is_none() || app.ui.agents.log.is_none();
+    if wanted && app.ui.agents.loading == 0 && app.ui.agents.failed.is_none() {
         reload(app);
     }
     let tokens = Tokens::get(ui.ctx());
+    if let Some(problem) = app.ui.agents.failed.clone() {
+        ui.label(egui::RichText::new(visible(&problem)).color(tokens.danger));
+        if ui.button(tr("Try again")).clicked() {
+            reload(app);
+        }
+        return;
+    }
     let Some(policy) = app.ui.agents.policy.clone() else {
         ui.spinner();
         return;
