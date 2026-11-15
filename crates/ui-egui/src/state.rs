@@ -23,7 +23,7 @@ pub enum TabKind {
     /// The new-tab page: recent hosts, local shell, serial port.
     New,
     /// A terminal of an engine session.
-    Session { session: String },
+    Session { session: sshcraft_engine::SessionId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +62,8 @@ pub struct UiState {
     /// A key waiting for its deletion to be confirmed: id and name.
     #[serde(skip)]
     pub key_confirm: Option<(String, String)>,
+    #[serde(skip)]
+    pub picker: Option<crate::session_tab::Picker>,
     #[serde(skip)]
     pub import: Option<crate::pages::import_export::ImportState>,
     #[serde(skip)]

@@ -152,6 +152,40 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Everything" => "Alles",
         "No password, passphrase or private key is exported." => "Kein Passwort, keine Passphrase und kein privater Schlüssel wird exportiert.",
         "Export to file" => "In Datei exportieren",
+        // Session tabs and questions
+        "Host" => "Host",
+        "No local shell was found." => "Es wurde keine lokale Shell gefunden.",
+        "No serial port was found." => "Es wurde kein serieller Port gefunden.",
+        "Clipboard" => "Zwischenablage",
+        "A program on {host} wants to put {count} characters in the clipboard. Allow it?" => {
+            "Ein Programm auf {host} möchte {count} Zeichen in die Zwischenablage legen. Erlauben?"
+        }
+        "Once" => "Einmal",
+        "Always for this host" => "Immer für diesen Host",
+        "No" => "Nein",
+        "Connecting…" => "Verbinde…",
+        "Connected" => "Verbunden",
+        "Connection lost. Reconnecting (attempt {attempt}) in {seconds} s." => "Verbindung verloren. Neuer Versuch ({attempt}) in {seconds} s.",
+        "The session ended." => "Die Sitzung ist beendet.",
+        "The connection was lost." => "Die Verbindung ist abgebrochen.",
+        "The host key was not accepted." => "Der Host-Schlüssel wurde nicht angenommen.",
+        "The host key of this server changed. Someone may be listening in, or the server was set up again. SSHCraft does not connect; if the change is expected, forget the old key in the host's settings." => {
+            "Der Host-Schlüssel dieses Servers hat sich geändert. Vielleicht hört jemand mit, oder der Server wurde neu eingerichtet. SSHCraft verbindet nicht; ist die Änderung erwartet, vergiss den alten Schlüssel in den Einstellungen des Hosts."
+        }
+        "Sign-in failed." => "Die Anmeldung ist fehlgeschlagen.",
+        "Sign-in was cancelled." => "Die Anmeldung wurde abgebrochen.",
+        "The server could not be reached." => "Der Server war nicht erreichbar.",
+        "The session could not start." => "Die Sitzung konnte nicht starten.",
+        "Reconnect" => "Neu verbinden",
+        "This session is gone." => "Diese Sitzung gibt es nicht mehr.",
+        "Baud rate" => "Baudrate",
+        "Unknown host key" => "Unbekannter Host-Schlüssel",
+        "{host} ({address}) is not known yet. Compare the fingerprint with the one its administrator gave you before you accept it." => {
+            "{host} ({address}) ist noch nicht bekannt. Vergleiche den Fingerabdruck mit dem, den dir die Verwaltung des Servers gegeben hat, bevor du ihn annimmst."
+        }
+        "Accept" => "Annehmen",
+        "Sign in to {host}" => "Bei {host} anmelden",
+        "Sign in" => "Anmelden",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

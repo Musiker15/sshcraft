@@ -148,9 +148,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         }
         Page::Tab(i) => match app.ui.tabs.get(i).map(|t| t.kind.clone()) {
             Some(TabKind::New) | None => new_tab_page(app, ui),
-            Some(TabKind::Session { .. }) => {
-                ui.label(tr("Terminal"));
-            }
+            Some(TabKind::Session { session }) => crate::session_tab::show(app, ui, session, i),
         },
     });
 }

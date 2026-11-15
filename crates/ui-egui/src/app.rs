@@ -20,6 +20,14 @@ pub struct SshcraftApp {
     pub bindings: Bindings,
     /// File dialogs: asked in a frame, shown after it, answered on a later frame.
     pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
+    /// The terminals of the open session tabs.
+    pub terminals: std::collections::HashMap<sshcraft_engine::SessionId, crate::session_tab::SessionTab>,
+    /// The engine's open questions.
+    pub prompts: crate::prompts::Prompts,
+    /// The terminal font loaded for the setting `appearance.font_family`.
+    pub(crate) term_font: Option<(String, egui::FontFamily)>,
+    /// Checked links the engine asked to open.
+    urls: Vec<String>,
     /// The shortcut settings the bindings were built from.
     bindings_from: Option<sshcraft_engine::settings::Shortcuts>,
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
@@ -42,6 +50,11 @@ impl SshcraftApp {
             toasts: Toasts::default(),
             bindings: Bindings::default(),
             dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
+            terminals: std::collections::HashMap::new(),
+            // Questions asked before the window subscribed are fetched once.
+            prompts: crate::prompts::Prompts::fetch_first(),
+            term_font: None,
+            urls: Vec::new(),
             bindings_from: None,
             events,
             _runtime: None,
@@ -72,9 +85,16 @@ impl SshcraftApp {
             match self.events.try_recv() {
                 Ok(EngineEvent::DataChanged { .. }) => self.data.dirty |= Refresh::DATA,
                 Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
+                Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),
+                Ok(EngineEvent::AuthPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "auth")),
+                Ok(EngineEvent::PromptWithdrawn { prompt_id }) => self.prompts.withdraw(prompt_id),
+                Ok(EngineEvent::Ui(sshcraft_engine::UiRequest::OpenUrl { url })) => self.urls.push(url),
                 Ok(_) => {}
                 // Events were lost: fetch everything again.
-                Err(TryRecvError::Lagged(_)) => self.data.dirty |= Refresh::DATA | Refresh::SETTINGS,
+                Err(TryRecvError::Lagged(_)) => {
+                    self.data.dirty |= Refresh::DATA | Refresh::SETTINGS;
+                    self.prompts.stale = true;
+                }
                 Err(TryRecvError::Empty | TryRecvError::Closed) => break,
             }
         }
@@ -94,6 +114,7 @@ impl SshcraftApp {
         }
         let tab = self.ui.tabs.remove(i);
         if let TabKind::Session { session } = tab.kind {
+            self.terminals.remove(&session);
             self.run_reported("session.close", serde_json::json!({ "id": session }));
         }
         self.ui.page = if self.ui.tabs.is_empty() { Page::Hosts } else { Page::Tab(i.saturating_sub(1).min(self.ui.tabs.len() - 1)) };
@@ -126,7 +147,11 @@ impl SshcraftApp {
         self.take_events();
         crate::pages::import_export::take_dialog_answers(self);
         data::refresh(self);
+        crate::prompts::refresh(self);
         let ctx = ui.ctx().clone();
+        for url in self.urls.drain(..) {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+        }
         // A character no font has is drawn as a box, never a panic (tests switch egui to panic).
         ctx.set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         crate::theme::apply(&ctx, &self.data.settings);
@@ -141,7 +166,12 @@ impl SshcraftApp {
                 crate::commands::run(self, id);
             }
         }
+        crate::session_tab::pump_all(self, &ctx);
         crate::shell::show(self, ui);
+        crate::session_tab::take_request(self);
+        crate::session_tab::show_picker(self, &ctx);
+        crate::session_tab::show_clipboard_question(self, &ctx);
+        crate::prompts::show(self, &ctx);
         if let Some(id) = crate::palette::show(self, &ctx) {
             crate::commands::run(self, id);
         }

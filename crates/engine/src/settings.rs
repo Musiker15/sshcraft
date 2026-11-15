@@ -46,6 +46,8 @@ pub const SHORTCUT_ACTIONS: [&str; 13] = [
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
 const MAX_COMBOS: usize = 4;
+/// Most hosts that may always write the clipboard (OSC 52) without asking.
+pub const MAX_CLIPBOARD_HOSTS: usize = 1000;
 const MAX_COMBO_LEN: usize = 40;
 const MODIFIERS: [&str; 4] = ["Ctrl", "Alt", "Shift", "Meta"];
 
@@ -155,6 +157,10 @@ pub struct Terminal {
     /// One of [`TERMINAL_TYPES`].
     pub terminal_type: String,
     pub clipboard_osc52: Osc52,
+    /// Hosts whose programs may write the clipboard without asking each time (the user chose
+    /// "Always for this host"). Empty by default: every host asks first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub clipboard_hosts: Vec<sshcraft_model::model::HostId>,
     /// Commands typed in terminals are kept (sealed) for the sidebar and completion.
     pub history: bool,
     /// Suggestions while typing in a terminal.
@@ -166,7 +172,14 @@ pub struct Terminal {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { terminal_type: TERMINAL_TYPES[0].into(), clipboard_osc52: Osc52::Write, history: true, autocomplete: true, local_shell: None }
+        Self {
+            terminal_type: TERMINAL_TYPES[0].into(),
+            clipboard_osc52: Osc52::Write,
+            clipboard_hosts: Vec::new(),
+            history: true,
+            autocomplete: true,
+            local_shell: None,
+        }
     }
 }
 
@@ -225,6 +238,9 @@ impl EngineSettings {
         if !TERMINAL_TYPES.contains(&self.terminal.terminal_type.as_str()) {
             self.terminal.terminal_type = TERMINAL_TYPES[0].into();
         }
+        let mut seen = std::collections::HashSet::new();
+        self.terminal.clipboard_hosts.retain(|h| seen.insert(*h));
+        self.terminal.clipboard_hosts.truncate(MAX_CLIPBOARD_HOSTS);
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

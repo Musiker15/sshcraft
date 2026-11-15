@@ -323,3 +323,16 @@ async fn settings_survive_a_reload() {
     let shell = session.execute(Caller::User, "local.default_shell", json!({})).await.unwrap();
     assert_eq!(shell["program"], "bash");
 }
+
+#[test]
+fn clipboard_hosts_round_trip() {
+    let hosts: Vec<sshcraft_model::model::HostId> = (0..MAX_CLIPBOARD_HOSTS + 5).map(|_| sshcraft_model::model::HostId::new()).collect();
+    let mut wanted = hosts.clone();
+    wanted.insert(1, hosts[0]);
+    let s = with(|s| s.terminal.clipboard_hosts = wanted);
+    assert_eq!(s.terminal.clipboard_hosts.len(), MAX_CLIPBOARD_HOSTS, "at most 1000");
+    assert_eq!(s.terminal.clipboard_hosts[..2], [hosts[0], hosts[1]], "a host once, in order");
+    let back: EngineSettings = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
+    assert_eq!(back, s);
+    assert!(EngineSettings::default().terminal.clipboard_hosts.is_empty(), "nobody is allowed by default");
+}
