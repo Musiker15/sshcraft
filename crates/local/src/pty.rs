@@ -163,6 +163,9 @@ fn home() -> Option<std::path::PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from).filter(|p| p.is_dir())
 }
 
+/// Held while a terminal is opened and its shell started.
+static SPAWNING: Mutex<()> = Mutex::new(());
+
 /// Starts the shell in `cwd` when that is a directory, else in the user's home directory, with
 /// `TERM` set to `term`. Output comes as [`ShellEvent::Data`], then [`ShellEvent::Ended`] with
 /// the exit code once the shell has ended and its output is read.
@@ -173,15 +176,35 @@ pub fn spawn(
     term: &str,
     cwd: Option<&std::path::Path>,
 ) -> Result<(LocalWriter, mpsc::Receiver<ShellEvent>), LocalError> {
-    let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| LocalError::Spawn(e.to_string()))?;
-    let mut builder = CommandBuilder::new(&cmd.program);
-    builder.args(&cmd.args);
-    builder.env("TERM", term);
     let dir = cwd.filter(|dir| usable_cwd(dir)).map(std::path::Path::to_path_buf).or_else(home);
-    if let Some(dir) = dir {
-        builder.cwd(dir);
-    }
-    let mut child = pair.slave.spawn_command(builder).map_err(|e| LocalError::Spawn(e.to_string()))?;
+    let builder = || {
+        let mut builder = CommandBuilder::new(&cmd.program);
+        builder.args(&cmd.args);
+        builder.env("TERM", term);
+        if let Some(dir) = &dir {
+            builder.cwd(dir);
+        }
+        builder
+    };
+    let (pair, mut child) = {
+        // One terminal at a time: on FreeBSD two started at once can race, and the child then
+        // finds its terminal is not one (ENOTTY when it takes it as its controlling terminal).
+        let _one = SPAWNING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let open =
+            || native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| LocalError::Spawn(e.to_string()));
+        let pair = open()?;
+        match pair.slave.spawn_command(builder()) {
+            Ok(child) => (pair, child),
+            // That race, should it come from outside this process: once more with a fresh pair.
+            Err(e) if e.to_string().contains("os error 25") => {
+                drop(pair);
+                let pair = open()?;
+                let child = pair.slave.spawn_command(builder()).map_err(|e| LocalError::Spawn(e.to_string()))?;
+                (pair, child)
+            }
+            Err(e) => return Err(LocalError::Spawn(e.to_string())),
+        }
+    };
     // Only the child holds the other end now, so the reader sees the end when it exits.
     drop(pair.slave);
     let mut killer = child.clone_killer();
