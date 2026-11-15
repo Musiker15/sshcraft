@@ -242,3 +242,18 @@ fn the_host_form_offers_a_proxy_command() {
         app.data.hosts.iter().any(|r| r.host.settings.proxy == Some(sshcraft_model::model::Proxy::Command { argv: want.clone() }))
     });
 }
+
+#[test]
+fn a_deleted_host_is_restored_from_the_trash() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let id = add_host(&session, "gone", None, &[]);
+    run(&session, "host.delete", json!({ "id": id }));
+    h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
+    h.state_mut().ui.settings.section = sshcraft_ui_egui::pages::settings::Section::Trash;
+    until(&mut h, "the trash", |app| app.data.trash.as_ref().is_some_and(|t| t.len() == 1));
+    h.get_by_label("gone");
+    h.get_by_label("Restore").click();
+    until(&mut h, "the restored host", |app| app.data.hosts.iter().any(|r| r.host.name == "gone"));
+    until(&mut h, "an empty trash", |app| app.data.trash.as_ref().is_some_and(Vec::is_empty));
+}

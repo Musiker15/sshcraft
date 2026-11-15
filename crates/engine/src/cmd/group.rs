@@ -59,12 +59,17 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let SaveParams { mut group, approve_command } = parse("group.save", params)?;
         let id = group.id.0.to_string();
-        let orphans = {
+        let (orphans, before) = {
             let store = ctx.session.store();
             let stored = store.list_groups()?.into_iter().find(|g| g.id == group.id);
-            keep_passwords(stored.as_ref().map(|g| &g.defaults), &mut group.defaults)
+            (keep_passwords(stored.as_ref().map(|g| &g.defaults), &mut group.defaults), stored)
         };
-        let mut servers = checked(&ctx.session, Change::SaveGroup(&group), ItemKind::Group, id, |s| Ok(s.upsert_group(&group)?))?;
+        let mut servers = checked(&ctx.session, Change::SaveGroup(&group), ItemKind::Group, id.clone(), |s| Ok(s.upsert_group(&group)?))?;
+        if let Some(before) = before.filter(|b| *b != group) {
+            let name = before.name.clone();
+            let payload = sshcraft_store::trash::TrashPayload::Group { groups: vec![before], hosts: Vec::new(), passwords: Vec::new() };
+            ctx.session.store().put_version(sshcraft_store::trash::TrashKind::Group, &id, &name, &payload, crate::now_ms() / 1000)?;
+        }
         if approve_command {
             super::host::approve_commands(&ctx, [&group.defaults])?;
         }

@@ -130,6 +130,7 @@ impl SshcraftApp {
                 Ok(EngineEvent::DataChanged { .. }) => {
                     self.data.dirty |= Refresh::DATA;
                     self.data.host_keys = None;
+                    self.data.trash = None;
                 }
                 Ok(EngineEvent::SettingsChanged) => self.data.dirty |= Refresh::SETTINGS,
                 Ok(EngineEvent::HostKeyPrompt(p)) => self.prompts.add_from(crate::prompts::from_event(&p, "host_key")),

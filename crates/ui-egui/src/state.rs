@@ -62,6 +62,9 @@ pub struct UiState {
     pub next_pane: u64,
     pub hosts: crate::pages::hosts::HostsView,
     pub settings: crate::pages::settings::SettingsView,
+    /// The earlier versions of an item, while that dialog is open.
+    #[serde(skip)]
+    pub versions: Option<crate::pages::trash::VersionsDialog>,
     #[serde(skip)]
     pub palette: PaletteState,
     /// Quitting, and the question before it.

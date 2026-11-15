@@ -14,3 +14,4 @@ pub mod sharing;
 pub mod snippets;
 pub mod sync;
 pub mod templates;
+pub mod trash;

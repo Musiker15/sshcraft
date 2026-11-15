@@ -53,7 +53,21 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let SaveParams { snippet } = parse("snippet.save", params)?;
         let vault = ctx.session.vault()?;
+        let before = snippets::list(&vault, &ctx.session.store())?.into_iter().find(|s| s.id == snippet.id);
+        let old = match &before {
+            Some(b) if *b != snippet => ctx.session.store().snapshot_snippet(b.id, &b.name)?,
+            _ => None,
+        };
         snippets::save(&vault, &ctx.session.store(), &snippet)?;
+        if let (Some(payload), Some(b)) = (old, before) {
+            ctx.session.store().put_version(
+                sshcraft_store::trash::TrashKind::Snippet,
+                &b.id.0.to_string(),
+                &b.name,
+                &payload,
+                crate::now_ms() / 1000,
+            )?;
+        }
         to_value(&snippet)
     })
 }

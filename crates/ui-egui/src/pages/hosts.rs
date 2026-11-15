@@ -265,6 +265,9 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
             if ui.button(tr("Duplicate")).clicked() {
                 duplicate_host(app, id);
             }
+            if ui.button(tr("Earlier versions…")).clicked() {
+                crate::pages::trash::open_versions(app, "host", &id.0.to_string(), &row.host.name);
+            }
             ui.menu_button(tr("Move to"), |ui| {
                 for (target, path) in host_form::group_targets(all_groups, None) {
                     if ui.button(path).clicked() {
@@ -399,6 +402,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     host_form::show_host(app, &ctx);
     host_form::show_group(app, &ctx);
     confirm(app, &ctx);
+    crate::pages::trash::versions_dialog(app, &ctx);
     crate::pages::import_export::show_import(app, &ctx);
     crate::pages::import_export::show_export(app, &ctx);
 }

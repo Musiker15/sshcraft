@@ -417,6 +417,15 @@ impl Store {
         json.map(|j| serde_json::from_str(&j).map_err(|e| StoreError::Malformed(e.to_string()))).transpose()
     }
 
+    /// Puts an earlier sealed stand of a snippet back.
+    pub fn put_snippet_sealed(&self, id: SnippetId, sealed: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO snippets (id, sealed) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET sealed = excluded.sealed",
+            rusqlite::params![id.0.to_string(), unb64(sealed)?],
+        )?;
+        Ok(())
+    }
+
     /// Drops the versions of an item (it is deleted for good).
     pub fn forget_versions(&self, kind: TrashKind, id: &str) -> Result<(), StoreError> {
         self.conn.execute("DELETE FROM versions WHERE kind = ?1 AND id = ?2", rusqlite::params![kind.as_str(), id])?;

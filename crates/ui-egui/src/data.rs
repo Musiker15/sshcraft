@@ -116,6 +116,9 @@ pub struct Data {
     /// The known host keys; `None` until loaded, and again after data changed.
     pub host_keys: Option<Vec<crate::pages::known_hosts::KnownKey>>,
     pub host_keys_loading: bool,
+    /// The trash; `None` until loaded, and again after data changed.
+    pub trash: Option<Vec<crate::pages::trash::TrashRow>>,
+    pub trash_loading: bool,
     /// What to fetch again; set by the engine's events, cleared when the fetch starts.
     pub dirty: Refresh,
     /// What is being fetched now, so a burst of changes starts one fetch each.

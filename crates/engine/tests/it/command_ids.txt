@@ -104,6 +104,8 @@ sync.set_server
 trash.list
 trash.purge
 trash.restore
+trash.restore_version
+trash.versions
 vault.hello
 vault.status
 workspace.delete

@@ -506,3 +506,37 @@ async fn deleting_a_host_keeps_it_in_the_trash_and_a_restore_syncs_it_again() {
     assert!(session.store().outbox(server).unwrap().contains(&(sshcraft_store::store::ItemKind::Host, host.id.0.to_string())));
     assert!(session.store().list_trash().unwrap().is_empty());
 }
+
+/// Every save keeps the stand before; restoring one saves it again (and so keeps the newer
+/// stand as a version too).
+#[tokio::test]
+async fn saving_keeps_the_previous_version_and_a_version_restores() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = open(dir.path());
+    let mut host = sshcraft_model::model::Host {
+        id: sshcraft_model::model::HostId::new(),
+        name: "web".into(),
+        group_id: None,
+        settings: sshcraft_model::model::ConnectionSettings { address: Some("old.org".into()), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    host.settings.address = Some("new.org".into());
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    // Saving the same again keeps no new version.
+    session.execute(Caller::User, "host.save", json!({ "host": host })).await.unwrap();
+    let id = host.id.0.to_string();
+    let versions = session.execute(Caller::User, "trash.versions", json!({ "kind": "host", "id": id })).await.unwrap();
+    assert_eq!(versions.as_array().unwrap().len(), 1);
+    let version = versions[0]["version"].clone();
+    session.execute(Caller::User, "trash.restore_version", json!({ "kind": "host", "id": id, "version": version })).await.unwrap();
+    assert_eq!(session.store().list_hosts().unwrap()[0].settings.address.as_deref(), Some("old.org"));
+    let versions = session.execute(Caller::User, "trash.versions", json!({ "kind": "host", "id": id })).await.unwrap();
+    assert_eq!(versions.as_array().unwrap().len(), 2, "the newer stand is a version now");
+    for cmd in ["trash.versions", "trash.restore_version"] {
+        assert!(session.execute(agent(), cmd, json!({ "kind": "host", "id": id, "version": 1 })).await.is_err(), "{cmd}");
+    }
+}

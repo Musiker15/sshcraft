@@ -78,6 +78,19 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "Allow on this device" => "Auf diesem Gerät erlauben",
         "Known hosts" => "Bekannte Server",
+        "Trash" => "Papierkorb",
+        "Snippet" => "Snippet",
+        "Deleted hosts, groups, keys and snippets stay here for {days} days, also when another device deleted them." => {
+            "Gelöschte Hosts, Gruppen, Schlüssel und Snippets bleiben {days} Tage hier, auch wenn ein anderes Gerät sie gelöscht hat."
+        }
+        "Keep for" => "Aufbewahren",
+        " days" => " Tage",
+        "The trash is empty." => "Der Papierkorb ist leer.",
+        "Delete for good" => "Endgültig löschen",
+        "Empty the trash" => "Papierkorb leeren",
+        "Earlier versions…" => "Frühere Fassungen …",
+        "Earlier versions of {name}" => "Frühere Fassungen von {name}",
+        "No earlier versions." => "Keine früheren Fassungen.",
         "Write to ~/.ssh/config" => "In ~/.ssh/config schreiben",
         "Written to {files}; a copy of the old file is in ~/.ssh/.sshcraft-backup." => {
             "Geschrieben in {files}; eine Kopie der alten Datei liegt in ~/.ssh/.sshcraft-backup."
