@@ -31,6 +31,8 @@ pub const MAX_REQUEST: usize = 1 << 20;
 pub const MAX_REPLY: usize = 8 << 20;
 /// Connections one server serves at once.
 pub const MAX_CONNECTIONS: usize = 16;
+/// Connections still signing in at once; with more, the oldest of them is dropped.
+pub const MAX_PENDING: usize = 16;
 /// Requests of one connection running at once.
 pub const MAX_RUNNING: usize = 64;
 /// How long a new connection has to sign in.

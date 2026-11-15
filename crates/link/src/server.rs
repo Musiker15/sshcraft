@@ -2,9 +2,9 @@
 //! [`Handler`], side by side. A connection that goes away (or a server that stops) drops its
 //! running requests, and the handler hears that the connection closed.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -17,7 +17,7 @@ use tokio::task::{AbortHandle, JoinSet};
 
 use crate::auth::{client_proof, nonce, same, server_proof, valid_nonce};
 use crate::wire::{Line, Request, Response, read_line, write_line};
-use crate::{AUTH_TIMEOUT, LinkError, MAX_CONNECTIONS, MAX_REPLY, MAX_REQUEST, MAX_RUNNING, Token};
+use crate::{AUTH_TIMEOUT, LinkError, MAX_CONNECTIONS, MAX_PENDING, MAX_REPLY, MAX_REQUEST, MAX_RUNNING, Token};
 
 /// One connection, for the handler to tell its callers apart.
 pub type ConnId = u64;
@@ -98,25 +98,40 @@ impl Drop for Closed {
     }
 }
 
+/// A connection that has not signed in yet.
+struct Pending {
+    task: AbortHandle,
+    signed_in: Arc<AtomicBool>,
+}
+
 async fn accept(listener: TcpListener, token: Token, handler: Arc<dyn Handler>, options: ServerOptions, mut stopped: watch::Receiver<bool>) {
+    // Signed-in connections; a place is taken when the sign-in succeeds.
     let open = Arc::new(AtomicUsize::new(0));
     let next = AtomicU64::new(1);
     let mut connections = JoinSet::new();
+    // Connections still signing in, oldest first: when they fill their places, the oldest goes,
+    // so silent connections cannot keep a client out.
+    let mut pending: VecDeque<Pending> = VecDeque::new();
     loop {
         tokio::select! {
             _ = stopped.changed() => break,
             accepted = listener.accept() => {
-                let Ok((stream, _)) = accepted else { continue };
-                while connections.try_join_next().is_some() {}
-                if open.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
-                    // No place: the connection is closed at once.
-                    drop(stream);
+                let Ok((stream, _)) = accepted else {
+                    // Out of file handles or the like: try again in a moment, not at once.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
+                };
+                while connections.try_join_next().is_some() {}
+                pending.retain(|p| !p.task.is_finished() && !p.signed_in.load(Ordering::SeqCst));
+                if pending.len() >= MAX_PENDING
+                    && let Some(oldest) = pending.pop_front()
+                {
+                    oldest.task.abort();
                 }
-                open.fetch_add(1, Ordering::SeqCst);
-                let slot = Slot(open.clone());
+                let signed_in = Arc::new(AtomicBool::new(false));
                 let conn = next.fetch_add(1, Ordering::SeqCst);
-                connections.spawn(serve(stream, token.clone(), handler.clone(), conn, options, slot));
+                let task = connections.spawn(serve(stream, token.clone(), handler.clone(), conn, options, open.clone(), signed_in.clone()));
+                pending.push_back(Pending { task, signed_in });
             }
         }
     }
@@ -139,35 +154,50 @@ async fn request(read: &mut BufReader<OwnedReadHalf>) -> Option<Request> {
 }
 
 /// The challenge sign-in; whether it succeeded. A failure has been answered.
-async fn sign_in(read: &mut BufReader<OwnedReadHalf>, write: &mut OwnedWriteHalf, token: &Token) -> bool {
+async fn sign_in(read: &mut BufReader<OwnedReadHalf>, write: &mut OwnedWriteHalf, token: &Token, open: &Arc<AtomicUsize>) -> Option<Slot> {
     let refuse = |id: u64| Response::error(id, "authentication required");
-    let Some(first) = request(read).await else { return false };
+    let first = request(read).await?;
     let client_nonce = first.params.get("clientNonce").and_then(Value::as_str).unwrap_or_default().to_string();
     if first.method != "auth.challenge" || !valid_nonce(&client_nonce) {
         let _ = write_line(write, &refuse(first.id), MAX_REPLY).await;
-        return false;
+        return None;
     }
     let server_nonce = nonce();
     let proof = server_proof(token, &client_nonce, &server_nonce);
-    if write_line(write, &Response::ok(first.id, json!({ "serverNonce": server_nonce, "serverProof": proof })), MAX_REPLY).await.is_err() {
-        return false;
-    }
-    let Some(second) = request(read).await else { return false };
+    write_line(write, &Response::ok(first.id, json!({ "serverNonce": server_nonce, "serverProof": proof })), MAX_REPLY).await.ok()?;
+    let second = request(read).await?;
     let given = second.params.get("proof").and_then(Value::as_str).unwrap_or_default();
     if second.method != "auth" || !same(given, &client_proof(token, &client_nonce, &server_nonce)) {
         let _ = write_line(write, &refuse(second.id), MAX_REPLY).await;
-        return false;
+        return None;
     }
-    write_line(write, &Response::ok(second.id, json!({ "authenticated": true })), MAX_REPLY).await.is_ok()
+    // A place among the signed-in connections, or no.
+    if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+        open.fetch_sub(1, Ordering::SeqCst);
+        let _ = write_line(write, &Response::error(second.id, "too many connections"), MAX_REPLY).await;
+        return None;
+    }
+    let slot = Slot(open.clone());
+    write_line(write, &Response::ok(second.id, json!({ "authenticated": true })), MAX_REPLY).await.ok()?;
+    Some(slot)
 }
 
-async fn serve(stream: TcpStream, token: Token, handler: Arc<dyn Handler>, conn: ConnId, options: ServerOptions, _slot: Slot) {
+async fn serve(
+    stream: TcpStream,
+    token: Token,
+    handler: Arc<dyn Handler>,
+    conn: ConnId,
+    options: ServerOptions,
+    open: Arc<AtomicUsize>,
+    signed_in: Arc<AtomicBool>,
+) {
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
-    match tokio::time::timeout(options.auth_timeout, sign_in(&mut read, &mut write, &token)).await {
-        Ok(true) => {}
+    let _slot = match tokio::time::timeout(options.auth_timeout, sign_in(&mut read, &mut write, &token, &open)).await {
+        Ok(Some(slot)) => slot,
         _ => return,
-    }
+    };
+    signed_in.store(true, Ordering::SeqCst);
     // Signed in: from here on the handler hears when the connection ends.
     let _closed = Closed(handler.clone(), conn, true);
     let (answers, mut outgoing) = mpsc::channel::<Response>(256);

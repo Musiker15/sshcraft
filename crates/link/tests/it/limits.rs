@@ -137,3 +137,16 @@ async fn an_id_still_running_is_refused_and_the_cap_holds() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(handler.calls.load(Ordering::SeqCst), sshcraft_link::MAX_RUNNING, "only what fits runs");
 }
+
+#[tokio::test]
+async fn silent_connections_cannot_keep_a_client_out() {
+    let (server, _handler, token) = echo_server().await;
+    // Something on the computer opens connections and never signs in.
+    let mut silent = Vec::new();
+    for _ in 0..(MAX_CONNECTIONS * 2) {
+        silent.push(TcpStream::connect(addr(&server)).await.unwrap());
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let client = Client::connect(addr(&server), &token).await;
+    assert!(client.is_ok(), "a client that signs in gets a place: {client:?}");
+}
