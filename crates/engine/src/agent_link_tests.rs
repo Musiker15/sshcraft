@@ -159,3 +159,22 @@ async fn the_file_names_the_port_and_holds_no_secret() {
     let text = std::fs::read_to_string(w.link.path().join(CONNECTION_FILE)).unwrap();
     assert!(!text.contains(token.hex()), "{text}");
 }
+
+/// Spec 10 (T15): an agent calling as fast as it can through the link cannot flood the log, and
+/// the app keeps answering.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_cannot_flood_the_log_through_the_link() {
+    let w = world().await;
+    let c = client(&w).await;
+    hello(&c, "flooder", "mcp").await;
+    for _ in 0..50 {
+        let calls: Vec<_> = (0..40).map(|_| run(&c, "host.delete", json!({ "id": uuid::Uuid::new_v4() }))).collect();
+        for result in futures::future::join_all(calls).await {
+            assert!(result.is_err(), "nothing was deleted");
+        }
+    }
+    let log = agent_log(&w).await;
+    assert!(log.len() <= sshcraft_store::agent::MAX_LOG, "{} entries", log.len());
+    assert!(log.len() >= 900, "the newest stay: {}", log.len());
+    assert_eq!(c.call("ping", json!({})).await.unwrap(), json!("pong"), "the app still answers");
+}
