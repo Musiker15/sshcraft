@@ -64,6 +64,45 @@ resolves the host name itself. An HTTP proxy receives its user and password unen
 authentication). *Direct* switches off a proxy inherited from a group. Reaching a hop takes at
 most 15 seconds.
 
+### Proxy command
+
+*Command* runs a program on this computer whose standard input and output carry the connection,
+like OpenSSH's `ProxyCommand` (for example `ssh -W %h:%p bastion` or `cloudflared access ssh
+--hostname %h`). `%h`, `%p`, `%r` and `%n` stand for the address, port and user of the first
+hop and the host's name; `%%` is a `%`.
+
+- **No shell.** The line is split once, by the quoting rules of `sh`, and the program starts
+  with that argument list. A line that needs a shell (`|`, `;`, `&`, `<`, `>`, `$`, backticks,
+  parentheses) is refused. A replaced token stays one argument, whatever the host name holds.
+- **Only after it was allowed on this device.** A command you save in the window, or that comes
+  from your own `~/.ssh/config`, runs without asking. One that arrived through sync, a share or
+  an AI agent, or that changed, is shown in full first (*Allow on this device* or *Cancel*); the
+  answer is kept per command line. AI agents can neither set nor change a proxy command.
+- What the program writes to standard error (up to 4 KiB) is shown when the connection fails.
+
+## Reconnecting
+
+A terminal whose connection drops tries again after 1, 2, 4, 8, 16 and 32 seconds, then every
+minute, up to *Settings › Terminal › Reconnect* times (10 by default, 0 switches it off). Port
+forwarding tries for as long as the rule is on. SSHCraft checks the clock and the network every
+five seconds: after sleep or when the network changed (another Wi-Fi, a VPN, a cable), every
+connection is pinged at once and given up after five seconds without an answer, instead of
+after the 45 seconds of keep-alive, and a reconnect that waits tries now.
+
+## Host keys
+
+A server's host key is kept whole (algorithm and key), several per server (one per algorithm).
+A key that matches one of them is trusted; any other key ends the connection, as before.
+*Keys › Known hosts* lists them, removes one (the next connection asks again), and reads or
+writes a `known_hosts` file. A server SSHCraft does not know yet takes every key of an imported
+file; a server it knows takes no key it does not know.
+
+After sign-in an OpenSSH server may name all its host keys (`UpdateHostKeys`). SSHCraft keeps a
+new one only after the server proved that it holds it, and drops keys the server no longer
+names; only when the key of this connection is among them. *Settings › General › Host keys*
+switches it off. Keys known only by their fingerprint (from before this version) gain their key
+on the next connection.
+
 ## Agent forwarding
 
 Off unless switched on for a host or group. When on, the target (never a jump host) may use the
@@ -97,10 +136,25 @@ Desktop only, from the new tab page or the command palette:
 
 SSHCraft prefers `mlkem768x25519-sha256`, the hybrid of ML-KEM and X25519 that `russh` offers
 first; servers without it fall back to Curve25519. Post-quantum host keys (ML-DSA) follow once
-`russh` supports them.
+`russh` supports them. SSHCraft always offers "strict kex" against the Terrapin attack
+(CVE-2023-48795); a test makes sure a packet slipped in before the key exchange is refused.
 
 ## Importing from `~/.ssh/config`
 
 `ProxyJump` through hosts of the same file (or hosts that already exist at the same place with
-that name) becomes jump hosts; other forms (`user@host:port`, a host not in the file) and
-`ProxyCommand` stay a warning. `ForwardAgent yes|no` and `SetEnv` are taken over.
+that name) becomes jump hosts; other forms (`user@host:port`, a host not in the file) stay a
+warning. `ProxyCommand` becomes a proxy command when it needs no shell (see above), otherwise a
+warning. `ForwardAgent yes|no` and `SetEnv` are taken over. `Include` is followed (relative to
+`~/.ssh`, with `~` and `*`, at most 16 levels and 256 files); `Match` is not.
+
+### Keeping in step and writing back
+
+With *Settings › General › Keep the hosts of ~/.ssh/config in step*, the file and the files it
+includes are read at start and again whenever one changes. Their hosts live in the group
+`~/.ssh/config` and follow the file: a changed entry updates its host (address, port, user,
+key, jump hosts, proxy command, agent forwarding, environment), an edit made in SSHCraft stays
+until the entry changes in the file, and a host that leaves the file stays in SSHCraft without
+its link. *Write to ~/.ssh/config* in a host's menu writes it back: into its own `Host` block
+where it came from (only the lines SSHCraft manages change; comments, `IdentityFile` and every
+other line stay), or as a new block before the first `Host` line of `~/.ssh/config`. The file is
+replaced in one step and the old one is kept as `config.sshcraft-bak`. AI agents can do neither.
