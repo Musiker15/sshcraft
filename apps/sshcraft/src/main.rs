@@ -81,6 +81,21 @@ fn title_bar_pref(runtime: &tokio::runtime::Runtime, session: &Session) -> craft
     }
 }
 
+/// The main window: its size, icon and frame. The app id names the window to the desktop (the
+/// Wayland app id, the X11 class), so it matches `de.musiker15.sshcraft.desktop` and the Flatpak.
+fn main_viewport(frame: &craft_window::policy::Frame) -> egui::ViewportBuilder {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("SSHCraft")
+        .with_app_id(APP_ID)
+        .with_inner_size([1200.0, 780.0])
+        .with_min_inner_size([720.0, 480.0])
+        .with_icon(sshcraft_ui_egui::widgets::icons::app_icon());
+    craft_window::policy::apply(viewport, frame)
+}
+
+/// SSHCraft's id on every platform: keyring service, data folder, desktop entry, bundle id.
+const APP_ID: &str = "de.musiker15.sshcraft";
+
 /// A small window that explains why SSHCraft did not start.
 struct Problem(String);
 
@@ -141,12 +156,7 @@ fn main() -> ExitCode {
     let pref = title_bar_pref(&runtime, &session);
     let decision = craft_window::policy::decide_for(craft_window::Prefix::new("SSHCRAFT"), craft_window::policy::Backend::from_env(), pref);
     let window_frame = decision.frame;
-    let viewport = egui::ViewportBuilder::default()
-        .with_title("SSHCraft")
-        .with_inner_size([1200.0, 780.0])
-        .with_min_inner_size([720.0, 480.0])
-        .with_icon(sshcraft_ui_egui::widgets::icons::app_icon());
-    let options = eframe::NativeOptions { viewport: craft_window::policy::apply(viewport, &window_frame), ..Default::default() };
+    let options = eframe::NativeOptions { viewport: main_viewport(&window_frame), ..Default::default() };
     let handle = runtime.handle().clone();
     let result = eframe::run_native(
         "SSHCraft",
@@ -184,6 +194,12 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_names_the_app_to_the_desktop() {
+        let viewport = main_viewport(&craft_window::policy::Frame::Native);
+        assert_eq!(viewport.app_id.as_deref(), Some("de.musiker15.sshcraft"));
+    }
 
     /// A second start on the same data does not open it and explains why.
     #[tokio::test(flavor = "multi_thread")]

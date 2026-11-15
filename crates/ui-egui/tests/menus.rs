@@ -233,3 +233,131 @@ fn the_keyboard_stays_with_the_terminal() {
     assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_none(), "no menu opened from the keyboard");
     assert!(!craft_menu::bar::is_focused(&h.ctx), "the bar did not take the keyboard");
 }
+
+fn screen(app: &SshcraftApp) -> String {
+    app.terminals.values().next().map(|t| t.term.visible_text()).unwrap_or_default()
+}
+
+/// A connected session in a terminal tab whose shell echoes what it gets.
+fn connected_terminal(h: &mut H, session: &Session) -> TestServer {
+    let (server, id) = host(session, "web", true);
+    h.run_steps(2);
+    h.state_mut().ui.connect_request = Some(ConnectRequest::Host(id));
+    until(h, "the connection", |app| {
+        app.in_terminal() && app.terminals.values().any(|t| matches!(t.status, Some(sshcraft_engine::SessionStatus::Connected { .. })))
+    });
+    server
+}
+
+/// Types `text` and lets the shell echo it, if it got it.
+fn type_and_wait(h: &mut H, text: &str) {
+    h.input_mut().events.push(egui::Event::Text(text.into()));
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}
+
+#[test]
+fn typing_stays_out_of_the_terminal_while_the_quit_question_is_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let _server = connected_terminal(&mut h, &session);
+    request_close(&mut h);
+    h.run_steps(3);
+    assert!(h.query_by_label("End sessions and quit").is_some());
+    let cursor = |app: &SshcraftApp| app.terminals.values().next().map(|t| (t.term.screen().cursor.row, t.term.screen().cursor.col));
+    type_and_wait(&mut h, "zqx");
+    let before = cursor(h.state());
+    h.key_press(egui::Key::Enter);
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert!(!screen(h.state()).contains("zqx"), "the shell got what was typed over the question");
+    assert_eq!(cursor(h.state()), before, "Enter on the question did not reach the shell");
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    type_and_wait(&mut h, "kvw");
+    assert!(screen(h.state()).contains("kvw"), "after the question the terminal has the keys again");
+}
+
+#[test]
+fn typing_stays_out_of_the_terminal_while_a_menu_is_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let _server = connected_terminal(&mut h, &session);
+    h.get_by_role_and_label(Role::MenuItem, "View").click_accesskit();
+    h.run_steps(2);
+    assert!(craft_menu::bar::is_open(&h.ctx));
+    type_and_wait(&mut h, "zqx");
+    assert!(!screen(h.state()).contains("zqx"), "the shell got what was typed into the open menu");
+    // The open menu has the keys: the arrow and Enter run its first row.
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().ui.palette.open, "View > Command palette ran from the keyboard");
+}
+
+/// Presses the primary button at `pos` and keeps it down for a frame.
+fn press_at(h: &mut H, pos: egui::Pos2) {
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.step();
+}
+
+fn release_at(h: &mut H, pos: egui::Pos2) {
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.step();
+}
+
+fn began_resize(h: &H) -> Option<egui::ResizeDirection> {
+    h.output().viewport_output.get(&ViewportId::ROOT).and_then(|v| {
+        v.commands.iter().find_map(|c| match c {
+            ViewportCommand::BeginResize(d) => Some(*d),
+            _ => None,
+        })
+    })
+}
+
+#[test]
+fn the_window_resizes_from_its_edges_where_the_app_draws_the_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(3);
+    // The system's frame resizes the window itself: no bands of the app's.
+    press_at(&mut h, egui::pos2(1.0, 400.0));
+    assert_eq!(began_resize(&h), None);
+    release_at(&mut h, egui::pos2(1.0, 400.0));
+
+    let layout = craft_window::Layout { left: Vec::new(), right: vec![craft_window::Button::Close] };
+    h.state_mut().window_frame =
+        craft_window::policy::Frame::Integrated(craft_window::policy::Captions { family: craft_window::policy::CaptionFamily::Windows, layout });
+    h.run_steps(2);
+    for (pos, direction) in [
+        (egui::pos2(1.0, 400.0), egui::ResizeDirection::West),
+        (egui::pos2(1199.0, 400.0), egui::ResizeDirection::East),
+        (egui::pos2(600.0, 799.0), egui::ResizeDirection::South),
+        (egui::pos2(1199.0, 799.0), egui::ResizeDirection::SouthEast),
+        (egui::pos2(600.0, 1.0), egui::ResizeDirection::North),
+    ] {
+        press_at(&mut h, pos);
+        assert_eq!(began_resize(&h), Some(direction), "at {pos:?}");
+        release_at(&mut h, pos);
+    }
+    // Inside the window a press is the page's.
+    press_at(&mut h, egui::pos2(600.0, 400.0));
+    assert_eq!(began_resize(&h), None);
+}

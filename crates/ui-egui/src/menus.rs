@@ -132,8 +132,9 @@ pub fn bar_ui(app: &mut SshcraftApp, ui: &mut egui::Ui, max_width: f32) {
     let bar = craft_menu::layout(&menu_bar(app), Target::current(), &layout_options()).bar;
     // While a terminal has the keyboard, the bar sees none of it: Alt+F is the shell's (forward a
     // word), F10 the program's, and a tap on Alt must not put the arrow keys on the bar. The mouse
-    // still opens the menus. The keys are given back unchanged for the terminal after the bar.
-    let held = (app.in_terminal() && !ctx.text_edit_focused()).then(|| {
+    // still opens the menus, and an open menu has the keys (the terminal then gets none). The keys
+    // are given back unchanged for the terminal after the bar.
+    let held = (app.in_terminal() && !ctx.text_edit_focused() && !craft_menu::bar::is_open(&ctx)).then(|| {
         ctx.input_mut(|i| {
             let kept = (i.events.clone(), i.raw.events.clone());
             i.events.retain(|e| !keyboard(e));

@@ -149,3 +149,56 @@ fn draw_glyph(painter: &egui::Painter, rect: Rect, button: Button, maximized: bo
         }
     }
 }
+
+/// How far the resize bands reach into the window, and the corners.
+const EDGE: f32 = 5.0;
+const CORNER: f32 = 10.0;
+
+/// Where the app draws the frame, the window has no edges of the system's: bands along them,
+/// over everything else, start a resize as the system's edges would. None while maximized.
+pub fn resize_edges(app: &SshcraftApp, ctx: &egui::Context) {
+    if !matches!(app.window_frame, Frame::Integrated(_)) || ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
+        return;
+    }
+    let full = ctx.content_rect();
+    let id = egui::Id::new("sshcraft-resize-edges");
+    egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(full.min).interactable(true).show(ctx, |ui| {
+        for (i, (direction, band)) in bands(full).into_iter().enumerate() {
+            let response = ui.interact(band, id.with(i), Sense::click_and_drag()).on_hover_cursor(cursor(direction));
+            if response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+            }
+        }
+    });
+}
+
+/// The bands of `full`, corners last: egui gives a press to the widget added last, so the corners
+/// win where they overlap the edges.
+fn bands(full: Rect) -> [(egui::ResizeDirection, Rect); 8] {
+    use egui::ResizeDirection::{East, North, NorthEast, NorthWest, South, SouthEast, SouthWest, West};
+    let c = vec2(CORNER, CORNER);
+    [
+        (North, full.with_max_y(full.top() + EDGE)),
+        (South, full.with_min_y(full.bottom() - EDGE)),
+        (West, full.with_max_x(full.left() + EDGE)),
+        (East, full.with_min_x(full.right() - EDGE)),
+        (NorthWest, Rect::from_min_size(full.left_top(), c)),
+        (NorthEast, Rect::from_min_size(full.right_top() - vec2(CORNER, 0.0), c)),
+        (SouthWest, Rect::from_min_size(full.left_bottom() - vec2(0.0, CORNER), c)),
+        (SouthEast, Rect::from_min_size(full.right_bottom() - c, c)),
+    ]
+}
+
+fn cursor(direction: egui::ResizeDirection) -> egui::CursorIcon {
+    use egui::ResizeDirection as D;
+    match direction {
+        D::North => egui::CursorIcon::ResizeNorth,
+        D::South => egui::CursorIcon::ResizeSouth,
+        D::East => egui::CursorIcon::ResizeEast,
+        D::West => egui::CursorIcon::ResizeWest,
+        D::NorthEast => egui::CursorIcon::ResizeNorthEast,
+        D::NorthWest => egui::CursorIcon::ResizeNorthWest,
+        D::SouthEast => egui::CursorIcon::ResizeSouthEast,
+        D::SouthWest => egui::CursorIcon::ResizeSouthWest,
+    }
+}

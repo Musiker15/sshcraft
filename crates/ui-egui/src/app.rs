@@ -382,6 +382,7 @@ impl SshcraftApp {
             }
         }
         self.toasts.show(&ctx);
+        crate::window::resize_edges(self, &ctx);
         self.forms.observe(crate::forms::shape(&self.ui));
     }
 
