@@ -207,13 +207,16 @@ fn alt_key(h: &mut H, key: egui::Key) {
 fn the_keyboard_stays_with_the_terminal() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, session) = app_harness(dir.path());
-    // Outside a terminal Alt+F opens File, as on Windows.
+    // Outside a terminal Alt+F opens File, as on Windows and Linux. On macOS Option is a typing
+    // key and the bar has no mnemonics (craft-menu), so there is nothing to check there.
     h.run_steps(3);
-    alt_key(&mut h, egui::Key::F);
-    assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_some(), "Alt+F opens File on a page");
-    h.key_press(egui::Key::Escape);
-    h.run_steps(3);
-    assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_none());
+    if !cfg!(target_os = "macos") {
+        alt_key(&mut h, egui::Key::F);
+        assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_some(), "Alt+F opens File on a page");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert!(h.query_by_role_and_label(Role::MenuItem, "New tab").is_none());
+    }
 
     let (_server, id) = host(&session, "web", true);
     h.state_mut().ui.connect_request = Some(ConnectRequest::Host(id));
