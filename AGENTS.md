@@ -178,12 +178,18 @@ Each has a test where it can have one.
 ## Running and looking at it
 
 - `cargo xtask ci` runs every gate; `cargo xtask test` runs the tests alone.
-- The desktop app returns in R4. Until then: `cargo run -p sshcraft-server -- --help`,
-  `docker build -f packaging/docker/Dockerfile -t sshcraft-server .`, a local shell in the
-  terminal with `cargo run -p sshcraft-ui-egui --example terminal_window` (an engine on a temp
-  folder, never the real data), and a picture of the terminal without a window with
-  `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]`.
-- `cargo xtask perf` runs the terminal's performance budgets in a release build.
+- The desktop app: `cargo run -p sshcraft` (on the real data folder; it refuses to start while
+  another SSHCraft runs). The sync server: `cargo run -p sshcraft-server -- --help`, or
+  `docker build -f packaging/docker/Dockerfile -t sshcraft-server .`.
+- Without touching the real data: a local shell in the terminal with
+  `cargo run -p sshcraft-ui-egui --example terminal_window`, and pictures without a window with
+  `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]` (the
+  terminal) or `-- out.png --page hosts|keys|settings|newtab [--dark|--light] [--language en|de]`
+  (the whole window on sample data). Both run an engine on a temp folder.
+- Interface tests run the app in egui_kittest on a test engine (`sshcraft_ui_egui::testing`,
+  feature `testing`).
+- `cargo xtask perf` runs the performance budgets of the terminal and the window in a release
+  build.
 - Parallel agents: a separate `CARGO_TARGET_DIR` each, and edit only the crates you own.
 
 ## Roadmap

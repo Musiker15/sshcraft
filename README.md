@@ -12,12 +12,20 @@ It follows the architecture and conventions of the other Craft apps: layered cra
 where everything is a command, an egui front end, a control channel and an MCP server for AI
 agents, with rights per action and a confirmation in the app.
 
-**Status:** rebuild in progress. The desktop app is being rebuilt on the Craft conventions (see
-[ROADMAP.md](ROADMAP.md)); until then there is no desktop app on `main`. The sync server works.
+**Status:** rebuild in progress (see [ROADMAP.md](ROADMAP.md)). The desktop app has hosts, keys,
+import and export, terminal tabs and settings; workspaces, port forwarding, snippets, session
+logs, sync and the agent confirmation return in R5. The sync server works. There is no release
+yet.
 
 ## Quick start
 
-The sync server, from the repository root:
+The desktop app (Windows for now), from the repository root:
+
+```bash
+cargo run -p sshcraft
+```
+
+The sync server:
 
 ```bash
 cargo run -p sshcraft-server -- serve --public-origin https://sync.example.org
