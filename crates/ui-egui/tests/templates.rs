@@ -57,6 +57,8 @@ fn a_template_directory_is_quoted_once() {
     assert_eq!(start_line(None, None, true), None);
     assert_eq!(start_line(Some("/a\nb"), None, true), None, "never a second line");
     assert_eq!(start_line(None, Some("ls\rrm -rf /"), true), None);
+    // fish reads a backslash inside single quotes: the word could end early there.
+    assert_eq!(start_line(Some("/tmp/a\\'; rm -rf ~ #"), Some("ls"), true), None, "no backslash in a directory");
 }
 
 #[test]

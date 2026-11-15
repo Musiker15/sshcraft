@@ -13,13 +13,14 @@ use crate::widgets::visible;
 
 /// The line typed once after connecting: the directory as one quoted word, then the command.
 /// `posix` is false for a serial line, which gets the command alone. `None` when there is
-/// nothing to type, or when either part has a line break or another control character (it
-/// would end the line and run what follows).
+/// nothing to type, when either part has a line break or another control character (it would
+/// end the line and run what follows), or when the directory has a backslash (fish reads one
+/// inside single quotes, so the quoted word could end early).
 pub fn start_line(cwd: Option<&str>, command: Option<&str>, posix: bool) -> Option<String> {
     let plain = |s: &str| !s.chars().any(char::is_control);
     let cwd = cwd.map(str::trim).filter(|c| !c.is_empty() && posix);
     let command = command.map(str::trim).filter(|c| !c.is_empty());
-    if !cwd.is_none_or(plain) || !command.is_none_or(plain) {
+    if !cwd.is_none_or(|c| plain(c) && !c.contains('\\')) || !command.is_none_or(plain) {
         return None;
     }
     let cd = cwd.map(|dir| format!("cd -- '{}'", dir.replace('\'', "'\\''")));
