@@ -13,11 +13,11 @@ use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sshcraft_model::keytypes::KeyKind;
-use sshcraft_model::model::{Group, Host, Identity, KeyId, PasswordId, ServerId};
+use sshcraft_model::model::{ConnectionSettings, Group, Host, Identity, IdentityId, KeyId, KeyRef, PasswordId, Proxy, ServerId};
 use zeroize::Zeroizing;
 
 use crate::snippets::{self, Snippet};
-use crate::store::{HostKey, Store, StoreError};
+use crate::store::{HostKey, ItemKind, Store, StoreError};
 use crate::vault::{Vault, VaultError};
 
 const MAGIC: &str = "sshcraft-backup-1";
@@ -29,8 +29,8 @@ pub const MAX_FILE: usize = 256 * 1024 * 1024;
 const KDF_MEMORY_KIB: u32 = 64 * 1024;
 const KDF_PASSES: u32 = 3;
 /// The most a file may ask for, so a crafted header cannot make the device allocate gigabytes.
-const KDF_MAX_MEMORY_KIB: u32 = 1024 * 1024;
-const KDF_MAX_PASSES: u32 = 16;
+const KDF_MAX_MEMORY_KIB: u32 = 256 * 1024;
+const KDF_MAX_PASSES: u32 = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
@@ -199,39 +199,82 @@ fn open(text: &str, passphrase: &str) -> Result<Content, BackupError> {
 }
 
 /// Adds from a backup what is missing on this device; nothing that is here is changed (local
-/// data stays authoritative). Items keep their sync server only when this device knows it.
-/// The whole file is checked first: a wrong passphrase or a changed file adds nothing.
-pub fn restore_missing(store: &Store, vault: &Vault, text: &str, passphrase: &str) -> Result<Counts, BackupError> {
-    let content = open(text, passphrase)?;
+/// data stays authoritative). Items keep their sync server only when this device knows it; those
+/// come back in the list, to be queued for it. Everything is checked before the first write: a
+/// wrong passphrase, a changed file or a key or snippet that does not read adds nothing. A file
+/// is not trusted beyond what it holds: a host that refers to a password, key or identity the file
+/// does not carry loses that reference, and host keys are taken only for servers of its hosts
+/// that this device does not know yet.
+pub fn restore_missing(store: &Store, vault: &Vault, text: &str, passphrase: &str) -> Result<(Counts, Vec<(ItemKind, String)>), BackupError> {
+    let mut content = open(text, passphrase)?;
+    let bad = |what: &str| BackupError::Store(StoreError::Malformed(format!("the backup holds a {what} that does not read")));
+    for k in &content.keys {
+        crate::vault::check_openssh(&k.openssh).map_err(|_| bad("key"))?;
+    }
+    for s in &content.snippets {
+        snippets::validate(s).map_err(|_| bad("snippet"))?;
+    }
     let servers: Vec<ServerId> = store.servers()?.into_iter().map(|s| s.id).collect();
     let place = |location: Option<ServerId>| location.filter(|s| servers.contains(s));
+
+    // References only to what the file itself holds.
+    let file_passwords: Vec<PasswordId> = content.passwords.iter().map(|p| p.id).collect();
+    let file_keys: Vec<KeyId> = content.keys.iter().map(|k| k.id).collect();
+    let file_identities: Vec<IdentityId> = content.identities.iter().map(|i| i.id).collect();
+    let confine = |s: &mut ConnectionSettings| {
+        s.password = s.password.filter(|p| file_passwords.contains(p));
+        s.totp = s.totp.filter(|p| file_passwords.contains(p));
+        s.identity = s.identity.filter(|i| file_identities.contains(i));
+        if matches!(&s.key, Some(KeyRef::Stored { id }) if !file_keys.contains(id)) {
+            s.key = None;
+        }
+        if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut s.proxy {
+            e.password = e.password.filter(|p| file_passwords.contains(p));
+        }
+    };
+    content.hosts.iter_mut().for_each(|h| confine(&mut h.settings));
+    content.groups.iter_mut().for_each(|g| confine(&mut g.defaults));
+    for identity in &mut content.identities {
+        identity.password = identity.password.filter(|p| file_passwords.contains(p));
+        if matches!(&identity.key, Some(KeyRef::Stored { id }) if !file_keys.contains(id)) {
+            identity.key = None;
+        }
+    }
+
     let mut counts = Counts::default();
+    let mut placed_at_server: Vec<(ItemKind, String)> = Vec::new();
+    let mut note = |kind: ItemKind, id: String, location: Option<ServerId>| {
+        if location.is_some() {
+            placed_at_server.push((kind, id));
+        }
+    };
 
     let have_groups: Vec<_> = store.list_groups()?.into_iter().map(|g| g.id).collect();
-    // Parents first: a group whose parent is neither here nor in the file goes to the top.
+    // Parents first; a group whose parent is neither here nor in the file (or a cycle) goes to
+    // the top.
     let mut pending: Vec<Group> = content.groups.into_iter().filter(|g| !have_groups.contains(&g.id)).collect();
     let mut placed: Vec<_> = have_groups.clone();
     while !pending.is_empty() {
         let before = pending.len();
         let mut rest = Vec::new();
         for mut group in pending {
-            let parent_ready = group.parent_id.is_none_or(|p| placed.contains(&p));
-            if parent_ready {
+            if group.parent_id.is_none_or(|p| placed.contains(&p)) {
                 group.location = place(group.location);
                 store.upsert_group(&group)?;
                 placed.push(group.id);
+                note(ItemKind::Group, group.id.0.to_string(), group.location);
                 counts.groups += 1;
             } else {
                 rest.push(group);
             }
         }
         if rest.len() == before {
-            // Parents that are nowhere: those groups go to the top.
             for mut group in rest.drain(..) {
                 group.parent_id = None;
                 group.location = place(group.location);
                 store.upsert_group(&group)?;
                 placed.push(group.id);
+                note(ItemKind::Group, group.id.0.to_string(), group.location);
                 counts.groups += 1;
             }
         }
@@ -240,26 +283,33 @@ pub fn restore_missing(store: &Store, vault: &Vault, text: &str, passphrase: &st
 
     let have_passwords = store.list_password_ids()?;
     for p in content.passwords.iter().filter(|p| !have_passwords.contains(&p.id)) {
-        vault.store_password(store, p.id, &p.secret, place(p.location))?;
+        let at = place(p.location);
+        vault.store_password(store, p.id, &p.secret, at)?;
+        note(ItemKind::Password, p.id.0.to_string(), at);
         counts.passwords += 1;
     }
     for k in content.keys.iter().filter(|k| store.key_record(k.id).ok().flatten().is_none()) {
-        vault.store_openssh_with_id(store, k.id, &k.name, &k.openssh, k.certificate.as_deref(), place(k.location))?;
+        let at = place(k.location);
+        vault.store_openssh_with_id(store, k.id, &k.name, &k.openssh, k.certificate.as_deref(), at)?;
+        note(ItemKind::Key, k.id.0.to_string(), at);
         counts.keys += 1;
     }
     let have_identities: Vec<_> = store.list_identities()?.into_iter().map(|i| i.id).collect();
     for mut identity in content.identities.into_iter().filter(|i| !have_identities.contains(&i.id)) {
         identity.location = place(identity.location);
         store.upsert_identity(&identity)?;
+        note(ItemKind::Identity, identity.id.0.to_string(), identity.location);
         counts.identities += 1;
     }
     let have_hosts: Vec<_> = store.list_hosts()?.into_iter().map(|h| h.id).collect();
+    let host_addresses: Vec<String> = content.hosts.iter().filter_map(|h| h.settings.address.clone()).collect();
     for mut host in content.hosts.into_iter().filter(|h| !have_hosts.contains(&h.id)) {
         if host.group_id.is_some_and(|g| !placed.contains(&g)) {
             host.group_id = None;
         }
         host.location = place(host.location);
         store.upsert_host(&host)?;
+        note(ItemKind::Host, host.id.0.to_string(), host.location);
         counts.hosts += 1;
     }
     let have_snippets: Vec<_> =
@@ -268,14 +318,12 @@ pub fn restore_missing(store: &Store, vault: &Vault, text: &str, passphrase: &st
         snippets::save(vault, store, snippet).map_err(|e| BackupError::Store(StoreError::Malformed(e.to_string())))?;
         counts.snippets += 1;
     }
-    // Host keys only for servers this device knows no key of yet (as with known_hosts): a
-    // server it knows keeps the keys it confirmed.
     let known: Vec<(String, u16)> = store.all_host_keys()?.into_iter().map(|k| (k.address, k.port)).collect();
-    for key in content.host_keys.iter().filter(|k| !known.contains(&(k.address.clone(), k.port))) {
+    for key in content.host_keys.iter().filter(|k| host_addresses.contains(&k.address) && !known.contains(&(k.address.clone(), k.port))) {
         store.add_host_key(key)?;
         counts.host_keys += 1;
     }
-    Ok(counts)
+    Ok((counts, placed_at_server))
 }
 
 #[cfg(test)]

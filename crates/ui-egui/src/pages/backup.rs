@@ -24,6 +24,16 @@ impl std::fmt::Debug for BackupForm {
     }
 }
 
+/// The passphrase between the dialog and the chosen file; never printed.
+#[derive(Clone, Default)]
+pub struct HeldPassphrase(pub Zeroizing<String>);
+
+impl std::fmt::Debug for HeldPassphrase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HeldPassphrase(..)")
+    }
+}
+
 /// The shortest passphrase (as the engine checks).
 const MIN: usize = 12;
 
@@ -86,7 +96,7 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 craft_dialogs::FileDialog::save().title(tr("Create backup")).file_name("sshcraft.backup")
             };
             app.dialogs.ask(dialog, DialogFor::Backup { restore: form.restore });
-            app.ui.backup_passphrase = Some(std::mem::take(&mut form.passphrase));
+            app.ui.backup_passphrase = Some(HeldPassphrase(std::mem::take(&mut form.passphrase)));
             keep = false;
         }
     }
@@ -98,7 +108,7 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 /// A file was chosen: the backup is written or read with the passphrase held for it.
 pub fn dialog_answer(app: &mut SshcraftApp, restore: bool, path: std::path::PathBuf) {
     let Some(passphrase) = app.ui.backup_passphrase.take() else { return };
-    let params = json!({ "path": path.to_string_lossy(), "passphrase": passphrase.as_str() });
+    let params = json!({ "path": path.to_string_lossy(), "passphrase": passphrase.0.as_str() });
     let id = if restore { "backup.restore" } else { "backup.create" };
     app.runner.run(
         id,

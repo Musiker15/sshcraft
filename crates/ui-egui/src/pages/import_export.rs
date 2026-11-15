@@ -158,7 +158,13 @@ pub fn take_dialog_answers(app: &mut SshcraftApp) {
                 None
             }
         };
-        let Some(path) = path else { continue };
+        let Some(path) = path else {
+            // A backup that was not written or read does not keep its passphrase.
+            if matches!(what, DialogFor::Backup { .. }) {
+                app.ui.backup_passphrase = None;
+            }
+            continue;
+        };
         match what {
             DialogFor::KnownHostsImport | DialogFor::KnownHostsExport => crate::pages::known_hosts::dialog_answer(app, &what, path),
             DialogFor::Backup { restore } => crate::pages::backup::dialog_answer(app, restore, path),

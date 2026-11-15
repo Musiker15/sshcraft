@@ -173,3 +173,9 @@ fn the_connections_section_says_there_is_no_update_check() {
         h.run_steps(1);
     }
 }
+
+#[test]
+fn a_held_backup_passphrase_is_never_printed() {
+    let held = sshcraft_ui_egui::pages::backup::HeldPassphrase(zeroize::Zeroizing::new("my secret phrase".into()));
+    assert!(!format!("{held:?}").contains("secret"));
+}

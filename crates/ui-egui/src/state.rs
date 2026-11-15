@@ -67,7 +67,7 @@ pub struct UiState {
     pub backup: Option<crate::pages::backup::BackupForm>,
     /// The passphrase between the dialog and the chosen file.
     #[serde(skip)]
-    pub backup_passphrase: Option<zeroize::Zeroizing<String>>,
+    pub backup_passphrase: Option<crate::pages::backup::HeldPassphrase>,
     /// The earlier versions of an item, while that dialog is open.
     #[serde(skip)]
     pub versions: Option<crate::pages::trash::VersionsDialog>,

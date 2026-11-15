@@ -56,7 +56,7 @@ fn a_backup_restores_on_an_empty_device() {
 
     // Another device with another master key.
     let (other, other_vault) = device();
-    let added = restore_missing(&other, &other_vault, &text, PASS).unwrap();
+    let (added, _) = restore_missing(&other, &other_vault, &text, PASS).unwrap();
     assert_eq!((added.groups, added.hosts, added.keys, added.passwords, added.snippets, added.host_keys), (1, 1, 1, 1, 1, 1));
     let back = other.list_hosts().unwrap();
     assert_eq!(back[0].id, host);
@@ -105,7 +105,7 @@ fn restore_adds_only_what_is_missing() {
     let mut h = store.list_hosts().unwrap().into_iter().find(|h| h.id == host).unwrap();
     h.name = "renamed".into();
     store.upsert_host(&h).unwrap();
-    let added = restore_missing(&store, &vault, &text, PASS).unwrap();
+    let (added, _) = restore_missing(&store, &vault, &text, PASS).unwrap();
     assert_eq!((added.hosts, added.groups, added.keys, added.passwords), (0, 0, 0, 0));
     assert_eq!(store.list_hosts().unwrap()[0].name, "renamed");
 }
@@ -114,4 +114,32 @@ fn restore_adds_only_what_is_missing() {
 fn a_short_passphrase_is_refused() {
     let (store, vault, _) = filled();
     assert!(matches!(create(&store, &vault, "short", 1), Err(BackupError::WeakPassphrase)));
+}
+
+/// A backup can only bring what it holds: a host that names a password the file does not carry
+/// (one that exists on this device) loses the reference, and host keys come only for its hosts.
+#[test]
+fn a_backup_cannot_point_at_secrets_of_this_device() {
+    let (store, vault) = device();
+    let local = PasswordId::new();
+    vault.store_password(&store, local, "mine", None).unwrap();
+    // Someone else's file: a host naming that password, and a host key for another server.
+    let (other, other_vault) = device();
+    let mut host = Host {
+        id: HostId::new(),
+        name: "trap".into(),
+        group_id: None,
+        settings: ConnectionSettings { address: Some("trap.org".into()), password: Some(local), ..Default::default() },
+        location: None,
+        tags: Vec::new(),
+        os: None,
+        forwards: Vec::new(),
+    };
+    other.upsert_host(&host).unwrap();
+    other.set_known_host("bank.example", 22, "SHA256:planted").unwrap();
+    let (text, _) = create(&other, &other_vault, PASS, 1).unwrap();
+    restore_missing(&store, &vault, &text, PASS).unwrap();
+    host = store.list_hosts().unwrap().into_iter().find(|h| h.name == "trap").unwrap();
+    assert_eq!(host.settings.password, None);
+    assert!(store.host_keys("bank.example", 22).unwrap().is_empty());
 }
