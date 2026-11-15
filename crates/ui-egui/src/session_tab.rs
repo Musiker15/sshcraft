@@ -42,6 +42,10 @@ pub struct SessionTab {
     focus: bool,
     /// Output came while nobody looked at the pane.
     unseen: bool,
+    /// The shell's working directory, as OSC 7 reported it.
+    pub cwd: Option<String>,
+    /// A line to type once, when the session first connects (a template's `cd` and command).
+    start: Option<String>,
     /// The bell rang, or the cursor's line asks for a secret or a yes/no.
     waiting: bool,
 }
@@ -127,11 +131,18 @@ fn host_name(app: &SshcraftApp, host: HostId) -> Option<String> {
 /// Opens a session for `target` in the pane `replace` (a new-pane page, or the pane being
 /// reconnected), or in a new tab when that pane is gone.
 fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<PaneSlot>) {
-    // A connection to this host is already on its way (a double click): one is enough.
-    if host.is_some() && app.ui.connecting.contains(&host) {
+    open_with(app, target, name, host, replace, None);
+}
+
+/// [`open`] with a line to type once the session first connects.
+pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>, replace: Option<PaneSlot>, start: Option<String>) {
+    // A connection for this pane (or, without one, to this host) is already on its way: one is
+    // enough (a double click asks twice).
+    let key = (replace, if replace.is_some() { None } else { host });
+    if (key.0.is_some() || key.1.is_some()) && app.ui.connecting.contains(&key) {
         return;
     }
-    app.ui.connecting.push(host);
+    app.ui.connecting.push(key);
     let asked_from = app.ui.page;
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
     let scrollback = app.data.settings.terminal.scrollback;
@@ -144,7 +155,7 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
         "session.open",
         params,
         Box::new(move |app, result| {
-            if let Some(i) = app.ui.connecting.iter().position(|h| *h == host) {
+            if let Some(i) = app.ui.connecting.iter().position(|k| *k == key) {
                 app.ui.connecting.remove(i);
             }
             let id = match result.and_then(|v| {
@@ -204,6 +215,8 @@ fn open(app: &mut SshcraftApp, target: Value, name: String, host: Option<HostId>
                 focus: follow,
                 unseen: false,
                 waiting: false,
+                cwd: None,
+                start,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -290,6 +303,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
         return;
     }
     let mut more = false;
+    let mut starts = Vec::new();
     let ids: Vec<SessionId> = app.terminals.keys().copied().collect();
     for id in ids {
         let Some(tab) = app.terminals.get_mut(&id) else { continue };
@@ -299,6 +313,12 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                 tab.mark_output();
             }
             if let Some(status) = outcome.status {
+                // The template's line goes out once, when the session first connects.
+                if matches!(status, SessionStatus::Connected { .. })
+                    && let Some(line) = tab.start.take()
+                {
+                    starts.push((id, line));
+                }
                 tab.status = Some(status);
             }
             more |= outcome.more;
@@ -331,6 +351,11 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                     }
                 }
                 Notice::ClipboardWrite(text) => clipboard_write(app, ctx, id, host, text),
+                Notice::WorkingDirectory(dir) => {
+                    if let Some(tab) = app.terminals.get_mut(&id) {
+                        tab.cwd = Some(dir);
+                    }
+                }
             }
         }
         // The host's name once the data has it, unless a program named the pane.
@@ -341,6 +366,9 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
         {
             tab.title = title;
         }
+    }
+    for (id, line) in starts {
+        send(app, id, format!("{line}\r").as_bytes());
     }
     // More output than one frame takes: the next frame continues. New output wakes the window
     // through the engine's terminal waker.

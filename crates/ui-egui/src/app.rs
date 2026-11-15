@@ -299,13 +299,22 @@ impl SshcraftApp {
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
         crate::session_tab::show_clipboard_question(self, &ctx);
+        crate::pages::templates::show_dialog(self, &ctx);
         crate::prompts::show(self, &ctx);
         // A shortcut recording ends when the user leaves the settings.
         if self.ui.page != Page::Settings {
             self.ui.settings.recording = None;
         }
-        if let Some(id) = crate::palette::show(self, &ctx) {
-            crate::commands::run(self, id);
+        if let Some((id, arg)) = crate::palette::show(self, &ctx) {
+            match id {
+                crate::palette::OPEN_WORKSPACE => {
+                    let template = self.data.templates.iter().find(|t| t.get("id").and_then(serde_json::Value::as_str) == arg.as_deref()).cloned();
+                    if let Some(template) = template {
+                        crate::pages::templates::open(self, &template);
+                    }
+                }
+                _ => crate::commands::run(self, id),
+            }
         }
         self.toasts.show(&ctx);
         self.forms.observe(crate::forms::shape(&self.ui));

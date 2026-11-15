@@ -268,6 +268,19 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Switch between grid and one large pane" => "Zwischen Raster und einem großen Bereich wechseln",
         "Broadcast on" => "Rundsenden an",
         "Broadcast on or off" => "Rundsenden an oder aus",
+        // Workspaces
+        "Save as workspace" => "Als Workspace speichern",
+        "Workspace saved." => "Workspace gespeichert.",
+        "Title" => "Titel",
+        "Directory" => "Verzeichnis",
+        "Command" => "Befehl",
+        "Over SSH the directory and the command are typed once after the first connect (a POSIX shell)." => {
+            "Über SSH werden Verzeichnis und Befehl einmal nach dem ersten Verbinden getippt (eine POSIX-Shell)."
+        }
+        "{count} pane left out: its host was deleted." => "{count} Bereich weggelassen: sein Host wurde gelöscht.",
+        "Workspaces" => "Workspaces",
+        "Delete workspace" => "Workspace löschen",
+        "Workspace: {name}" => "Workspace: {name}",
         "SSHCraft is already open. Switch to its window." => "SSHCraft ist schon geöffnet. Wechsle in sein Fenster.",
         "The previous version of SSHCraft is still running. Quit it (also in the notification area), then start SSHCraft again." => {
             "Die vorige Fassung von SSHCraft läuft noch. Beende sie (auch im Infobereich der Taskleiste) und starte SSHCraft dann erneut."

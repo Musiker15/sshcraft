@@ -23,6 +23,7 @@ pub enum Icon {
     Record,
     Maximize,
     Detach,
+    Save,
 }
 
 /// Draws `icon` into `rect` (square works best) with lines of `color`.
@@ -133,6 +134,15 @@ pub fn draw(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Maximize => {
             painter.rect_stroke(Rect::from_min_max(p(-0.7, -0.7), p(0.7, 0.7)), 1.0, stroke, egui::StrokeKind::Inside);
             line(p(-0.7, -0.4), p(0.7, -0.4));
+        }
+        Icon::Save => {
+            // An arrow down into a tray.
+            line(p(0.0, -0.8), p(0.0, 0.3));
+            line(p(-0.35, -0.05), p(0.0, 0.3));
+            line(p(0.35, -0.05), p(0.0, 0.3));
+            line(p(-0.8, 0.2), p(-0.8, 0.75));
+            line(p(-0.8, 0.75), p(0.8, 0.75));
+            line(p(0.8, 0.75), p(0.8, 0.2));
         }
         Icon::Detach => {
             painter.rect_stroke(Rect::from_min_max(p(-0.8, -0.3), p(0.3, 0.8)), 1.0, stroke, egui::StrokeKind::Inside);

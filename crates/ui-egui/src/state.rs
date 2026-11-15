@@ -86,12 +86,14 @@ pub struct UiState {
     pub agent_keys: crate::pages::key_sources::AgentKeys,
     #[serde(skip)]
     pub passcli: Option<crate::pages::key_sources::PassCliView>,
-    /// Hosts a connection is being opened for (`None` for local shells and serial ports).
+    /// Connections on their way: for a pane, or (without one) to a host.
     #[serde(skip)]
-    pub connecting: Vec<Option<sshcraft_model::model::HostId>>,
+    pub connecting: Vec<(Option<PaneSlot>, Option<sshcraft_model::model::HostId>)>,
     /// The terminal shown in the last frame, to give the keyboard to the next one shown.
     #[serde(skip)]
     pub shown_terminal: Option<sshcraft_engine::SessionId>,
+    #[serde(skip)]
+    pub template_form: Option<crate::pages::templates::TemplateForm>,
     #[serde(skip)]
     pub picker: Option<crate::session_tab::Picker>,
     #[serde(skip)]

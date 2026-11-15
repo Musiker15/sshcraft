@@ -32,6 +32,8 @@ pub(crate) struct Prefilter {
     state: State,
     /// The OSC string being held back, starting with `ESC ]`.
     osc: Vec<u8>,
+    /// The working directory the last OSC 7 named.
+    pub(crate) cwd: Option<String>,
 }
 
 impl Prefilter {
@@ -112,6 +114,9 @@ impl Prefilter {
     /// Passes the held-back OSC string on and goes back to ground, keeping `ESC` pending when the
     /// string was ended by one.
     fn release(&mut self, out: &mut Vec<u8>) -> State {
+        if let Some(dir) = working_directory(&self.osc) {
+            self.cwd = Some(dir);
+        }
         out.extend_from_slice(&self.osc);
         if self.osc.capacity() > 1 << 16 {
             self.osc = Vec::new();
@@ -129,6 +134,32 @@ impl Prefilter {
             _ => State::Discard,
         }
     }
+}
+
+/// The longest working directory OSC 7 may name, in characters.
+const MAX_CWD_CHARS: usize = 1000;
+
+/// The path of a complete `ESC ] 7 ; file://host/path` string: percent-decoded, one plain line,
+/// at most [`MAX_CWD_CHARS`]; `None` for anything else.
+fn working_directory(osc: &[u8]) -> Option<String> {
+    let body = osc.strip_prefix(b"\x1b]7;")?;
+    let body = body.strip_suffix(b"\x1b\\").or_else(|| body.strip_suffix(&[BEL]))?;
+    let rest = body.strip_prefix(b"file://")?;
+    let path = rest.get(rest.iter().position(|b| *b == b'/')?..)?;
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut i = 0;
+    while let Some(&b) = path.get(i) {
+        if b == b'%' {
+            let hex = std::str::from_utf8(path.get(i + 1..i + 3)?).ok()?;
+            bytes.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            bytes.push(b);
+            i += 1;
+        }
+    }
+    let dir = String::from_utf8(bytes).ok()?;
+    (dir.chars().count() <= MAX_CWD_CHARS && !dir.chars().any(char::is_control)).then_some(dir)
 }
 
 #[cfg(test)]

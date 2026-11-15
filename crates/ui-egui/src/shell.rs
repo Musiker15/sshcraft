@@ -50,6 +50,7 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
     let mut select = None;
     let mut close = None;
     let mut merge = None;
+    let mut save_tab = None;
     let mut rects = Vec::new();
     let mut dropped = None;
     // Last frame's places of the tabs: the drag areas lie under the tabs' own buttons.
@@ -97,6 +98,13 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
             // Dragging a tab onto another merges its panes into that one.
             rects.push(shown.response.rect);
         }
+        // The shown tab can be kept as a workspace template.
+        if let Page::Tab(i) = app.ui.page
+            && app.ui.tabs.get(i).is_some_and(|t| t.panes.sessions().next().is_some())
+            && crate::widgets::icons::icon_button(ui, Icon::Save, tr("Save as workspace"))
+        {
+            save_tab = Some(i);
+        }
         let (plus, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
         draw(ui.painter(), Icon::Plus, plus.shrink(5.0), tokens.text_dim);
         if response.on_hover_text(tr("New tab")).clicked() {
@@ -114,6 +122,9 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     if let Some(i) = select {
         app.ui.page = Page::Tab(i);
+    }
+    if let Some(i) = save_tab {
+        crate::pages::templates::open_dialog(app, i);
     }
     if let Some((from, to)) = merge {
         app.merge_tabs(from, to);
@@ -137,6 +148,7 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
             app.ui.connect_request = Some(crate::state::ConnectRequest::Serial);
         }
     });
+    crate::pages::templates::list(app, ui);
     ui.add_space(8.0);
     ui.add(egui::TextEdit::singleline(&mut app.ui.new_tab_query).hint_text(tr("Search hosts")).desired_width(320.0));
     ui.add_space(8.0);

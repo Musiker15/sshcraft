@@ -18,7 +18,8 @@ bitflags! {
         const KEYS = 1 << 2;
         const IDENTITIES = 1 << 3;
         const SETTINGS = 1 << 4;
-        const DATA = Self::HOSTS.bits() | Self::GROUPS.bits() | Self::KEYS.bits() | Self::IDENTITIES.bits();
+        const TEMPLATES = 1 << 5;
+        const DATA = Self::HOSTS.bits() | Self::GROUPS.bits() | Self::KEYS.bits() | Self::IDENTITIES.bits() | Self::TEMPLATES.bits();
     }
 }
 
@@ -74,6 +75,8 @@ pub struct Data {
     pub groups: Vec<GroupRow>,
     pub keys: Vec<KeyRow>,
     pub identities: Vec<IdentityRow>,
+    /// Workspace templates as `workspace.list` returns them.
+    pub templates: Vec<Value>,
     pub settings: EngineSettings,
     /// What this device can make besides vault keys; asked once.
     pub security: Option<crate::pages::keys::SecuritySupport>,
@@ -126,6 +129,9 @@ pub fn refresh(app: &mut SshcraftApp) {
     }
     if due.contains(Refresh::KEYS) {
         fetch(app, Refresh::KEYS, "key.list", |d, v| d.keys = rows(v));
+    }
+    if due.contains(Refresh::TEMPLATES) {
+        fetch(app, Refresh::TEMPLATES, "workspace.list", |d, v| d.templates = rows(v));
     }
     if due.contains(Refresh::IDENTITIES) {
         fetch(app, Refresh::IDENTITIES, "identity.list", |d, v| d.identities = rows(v));
