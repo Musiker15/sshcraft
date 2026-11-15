@@ -43,7 +43,10 @@ fn run_write(ctx: Ctx, params: Value) -> Out {
         if host_ids.is_empty() || host_ids.len() > 1000 {
             return Err(CommandError::bad_params("sshconfig.write", "1 to 1000 hosts"));
         }
-        let files = crate::ssh_config::write_back(&ctx.session, &host_ids, &home()?)?;
+        let files = {
+            let _one = crate::ssh_config::BUSY.lock().await;
+            crate::ssh_config::write_back(&ctx.session, &host_ids, &home()?)?
+        };
         ctx.session.announce(&[]);
         Ok(json!({ "files": files }))
     }

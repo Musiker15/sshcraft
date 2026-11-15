@@ -55,6 +55,35 @@ async fn live_refresh_adds_updates_and_unlinks() {
 }
 
 #[tokio::test]
+async fn an_entry_that_comes_back_takes_its_host_back() {
+    let w = World::new();
+    w.write("Host web\n  HostName web.org\nHost db\n  HostName db.org\n");
+    w.refresh().await;
+    let web = w.host("web").unwrap();
+    w.write("Host db\n  HostName db.org\n");
+    assert_eq!(w.refresh().await.unlinked, 1);
+    w.write("Host web\n  HostName web.org\nHost db\n  HostName db.org\n");
+    let back = w.refresh().await;
+    assert_eq!(back.added, 0);
+    let webs: Vec<_> = w.session.store().list_hosts().unwrap().into_iter().filter(|h| h.name == "web").collect();
+    assert_eq!(webs.len(), 1);
+    assert_eq!(webs[0].id, web.id);
+}
+
+#[tokio::test]
+async fn an_empty_or_missing_file_keeps_the_links() {
+    let w = World::new();
+    w.write("Host web\n  HostName web.org\n");
+    w.refresh().await;
+    // An editor that truncates before writing, or a file moved away for a moment.
+    w.write("");
+    assert_eq!(w.refresh().await.unlinked, 0);
+    std::fs::remove_file(w.config()).unwrap();
+    assert_eq!(w.refresh().await.unlinked, 0);
+    assert_eq!(w.session.store().config_links().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn unchanged_file_is_not_applied_twice() {
     let w = World::new();
     w.write("Host web\n  HostName web.org\n");

@@ -24,6 +24,9 @@ pub const GROUP_NAME: &str = "~/.ssh/config";
 /// The setting row that remembers the group (it may be renamed).
 const GROUP_SETTING: &str = "sshconfig.group";
 
+/// Refreshes and write-backs one at a time.
+pub(crate) static BUSY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// How often the files are checked for changes.
 const WATCH_EVERY: Duration = Duration::from_secs(5);
 
@@ -74,19 +77,39 @@ async fn live_group(session: &Session) -> Result<GroupId, CommandError> {
 
 /// Reads the file and brings the linked hosts in step with it.
 pub async fn refresh_from(session: &Session, home: &Path) -> Result<(RefreshOutcome, Vec<PathBuf>), CommandError> {
-    let parsed = read(home);
+    // One refresh or write-back at a time (the watcher, the command, a write-back).
+    let _one = BUSY.lock().await;
     let agent: Option<Vec<String>> = session.sessions().agent_keys().await.ok().map(|keys| keys.into_iter().map(|k| k.fingerprint).collect());
-    let candidates = sshconfig::plan_import(&parsed.hosts, &crate::cmd::import::fingerprint_of, agent.as_deref());
+    // Reading files and key files blocks: off the runtime's workers.
+    let home_owned = home.to_path_buf();
+    let (parsed, candidates) = tokio::task::spawn_blocking(move || {
+        let parsed = read(&home_owned);
+        let candidates = sshconfig::plan_import(&parsed.hosts, &crate::cmd::import::fingerprint_of, agent.as_deref());
+        (parsed, candidates)
+    })
+    .await
+    .map_err(|e| CommandError::failed(ErrorCode::Internal, e))?;
+    let root = home.join(".ssh").join("config");
+    // A file that is gone or half written says nothing about its hosts: links stay.
+    let root_read = parsed.files.first() == Some(&root) && !parsed.hosts.is_empty();
     let mut outcome = RefreshOutcome { skipped: parsed.skipped.clone(), ..RefreshOutcome::default() };
     let links = session.store().config_links()?;
     let hosts = session.store().list_hosts()?;
     let group = if candidates.is_empty() { None } else { Some(live_group(session).await?) };
 
-    // Every alias gets its host first, so jump hosts can point at each other.
+    // Every alias gets its host first, so jump hosts can point at each other. An alias without
+    // a link takes back a host of the same name in the group that lost its link (the entry was
+    // commented out for a while), instead of making a second one.
     let mut ids: Vec<(String, HostId, Option<ConfigLink>)> = Vec::new();
     for (candidate, config) in candidates.iter().zip(&parsed.hosts) {
         let link = links.iter().find(|l| l.alias == candidate.name && hosts.iter().any(|h| h.id == l.host_id)).cloned();
-        let id = link.as_ref().map_or_else(HostId::new, |l| l.host_id);
+        let unlinked_twin = || {
+            hosts
+                .iter()
+                .find(|h| h.name == candidate.name && h.group_id.is_some() && h.group_id == group && !links.iter().any(|l| l.host_id == h.id))
+                .map(|h| h.id)
+        };
+        let id = link.as_ref().map(|l| l.host_id).or_else(unlinked_twin).unwrap_or_else(HostId::new);
         let file = config.file.as_ref().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
         ids.push((candidate.name.clone(), id, link.map(|l| ConfigLink { file, ..l })));
     }
@@ -136,7 +159,7 @@ pub async fn refresh_from(session: &Session, home: &Path) -> Result<(RefreshOutc
         });
         session.store().set_config_link(&ConfigLink { host_id: *id, alias: alias.clone(), file, digest })?;
     }
-    for link in links.iter().filter(|l| !candidates.iter().any(|c| c.name == l.alias)) {
+    for link in links.iter().filter(|l| root_read && !candidates.iter().any(|c| c.name == l.alias)) {
         session.store().remove_config_link(link.host_id)?;
         outcome.unlinked += 1;
     }
@@ -270,9 +293,15 @@ pub fn write_back(session: &Session, host_ids: &[HostId], home: &Path) -> Result
     Ok(written)
 }
 
-/// When any of these files last changed (missing ones count as never).
+/// When any of these files, or the folders they are in, last changed (missing ones count as
+/// never). A folder changes when a file is added to it, so a new file in an `Include` glob is
+/// seen too.
 fn stamp(files: &[PathBuf]) -> Vec<Option<SystemTime>> {
-    files.iter().map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok()).collect()
+    let mut paths: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+    paths.extend(files.iter().filter_map(|f| f.parent()));
+    paths.sort();
+    paths.dedup();
+    paths.iter().map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok()).collect()
 }
 
 /// Checks the files every few seconds while the setting is on and refreshes when one changed.

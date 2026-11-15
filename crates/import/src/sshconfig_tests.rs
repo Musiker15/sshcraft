@@ -352,6 +352,34 @@ fn include_inside_host_applies_to_that_host() {
 }
 
 #[test]
+fn lines_after_an_include_belong_to_the_host_again() {
+    let fs = MemFs::default()
+        .with("/home/u/.ssh/config", "Host work\n  Include work.d/*\n  User worker\nHost db\n  HostName db.org\n")
+        .with("/home/u/.ssh/work.d/a", "Host inner\n  HostName inner.org\n");
+    let parsed = tree(&fs);
+    assert_eq!(host(&parsed, "work").user.as_deref(), Some("worker"));
+    assert_eq!(host(&parsed, "db").user, None);
+    // `inner` is only read for hosts that match `work`, so it is no host of its own.
+    assert!(parsed.hosts.iter().all(|h| h.alias != "inner"), "{:?}", parsed.hosts.iter().map(|h| &h.alias).collect::<Vec<_>>());
+}
+
+#[test]
+fn an_include_at_the_top_applies_to_all() {
+    let fs = MemFs::default().with("/home/u/.ssh/config", "Include common\nHost a\n").with("/home/u/.ssh/common", "Host b\n  User shared\n");
+    let parsed = tree(&fs);
+    assert_eq!(host(&parsed, "b").user.as_deref(), Some("shared"));
+    assert!(parsed.hosts.iter().any(|h| h.alias == "a"));
+}
+
+#[test]
+fn too_many_hosts_stop_with_a_warning() {
+    let text: String = (0..MAX_CONFIG_HOSTS + 10).map(|i| format!("Host h{i}\n")).collect();
+    let parsed = parse(&text);
+    assert_eq!(parsed.hosts.len(), MAX_CONFIG_HOSTS);
+    assert!(parsed.skipped.iter().any(|s| s.contains("hosts")), "{:?}", parsed.skipped);
+}
+
+#[test]
 fn include_cycle_stops() {
     let fs = MemFs::default().with("/home/u/.ssh/config", "Include config\nHost a\n");
     let parsed = tree(&fs);

@@ -45,6 +45,9 @@ pub use crate::import::{ImportCandidate, ImportWarning, KeyNote};
 struct Block {
     /// Index into the files read; the block came from that file.
     file: usize,
+    /// The patterns of the `Host` lines an `Include` stood under: an included block applies
+    /// only to hosts all of them match too (OpenSSH evaluates the included lines only there).
+    guards: Vec<Vec<String>>,
     patterns: Vec<String>,
     /// `Match` blocks are skipped, together with everything inside them.
     skip: bool,
@@ -57,6 +60,12 @@ pub const MAX_INCLUDE_DEPTH: usize = 16;
 pub const MAX_CONFIG_FILES: usize = 256;
 /// The largest file read.
 pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+/// The most bytes read for one configuration, over all files.
+pub const MAX_CONFIG_TOTAL: usize = 4 * 1024 * 1024;
+/// The most `Host` and `Match` blocks read; further ones are skipped and reported.
+pub const MAX_CONFIG_BLOCKS: usize = 10_000;
+/// The most hosts taken from one configuration.
+pub const MAX_CONFIG_HOSTS: usize = 2_000;
 
 /// Where configuration files come from: the disk, or memory in tests.
 pub trait ConfigFs {
@@ -109,15 +118,21 @@ struct Reading {
     blocks: Vec<Block>,
     skipped: Vec<String>,
     files: Vec<PathBuf>,
+    /// The guards for blocks read now (inside an `Include` under a `Host`).
+    guards: Vec<Vec<String>>,
+    /// Bytes read so far over all files.
+    bytes: usize,
 }
 
 impl Reading {
     fn new() -> Self {
         // Lines before the first `Host` apply to every host.
         Self {
-            blocks: vec![Block { file: 0, patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }],
+            blocks: vec![Block { file: 0, guards: Vec::new(), patterns: vec!["*".to_owned()], skip: false, entries: Vec::new() }],
             skipped: Vec::new(),
             files: Vec::new(),
+            guards: Vec::new(),
+            bytes: 0,
         }
     }
 
@@ -135,10 +150,20 @@ impl Reading {
                 continue;
             }
             match keyword.as_str() {
-                "host" => self.blocks.push(Block { file, patterns: split_args(value), skip: false, entries: Vec::new() }),
+                "host" | "match" if self.blocks.len() >= MAX_CONFIG_BLOCKS => {
+                    if !self.skipped.iter().any(|s| s.starts_with("too many blocks")) {
+                        self.skipped.push(format!("too many blocks, stopped at {MAX_CONFIG_BLOCKS}"));
+                    }
+                    // Everything after it is skipped with it.
+                    self.blocks.push(Block { file, guards: Vec::new(), patterns: Vec::new(), skip: true, entries: Vec::new() });
+                    return;
+                }
+                "host" => {
+                    self.blocks.push(Block { file, guards: self.guards.clone(), patterns: split_args(value), skip: false, entries: Vec::new() })
+                }
                 "match" => {
                     self.skipped.push(line.to_owned());
-                    self.blocks.push(Block { file, patterns: Vec::new(), skip: true, entries: Vec::new() });
+                    self.blocks.push(Block { file, guards: self.guards.clone(), patterns: Vec::new(), skip: true, entries: Vec::new() });
                 }
                 // An Include inside a skipped Match block is skipped with it.
                 "include" if self.blocks.last().is_some_and(|b| b.skip) => {}
@@ -156,15 +181,20 @@ impl Reading {
         }
     }
 
-    fn finish(self) -> ParsedConfig {
+    fn finish(mut self) -> ParsedConfig {
         let mut aliases: Vec<String> = Vec::new();
-        for block in self.blocks.iter().skip(1) {
+        let mut seen = std::collections::HashSet::new();
+        for block in self.blocks.iter().skip(1).filter(|b| !b.skip) {
             for pattern in &block.patterns {
                 let concrete = !pattern.contains(['*', '?']) && !pattern.starts_with('!');
-                if concrete && !aliases.contains(pattern) {
+                if concrete && guards_match(&block.guards, pattern) && seen.insert(pattern.clone()) {
                     aliases.push(pattern.clone());
                 }
             }
+        }
+        if aliases.len() > MAX_CONFIG_HOSTS {
+            self.skipped.push(format!("more than {MAX_CONFIG_HOSTS} hosts, the rest is not taken"));
+            aliases.truncate(MAX_CONFIG_HOSTS);
         }
         let hosts = aliases
             .into_iter()
@@ -205,11 +235,26 @@ fn read_file(fs: &dyn ConfigFs, path: &Path, home: &Path, depth: usize, reading:
         reading.skipped.push(format!("cannot read {}", path.display()));
         return;
     };
+    if reading.bytes.saturating_add(text.len()) > MAX_CONFIG_TOTAL {
+        reading.skipped.push(format!("{} is past the {MAX_CONFIG_TOTAL} bytes read in all", path.display()));
+        return;
+    }
+    reading.bytes += text.len();
     reading.files.push(path.to_path_buf());
     reading.lines(&text, &mut |reading, line, value| {
         if depth >= MAX_INCLUDE_DEPTH {
             reading.skipped.push(format!("{line}: includes nest too deep"));
             return;
+        }
+        // The block the Include stands in: under a Host, the included lines apply only to the
+        // hosts it matches, and the lines after the Include belong to it again.
+        let (parent_file, parent_patterns, parent_skip, under_host) = match reading.blocks.last() {
+            Some(b) => (b.file, b.patterns.clone(), b.skip, reading.blocks.len() > 1),
+            None => (0, vec!["*".to_owned()], false, false),
+        };
+        let parent_guards = reading.blocks.last().map(|b| b.guards.clone()).unwrap_or_default();
+        if under_host {
+            reading.guards.push(parent_patterns.clone());
         }
         for arg in split_args(value) {
             let target = if let Some(rest) = arg.strip_prefix("~/") {
@@ -224,7 +269,16 @@ fn read_file(fs: &dyn ConfigFs, path: &Path, home: &Path, depth: usize, reading:
                 read_file(fs, &p, home, depth + 1, reading);
             }
         }
+        if under_host {
+            reading.guards.pop();
+        }
+        reading.blocks.push(Block { file: parent_file, guards: parent_guards, patterns: parent_patterns, skip: parent_skip, entries: Vec::new() });
     });
+}
+
+/// Whether a name matches every guard (the `Host` lines its `Include` stood under).
+fn guards_match(guards: &[Vec<String>], alias: &str) -> bool {
+    guards.iter().all(|patterns| patterns_match(patterns, alias))
 }
 
 fn collect(blocks: &[Block], alias: String) -> ConfigHost {
@@ -291,8 +345,12 @@ fn collect(blocks: &[Block], alias: String) -> ConfigHost {
 }
 
 fn applies(block: &Block, alias: &str) -> bool {
+    guards_match(&block.guards, alias) && patterns_match(&block.patterns, alias)
+}
+
+fn patterns_match(patterns: &[String], alias: &str) -> bool {
     let mut matched = false;
-    for pattern in &block.patterns {
+    for pattern in patterns {
         if let Some(negated) = pattern.strip_prefix('!') {
             if glob(negated, alias) {
                 return false;
