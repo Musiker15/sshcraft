@@ -34,6 +34,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Dropdown window" => "Dropdown-Fenster",
+        "A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off." => {
+            "Ein Kürzel, das SSHCraft aus jedem Programm oben am Bildschirm zeigt und wieder ausblendet. Leer: aus."
+        }
+        "Like Ctrl+` or Ctrl+Alt+T" => "Etwa Ctrl+` oder Ctrl+Alt+T",
+        "The dropdown shortcut could not be set: {why}" => "Das Dropdown-Kürzel ließ sich nicht setzen: {why}",
         "Hex view of what the session received" => "Hex-Ansicht dessen, was die Sitzung empfangen hat",
         "Received since the view opened ({count} bytes kept)" => "Empfangen, seit die Ansicht offen ist ({count} Bytes gehalten)",
         "Telnet came from elsewhere: allow it in the host's form to use it here." => {

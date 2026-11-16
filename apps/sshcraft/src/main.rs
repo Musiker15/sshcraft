@@ -4,6 +4,7 @@
 //! SSHCraft, the desktop app: opens the engine on the user's data and shows the window.
 
 mod control;
+mod dropdown;
 mod platform;
 
 use std::process::ExitCode;
@@ -55,6 +56,8 @@ fn hand_over(open: &control::Open) -> bool {
 /// The window around the app.
 struct Shell {
     app: SshcraftApp,
+    /// The dropdown window's global shortcut.
+    dropdown: dropdown::Dropdown,
     /// The control channel, while the app runs with `--control`.
     _control: Option<sshcraft_link::Server>,
 }
@@ -69,6 +72,14 @@ impl eframe::App for Shell {
     /// consent, and the control channel answers.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.app.logic(ctx);
+        // The shortcut follows the setting; a press shows or hides the window.
+        let wanted = self.app.data.settings.appearance.dropdown_shortcut.clone();
+        if let Err(why) = self.dropdown.sync(wanted.as_deref()) {
+            self.app.toasts.error(&sshcraft_ui_egui::i18n::trf("The dropdown shortcut could not be set: {why}", &[("why", &why)]));
+        }
+        if self.dropdown.take_pressed() {
+            sshcraft_ui_egui::dropdown::toggle(&mut self.app, ctx);
+        }
         // Last, so it sees the quit question's `CancelClose` (craft-quit: macOS quits through
         // AppKit, not by closing the window).
         craft_quit::on_close_request(ctx);
@@ -207,7 +218,8 @@ fn main() -> ExitCode {
                 }
                 None => None,
             };
-            Ok(Box::new(Shell { app, _control: control }))
+            let dropdown = dropdown::Dropdown::new(&cc.egui_ctx);
+            Ok(Box::new(Shell { app, dropdown, _control: control }))
         }),
     );
     // The window and the app are gone; the engine's tasks get a moment to end.

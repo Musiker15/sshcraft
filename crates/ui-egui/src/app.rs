@@ -45,6 +45,8 @@ pub struct SshcraftApp {
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
     /// Turns the agent link on and off as the consent says.
     pub link: crate::link::LinkWatch,
+    /// The dropdown shortcut hid the window.
+    pub dropdown_hidden: bool,
     /// Where a second start leaves `ssh://` links (`None`: not looked for, as in tests).
     pub handoff_dir: Option<std::path::PathBuf>,
     /// When to look there next, in the window's time.
@@ -96,6 +98,7 @@ impl SshcraftApp {
             log_viewer: None,
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
+            dropdown_hidden: false,
             handoff_dir: None,
             handoff_next: 0.0,
             control: None,

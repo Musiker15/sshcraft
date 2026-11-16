@@ -198,6 +198,21 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Ligatures"));
         ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
         ui.end_row();
+        ui.label(tr("Dropdown window"));
+        ui.horizontal(|ui| {
+            let mut text = a.dropdown_shortcut.clone().unwrap_or_default();
+            if ui
+                .add(egui::TextEdit::singleline(&mut text).hint_text("Ctrl+`").desired_width(120.0).char_limit(40))
+                .on_hover_text(tr("A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off."))
+                .changed()
+            {
+                a.dropdown_shortcut = (!text.trim().is_empty()).then(|| text.trim().to_string());
+            }
+            if a.dropdown_shortcut.as_deref().is_some_and(|c| !sshcraft_engine::settings::valid_combo(c)) {
+                ui.label(egui::RichText::new(tr("Like Ctrl+` or Ctrl+Alt+T")).color(crate::theme::Tokens::get(ui.ctx()).danger));
+            }
+        });
+        ui.end_row();
         ui.label(tr("Reachability"));
         ui.checkbox(&mut a.show_reachability, tr("Show in the host list whether each host answers (connects to them every minute)"));
         ui.end_row();
