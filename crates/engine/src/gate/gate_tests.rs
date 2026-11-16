@@ -1094,3 +1094,19 @@ async fn agents_cannot_aim_a_proxy_command() {
     w.add_group(&plain);
     call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "group": plain.id.0 } })).await.unwrap();
 }
+
+/// A login script types lines into the session with the user's credentials: an agent must not
+/// point one, approved or not, at an address of its choosing.
+#[tokio::test]
+async fn agents_cannot_aim_a_login_script() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let mut gw = group("menu", None);
+    gw.defaults.login_script = Some(vec![sshcraft_model::login_script::LoginStep { expect: "Password:".into(), send: "secret".into() }]);
+    w.add_group(&gw);
+    let conn = w.conn();
+    let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gw.id.0, "address": "evil.example" } })).await;
+    assert!(is_denied(&r), "{r:?}");
+    let r = call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "group": gw.id.0 } })).await;
+    assert!(is_denied(&r), "{r:?}");
+}

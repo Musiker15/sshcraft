@@ -136,3 +136,13 @@ fn the_rate_limit_lets_one_through_per_window() {
     assert!(!limit.allow(now + Duration::from_secs(1)));
     assert!(limit.allow(now + Duration::from_secs(6)));
 }
+
+#[test]
+fn markup_in_a_message_is_never_rendered_on_freedesktop() {
+    let safe = sshcraft_ui_egui::notify::markup_safe("<a href=\"https://evil\">click</a> & more");
+    if cfg!(all(unix, not(target_os = "macos"))) {
+        assert_eq!(safe, "&lt;a href=\"https://evil\"&gt;click&lt;/a&gt; &amp; more");
+    } else {
+        assert_eq!(safe, "<a href=\"https://evil\">click</a> & more");
+    }
+}

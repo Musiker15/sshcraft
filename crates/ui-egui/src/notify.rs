@@ -23,9 +23,15 @@ impl Notifier for Desktop {
         // Off the interface thread: the desktop service may take a moment to answer.
         std::thread::spawn(move || {
             // A desktop without a notification service shows nothing; there is no one to tell.
-            let _shown = notify_rust::Notification::new().appname("SSHCraft").summary(&title).body(&body).show();
+            let _shown = notify_rust::Notification::new().appname("SSHCraft").summary(&title).body(&markup_safe(&body)).show();
         });
     }
+}
+
+/// `text` safe for notification servers that read markup (the freedesktop ones render links and
+/// images in the body): `&`, `<` and `>` become entities there and stay as they are elsewhere.
+pub fn markup_safe(text: &str) -> String {
+    if cfg!(all(unix, not(target_os = "macos"))) { text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") } else { text.to_string() }
 }
 
 /// Keeps notifications instead of showing them (tests, and every app made for tests).

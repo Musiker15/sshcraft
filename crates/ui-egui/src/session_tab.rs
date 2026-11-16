@@ -540,8 +540,21 @@ fn hint_keys(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) -> Optio
 /// The look of `host`'s terminals: its own appearance with what its groups give.
 pub fn host_appearance(app: &SshcraftApp, host: Option<HostId>) -> sshcraft_model::appearance::Appearance {
     let Some(row) = host.and_then(|id| app.data.hosts.iter().find(|r| r.host.id == id)) else { return Default::default() };
-    let groups: Vec<sshcraft_model::model::Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
-    sshcraft_model::appearance::appearance_for(&row.host, &groups)
+    // The groups above the host, nearest first, without copying them; a cycle or a deep chain
+    // stops like `group_chain`.
+    let mut levels = vec![row.host.settings.appearance.as_ref()];
+    let mut seen: Vec<sshcraft_model::model::GroupId> = Vec::new();
+    let mut next = row.host.group_id;
+    while let Some(id) = next {
+        if seen.contains(&id) || seen.len() >= sshcraft_model::model::MAX_GROUP_DEPTH {
+            break;
+        }
+        let Some(g) = app.data.groups.iter().find(|g| g.group.id == id) else { break };
+        seen.push(id);
+        levels.push(g.group.defaults.appearance.as_ref());
+        next = g.group.parent_id;
+    }
+    sshcraft_model::appearance::merge(levels)
 }
 
 /// The badge in the terminal's top right corner, on the host's colour.
@@ -640,6 +653,8 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             let outcome = pump.frame(&mut tab.term, FrameBudget::DEFAULT);
             if outcome.fed > 0 {
                 tab.mark_output();
+                // Commands get the time their start or end arrived, shown or not.
+                tab.term.stamp_commands(chrono::Utc::now());
             }
             if let Some(status) = outcome.status {
                 // The template's line goes out once, when the session first connects.
@@ -660,6 +675,9 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         }
         let notices = tab.term.take_notices();
+        if notices.iter().any(|n| matches!(n, Notice::CommandStarted | Notice::CommandFinished { .. })) {
+            tab.term.stamp_commands(chrono::Utc::now());
+        }
         let host = tab.host;
         let can_send = !ended(tab.status.as_ref());
         for notice in notices {
@@ -1181,8 +1199,6 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         ui.label(tr("This session is gone."));
         return;
     };
-    // Commands get the time they were first shown running or finished.
-    tab.term.stamp_commands(chrono::Utc::now());
     for command in pending {
         match command {
             "ui.terminal.copy" => {

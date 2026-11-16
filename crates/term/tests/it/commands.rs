@@ -122,3 +122,39 @@ fn jumping_between_prompts_scrolls_the_view() {
     assert!(t.screen().display_offset > 0);
     assert!(t.jump_to_prompt(Direction::Down));
 }
+
+#[test]
+fn a_two_line_prompt_keeps_rows_and_output_aligned() {
+    let mut t = term(40, 12);
+    let prompt = [A, b"user@host ~\r\n$ ", B].concat();
+    t.feed(&[prompt.as_slice(), b"false\r\n", C, b"err\r\n", &end("1"), &prompt].concat());
+    let commands = t.screen().commands;
+    assert_eq!(commands.len(), 2, "one row per command: {commands:?}");
+    assert_eq!(commands[0].record.exit, Some(1));
+    assert_eq!(commands[1].record.state, CommandState::Prompt);
+    assert_eq!(t.last_finished_output().as_deref(), Some("err"));
+}
+
+#[test]
+fn an_empty_enter_without_end_mark_keeps_rows_aligned() {
+    let mut t = term(40, 12);
+    t.feed(&[A, b"$ \r\n", A, b"$ ls\r\n", C, b"out\r\n", &end("0"), A, b"$ "].concat());
+    let commands = t.screen().commands;
+    assert_eq!(commands.len(), 2, "{commands:?}");
+    assert_eq!(commands[0].record.exit, Some(0));
+    assert_eq!(t.last_finished_output().as_deref(), Some("out"));
+}
+
+#[test]
+fn an_end_mark_without_a_command_finishes_nothing() {
+    let mut t = term(40, 12);
+    t.feed(&[A, b"$ ", B, b"\r\n", &end("0"), A, b"$ ", B].concat());
+    assert!(t.command_history().iter().all(|r| r.state == CommandState::Prompt), "{:?}", t.command_history());
+}
+
+#[test]
+fn marks_inside_a_full_screen_program_are_left_out() {
+    let mut t = term(40, 12);
+    t.feed(&[b"\x1b[?1049h".as_slice(), A, b"$ ", B, b"x\r\n", C, &end("0"), b"\x1b[?1049l"].concat());
+    assert!(t.command_history().is_empty());
+}

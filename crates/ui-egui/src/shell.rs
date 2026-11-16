@@ -66,6 +66,8 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
         }
         for (i, tab) in app.ui.tabs.iter().enumerate() {
             let selected = app.ui.page == Page::Tab(i);
+            // The look of the tab's first host, worked out once per tab and frame.
+            let look = crate::session_tab::host_appearance(app, tab.panes.sessions().next().and_then(|s| app.terminals.get(&s)).and_then(|t| t.host));
             let frame =
                 egui::Frame::new().fill(if selected { tokens.panel } else { tokens.bg }).corner_radius(tokens.radius).inner_margin(vec2(8.0, 4.0));
             let shown = frame.show(ui, |ui| {
@@ -86,8 +88,6 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                     draw(ui.painter(), Icon::Broadcast, rect, tokens.danger);
                     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr("Broadcast on")));
                 }
-                let look =
-                    crate::session_tab::host_appearance(app, tab.panes.sessions().next().and_then(|s| app.terminals.get(&s)).and_then(|t| t.host));
                 if let Some(badge) = &look.badge {
                     let [r, g, b] = look.color.unwrap_or([0x55, 0x5a, 0x66]);
                     egui::Frame::new().fill(egui::Color32::from_rgb(r, g, b)).corner_radius(3.0).inner_margin(vec2(4.0, 0.0)).show(ui, |ui| {
@@ -108,8 +108,7 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                 }
             });
             // The host's colour as a line under its tab.
-            let accent = tab.panes.sessions().next().and_then(|s| app.terminals.get(&s)).and_then(|t| t.host);
-            if let Some([r, g, b]) = crate::session_tab::host_appearance(app, accent).color {
+            if let Some([r, g, b]) = look.color {
                 let rect = shown.response.rect;
                 ui.painter().line_segment(
                     [rect.left_bottom() + vec2(4.0, -1.0), rect.right_bottom() + vec2(-4.0, -1.0)],

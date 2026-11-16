@@ -736,7 +736,7 @@ fn login_script(ctx: &Context, host_id: HostId, shared: &Shared) -> Option<crate
         drop(store);
         local_note(
             shared,
-            "This host has a login script that is not allowed on this device yet. Open the host, tick Allow this login script on this device, and save.",
+            "This host has a login script that is not allowed on this device yet. Open the host, or the group it comes from, tick Allow this login script on this device, and save.",
         );
         return None;
     }

@@ -21,11 +21,16 @@ yourself:
 **bash** (`~/.bashrc`):
 
 ```bash
-__sshcraft_prompt() { local s=$?; printf '\e]133;D;%s\a\e]133;A\a' "$s"; }
-PROMPT_COMMAND="__sshcraft_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+__sshcraft_ran=1
+__sshcraft_status() { __sshcraft_s=$?; }
+__sshcraft_prompt() { printf '\e]133;D;%s\a\e]133;A\a' "$__sshcraft_s"; __sshcraft_ran=; }
+PROMPT_COMMAND="__sshcraft_status;${PROMPT_COMMAND:+$PROMPT_COMMAND;}__sshcraft_prompt"
 PS1="$PS1"'\[\e]133;B\a\]'
-trap '[[ $BASH_COMMAND == __sshcraft_prompt* ]] || printf "\e]133;C\a"' DEBUG
+trap '[[ -z $__sshcraft_ran && $BASH_COMMAND != __sshcraft_* ]] && { __sshcraft_ran=1; printf "\e]133;C\a"; }' DEBUG
 ```
+
+The exit code is taken first and the prompt marks come last, so other `PROMPT_COMMAND` entries
+(direnv, `history -a`) neither change the code nor start a command.
 
 **zsh** (`~/.zshrc`):
 

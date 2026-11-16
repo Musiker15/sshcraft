@@ -27,6 +27,9 @@ const PROMPT_SEARCH_LINES: i32 = 1000;
 const PAIRING_LINES: i32 = 20_000;
 /// Notices about commands kept until they are taken.
 const MAX_NOTICES: usize = 256;
+/// How far up a mark looks for the earlier mark of the same prompt (a prompt over several lines,
+/// a prompt drawn again on the next line).
+const PROMPT_HEIGHT: i32 = 50;
 
 /// Where a command is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +52,8 @@ pub struct CommandRecord {
     pub finished: Option<DateTime<Utc>>,
     /// Lines from the prompt line to the first line of output.
     output_offset: Option<usize>,
+    /// Lines from the prompt line to the line after the output (where the cursor was at `D`).
+    output_end: Option<usize>,
 }
 
 /// A visible prompt line and its command.
@@ -92,40 +97,97 @@ impl Terminal {
         (top..=bottom).rev().filter(|line| self.line_marked(*line)).collect()
     }
 
+    /// Marks `line` for its prompt: the whole line (`full`), or only its last cell, where the
+    /// prompt text written after `A` does not reach.
+    fn mark_line(&mut self, line: Line, full: bool) {
+        let columns = self.term.grid().columns();
+        let row = &mut self.term.grid_mut()[line];
+        for col in 0..columns {
+            row[Column(col)].flags.set(MARK, full || col + 1 == columns);
+        }
+    }
+
+    fn unmark_line(&mut self, line: i32) {
+        let columns = self.term.grid().columns();
+        let row = &mut self.term.grid_mut()[Line(line)];
+        for col in 0..columns {
+            row[Column(col)].flags.remove(MARK);
+        }
+    }
+
+    /// The nearest marked line above `line`, at most [`PROMPT_HEIGHT`] lines up.
+    fn marked_above(&self, line: i32) -> Option<i32> {
+        let low = line.saturating_sub(PROMPT_HEIGHT);
+        (low..line).rev().find(|l| self.line_marked(*l))
+    }
+
     pub(crate) fn apply_shell_mark(&mut self, mark: ShellMark) {
+        // A full-screen program has its own screen: its marks would pair with nothing.
+        if self.term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
+            return;
+        }
         let cursor = self.term.grid().cursor.point.line;
         match mark {
             ShellMark::PromptStart => {
-                self.add_mark();
-                let records = &mut self.commands.records;
-                // A prompt drawn again (a resize, a shell that redraws) is the same command.
-                if records.back().is_none_or(|r| r.state != CommandState::Prompt) {
+                if self.commands.records.back().is_some_and(|r| r.state == CommandState::Prompt) {
+                    // The same prompt drawn again (an empty Enter, a redraw): its earlier mark
+                    // goes, so one prompt keeps one marked line.
+                    if !self.line_marked(cursor.0)
+                        && let Some(old) = self.marked_above(cursor.0)
+                    {
+                        self.unmark_line(old);
+                    }
+                } else {
+                    let records = &mut self.commands.records;
                     if records.len() >= MAX_COMMANDS {
                         records.pop_front();
                     }
-                    records.push_back(CommandRecord { state: CommandState::Prompt, exit: None, started: None, finished: None, output_offset: None });
+                    records.push_back(CommandRecord {
+                        state: CommandState::Prompt,
+                        exit: None,
+                        started: None,
+                        finished: None,
+                        output_offset: None,
+                        output_end: None,
+                    });
                 }
+                self.mark_line(cursor, false);
             }
-            // Marked again at the end of the prompt: the prompt text written since `A` replaced
-            // the cells it covers, and their flags with them.
-            ShellMark::CommandStart => self.add_mark(),
+            ShellMark::CommandStart => {
+                // The prompt's own line is where the command is typed: it takes the mark from
+                // the line `A` marked (the first line of a prompt over several lines).
+                if !self.line_marked(cursor.0)
+                    && self.commands.records.back().is_some_and(|r| r.state == CommandState::Prompt)
+                    && let Some(old) = self.marked_above(cursor.0)
+                {
+                    self.unmark_line(old);
+                }
+                self.mark_line(cursor, true);
+            }
             ShellMark::OutputStart => {
+                // Only a waiting prompt starts a command, so a flood of `C` costs nothing more.
+                if self.commands.records.back().is_none_or(|r| r.state != CommandState::Prompt) {
+                    return;
+                }
                 let low = cursor.0.saturating_sub(PROMPT_SEARCH_LINES);
                 let prompt = (low..=cursor.0).rev().find(|line| self.line_marked(*line));
-                if let Some(record) = self.commands.records.back_mut()
-                    && record.state == CommandState::Prompt
-                {
+                if let Some(record) = self.commands.records.back_mut() {
                     record.state = CommandState::Running;
                     record.output_offset = prompt.and_then(|p| usize::try_from(cursor.0.saturating_sub(p)).ok());
                     self.commands.notice(Notice::CommandStarted);
                 }
             }
             ShellMark::CommandEnd(exit) => {
-                if let Some(record) = self.commands.records.back_mut()
-                    && record.state != CommandState::Finished
-                {
+                // A prompt that ran nothing (an empty Enter) stays a prompt.
+                if self.commands.records.back().is_none_or(|r| r.state != CommandState::Running) {
+                    return;
+                }
+                let low = cursor.0.saturating_sub(PROMPT_SEARCH_LINES);
+                let prompt = (low..=cursor.0).rev().find(|line| self.line_marked(*line));
+                if let Some(record) = self.commands.records.back_mut() {
                     record.state = CommandState::Finished;
                     record.exit = exit;
+                    record.output_end = prompt.and_then(|p| usize::try_from(cursor.0.saturating_sub(p)).ok());
                     self.commands.notice(Notice::CommandFinished { exit });
                 }
             }
@@ -143,6 +205,7 @@ impl Terminal {
 
     /// Gives commands that started or finished since the last call the time `now`.
     pub fn stamp_commands(&mut self, now: DateTime<Utc>) {
+        self.changed();
         for record in self.commands.records.iter_mut().rev() {
             match record.state {
                 CommandState::Prompt => {}
@@ -192,9 +255,13 @@ impl Terminal {
         let (index, record) = self.commands.records.iter().rev().enumerate().find(|(_, r)| r.state == CommandState::Finished)?;
         let prompt = *prompts.get(index)?;
         let first = prompt.saturating_add(i32::try_from(record.output_offset?).ok()?);
-        // The output ends before the next prompt line, or at the newest line.
+        // The output ends where the cursor was when the command ended, else before the next
+        // prompt line, else at the newest line.
         let next = index.checked_sub(1).and_then(|i| prompts.get(i).copied());
-        let last = next.map_or(self.term.grid().bottommost_line().0, |n| n.saturating_sub(1));
+        let last = match record.output_end.and_then(|e| i32::try_from(e).ok()) {
+            Some(end) => prompt.saturating_add(end).saturating_sub(1),
+            None => next.map_or(self.term.grid().bottommost_line().0, |n| n.saturating_sub(1)),
+        };
         Some(self.lines_text(first, last))
     }
 

@@ -153,6 +153,9 @@ pub const MAX_COMPLETED_LINES: usize = 1000;
 /// The longest finished line kept, in characters.
 pub const MAX_LINE_CHARS: usize = 4096;
 
+/// What cached command rows are for: the version of the terminal, the display offset, the rows.
+type RowsKey = (u64, usize, usize);
+
 /// One terminal.
 pub struct Terminal {
     term: Term<Listener>,
@@ -175,6 +178,11 @@ pub struct Terminal {
     programs_changed: bool,
     /// Finished output lines, kept only while [`Terminal::set_line_capture`] is on.
     completed: Option<std::collections::VecDeque<String>>,
+    /// Counts every change that may move prompt lines or their records.
+    version: u64,
+    /// The command rows of the last screen, with the version, offset and height they are for:
+    /// the interface asks for the screen several times a frame.
+    rows_cache: std::cell::Cell<Option<(RowsKey, Vec<CommandRow>)>>,
 }
 
 impl Terminal {
@@ -196,11 +204,14 @@ impl Terminal {
             programs: progstatus::Programs::default(),
             programs_changed: false,
             completed: None,
+            version: 0,
+            rows_cache: std::cell::Cell::new(None),
         }
     }
 
     /// Output from the session.
     pub fn feed(&mut self, bytes: &[u8]) {
+        self.changed();
         let mut filtered = std::mem::take(&mut self.filtered);
         filtered.clear();
         self.prefilter.filter(bytes, &mut filtered);
@@ -248,6 +259,7 @@ impl Terminal {
         if size == self.size {
             return;
         }
+        self.changed();
         // The history shrinks before a wider grid is allocated.
         self.term.set_options(options(size, &self.config));
         self.term.resize(size);
@@ -270,8 +282,19 @@ impl Terminal {
 
     pub fn screen(&self) -> Screen {
         let mut screen = screen::screen(&self.term);
-        screen.commands = self.command_rows(screen.display_offset, usize::from(screen.rows));
+        let key = (self.version, screen.display_offset, usize::from(screen.rows));
+        let rows = match self.rows_cache.take() {
+            Some((cached, rows)) if cached == key => rows,
+            _ => self.command_rows(screen.display_offset, usize::from(screen.rows)),
+        };
+        self.rows_cache.set(Some((key, rows.clone())));
+        screen.commands = rows;
         screen
+    }
+
+    /// Prompt lines or their records may have changed: the cached command rows are stale.
+    pub(crate) fn changed(&mut self) {
+        self.version = self.version.wrapping_add(1);
     }
 
     /// The visible rows as text, one line each, for screen readers.
