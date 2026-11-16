@@ -81,6 +81,13 @@ fn run_list(ctx: Ctx, _params: Value) -> Out {
             }
         }
         out.push(Connection {
+            kind: "reachability",
+            target: "TCP".to_owned(),
+            name: String::new(),
+            count: 0,
+            active: settings.appearance.show_reachability,
+        });
+        out.push(Connection {
             kind: "ssh_agent",
             target: if cfg!(windows) { r"\.\pipe\openssh-ssh-agent".to_owned() } else { "SSH_AUTH_SOCK".to_owned() },
             name: String::new(),

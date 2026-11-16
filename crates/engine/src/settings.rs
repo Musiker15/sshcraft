@@ -180,6 +180,9 @@ pub struct Appearance {
     pub host_view: HostView,
     /// Neighbouring characters may join into one glyph where the font has ligatures (`->`).
     pub ligatures: bool,
+    /// The host list shows whether each host answers (a TCP connect every minute). Off by
+    /// default: it reaches out to every host shown.
+    pub show_reachability: bool,
 }
 
 impl Default for Appearance {
@@ -191,6 +194,7 @@ impl Default for Appearance {
             font_size: 14,
             host_view: HostView::Grid,
             ligatures: true,
+            show_reachability: false,
         }
     }
 }
@@ -420,6 +424,7 @@ pub fn read_tauri_settings(store: &Store) -> EngineSettings {
             font_size: field(&map, "font_size").unwrap_or(d.appearance.font_size),
             host_view: field(&map, "host_view").unwrap_or(d.appearance.host_view),
             ligatures: d.appearance.ligatures,
+            show_reachability: d.appearance.show_reachability,
         };
         out.terminal.terminal_type = field(&map, "terminal_type").unwrap_or(d.terminal.terminal_type);
         out.terminal.clipboard_osc52 = field(&map, "clipboard_osc52").unwrap_or(d.terminal.clipboard_osc52);

@@ -198,6 +198,9 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Ligatures"));
         ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
         ui.end_row();
+        ui.label(tr("Reachability"));
+        ui.checkbox(&mut a.show_reachability, tr("Show in the host list whether each host answers (connects to them every minute)"));
+        ui.end_row();
         ui.label(tr("Hosts as"));
         ui.horizontal(|ui| {
             ui.radio_value(&mut a.host_view, HostView::Grid, tr("Grid"));

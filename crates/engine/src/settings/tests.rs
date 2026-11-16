@@ -78,6 +78,7 @@ async fn saved_settings_come_back() {
             font_size: 15,
             host_view: HostView::List,
             ligatures: false,
+            show_reachability: true,
         };
         s.terminal.terminal_type = "vt100".into();
         s.terminal.clipboard_osc52 = Osc52::Off;
@@ -227,6 +228,7 @@ async fn takeover_copies_every_field() {
             font_size: 17,
             host_view: HostView::List,
             ligatures: true,
+            show_reachability: false,
         }
     );
     assert_eq!(s.terminal.terminal_type, "vt220");

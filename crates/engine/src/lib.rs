@@ -23,6 +23,8 @@ pub mod login_script;
 pub mod passcli;
 mod pool;
 pub mod prompts;
+#[cfg(test)]
+mod reachable_tests;
 pub mod recording;
 pub mod secrets;
 pub mod sessions;

@@ -25,6 +25,7 @@ host.export
 host.forget_key
 host.info
 host.list
+host.reachable
 host.recent
 host.save
 hostkey.export

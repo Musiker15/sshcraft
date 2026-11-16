@@ -277,3 +277,20 @@ fn the_host_form_takes_a_password_reference() {
         app.data.hosts.iter().any(|r| r.host.settings.password_ref.as_ref().is_some_and(|p| p.reference == "op://Servers/vaulted/password"))
     });
 }
+
+#[test]
+fn reachability_is_checked_only_when_switched_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let id = HostId(uuid::Uuid::new_v4());
+    let port = listener.local_addr().unwrap().port();
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "up", "settings": { "address": "127.0.0.1", "port": port } } }));
+    until(&mut h, "the host", |app| app.data.hosts.iter().any(|r| r.host.id == id));
+    h.run_steps(5);
+    assert!(h.state().ui.hosts.reachability.hosts.is_empty(), "off by default: nothing is checked");
+    let mut settings = run(&session, "settings.get", json!({}));
+    settings["appearance"]["show_reachability"] = json!(true);
+    run(&session, "settings.save", json!({ "settings": settings }));
+    until(&mut h, "the check", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
+}

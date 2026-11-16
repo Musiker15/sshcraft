@@ -34,6 +34,17 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Whether the hosts in the list answer, every minute while it is shown" => {
+            "Ob die Hosts in der Liste antworten, jede Minute, solange sie angezeigt wird"
+        }
+        "Reachability" => "Erreichbarkeit",
+        "Show in the host list whether each host answers (connects to them every minute)" => {
+            "In der Hostliste zeigen, ob jeder Host antwortet (verbindet sich jede Minute mit ihnen)"
+        }
+        "Answers" => "Antwortet",
+        "Does not answer" => "Antwortet nicht",
+        "Behind a jump host or proxy: not checked" => "Hinter einem Jump-Host oder Proxy: nicht geprüft",
+        "Not checked yet" => "Noch nicht geprüft",
         "Unix socket (-L)" => "Unix-Socket (-L)",
         "Socket on the server" => "Socket auf dem Server",
         "The socket needs an absolute path of at most 107 bytes." => "Der Socket braucht einen absoluten Pfad mit höchstens 107 Bytes.",

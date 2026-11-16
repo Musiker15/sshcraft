@@ -32,6 +32,12 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         command("host.delete", "Delete a host", "{ id }", run_delete),
         query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
+        query(
+            "host.reachable",
+            "Check whether hosts answer",
+            "{ ids: at most 500 host ids } -> [{ id, reachable: true, false, or null behind a jump host or proxy }]",
+            run_reachable,
+        ),
         command("host.forget_key", "Forget the host key", "{ host_id }", run_forget_key),
         query("host.info", "Host details", "{ host: id or unique name }", run_info),
         command("host.exec", "Run a command on a host", "{ host: id or unique name, command, timeout_secs?: 1 to 600, 60 if missing }", run_exec),
@@ -274,6 +280,68 @@ fn run_recent(ctx: Ctx, params: Value) -> Out {
         let RecentParams { limit } = parse("host.recent", params)?;
         to_value(&ctx.session.store().recent_hosts(limit.min(100))?)
     })
+}
+
+/// The most hosts one `host.reachable` call checks.
+const MAX_REACHABLE: usize = 500;
+/// Checks running at once.
+const REACHABLE_PARALLEL: usize = 16;
+/// How long one TCP connect may take.
+const REACHABLE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Deserialize)]
+struct ReachableParams {
+    ids: Vec<HostId>,
+}
+
+#[derive(serde::Serialize)]
+struct Reachable {
+    id: HostId,
+    /// `None`: behind a jump host or proxy, where a direct connect says nothing.
+    reachable: Option<bool>,
+}
+
+/// Opens a TCP connection to each host's address and port and closes it again; no SSH.
+fn run_reachable(ctx: Ctx, params: Value) -> Out {
+    use futures::{FutureExt, StreamExt};
+    async move {
+        let ReachableParams { ids } = parse("host.reachable", params)?;
+        if ids.len() > MAX_REACHABLE {
+            return Err(CommandError::bad_params("host.reachable", format!("at most {MAX_REACHABLE} ids")));
+        }
+        // Each host: where to connect, or `None` when the route is not direct.
+        let targets: Vec<(HostId, Option<(String, u16)>)> = {
+            let store = ctx.session.store();
+            let hosts = store.list_hosts()?;
+            let groups = store.list_groups()?;
+            ids.iter()
+                .filter_map(|id| hosts.iter().find(|h| h.id == *id))
+                .map(|host| {
+                    let chain = host.group_id.map(|g| group_chain(&groups, g)).unwrap_or_default();
+                    let refs: Vec<&Group> = chain.iter().collect();
+                    let jumps =
+                        host.settings.jump_hosts.clone().or_else(|| refs.iter().find_map(|g| g.defaults.jump_hosts.clone())).unwrap_or_default();
+                    let proxy = host.settings.proxy.clone().or_else(|| refs.iter().find_map(|g| g.defaults.proxy.clone()));
+                    let direct = jumps.is_empty() && matches!(proxy, None | Some(Proxy::Direct));
+                    (host.id, direct.then(|| effective_endpoint(host, &refs).ok()).flatten())
+                })
+                .collect()
+        };
+        let checks = targets.into_iter().map(|(id, target)| async move {
+            let reachable = match target {
+                Some((address, port)) => {
+                    let address = address.trim_start_matches('[').trim_end_matches(']').to_string();
+                    let connect = tokio::net::TcpStream::connect((address.as_str(), port));
+                    Some(matches!(tokio::time::timeout(REACHABLE_TIMEOUT, connect).await, Ok(Ok(_))))
+                }
+                None => None,
+            };
+            Reachable { id, reachable }
+        });
+        let out: Vec<Reachable> = futures::stream::iter(checks).buffer_unordered(REACHABLE_PARALLEL).collect().await;
+        to_value(&out)
+    }
+    .boxed()
 }
 
 #[derive(Deserialize)]

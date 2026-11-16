@@ -34,6 +34,57 @@ pub struct HostsView {
     pub search: String,
     #[serde(skip)]
     pub cache: HostsCache,
+    #[serde(skip)]
+    pub reachability: Reachability,
+}
+
+/// The last answer of `host.reachable`: `None` behind a jump host or proxy.
+#[derive(Debug, Clone, Default)]
+pub struct Reachability {
+    pub hosts: std::collections::HashMap<HostId, Option<bool>>,
+    /// When the last check started, in the window's time.
+    pub checked_at: Option<f64>,
+    pub loading: bool,
+}
+
+/// How often the list checks again while it is shown.
+const REACHABILITY_EVERY: f64 = 60.0;
+/// The most hosts one check asks for (the command's limit).
+const REACHABILITY_MAX: usize = 500;
+
+/// Checks the shown hosts once a minute while the setting is on.
+fn refresh_reachability(app: &mut SshcraftApp, ctx: &egui::Context) {
+    if !app.data.settings.appearance.show_reachability {
+        app.ui.hosts.reachability = Reachability::default();
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let state = &app.ui.hosts.reachability;
+    let due = state.checked_at.is_none_or(|at| now - at >= REACHABILITY_EVERY);
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(REACHABILITY_EVERY));
+    if !due || state.loading {
+        return;
+    }
+    let ids: Vec<HostId> = app.ui.hosts.cache.shown.iter().filter_map(|&k| app.data.hosts.get(k)).map(|r| r.host.id).take(REACHABILITY_MAX).collect();
+    app.ui.hosts.reachability.checked_at = Some(now);
+    if ids.is_empty() {
+        return;
+    }
+    app.ui.hosts.reachability.loading = true;
+    app.runner.run(
+        "host.reachable",
+        json!({ "ids": ids }),
+        Box::new(|app, result| {
+            app.ui.hosts.reachability.loading = false;
+            if let Ok(serde_json::Value::Array(rows)) = result {
+                for row in rows {
+                    if let Ok(id) = serde_json::from_value::<HostId>(row["id"].clone()) {
+                        app.ui.hosts.reachability.hosts.insert(id, row["reachable"].as_bool());
+                    }
+                }
+            }
+        }),
+    );
 }
 
 /// The page's lists, worked out again only when the data or the view changed: with thousands of
@@ -239,6 +290,17 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
     ui.horizontal(|ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
         draw(ui.painter(), Icon::Host, icon, tokens.text_dim);
+        if app.data.settings.appearance.show_reachability {
+            let (color, text) = match app.ui.hosts.reachability.hosts.get(&row.host.id) {
+                Some(Some(true)) => (tokens.success, tr("Answers")),
+                Some(Some(false)) => (tokens.danger, tr("Does not answer")),
+                Some(None) => (tokens.text_dim, tr("Behind a jump host or proxy: not checked")),
+                None => (tokens.text_dim, tr("Not checked yet")),
+            };
+            let (dot, response) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+            ui.painter().circle_filled(dot.center(), 4.0, color);
+            response.on_hover_text(text);
+        }
         let response = elided_label(ui, &row.host.name, MAX_NAME_WIDTH, tokens.text, FontId::proportional(14.0));
         if let Some(address) = &row.host.settings.address {
             elided_label(ui, address, 140.0, tokens.text_dim, FontId::proportional(13.0));
@@ -344,6 +406,7 @@ fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     update_cache(app);
+    refresh_reachability(app, ui.ctx());
     let all_groups = app.ui.hosts.cache.groups.clone();
     ui.horizontal(|ui| {
         ui.heading(tr("Hosts"));
