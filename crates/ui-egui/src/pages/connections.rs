@@ -37,6 +37,7 @@ fn purpose(v: &Value) -> String {
         "wake_on_lan" => trf("Wake-on-LAN before connecting to {count} hosts or groups", &[("count", &count)]),
         "port_knock" => trf("Port knocking before connecting to {count} hosts or groups", &[("count", &count)]),
         "connect_program" => trf("Local programs before or after connecting to {count} hosts or groups, once allowed", &[("count", &count)]),
+        "resource_bar" => tr("Load, memory and disk of the server under SSH terminals, every 10 seconds").to_owned(),
         "reachability" => tr("Whether the hosts in the list answer, every minute while it is shown").to_owned(),
         "ssh_agent" => tr("Keys from the SSH agent (Proton Pass), when a host uses one").to_owned(),
         "agent_port" => tr("AI agents connect here, from this computer only").to_owned(),

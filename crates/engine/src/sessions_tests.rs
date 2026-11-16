@@ -2292,3 +2292,16 @@ mod steps {
         assert_eq!(ended_code(&statuses), Some(ErrorCode::ConnectStepFailed));
     }
 }
+
+#[tokio::test]
+async fn the_resource_probe_runs_its_fixed_command_over_the_tab() {
+    let f = fixture(true).await;
+    f.server.set_exec_output("0.50 0.4 0.3 1/2 3\n@@SSHCRAFT@@\nMemTotal: 1000 kB\nMemAvailable: 250 kB\n@@SSHCRAFT@@\n");
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    let r = f.manager.resources(id).await.unwrap().unwrap();
+    assert_eq!((r.load, r.memory_percent, r.disk_percent), (Some(0.5), Some(75), None));
+    assert!(f.server.received_commands().contains(&sshcraft_model::resources::PROBE.to_owned()));
+    assert!(f.manager.resources(uuid::Uuid::new_v4()).await.is_err(), "no such tab");
+}

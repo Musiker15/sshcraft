@@ -14,6 +14,7 @@ pub mod os_detect;
 pub mod placeholders;
 pub mod policy;
 pub mod proxy_command;
+pub mod resources;
 pub mod secret_ref;
 pub mod ssh_url;
 pub mod totp;

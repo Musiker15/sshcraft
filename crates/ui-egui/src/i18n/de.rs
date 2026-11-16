@@ -34,6 +34,16 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "load {load}" => "Last {load}",
+        "memory {percent} %" => "Speicher {percent} %",
+        "disk {percent} %" => "Platte {percent} %",
+        "Server resources" => "Server-Ressourcen",
+        "Show load, memory and disk under SSH terminals (runs a command on the server every 10 seconds)" => {
+            "Last, Speicher und Platte unter SSH-Terminals zeigen (führt alle 10 Sekunden einen Befehl auf dem Server aus)"
+        }
+        "Load, memory and disk of the server under SSH terminals, every 10 seconds" => {
+            "Last, Speicher und Platte des Servers unter SSH-Terminals, alle 10 Sekunden"
+        }
         "Desktop shortcut" => "Verknüpfung auf dem Desktop",
         "The shortcut is at {path}." => "Die Verknüpfung liegt unter {path}.",
         "Add your own sign-in" => "Eigene Anmeldung ergänzen",

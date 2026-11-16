@@ -88,6 +88,7 @@ session.open
 session.read
 session.recording
 session.resize
+session.resources
 session.send
 settings.get
 settings.save

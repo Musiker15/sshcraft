@@ -284,6 +284,9 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Connections"));
         ui.checkbox(&mut t.reuse_connections, tr("Tabs, port forwards and commands to one host share its connection"));
         ui.end_row();
+        ui.label(tr("Server resources"));
+        ui.checkbox(&mut t.resource_bar, tr("Show load, memory and disk under SSH terminals (runs a command on the server every 10 seconds)"));
+        ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));
         ui.end_row();

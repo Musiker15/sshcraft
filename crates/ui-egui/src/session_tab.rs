@@ -77,6 +77,9 @@ pub struct SessionTab {
     hint_typed: String,
     /// The compose field's text while it is open.
     compose: Option<String>,
+    /// The server's load, memory and disk for the resource bar, and when they were asked for.
+    pub resources: Option<sshcraft_model::resources::Resources>,
+    resources_at: Option<f64>,
     /// The list of recent pastes is open.
     paste_picker: bool,
     /// A program waited for the user at the last status change.
@@ -349,6 +352,8 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 hints: None,
                 hint_typed: String::new(),
                 compose: None,
+                resources: None,
+                resources_at: None,
                 paste_picker: false,
                 program_blocked: false,
             };
@@ -856,7 +861,52 @@ fn status_text(status: Option<&SessionStatus>) -> (String, bool) {
     }
 }
 
+/// How often the resource bar asks the server again, in seconds.
+const RESOURCES_EVERY: f64 = 10.0;
+
+/// Asks the server of SSH tab `id` for its load, memory and disk every ten seconds while the tab
+/// is shown and the setting is on.
+fn refresh_resources(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) {
+    if !app.data.settings.terminal.resource_bar {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    let connected = matches!(tab.status, Some(SessionStatus::Connected { .. }));
+    if tab.host.is_none() || !connected || tab.resources_at.is_some_and(|at| now - at < RESOURCES_EVERY) {
+        return;
+    }
+    tab.resources_at = Some(now);
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(RESOURCES_EVERY));
+    app.runner.run(
+        "session.resources",
+        json!({ "id": id }),
+        Box::new(move |app, result| {
+            if let Some(tab) = app.terminals.get_mut(&id) {
+                tab.resources = result.ok().and_then(|v| serde_json::from_value(v).ok()).flatten();
+            }
+        }),
+    );
+}
+
+/// The resource bar's text: `load 0.42 · memory 75 % of 16 GiB · disk 42 %`.
+pub fn resources_text(r: &sshcraft_model::resources::Resources) -> String {
+    let mut parts = Vec::new();
+    if let Some(load) = r.load {
+        parts.push(trf("load {load}", &[("load", &format!("{load:.2}"))]));
+    }
+    if let Some(memory) = r.memory_percent {
+        let of = r.memory_total_kib.map(|k| format!(" / {:.1} GiB", k as f64 / 1_048_576.0)).unwrap_or_default();
+        parts.push(trf("memory {percent} %", &[("percent", &memory.to_string())]) + &of);
+    }
+    if let Some(disk) = r.disk_percent {
+        parts.push(trf("disk {percent} %", &[("percent", &disk.to_string())]));
+    }
+    parts.join("  ·  ")
+}
+
 fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
+    refresh_resources(app, &ui.ctx().clone(), id);
     let tokens = Tokens::get(ui.ctx());
     let Some(tab) = app.terminals.get(&id) else { return };
     let (text, is_end) = status_text(tab.status.as_ref());
@@ -882,6 +932,14 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
         }
         if is_end && !mismatch && ui.button(tr("Reconnect")).clicked() {
             reconnect = true;
+        }
+        if app.data.settings.terminal.resource_bar
+            && !is_end
+            && let Some(r) = &tab.resources
+        {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(resources_text(r)).color(tokens.text_dim).small());
+            });
         }
     });
     if reconnect && let Some(tab) = app.terminals.get(&id) {

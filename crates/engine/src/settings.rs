@@ -236,6 +236,9 @@ pub struct Terminal {
     pub triggers: Vec<Trigger>,
     /// Tabs, port forwards and commands to one host share its SSH connection.
     pub reuse_connections: bool,
+    /// A bar under SSH terminals with the server's load, memory and disk, read every ten
+    /// seconds while the tab is shown. Off by default: it runs a command on the server.
+    pub resource_bar: bool,
     /// Snippets (by id) shown as buttons above each terminal, in order, at most
     /// [`MAX_SNIPPET_BAR`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -309,6 +312,7 @@ impl Default for Terminal {
             triggers: Vec::new(),
             snippet_bar: Vec::new(),
             reuse_connections: true,
+            resource_bar: false,
         }
     }
 }

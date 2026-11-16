@@ -81,6 +81,13 @@ fn run_list(ctx: Ctx, _params: Value) -> Out {
             }
         }
         out.push(Connection {
+            kind: "resource_bar",
+            target: "SSH".to_owned(),
+            name: String::new(),
+            count: 0,
+            active: settings.terminal.resource_bar,
+        });
+        out.push(Connection {
             kind: "reachability",
             target: "TCP".to_owned(),
             name: String::new(),

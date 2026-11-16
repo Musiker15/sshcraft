@@ -35,6 +35,9 @@ pub type ReadSettings = Arc<dyn Fn() -> EngineSettings + Send + Sync>;
 
 pub type SessionId = Uuid;
 
+/// The most bytes a resource probe reads.
+const RESOURCES_LIMIT: usize = 16 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EndReason {
@@ -162,6 +165,11 @@ pub(crate) trait TermWriter: Send + Sync {
     async fn list_dir(&self, _dir: &str, _prefix: &str) -> Result<Vec<String>, String> {
         Ok(Vec::new())
     }
+    /// Runs the fixed `command` on a channel of its own beside the shell, at most `limit` bytes
+    /// back; nothing where a terminal has no server.
+    async fn probe(&self, _command: &str, _limit: usize) -> Result<Option<Vec<u8>>, String> {
+        Ok(None)
+    }
 }
 
 #[async_trait::async_trait]
@@ -180,6 +188,10 @@ impl TermWriter for ShellWriter {
         };
         let output = self.exec(crate::listing::LIST_COMMAND, Some(input.as_bytes()), crate::listing::MAX_OUTPUT).await.map_err(|e| e.to_string())?;
         Ok(crate::listing::parse_listing(&output, prefix))
+    }
+
+    async fn probe(&self, command: &str, limit: usize) -> Result<Option<Vec<u8>>, String> {
+        self.exec(command, None, limit).await.map(Some).map_err(|e| e.to_string())
     }
 }
 
@@ -595,6 +607,20 @@ impl SessionManager {
             .and_then(|live| live.writer.lock().unwrap_or_else(PoisonError::into_inner).clone())
             .ok_or("not connected")?;
         writer.list_dir(dir, prefix).await
+    }
+
+    /// Load, memory and disk of the tab's server, read by [`sshcraft_model::resources::PROBE`]
+    /// beside the shell; `None` for a tab without a server or a server that told nothing.
+    pub async fn resources(&self, id: SessionId) -> Result<Option<sshcraft_model::resources::Resources>, String> {
+        let writer = self
+            .sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&id)
+            .and_then(|live| live.writer.lock().unwrap_or_else(PoisonError::into_inner).clone())
+            .ok_or("not connected")?;
+        let output = writer.probe(sshcraft_model::resources::PROBE, RESOURCES_LIMIT).await?;
+        Ok(output.and_then(|o| sshcraft_model::resources::parse(&String::from_utf8_lossy(&o))))
     }
 
     /// The UI has rendered `bytes` more output bytes.
