@@ -80,6 +80,7 @@ async fn saved_settings_come_back() {
             ligatures: false,
             show_reachability: true,
             dropdown_shortcut: Some("Ctrl+`".into()),
+            smart_groups: vec![SmartGroup { name: "Web".into(), tags: vec!["web".into()], query: "prod".into() }],
         };
         s.terminal.terminal_type = "vt100".into();
         s.terminal.clipboard_osc52 = Osc52::Off;
@@ -231,6 +232,7 @@ async fn takeover_copies_every_field() {
             ligatures: true,
             show_reachability: false,
             dropdown_shortcut: None,
+            smart_groups: Vec::new(),
         }
     );
     assert_eq!(s.terminal.terminal_type, "vt220");
@@ -431,4 +433,26 @@ fn macros_sshcraft_cannot_run_are_dropped() {
     ];
     let kept: Vec<String> = s.sanitized().terminal.macros.into_iter().map(|m| m.name).collect();
     assert_eq!(kept, vec!["deploy".to_string()]);
+}
+
+#[test]
+fn dynamic_groups_sshcraft_cannot_use_are_dropped() {
+    let g = |name: &str, tags: &[&str], query: &str| SmartGroup {
+        name: name.into(),
+        tags: tags.iter().map(|t| t.to_string()).collect(),
+        query: query.into(),
+    };
+    let mut s = EngineSettings::default();
+    s.appearance.smart_groups = vec![
+        g("Web", &["web"], ""),
+        g("web", &["other"], ""),
+        g("Filters nothing", &[], "  "),
+        g("Bad\u{7}", &["a"], ""),
+        g("Tag", &["a\nb"], ""),
+        g("Search", &[], "prod"),
+    ];
+    s.appearance.smart_groups.extend((0..40).map(|i| g(&format!("g{i}"), &["t"], "")));
+    let kept: Vec<String> = s.sanitized().appearance.smart_groups.into_iter().map(|g| g.name).collect();
+    assert_eq!(kept[..2], ["Web".to_string(), "Search".to_string()]);
+    assert_eq!(kept.len(), MAX_SMART_GROUPS);
 }

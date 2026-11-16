@@ -221,6 +221,40 @@ pub struct Appearance {
     /// A global shortcut that shows SSHCraft at the top of the screen or hides it; `None`: off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dropdown_shortcut: Option<String>,
+    /// Saved filters of the host list, shown as chips above it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub smart_groups: Vec<SmartGroup>,
+}
+
+/// Dynamic groups kept at most.
+pub const MAX_SMART_GROUPS: usize = 32;
+/// Tags one dynamic group asks for at most.
+pub const MAX_SMART_TAGS: usize = 16;
+/// The longest tag and search text of a dynamic group.
+pub const MAX_SMART_TEXT: usize = 256;
+
+/// A saved filter of the host list: the hosts in any group that carry all `tags` and match
+/// `query` like the search field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmartGroup {
+    pub name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub query: String,
+}
+
+impl SmartGroup {
+    /// A name like a macro's, at least one tag or a search, all without control characters.
+    pub fn valid(&self) -> bool {
+        let text = |s: &str, max: usize| s.chars().count() <= max && !s.chars().any(char::is_control);
+        !self.name.trim().is_empty()
+            && text(&self.name, MAX_MACRO_NAME)
+            && (!self.tags.is_empty() || !self.query.trim().is_empty())
+            && self.tags.len() <= MAX_SMART_TAGS
+            && self.tags.iter().all(|t| !t.trim().is_empty() && text(t, MAX_SMART_TEXT))
+            && text(&self.query, MAX_SMART_TEXT)
+    }
 }
 
 impl Default for Appearance {
@@ -234,6 +268,7 @@ impl Default for Appearance {
             ligatures: true,
             show_reachability: false,
             dropdown_shortcut: None,
+            smart_groups: Vec::new(),
         }
     }
 }
@@ -423,6 +458,10 @@ impl EngineSettings {
         self.terminal.macros.retain(|m| m.valid() && seen.insert(m.name.trim().to_lowercase()));
         self.terminal.macros.truncate(MAX_MACROS);
         let a = &mut self.appearance;
+        // Dynamic groups SSHCraft cannot use are dropped, the rest kept up to the limit.
+        let mut names = std::collections::HashSet::new();
+        a.smart_groups.retain(|g| g.valid() && names.insert(g.name.trim().to_lowercase()));
+        a.smart_groups.truncate(MAX_SMART_GROUPS);
         // A shortcut SSHCraft cannot read is dropped, not guessed at.
         a.dropdown_shortcut = a.dropdown_shortcut.take().filter(|c| valid_combo(c));
         a.font_size = a.font_size.clamp(*FONT_SIZES.start(), *FONT_SIZES.end());
@@ -480,6 +519,7 @@ pub fn read_tauri_settings(store: &Store) -> EngineSettings {
             ligatures: d.appearance.ligatures,
             show_reachability: d.appearance.show_reachability,
             dropdown_shortcut: None,
+            smart_groups: Vec::new(),
         };
         out.terminal.terminal_type = field(&map, "terminal_type").unwrap_or(d.terminal.terminal_type);
         out.terminal.clipboard_osc52 = field(&map, "clipboard_osc52").unwrap_or(d.terminal.clipboard_osc52);

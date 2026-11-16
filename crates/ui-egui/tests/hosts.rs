@@ -333,3 +333,53 @@ fn a_host_shared_without_its_sign_in_asks_for_one() {
     until(&mut h, "the key", |app| app.data.hosts.iter().any(|r| r.host.id == id && r.host.settings.key.is_some()));
     assert!(h.query_by_label("Add your own sign-in").is_none());
 }
+
+fn save_dynamic_groups(session: &Session, groups: Value) {
+    let mut settings = run(session, "settings.get", json!({}));
+    settings["appearance"]["smart_groups"] = groups;
+    run(session, "settings.save", json!({ "settings": settings }));
+}
+
+#[test]
+fn a_dynamic_group_finds_tagged_hosts_in_every_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let prod = add_group(&session, "production", None, json!({}));
+    add_host(&session, "alpha", Some(prod), &["web"]);
+    add_host(&session, "beta", None, &["web"]);
+    add_host(&session, "gamma", None, &["db"]);
+    save_dynamic_groups(&session, json!([{ "name": "Web servers", "tags": ["web"] }]));
+    until(&mut h, "the data", |app| app.data.hosts.len() == 3 && !app.data.settings.appearance.smart_groups.is_empty());
+    assert!(h.query_by_label("alpha").is_none(), "alpha is in a group below");
+    h.get_by_label("Web servers").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("alpha").is_some(), "found in its group");
+    assert!(h.query_by_label("beta").is_some());
+    assert!(h.query_by_label("gamma").is_none());
+    // A second click leaves the dynamic group.
+    h.get_by_label("Web servers").click();
+    h.run_steps(2);
+    assert!(h.state().ui.hosts.smart.is_none() && h.state().ui.hosts.tags.is_empty());
+    assert!(h.query_by_label("alpha").is_none());
+    assert!(h.query_by_label("gamma").is_some());
+}
+
+#[test]
+fn the_current_filter_can_be_saved_as_a_dynamic_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    add_host(&session, "gamma", None, &["db"]);
+    until(&mut h, "the hosts", |app| app.data.hosts.len() == 1);
+    assert!(h.query_by_label("Save as dynamic group").is_none(), "nothing to save without a filter");
+    h.state_mut().ui.hosts.tags = vec!["db".into()];
+    h.run_steps(2);
+    h.get_by_label("Save as dynamic group").click();
+    h.run_steps(2);
+    h.state_mut().ui.hosts.smart_draft = Some("Databases".into());
+    h.run_steps(1);
+    h.get_by_label("Save").click();
+    until(&mut h, "the saved group", |app| !app.data.settings.appearance.smart_groups.is_empty());
+    let saved = &h.state().data.settings.appearance.smart_groups[0];
+    assert_eq!((saved.name.as_str(), saved.tags.clone()), ("Databases", vec!["db".to_string()]));
+    assert_eq!(h.state().ui.hosts.smart.as_deref(), Some("Databases"), "applied right away");
+}

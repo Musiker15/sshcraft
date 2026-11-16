@@ -34,6 +34,10 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Save as dynamic group" => "Als dynamische Gruppe speichern",
+        "A dynamic group has that name already." => "Eine dynamische Gruppe mit diesem Namen gibt es schon.",
+        "Tags: {tags}" => "Tags: {tags}",
+        "Search: {text}" => "Suche: {text}",
         "Macros" => "Makros",
         "Run from the command palette on the focused terminal. One step per line: text to wait for => line to send, or just the line to send at once." => {
             "Laufen über die Befehlspalette im fokussierten Terminal. Ein Schritt pro Zeile: Text, auf den gewartet wird => Zeile, die gesendet wird, oder nur die Zeile, die sofort gesendet wird."
