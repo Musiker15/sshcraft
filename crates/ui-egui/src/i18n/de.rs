@@ -34,6 +34,21 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "No containers found." => "Keine Container gefunden.",
+        "Letters, digits, dots, dashes and underscores, starting with a letter or digit" => {
+            "Buchstaben, Ziffern, Punkte, Bindestriche und Unterstriche, am Anfang ein Buchstabe oder eine Ziffer"
+        }
+        "Lowercase letters, digits, dots and dashes, starting and ending with a letter or digit" => {
+            "Kleinbuchstaben, Ziffern, Punkte und Bindestriche, am Anfang und Ende ein Buchstabe oder eine Ziffer"
+        }
+        "Only Kubernetes has namespaces" => "Nur Kubernetes hat Namespaces",
+        "The container name or namespace has characters SSHCraft does not put into a command." => {
+            "Der Name des Containers oder der Namespace enthält Zeichen, die SSHCraft in keinen Befehl schreibt."
+        }
+        "Snippets typed in this order once a session starts, not again after a reconnect." => {
+            "Snippets, die beim Start einer Sitzung einmal in dieser Reihenfolge getippt werden, nach einem Wiederverbinden nicht noch einmal."
+        }
+        "Snippet not on this device" => "Snippet nicht auf diesem Gerät",
         "Save as dynamic group" => "Als dynamische Gruppe speichern",
         "A dynamic group has that name already." => "Eine dynamische Gruppe mit diesem Namen gibt es schon.",
         "Tags: {tags}" => "Tags: {tags}",

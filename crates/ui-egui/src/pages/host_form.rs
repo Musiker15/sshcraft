@@ -336,31 +336,66 @@ fn launch_rows(
     opened: &Option<Vec<sshcraft_model::model::SnippetId>>,
     allow: &mut bool,
 ) {
+    use sshcraft_model::model::SnippetId;
     ui.add_space(8.0);
     ui.label(egui::RichText::new(tr("Launch actions")).strong());
-    ui.label(egui::RichText::new(tr("Snippets typed once when a session starts, not again after a reconnect.")).small());
-    let chosen = value.get_or_insert_with(Vec::new);
+    ui.label(egui::RichText::new(tr("Snippets typed in this order once a session starts, not again after a reconnect.")).small());
+    let chosen: Vec<SnippetId> = value.clone().unwrap_or_default();
+    let mut next = chosen.clone();
+    let known: Vec<(SnippetId, &str)> =
+        app.data.snippets.iter().filter_map(|row| uuid::Uuid::parse_str(&row.id).ok().map(|u| (SnippetId(u), row.name.as_str()))).collect();
+    let numbered = |pos: Option<usize>, name: String| match pos {
+        Some(p) => format!("{}. {name}", p.saturating_add(1)),
+        None => name,
+    };
     egui::ScrollArea::vertical().id_salt("sshcraft-launch").max_height(120.0).show(ui, |ui| {
-        for row in &app.data.snippets {
-            let Ok(uuid) = uuid::Uuid::parse_str(&row.id) else { continue };
-            let id = sshcraft_model::model::SnippetId(uuid);
-            let mut on = chosen.contains(&id);
+        for (id, name) in &known {
+            let pos = chosen.iter().position(|c| c == id);
+            let mut on = pos.is_some();
             let full = chosen.len() >= sshcraft_model::launch::MAX_LAUNCH;
-            if ui.add_enabled(on || !full, egui::Checkbox::new(&mut on, crate::widgets::visible(&row.name))).changed() {
+            if ui.add_enabled(on || !full, egui::Checkbox::new(&mut on, numbered(pos, crate::widgets::visible(name)))).changed() {
                 if on {
-                    chosen.push(id);
+                    next.push(*id);
                 } else {
-                    chosen.retain(|c| *c != id);
+                    next.retain(|c| c != id);
                 }
             }
         }
+        // Snippets this device does not have (yet) still count, and can be taken out.
+        for (p, id) in chosen.iter().enumerate().filter(|(_, id)| !known.iter().any(|(k, _)| k == *id)) {
+            let mut on = true;
+            if ui.checkbox(&mut on, numbered(Some(p), tr("Snippet not on this device").to_string())).changed() {
+                next.retain(|c| c != id);
+            }
+        }
     });
-    if chosen.is_empty() {
-        *value = None;
-    } else if value == opened {
+    // Unticking the last one keeps an empty list: none here, not the group's.
+    if next != chosen {
+        *value = Some(next);
+    }
+    if launch_needs_allow(value, opened) {
         ui.checkbox(allow, tr("Allow the launch actions on this device"))
             .on_hover_text(tr("Launch actions that came through sync, a share or an import are not typed until allowed here."));
     }
+}
+
+/// Whether the launch actions hold one that was there when the form opened: it may have come
+/// through sync, a share or an agent, so only the box allows it.
+pub(crate) fn launch_needs_allow(
+    value: &Option<Vec<sshcraft_model::model::SnippetId>>,
+    opened: &Option<Vec<sshcraft_model::model::SnippetId>>,
+) -> bool {
+    let was = opened.as_deref().unwrap_or_default();
+    value.as_deref().unwrap_or_default().iter().any(|id| was.contains(id))
+}
+
+/// Whether saving allows the launch actions: all of them picked in this form, or the box ticked.
+pub(crate) fn approve_launch(
+    value: &Option<Vec<sshcraft_model::model::SnippetId>>,
+    opened: &Option<Vec<sshcraft_model::model::SnippetId>>,
+    allow: bool,
+) -> bool {
+    value.as_ref().is_some_and(|l| !l.is_empty()) && (allow || !launch_needs_allow(value, opened))
 }
 
 /// A container on the host to open instead of its shell: runtime, name (picked from the host's
@@ -391,6 +426,7 @@ fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft
             if c.runtime != runtime {
                 c.runtime = runtime;
                 c.namespace = None;
+                app.ui.container_names = None;
             }
             ui.add(egui::TextEdit::singleline(&mut c.name).hint_text(tr("name")).desired_width(140.0).char_limit(253));
             if let Some(id) = host
@@ -398,16 +434,24 @@ fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft
             {
                 app.runner.run(
                     "host.containers",
-                    serde_json::json!({ "host_id": id, "runtime": runtime }),
-                    Box::new(|app, result| match result {
-                        Ok(v) => app.ui.container_names = serde_json::from_value(v).unwrap_or_default(),
+                    serde_json::json!({ "host_id": id, "runtime": runtime, "namespace": c.namespace }),
+                    Box::new(move |app, result| match result {
+                        Ok(v) => {
+                            let names: Vec<String> = serde_json::from_value(v).unwrap_or_default();
+                            if names.is_empty() {
+                                app.toasts.info(tr("No containers found."));
+                            }
+                            app.ui.container_names = Some((id, names));
+                        }
                         Err(e) => app.toasts.error(&e.to_string()),
                     }),
                 );
             }
-            if !app.ui.container_names.is_empty() {
+            // The list of this host; another host's stays out.
+            let listed = app.ui.container_names.as_ref().filter(|(of, names)| Some(*of) == host && !names.is_empty()).map(|(_, names)| names.clone());
+            if let Some(names) = listed {
                 egui::ComboBox::from_id_salt("sshcraft-container-pick").selected_text(tr("Pick")).show_ui(ui, |ui| {
-                    for name in &app.ui.container_names {
+                    for name in &names {
                         if ui.selectable_label(c.name == *name, crate::widgets::visible(name)).clicked() {
                             c.name = name.clone();
                         }
@@ -431,11 +475,21 @@ fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft
             if !c.name.is_empty()
                 && let Err(e) = check(c)
             {
-                ui.label(egui::RichText::new(e.to_string()).color(crate::theme::Tokens::get(ui.ctx()).danger));
+                ui.label(egui::RichText::new(container_error_text(&e)).color(crate::theme::Tokens::get(ui.ctx()).danger));
             }
         });
     });
     ui.end_row();
+}
+
+/// What is wrong with a container's name, in the interface's language.
+fn container_error_text(e: &sshcraft_model::container::ContainerError) -> &'static str {
+    use sshcraft_model::container::ContainerError;
+    match e {
+        ContainerError::Name => tr("Letters, digits, dots, dashes and underscores, starting with a letter or digit"),
+        ContainerError::KubernetesName => tr("Lowercase letters, digits, dots and dashes, starting and ending with a letter or digit"),
+        ContainerError::Namespace => tr("Only Kubernetes has namespaces"),
+    }
 }
 
 /// SSH, or Telnet for devices that speak nothing else (with a warning: nothing is encrypted).
@@ -999,7 +1053,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                         "approve_x11": form.host.settings.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
                         "approve_telnet": form.host.settings.protocol == Some(Telnet) && (form.opened_protocol != Some(Telnet) || form.allow_telnet),
                         // Picked here, or allowed with the box below.
-                        "approve_launch": form.host.settings.launch.as_ref().is_some_and(|l| !l.is_empty()) && (form.host.settings.launch != form.opened_launch || form.allow_launch),
+                        "approve_launch": approve_launch(&form.host.settings.launch, &form.opened_launch, form.allow_launch),
                         "approve_login_script": form.allow_script && form.host.settings.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                         "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
                     }),
@@ -1123,7 +1177,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                         "approve_x11": form.group.defaults.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
                         "approve_telnet": form.group.defaults.protocol == Some(Telnet) && (form.opened_protocol != Some(Telnet) || form.allow_telnet),
                         // Picked here, or allowed with the box below.
-                        "approve_launch": form.group.defaults.launch.as_ref().is_some_and(|l| !l.is_empty()) && (form.group.defaults.launch != form.opened_launch || form.allow_launch),
+                        "approve_launch": approve_launch(&form.group.defaults.launch, &form.opened_launch, form.allow_launch),
                         "approve_login_script": form.allow_script && form.group.defaults.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                     }),
                     Box::new(move |app, result| {
@@ -1180,5 +1234,24 @@ impl GroupForm {
             opened_script,
             allow_script: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use sshcraft_model::model::SnippetId;
+
+    #[test]
+    fn launch_actions_from_elsewhere_need_the_box_even_when_the_list_changed() {
+        let (a, b, c) = (SnippetId::new(), SnippetId::new(), SnippetId::new());
+        let opened = Some(vec![a, b]);
+        assert!(!approve_launch(&Some(vec![a]), &opened, false), "unticking B does not allow A");
+        assert!(!approve_launch(&Some(vec![a, c]), &opened, false), "adding C does not allow A");
+        assert!(approve_launch(&Some(vec![a]), &opened, true));
+        assert!(approve_launch(&Some(vec![c]), &opened, false), "picked here");
+        assert!(!approve_launch(&Some(Vec::new()), &opened, true), "nothing to allow");
+        assert!(launch_needs_allow(&Some(vec![a, c]), &opened));
+        assert!(!launch_needs_allow(&Some(vec![c]), &opened));
     }
 }

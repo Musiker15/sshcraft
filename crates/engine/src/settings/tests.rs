@@ -456,3 +456,14 @@ fn dynamic_groups_sshcraft_cannot_use_are_dropped() {
     assert_eq!(kept[..2], ["Web".to_string(), "Search".to_string()]);
     assert_eq!(kept.len(), MAX_SMART_GROUPS);
 }
+
+#[test]
+fn names_that_differ_only_in_case_clash() {
+    use sshcraft_model::login_script::LoginStep;
+    assert!(same_name("Über", "über"));
+    assert!(!same_name("Über", "Ober"));
+    let mut s = EngineSettings::default();
+    let m = |name: &str| Macro { name: name.into(), steps: vec![LoginStep { expect: String::new(), send: "x".into() }] };
+    s.terminal.macros = vec![m("Über"), m("über")];
+    assert_eq!(s.sanitized().terminal.macros.len(), 1);
+}

@@ -407,7 +407,7 @@ fn macros(app: &mut SshcraftApp, ui: &mut Ui) {
             .font(egui::TextStyle::Monospace),
     );
     let draft = Macro { name: name.trim().to_string(), steps: crate::macros::parse_steps(&text) };
-    let clash = list.iter().enumerate().any(|(i, m)| Some(i) != place && m.name.trim().eq_ignore_ascii_case(&draft.name));
+    let clash = list.iter().enumerate().any(|(i, m)| Some(i) != place && sshcraft_engine::settings::same_name(&m.name, &draft.name));
     let ok = draft.valid() && !clash;
     let (mut keep, mut store) = (true, false);
     ui.horizontal(|ui| {

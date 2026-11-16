@@ -2535,7 +2535,7 @@ async fn a_container_name_from_elsewhere_never_reaches_a_command() {
 async fn listed_containers_are_checked() {
     let f = fixture(true).await;
     f.server.set_exec_output("web\nbad name\n$(id)\ndb_1\n");
-    let names = f.manager.list_containers(f.host_id, sshcraft_model::container::Runtime::Docker).await.unwrap();
+    let names = f.manager.list_containers(f.host_id, sshcraft_model::container::Runtime::Docker, None).await.unwrap();
     assert_eq!(names, vec!["web".to_string(), "db_1".to_string()]);
     assert!(f.server.received_commands().contains(&"docker ps --format '{{.Names}}'".to_owned()));
 }
@@ -2558,8 +2558,80 @@ mod launch {
     }
 
     fn allow(f: &Fixture, texts: &[String]) {
-        let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(texts));
+        allow_for(f, &f.host_id.0.to_string(), texts);
+    }
+
+    fn allow_for(f: &Fixture, level: &str, texts: &[String]) {
+        let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(level, texts));
         f.store.lock().unwrap().approve_command(&digest).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_approval_for_another_host_does_not_count() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo other-host");
+        allow_for(&f, &uuid::Uuid::new_v4().to_string(), &[text]);
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo other-host"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn a_reconnected_tab_types_no_launch_actions() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo again-not");
+        allow(&f, &[text]);
+        // The tab's Reconnect button opens the session again.
+        let sink = Arc::new(RecordingSink::default());
+        f.manager.reopen(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo again-not"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn launch_actions_are_not_typed_into_a_session_that_stays() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo into-tmux");
+        allow(&f, &[text]);
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.persistence = Some(sshcraft_model::persist::Persistence { tool: sshcraft_model::persist::Tool::Tmux, name: "work".into() });
+            store.upsert_host(&host).unwrap();
+        }
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo into-tmux"), "{out}");
+        assert!(out.contains("session that stays"), "the terminal says why: {out}");
+    }
+
+    #[tokio::test]
+    async fn launch_actions_on_telnet_wait_for_a_login_script() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let f = fixture(true).await;
+        let text = launching(&f, "echo at-login-prompt");
+        allow(&f, &[text]);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let device = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket.write_all(b"login: ").await.unwrap();
+            let mut buf = [0u8; 64];
+            tokio::time::timeout(Duration::from_millis(500), socket.read(&mut buf)).await.ok().and_then(Result::ok).map(|n| buf[..n].to_vec())
+        });
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.protocol = Some(sshcraft_model::model::Protocol::Telnet);
+            host.settings.port = Some(port);
+            store.upsert_host(&host).unwrap();
+            store.approve_command(&sshcraft_store::store::command_digest(&crate::sessions::telnet_approval(&f.host_id.0.to_string()))).unwrap();
+        }
+        let sink = Arc::new(RecordingSink::default());
+        f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+        let heard = device.await.unwrap();
+        assert!(heard.as_ref().is_none_or(|b| !String::from_utf8_lossy(b).contains("at-login-prompt")), "{heard:?}");
     }
 
     async fn output_after(sink: &RecordingSink, wait: Duration) -> String {

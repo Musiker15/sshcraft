@@ -144,7 +144,7 @@ mod launch_approval {
         let mut h = host(Vec::new());
         h.settings.login_script = None;
         h.settings.launch = Some(vec![sshcraft_model::model::SnippetId(uuid::Uuid::parse_str(snippet["id"].as_str().unwrap()).unwrap())]);
-        let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(&["cd /srv/app".to_string()]));
+        let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(&h.id.0.to_string(), &["cd /srv/app".to_string()]));
         session.execute(Caller::User, "host.save", json!({ "host": h })).await.unwrap();
         assert!(!session.store().command_approved(&digest).unwrap(), "not without the flag");
         session.execute(Caller::User, "host.save", json!({ "host": h, "approve_launch": true })).await.unwrap();

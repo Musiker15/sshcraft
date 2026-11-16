@@ -25,6 +25,18 @@ mod tests {
         assert_eq!((steps[2].expect.as_str(), steps[2].send.as_str()), ("$", "exit"));
         assert_eq!(parse_steps(&steps_text(&steps)), steps);
     }
+
+    #[test]
+    fn a_line_to_send_with_an_arrow_survives_editing() {
+        let steps = parse_steps("=> echo a => b");
+        assert_eq!((steps[0].expect.as_str(), steps[0].send.as_str()), ("", "echo a => b"));
+        assert_eq!(parse_steps(&steps_text(&steps)), steps);
+    }
+
+    #[test]
+    fn lines_of_one_tick_go_as_one_write() {
+        assert_eq!(joined(vec![b"cd /srv\r".to_vec(), b"rm -rf build\r".to_vec()]), b"cd /srv\rrm -rf build\r".to_vec());
+    }
 }
 
 #[derive(Debug)]
@@ -76,14 +88,21 @@ pub fn tick(app: &mut SshcraftApp, id: SessionId, bytes: &[u8]) {
             tab.macro_run = None;
         }
     }
-    for line in sends {
+    // One write per terminal: separate sends could overtake each other on their way.
+    if !sends.is_empty() {
+        let bytes = joined(sends);
         for target in crate::session_tab::broadcast_targets(app, id) {
-            crate::session_tab::send_bytes(app, target, &line);
+            crate::session_tab::send_bytes(app, target, &bytes);
         }
     }
     if let Some(name) = timed_out {
         app.toasts.error(&trf("Macro {name} stopped: a step did not see its text within 15 seconds.", &[("name", &crate::widgets::visible(&name))]));
     }
+}
+
+/// The lines one tick sends, as one write.
+pub(crate) fn joined(lines: Vec<Vec<u8>>) -> Vec<u8> {
+    lines.concat()
 }
 
 /// The session of the focused pane in the shown tab.
@@ -109,7 +128,18 @@ pub fn parse_steps(text: &str) -> Vec<sshcraft_model::login_script::LoginStep> {
 
 /// The editor's text for `steps`.
 pub fn steps_text(steps: &[sshcraft_model::login_script::LoginStep]) -> String {
-    steps.iter().map(|s| if s.expect.is_empty() { s.send.clone() } else { format!("{} => {}", s.expect, s.send) }).collect::<Vec<_>>().join("\n")
+    // A line to send that holds `=>` itself keeps an empty text to wait for in front.
+    steps
+        .iter()
+        .map(|s| {
+            if s.expect.is_empty() && !s.send.contains("=>") {
+                s.send.clone()
+            } else {
+                format!("{} => {}", s.expect, s.send).trim_start().to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The palette label of macro `name`.

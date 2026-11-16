@@ -86,7 +86,11 @@ pub fn uses_tmux_control(app: &SshcraftApp, id: HostId) -> bool {
     let persistence = row.host.settings.persistence.clone().or_else(|| chain.iter().find_map(|g| g.defaults.persistence.clone()));
     // A Telnet host has no tmux behind it: the engine never runs it there.
     let protocol = row.host.settings.protocol.or_else(|| chain.iter().find_map(|g| g.defaults.protocol)).unwrap_or_default();
-    protocol == sshcraft_model::model::Protocol::Ssh && persistence.is_some_and(|p| p.tool == sshcraft_model::persist::Tool::TmuxControl)
+    // Nor does a container: the engine opens it instead, from any level.
+    let container = row.host.settings.container.is_some() || chain.iter().any(|g| g.defaults.container.is_some());
+    protocol == sshcraft_model::model::Protocol::Ssh
+        && !container
+        && persistence.is_some_and(|p| p.tool == sshcraft_model::persist::Tool::TmuxControl)
 }
 
 /// A shared host whose owner's sign-in was not shared, and that has none of its own yet.
@@ -410,7 +414,7 @@ fn smart_chips(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     let Some(mut name) = app.ui.hosts.smart_draft.take() else { return };
     let group = SmartGroup { name: name.trim().to_string(), tags: app.ui.hosts.tags.clone(), query: app.ui.hosts.search.trim().to_string() };
-    let clash = saved.iter().any(|g| g.name.trim().eq_ignore_ascii_case(&group.name));
+    let clash = saved.iter().any(|g| sshcraft_engine::settings::same_name(&g.name, &group.name));
     let mut keep = true;
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(200.0));

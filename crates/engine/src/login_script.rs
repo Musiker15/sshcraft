@@ -55,6 +55,11 @@ impl LoginScript {
         self.stopped || self.next >= self.steps.len()
     }
 
+    /// Every step ran: the script did not stop on a step that waited too long.
+    pub fn completed(&self) -> bool {
+        !self.stopped && self.next >= self.steps.len()
+    }
+
     fn plain(&mut self, bytes: &[u8]) {
         let text = String::from_utf8_lossy(bytes);
         for c in text.chars() {
@@ -133,6 +138,17 @@ mod tests {
         let mut s = LoginScript::new(vec![step("login:", "admin")], now);
         assert_eq!(s.feed(b"\x1b[32mlog", now), Feed::Nothing);
         assert_eq!(s.feed(b"\x1b]0;title\x07in\x1b[0m:", now), Feed::Send(b"admin\r".to_vec()));
+    }
+
+    #[test]
+    fn a_script_that_timed_out_did_not_complete() {
+        let start = Instant::now();
+        let mut script = LoginScript::new(vec![step("menu>", "2")], start);
+        assert!(matches!(script.feed(b"", start + STEP_TIMEOUT + Duration::from_secs(1)), Feed::TimedOut));
+        assert!(script.finished() && !script.completed());
+        let mut done = LoginScript::new(vec![step("menu>", "2")], start);
+        assert!(matches!(done.feed(b"menu>", start), Feed::Send(_)));
+        assert!(done.completed());
     }
 
     #[test]

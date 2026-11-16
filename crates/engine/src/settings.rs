@@ -27,6 +27,12 @@ const MAX_FONT_FAMILY: usize = 200;
 /// Terminal types a session may ask for (`TERM`); the first is the default.
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
+/// Whether two names of macros or dynamic groups count as the same: case is ignored, also
+/// beyond ASCII.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
 /// Macros kept at most.
 pub const MAX_MACROS: usize = 64;
 /// The longest macro name.

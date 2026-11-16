@@ -383,3 +383,17 @@ fn the_current_filter_can_be_saved_as_a_dynamic_group() {
     assert_eq!((saved.name.as_str(), saved.tags.clone()), ("Databases", vec!["db".to_string()]));
     assert_eq!(h.state().ui.hosts.smart.as_deref(), Some("Databases"), "applied right away");
 }
+
+#[test]
+fn a_container_host_in_a_tmux_group_is_no_tmux_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let g = add_group(&session, "tmux", None, json!({ "persistence": { "tool": "tmux_control", "name": "work" } }));
+    let plain = add_host(&session, "plain", Some(g), &[]);
+    let boxed = HostId(uuid::Uuid::new_v4());
+    let host = json!({ "id": boxed, "name": "boxed", "group_id": g, "settings": { "address": "10.0.0.6", "container": { "runtime": "docker", "name": "web" } }, "tags": [] });
+    run(&session, "host.save", json!({ "host": host }));
+    until(&mut h, "the hosts", |app| app.data.hosts.len() == 2);
+    assert!(hosts::uses_tmux_control(h.state(), plain));
+    assert!(!hosts::uses_tmux_control(h.state(), boxed), "the container opens instead of tmux");
+}

@@ -47,7 +47,7 @@ pub fn specs() -> Vec<CommandSpec> {
         query(
             "host.containers",
             "Containers on a host",
-            "{ host_id, runtime: docker|podman|kubectl } -> [names] (checked; at most 500)",
+            "{ host_id, runtime: docker|podman|kubectl, namespace? } -> [names] (checked; at most 500)",
             run_containers,
         ),
         query(
@@ -224,7 +224,7 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
             approve_telnet_for(&ctx, &host.settings, &host.id.0.to_string())?;
         }
         if approve_launch {
-            approve_launch_for(&ctx, &host.settings)?;
+            approve_launch_for(&ctx, &host.settings, &host.id.0.to_string())?;
         }
         if approve_login_script {
             approve_login_scripts(&ctx, [&host.settings])?;
@@ -266,8 +266,9 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
     Ok(())
 }
 
-/// Allows the launch actions `settings` name, for the snippets' current texts; only the user can.
-pub(crate) fn approve_launch_for(ctx: &Ctx, settings: &ConnectionSettings) -> Result<(), CommandError> {
+/// Allows the launch actions `settings` of the level `id` name, for the snippets' current texts;
+/// only the user can.
+pub(crate) fn approve_launch_for(ctx: &Ctx, settings: &ConnectionSettings, id: &str) -> Result<(), CommandError> {
     let Some(ids) = settings.launch.as_ref().filter(|ids| !ids.is_empty()) else { return Ok(()) };
     if !ctx.caller.is_user() {
         return Ok(());
@@ -283,7 +284,7 @@ pub(crate) fn approve_launch_for(ctx: &Ctx, settings: &ConnectionSettings) -> Re
         .filter(|t| sshcraft_model::placeholders::find(t).is_empty())
         .collect();
     if !texts.is_empty() {
-        store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(&texts)))?;
+        store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(id, &texts)))?;
     }
     Ok(())
 }
@@ -419,14 +420,21 @@ fn run_shortcut(ctx: Ctx, params: Value) -> Out {
 struct ContainersParams {
     host_id: HostId,
     runtime: sshcraft_model::container::Runtime,
+    #[serde(default)]
+    namespace: Option<String>,
 }
 
 /// Lists the containers on a host for the pick list in the host form.
 fn run_containers(ctx: Ctx, params: Value) -> Out {
     use futures::FutureExt;
     async move {
-        let ContainersParams { host_id, runtime } = parse("host.containers", params)?;
-        let names = ctx.session.sessions().list_containers(host_id, runtime).await.map_err(|(code, detail)| CommandError::Failed { code, detail })?;
+        let ContainersParams { host_id, runtime, namespace } = parse("host.containers", params)?;
+        let names = ctx
+            .session
+            .sessions()
+            .list_containers(host_id, runtime, namespace)
+            .await
+            .map_err(|(code, detail)| CommandError::Failed { code, detail })?;
         to_value(&names)
     }
     .boxed()

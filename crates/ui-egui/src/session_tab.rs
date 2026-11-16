@@ -267,7 +267,9 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
     let asked_from = app.ui.page;
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
     let scrollback = app.data.settings.terminal.scrollback;
-    let params = json!({ "target": target, "cols": 100, "rows": 30 });
+    // Reconnecting a pane opens its session again: launch actions ran already.
+    let again = matches!(replace, Some(PaneSlot::Session { .. }));
+    let params = json!({ "target": target, "cols": 100, "rows": 30, "again": again });
     // A host whose session is tmux in control mode: its windows become tabs.
     let tmux_control = host.is_some_and(|h| crate::pages::hosts::uses_tmux_control(app, h));
     let old = match replace {
@@ -999,6 +1001,7 @@ pub fn notice_text(code: sshcraft_engine::ErrorCode) -> Option<&'static str> {
         ErrorCode::TelnetNotAllowed => tr("Telnet came from elsewhere: allow it in the host's form to use it here."),
         ErrorCode::TelnetDirectOnly => tr("Telnet goes straight to the device, without jump host or proxy."),
         ErrorCode::SessionNameInvalid => tr("The tmux or screen session name has characters SSHCraft does not put into a command."),
+        ErrorCode::ContainerNameInvalid => tr("The container name or namespace has characters SSHCraft does not put into a command."),
         _ => return None,
     })
 }

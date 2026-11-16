@@ -112,18 +112,24 @@ impl Container {
     }
 }
 
-/// The command that lists the containers (pods) a runtime runs, one name per line.
-pub fn list_command(runtime: Runtime) -> &'static str {
-    match runtime {
-        Runtime::Docker => "docker ps --format '{{.Names}}'",
-        Runtime::Podman => "podman ps --format '{{.Names}}'",
-        Runtime::Kubectl => "kubectl get pods -o name",
+/// The command that lists the containers (pods) a runtime runs, one name per line; for
+/// Kubernetes in `namespace` when given. `None` when the namespace fails the check, or is given
+/// for Docker or Podman.
+pub fn list_command(runtime: Runtime, namespace: Option<&str>) -> Option<String> {
+    match (runtime, namespace) {
+        (Runtime::Docker, None) => Some("docker ps --format '{{.Names}}'".into()),
+        (Runtime::Podman, None) => Some("podman ps --format '{{.Names}}'".into()),
+        (Runtime::Kubectl, None) => Some("kubectl get pods -o name".into()),
+        (Runtime::Kubectl, Some(ns)) => k8s_name_ok(ns).then(|| format!("kubectl get pods -n {ns} -o name")),
+        (Runtime::Docker | Runtime::Podman, Some(_)) => None,
     }
 }
 
 /// The names in a listing, each checked; what does not pass is left out, at most [`MAX_LISTED`].
-pub fn parse_list(runtime: Runtime, output: &str) -> Vec<String> {
-    output
+/// When the output was `cut` at its limit, the last line may be part of a name and is left out.
+pub fn parse_list(runtime: Runtime, output: &str, cut: bool) -> Vec<String> {
+    let whole = if cut { output.rfind('\n').map_or("", |end| &output[..end]) } else { output };
+    whole
         .lines()
         .map(str::trim)
         .map(|l| if runtime == Runtime::Kubectl { l.strip_prefix("pod/").unwrap_or(l) } else { l })
@@ -179,9 +185,28 @@ mod tests {
 
     #[test]
     fn listings_keep_only_names_that_pass() {
-        assert_eq!(parse_list(Runtime::Docker, "web\ndb_1\n\nbad name\n$(id)\n"), vec!["web".to_string(), "db_1".to_string()]);
-        assert_eq!(parse_list(Runtime::Kubectl, "pod/api-1\npod/Bad\nworker\n"), vec!["api-1".to_string(), "worker".to_string()]);
+        assert_eq!(parse_list(Runtime::Docker, "web\ndb_1\n\nbad name\n$(id)\n", false), vec!["web".to_string(), "db_1".to_string()]);
+        assert_eq!(parse_list(Runtime::Kubectl, "pod/api-1\npod/Bad\nworker\n", false), vec!["api-1".to_string(), "worker".to_string()]);
         let many = "c\n".repeat(MAX_LISTED + 10);
-        assert_eq!(parse_list(Runtime::Docker, &many).len(), MAX_LISTED);
+        assert_eq!(parse_list(Runtime::Docker, &many, false).len(), MAX_LISTED);
+    }
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+
+    #[test]
+    fn kubernetes_lists_the_namespace_typed() {
+        assert_eq!(list_command(Runtime::Kubectl, Some("prod")).as_deref(), Some("kubectl get pods -n prod -o name"));
+        assert_eq!(list_command(Runtime::Kubectl, None).as_deref(), Some("kubectl get pods -o name"));
+        assert_eq!(list_command(Runtime::Kubectl, Some("x;id")), None, "a namespace that fails the check lists nothing");
+        assert_eq!(list_command(Runtime::Docker, None).as_deref(), Some("docker ps --format '{{.Names}}'"));
+    }
+
+    #[test]
+    fn a_cut_last_line_is_left_out() {
+        assert_eq!(parse_list(Runtime::Docker, "web\ndb\nwe", true), vec!["web".to_string(), "db".to_string()]);
+        assert_eq!(parse_list(Runtime::Docker, "web\ndb", false), vec!["web".to_string(), "db".to_string()]);
     }
 }

@@ -99,7 +99,7 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
             super::host::approve_telnet_for(&ctx, &group.defaults, &group.id.0.to_string())?;
         }
         if approve_launch {
-            super::host::approve_launch_for(&ctx, &group.defaults)?;
+            super::host::approve_launch_for(&ctx, &group.defaults, &group.id.0.to_string())?;
         }
         if approve_login_script {
             super::host::approve_login_scripts(&ctx, [&group.defaults])?;

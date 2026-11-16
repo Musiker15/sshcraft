@@ -58,6 +58,25 @@ like a proxy command). Saving it in the window with a change, or ticking the box
 allows it; a script from sync, a share or an agent does not run until then, and agents can never
 allow one. Its texts are bounded and may hold no control characters.
 
+## Launch actions
+
+Launch actions type snippets into a session, so they follow the login script rules. They run
+only once the user allowed exactly these texts for exactly this host or group on this device
+(the digest of the level's id and the texts). A snippet whose text changes needs a new approval,
+and an approval for one host does not count for another. Only the box in the form allows actions
+that were there when the form opened; changing the list does not allow the ones that came through
+sync, a share or an agent. They are typed once, on the first connect of a tab: not after a
+reconnect, not after a login script that stopped, not into a tmux or screen session that stays,
+and on Telnet only after a login script signed in.
+
+## Containers
+
+A container target puts a name into a fixed `docker`, `podman` or `kubectl exec` command. The
+name and namespace are checked on save and again before connecting (letters, digits, dots,
+dashes and underscores, no leading dash), so a name from sync cannot add to the command. The
+list of a host's containers is read with a fixed command, cut at 64 KiB, and names that fail the
+check are left out.
+
 ## Passwords from password managers, one-time codes, the lock
 
 A password reference names an item in the user's password manager; it is fetched by that
