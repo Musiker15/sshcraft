@@ -18,4 +18,5 @@ pub mod proxy_command;
 pub mod resources;
 pub mod secret_ref;
 pub mod ssh_url;
+pub mod tmux;
 pub mod totp;
