@@ -170,9 +170,17 @@
 
         <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\sshcraft.exe" Value="[#SshcraftExe]" Type="string" />
 
-        <!-- No file types and no ssh:// handler: SSHCraft opens no documents, and links never
-             run anything (docs/security.md); a link handler comes with F1 and only opens the
-             connection dialog. -->
+        <!-- No file types: SSHCraft opens no documents. ssh:// links are offered to Windows as
+             a capability, so the user picks SSHCraft in the default apps and no other program
+             loses the link. A link only fills the quick connect dialog (docs/security.md). -->
+        <RegistryValue Root="HKMU" Key="Software\Classes\SSHCraft.ssh" Value="URL:SSH link" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\SSHCraft.ssh" Name="URL Protocol" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\SSHCraft.ssh\DefaultIcon" Value="[#SshcraftExe],0" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\SSHCraft.ssh\shell\open\command" Value="&quot;[#SshcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\SSHCraft\Capabilities" Name="ApplicationName" Value="SSHCraft" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\SSHCraft\Capabilities" Name="ApplicationDescription" Value="SSH client with end-to-end encrypted sync" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\SSHCraft\Capabilities\URLAssociations" Name="ssh" Value="SSHCraft.ssh" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\RegisteredApplications" Name="SSHCraft" Value="Software\SSHCraft\Capabilities" Type="string" />
       <RegistryValue Root="HKMU" Key="Software\SSHCraft" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" />
       </Component>
 

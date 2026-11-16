@@ -24,6 +24,29 @@ pub struct ControlArgs {
     pub token_file: Option<PathBuf>,
 }
 
+/// A link as given, with where it points.
+pub type Link = (String, sshcraft_model::ssh_url::Target);
+
+/// Takes an `ssh://` link out of `args` (the desktop passes one when a link is opened): the
+/// other arguments, and the link with where it points. A second link or a link that is not
+/// valid is an error, shown before anything starts.
+pub fn take_link(args: &[String]) -> Result<(Vec<String>, Option<Link>), String> {
+    let mut rest = Vec::new();
+    let mut link = None;
+    for arg in args {
+        if arg.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("ssh://")) {
+            if link.is_some() {
+                return Err("only one ssh:// link at a time".into());
+            }
+            let target = sshcraft_model::ssh_url::parse_url(arg).map_err(|e| format!("ssh:// link: {e}"))?;
+            link = Some((arg.clone(), target));
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    Ok((rest, link))
+}
+
 /// The control options among the command line `args` (without the program name).
 pub fn parse(args: &[String]) -> Result<Option<ControlArgs>, String> {
     let mut port = None;
@@ -138,6 +161,16 @@ mod tests {
         for bad in [&["--control"][..], &["--control", "x"], &["--control", "0"], &["--control-token-file", "t"], &["--other"]] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn one_valid_link_is_taken_from_the_arguments() {
+        let (rest, link) = take_link(&args(&["--control", "7878", "SSH://root@db:2222"])).unwrap();
+        assert_eq!(rest, args(&["--control", "7878"]));
+        assert_eq!(link.map(|(_, t)| t.name()), Some("root@db:2222".to_string()));
+        assert_eq!(take_link(&args(&[])).unwrap().1, None);
+        assert!(take_link(&args(&["ssh://-oProxyCommand=calc@host"])).is_err());
+        assert!(take_link(&args(&["ssh://a", "ssh://b"])).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -5734,6 +5734,7 @@ dependencies = [
  "sshcraft-engine",
  "sshcraft-fido",
  "sshcraft-link",
+ "sshcraft-model",
  "sshcraft-platform",
  "sshcraft-ui-egui",
  "tempfile",

@@ -10,6 +10,7 @@ pub mod control;
 pub mod data;
 pub mod fonts;
 pub mod forms;
+pub mod handoff;
 pub mod history;
 pub mod i18n;
 pub mod keymap;

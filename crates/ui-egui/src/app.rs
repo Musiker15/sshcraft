@@ -45,6 +45,10 @@ pub struct SshcraftApp {
     events: tokio::sync::broadcast::Receiver<EngineEvent>,
     /// Turns the agent link on and off as the consent says.
     pub link: crate::link::LinkWatch,
+    /// Where a second start leaves `ssh://` links (`None`: not looked for, as in tests).
+    pub handoff_dir: Option<std::path::PathBuf>,
+    /// When to look there next, in the window's time.
+    pub handoff_next: f64,
     /// The control channel (`--control`), when the app was started with it.
     pub control: Option<crate::control::Control>,
     /// Who draws the window frame (craft-window's decision, made by the app at start).
@@ -92,6 +96,8 @@ impl SshcraftApp {
             log_viewer: None,
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
+            handoff_dir: None,
+            handoff_next: 0.0,
             control: None,
             window_frame: craft_window::policy::Frame::Native,
             #[cfg(target_os = "macos")]
@@ -391,6 +397,7 @@ impl SshcraftApp {
         crate::shell::show(self, ui);
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
+        crate::handoff::poll(self, &ctx);
         crate::quick_connect::show(self, &ctx);
         crate::session_tab::show_clipboard_question(self, &ctx);
         crate::pages::templates::show_dialog(self, &ctx);
