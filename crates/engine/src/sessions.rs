@@ -515,6 +515,20 @@ impl SessionManager {
         self
     }
 
+    /// The containers (pods) `runtime` runs on a host, each name checked: connects like a tab
+    /// does, runs the fixed listing command, opens no shell.
+    pub async fn list_containers(
+        &self,
+        host_id: HostId,
+        runtime: sshcraft_model::container::Runtime,
+    ) -> Result<Vec<String>, (ErrorCode, Option<String>)> {
+        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default(), true).await.map_err(failure_code)?;
+        let output =
+            session.exec(sshcraft_model::container::list_command(runtime), 64 * 1024).await.map_err(|e| (ErrorCode::Session, Some(e.to_string())));
+        crate::pool::release(session).await;
+        Ok(sshcraft_model::container::parse_list(runtime, &String::from_utf8_lossy(&output?)))
+    }
+
     /// Puts a public key into `authorized_keys` on a host: connects like a tab does (with every
     /// question), runs one command, opens no shell.
     pub async fn install_key(&self, host_id: HostId, key: KeyRef) -> Result<InstallOutcome, (ErrorCode, Option<String>)> {
@@ -1209,10 +1223,12 @@ async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u3
     if route.target.protocol == sshcraft_model::model::Protocol::Telnet {
         return connect_telnet(ctx, &route, size).await;
     }
-    let persistence = route.target.persistence;
-    let command = match &persistence {
-        Some(p) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
-        None => None,
+    let persistence = route.target.persistence.clone();
+    // A container opens instead of the host's shell; otherwise a session that stays.
+    let command = match (&route.target.container, &persistence) {
+        (Some(c), _) => Some(c.command().ok_or_else(|| end_error(ErrorCode::ContainerNameInvalid, Some(c.name.clone())))?),
+        (None, Some(p)) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
+        (None, None) => None,
     };
     let (session, notice) = connect_session(ctx, host_id, opened, true).await?;
     let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);

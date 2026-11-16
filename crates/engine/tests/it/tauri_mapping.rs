@@ -121,6 +121,7 @@ const TAURI: &[(&str, Place)] = &[
 /// Engine commands with no Tauri command before them: the agent backend's actions and the list
 /// of open questions.
 const NEW: &[&str] = &[
+    "host.containers",
     "session.resources",
     "host.shortcut",
     "host.bulk_update",

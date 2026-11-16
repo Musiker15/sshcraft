@@ -88,6 +88,8 @@ pub enum ErrorCode {
     X11NotAllowed,
     /// The tmux or screen session name is not one SSHCraft puts into a command.
     SessionNameInvalid,
+    /// The container's name or namespace is not one SSHCraft puts into a command.
+    ContainerNameInvalid,
     /// A Telnet connection: nothing on it is encrypted.
     TelnetUnencrypted,
     /// Telnet goes straight to the host: no jump host, no proxy.

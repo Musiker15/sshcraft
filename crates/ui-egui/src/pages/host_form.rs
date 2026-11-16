@@ -310,12 +310,88 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
 }
 
 /// How the session runs: kept in tmux or screen, and over SSH or Telnet.
-fn session_rows(ui: &mut Ui, s: &mut ConnectionSettings) {
+fn session_rows(app: &mut SshcraftApp, ui: &mut Ui, s: &mut ConnectionSettings, host: Option<HostId>) {
     ui.add_space(8.0);
     egui::Grid::new("sshcraft-session-rows").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+        container_row(app, ui, &mut s.container, host);
         persistence_row(ui, &mut s.persistence);
         protocol_row(ui, &mut s.protocol);
     });
+}
+
+/// A container on the host to open instead of its shell: runtime, name (picked from the host's
+/// list or typed), namespace for Kubernetes, shell.
+fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft_model::container::Container>, host: Option<HostId>) {
+    use sshcraft_model::container::{Container, Runtime, Shell, check};
+    ui.label(tr("Container"));
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            let mut runtime = value.as_ref().map(|c| c.runtime);
+            let shown = match runtime {
+                None => tr("No"),
+                Some(Runtime::Docker) => "Docker",
+                Some(Runtime::Podman) => "Podman",
+                Some(Runtime::Kubectl) => "Kubernetes",
+            };
+            egui::ComboBox::from_id_salt("sshcraft-container-runtime").selected_text(shown).show_ui(ui, |ui| {
+                ui.selectable_value(&mut runtime, None, tr("No"));
+                ui.selectable_value(&mut runtime, Some(Runtime::Docker), "Docker");
+                ui.selectable_value(&mut runtime, Some(Runtime::Podman), "Podman");
+                ui.selectable_value(&mut runtime, Some(Runtime::Kubectl), "Kubernetes");
+            });
+            let Some(runtime) = runtime else {
+                *value = None;
+                return;
+            };
+            let c = value.get_or_insert_with(|| Container { runtime, name: String::new(), namespace: None, shell: Shell::Sh });
+            if c.runtime != runtime {
+                c.runtime = runtime;
+                c.namespace = None;
+            }
+            ui.add(egui::TextEdit::singleline(&mut c.name).hint_text(tr("name")).desired_width(140.0).char_limit(253));
+            if let Some(id) = host
+                && ui.small_button(tr("List")).on_hover_text(tr("Ask the host which containers run there")).clicked()
+            {
+                app.runner.run(
+                    "host.containers",
+                    serde_json::json!({ "host_id": id, "runtime": runtime }),
+                    Box::new(|app, result| match result {
+                        Ok(v) => app.ui.container_names = serde_json::from_value(v).unwrap_or_default(),
+                        Err(e) => app.toasts.error(&e.to_string()),
+                    }),
+                );
+            }
+            if !app.ui.container_names.is_empty() {
+                egui::ComboBox::from_id_salt("sshcraft-container-pick").selected_text(tr("Pick")).show_ui(ui, |ui| {
+                    for name in &app.ui.container_names {
+                        if ui.selectable_label(c.name == *name, crate::widgets::visible(name)).clicked() {
+                            c.name = name.clone();
+                        }
+                    }
+                });
+            }
+        });
+        let Some(c) = value.as_mut() else { return };
+        ui.horizontal(|ui| {
+            if c.runtime == Runtime::Kubectl {
+                let mut ns = c.namespace.clone().unwrap_or_default();
+                if ui.add(egui::TextEdit::singleline(&mut ns).hint_text(tr("namespace")).desired_width(120.0).char_limit(253)).changed() {
+                    c.namespace = (!ns.trim().is_empty()).then(|| ns.trim().to_string());
+                }
+            }
+            egui::ComboBox::from_id_salt("sshcraft-container-shell").selected_text(format!("{:?}", c.shell).to_lowercase()).show_ui(ui, |ui| {
+                for shell in [Shell::Sh, Shell::Bash, Shell::Zsh, Shell::Ash] {
+                    ui.selectable_value(&mut c.shell, shell, format!("{shell:?}").to_lowercase());
+                }
+            });
+            if !c.name.is_empty()
+                && let Err(e) = check(c)
+            {
+                ui.label(egui::RichText::new(e.to_string()).color(crate::theme::Tokens::get(ui.ctx()).danger));
+            }
+        });
+    });
+    ui.end_row();
 }
 
 /// SSH, or Telnet for devices that speak nothing else (with a warning: nothing is encrypted).
@@ -832,7 +908,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 login_script_editor(ui, &mut form.host.settings.login_script, &form.opened_script, &mut form.allow_script);
                 steps_editor(ui, tr("Before connecting"), "before", Some(form.host.id), &mut form.host.settings.before_connect);
                 steps_editor(ui, tr("After the session"), "after", Some(form.host.id), &mut form.host.settings.after_disconnect);
-                session_rows(ui, &mut form.host.settings);
+                session_rows(app, ui, &mut form.host.settings, form.editing.then_some(form.host.id));
                 if form.host.settings.protocol == Some(Telnet) && form.opened_protocol == Some(Telnet) {
                     ui.checkbox(&mut form.allow_telnet, tr("Allow Telnet on this device"))
                         .on_hover_text(tr("Telnet that came through sync, a share or an import is not used until allowed here."));
@@ -956,7 +1032,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 login_script_editor(ui, &mut form.group.defaults.login_script, &form.opened_script, &mut form.allow_script);
                 steps_editor(ui, tr("Before connecting"), "before", None, &mut form.group.defaults.before_connect);
                 steps_editor(ui, tr("After the session"), "after", None, &mut form.group.defaults.after_disconnect);
-                session_rows(ui, &mut form.group.defaults);
+                session_rows(app, ui, &mut form.group.defaults, None);
                 if form.group.defaults.protocol == Some(Telnet) && form.opened_protocol == Some(Telnet) {
                     ui.checkbox(&mut form.allow_telnet, tr("Allow Telnet on this device"))
                         .on_hover_text(tr("Telnet that came through sync, a share or an import is not used until allowed here."));

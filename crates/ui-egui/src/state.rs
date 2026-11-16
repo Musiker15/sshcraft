@@ -92,6 +92,9 @@ pub struct UiState {
     pub quick_text: String,
     #[serde(skip)]
     pub quick_connect: Option<crate::quick_connect::QuickConnect>,
+    /// The containers a host listed for the host form's pick list.
+    #[serde(skip)]
+    pub container_names: Vec<String>,
     #[serde(skip)]
     pub host_form: Option<crate::pages::host_form::HostForm>,
     #[serde(skip)]

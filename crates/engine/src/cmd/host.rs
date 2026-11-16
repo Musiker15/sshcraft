@@ -45,6 +45,12 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
         query(
+            "host.containers",
+            "Containers on a host",
+            "{ host_id, runtime: docker|podman|kubectl } -> [names] (checked; at most 500)",
+            run_containers,
+        ),
+        query(
             "host.reachable",
             "Check whether hosts answer",
             "{ ids: at most 500 host ids } -> [{ id, reachable: true, false, or null behind a jump host or proxy }]",
@@ -289,6 +295,12 @@ pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSet
     if let Some(p) = &settings.persistence {
         sshcraft_model::persist::check(&p.name).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
     }
+    if let Some(c) = &settings.container {
+        sshcraft_model::container::check(c).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
+        if settings.persistence.is_some() {
+            return Err(CommandError::bad_params(command, "a container target and a session that stays do not go together"));
+        }
+    }
     Ok(())
 }
 
@@ -362,6 +374,23 @@ fn run_shortcut(ctx: Ctx, params: Value) -> Out {
         let path = sshcraft_platform::shortcut::create(&dir, &host.name, &exe, &host_id.0).map_err(|e| failed(&e))?;
         Ok(serde_json::json!({ "path": path }))
     })
+}
+
+#[derive(Deserialize)]
+struct ContainersParams {
+    host_id: HostId,
+    runtime: sshcraft_model::container::Runtime,
+}
+
+/// Lists the containers on a host for the pick list in the host form.
+fn run_containers(ctx: Ctx, params: Value) -> Out {
+    use futures::FutureExt;
+    async move {
+        let ContainersParams { host_id, runtime } = parse("host.containers", params)?;
+        let names = ctx.session.sessions().list_containers(host_id, runtime).await.map_err(|(code, detail)| CommandError::Failed { code, detail })?;
+        to_value(&names)
+    }
+    .boxed()
 }
 
 /// The most hosts one `host.bulk_update` call changes.

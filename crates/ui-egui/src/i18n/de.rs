@@ -34,6 +34,11 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Container" => "Container",
+        "name" => "Name",
+        "Ask the host which containers run there" => "Den Host fragen, welche Container dort laufen",
+        "Pick" => "Auswählen",
+        "namespace" => "Namespace",
         "Dropdown window" => "Dropdown-Fenster",
         "A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off." => {
             "Ein Kürzel, das SSHCraft aus jedem Programm oben am Bildschirm zeigt und wieder ausblendet. Leer: aus."

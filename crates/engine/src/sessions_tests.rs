@@ -2495,3 +2495,47 @@ async fn telnet_from_elsewhere_is_not_used_until_allowed() {
     assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::TelnetNotAllowed));
     assert!(tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(), "the device never hears from us");
 }
+
+#[tokio::test]
+async fn a_container_target_opens_the_fixed_exec_command() {
+    use sshcraft_model::container::{Container, Runtime, Shell};
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.container = Some(Container { runtime: Runtime::Docker, name: "web".into(), namespace: None, shell: Shell::Bash });
+        store.upsert_host(&host).unwrap();
+    }
+    let (_tab, _) = connected_tab(&f).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !f.server.received_commands().contains(&"docker exec -it web bash".to_owned()) {
+        assert!(tokio::time::Instant::now() < deadline, "{:?}", f.server.received_commands());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_container_name_from_elsewhere_never_reaches_a_command() {
+    use sshcraft_model::container::{Container, Runtime, Shell};
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.container = Some(Container { runtime: Runtime::Docker, name: "web;id".into(), namespace: None, shell: Shell::Sh });
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::ContainerNameInvalid));
+    assert!(f.server.received_commands().is_empty());
+}
+
+#[tokio::test]
+async fn listed_containers_are_checked() {
+    let f = fixture(true).await;
+    f.server.set_exec_output("web\nbad name\n$(id)\ndb_1\n");
+    let names = f.manager.list_containers(f.host_id, sshcraft_model::container::Runtime::Docker).await.unwrap();
+    assert_eq!(names, vec!["web".to_string(), "db_1".to_string()]);
+    assert!(f.server.received_commands().contains(&"docker ps --format '{{.Names}}'".to_owned()));
+}

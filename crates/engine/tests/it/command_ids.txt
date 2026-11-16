@@ -20,6 +20,7 @@ history.clear
 history.list
 history.record
 host.bulk_update
+host.containers
 host.delete
 host.exec
 host.export
