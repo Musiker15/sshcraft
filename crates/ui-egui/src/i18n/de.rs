@@ -34,6 +34,18 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Connected." => "Verbunden.",
+        "No SSH agent here to forward." => "Hier läuft kein SSH-Agent, der weitergeleitet werden könnte.",
+        "No X server here: X11 forwarding is off." => "Hier läuft kein X-Server: Die X11-Weiterleitung ist aus.",
+        "X11 forwarding came from elsewhere and is off until you allow it in the host's form." => {
+            "Die X11-Weiterleitung kam von anderswo und bleibt aus, bis du sie im Formular des Hosts erlaubst."
+        }
+        "The certificate had expired: signed in with the key alone." => "Das Zertifikat war abgelaufen: Die Anmeldung lief nur mit dem Schlüssel.",
+        "Telnet is not encrypted." => "Telnet ist nicht verschlüsselt.",
+        "Protocol" => "Protokoll",
+        "Not encrypted: anyone on the way can read along. Stored passwords and keys are never sent." => {
+            "Nicht verschlüsselt: Jeder auf dem Weg kann mitlesen. Gespeicherte Passwörter und Schlüssel werden nie gesendet."
+        }
         "tmux, windows as tabs" => "tmux, Fenster als Tabs",
         "Keep the session" => "Sitzung behalten",
         "Every connect attaches to this session again, also after the connection dropped." => {

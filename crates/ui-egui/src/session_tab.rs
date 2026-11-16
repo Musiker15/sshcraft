@@ -944,10 +944,27 @@ pub fn show_clipboard_question(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
 }
 
+/// What a notice beside a working connection says.
+pub fn notice_text(code: sshcraft_engine::ErrorCode) -> Option<&'static str> {
+    use sshcraft_engine::ErrorCode;
+    Some(match code {
+        ErrorCode::AgentForwardingUnavailable => tr("No SSH agent here to forward."),
+        ErrorCode::X11Unavailable => tr("No X server here: X11 forwarding is off."),
+        ErrorCode::X11NotAllowed => tr("X11 forwarding came from elsewhere and is off until you allow it in the host's form."),
+        ErrorCode::CertificateExpired => tr("The certificate had expired: signed in with the key alone."),
+        ErrorCode::TelnetUnencrypted => tr("Telnet is not encrypted."),
+        _ => return None,
+    })
+}
+
 fn status_text(status: Option<&SessionStatus>) -> (String, bool) {
     match status {
         None | Some(SessionStatus::Connecting) => (tr("Connecting…").to_string(), false),
-        Some(SessionStatus::Connected { .. }) => (tr("Connected").to_string(), false),
+        Some(SessionStatus::Connected { notice: None }) => (tr("Connected").to_string(), false),
+        Some(SessionStatus::Connected { notice: Some(code) }) => match notice_text(*code) {
+            Some(text) => (format!("{} {}", tr("Connected."), text), false),
+            None => (tr("Connected").to_string(), false),
+        },
         Some(SessionStatus::Reconnecting { attempt, delay_secs }) => (
             trf(
                 "Connection lost. Reconnecting (attempt {attempt}) in {seconds} s.",

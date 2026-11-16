@@ -300,6 +300,34 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     *value = (!a.is_empty()).then_some(a);
 }
 
+/// How the session runs: kept in tmux or screen, and over SSH or Telnet.
+fn session_rows(ui: &mut Ui, s: &mut ConnectionSettings) {
+    ui.add_space(8.0);
+    egui::Grid::new("sshcraft-session-rows").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+        persistence_row(ui, &mut s.persistence);
+        protocol_row(ui, &mut s.protocol);
+    });
+}
+
+/// SSH, or Telnet for devices that speak nothing else (with a warning: nothing is encrypted).
+fn protocol_row(ui: &mut Ui, value: &mut Option<sshcraft_model::model::Protocol>) {
+    use sshcraft_model::model::Protocol;
+    ui.label(tr("Protocol"));
+    ui.horizontal(|ui| {
+        let mut chosen = value.unwrap_or_default();
+        ui.radio_value(&mut chosen, Protocol::Ssh, "SSH");
+        ui.radio_value(&mut chosen, Protocol::Telnet, "Telnet");
+        *value = (chosen == Protocol::Telnet).then_some(Protocol::Telnet);
+        if chosen == Protocol::Telnet {
+            ui.label(
+                egui::RichText::new(tr("Not encrypted: anyone on the way can read along. Stored passwords and keys are never sent."))
+                    .color(crate::theme::Tokens::get(ui.ctx()).warning),
+            );
+        }
+    });
+    ui.end_row();
+}
+
 /// Whether the shell runs inside tmux or screen, and the session's name.
 fn persistence_row(ui: &mut Ui, value: &mut Option<sshcraft_model::persist::Persistence>) {
     use sshcraft_model::persist::{Persistence, Tool, check};
@@ -613,7 +641,6 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
 
         tri_state(ui, tr("Agent forwarding"), &mut s.agent_forwarding, &inherited.agent_forwarding);
         tri_state(ui, tr("X11 forwarding"), &mut s.x11, &inherited.x11);
-        persistence_row(ui, &mut s.persistence);
         tri_state(ui, tr("Record sessions"), &mut s.session_log, &None);
         appearance(ui, &mut s.appearance);
 
@@ -796,6 +823,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 login_script_editor(ui, &mut form.host.settings.login_script, &form.opened_script, &mut form.allow_script);
                 steps_editor(ui, tr("Before connecting"), "before", Some(form.host.id), &mut form.host.settings.before_connect);
                 steps_editor(ui, tr("After the session"), "after", Some(form.host.id), &mut form.host.settings.after_disconnect);
+                session_rows(ui, &mut form.host.settings);
             },
         );
         if let Some(error) = &form.error {
@@ -914,6 +942,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 login_script_editor(ui, &mut form.group.defaults.login_script, &form.opened_script, &mut form.allow_script);
                 steps_editor(ui, tr("Before connecting"), "before", None, &mut form.group.defaults.before_connect);
                 steps_editor(ui, tr("After the session"), "after", None, &mut form.group.defaults.after_disconnect);
+                session_rows(ui, &mut form.group.defaults);
             },
         );
         if let Some(error) = &form.error {

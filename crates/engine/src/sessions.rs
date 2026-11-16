@@ -1202,10 +1202,14 @@ async fn connect_target(ctx: &Arc<Context>, target: &SessionTarget, size: &Mutex
 async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
     // A session that outlives the connection: the fixed tmux or screen command, attached again on
     // every connect.
-    let persistence = {
+    let route = {
         let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
-        lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?.target.persistence
+        lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
     };
+    if route.target.protocol == sshcraft_model::model::Protocol::Telnet {
+        return connect_telnet(ctx, &route, size).await;
+    }
+    let persistence = route.target.persistence;
     let command = match &persistence {
         Some(p) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
         None => None,
@@ -1221,6 +1225,41 @@ async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u3
     }
     let (writer, events) = shell.split();
     Ok((Arc::new(writer), events, notice, prober, Some(session)))
+}
+
+/// A Telnet host: straight to its address, no sign-in by SSHCraft (the device asks, the user
+/// types), never stored credentials.
+async fn connect_telnet(ctx: &Arc<Context>, route: &Route, size: &Mutex<(u32, u32)>) -> Result<Connected, Failure> {
+    if !route.jumps.is_empty() || route.target.proxy.is_some() {
+        return Err(end_error(ErrorCode::TelnetDirectOnly, None));
+    }
+    // A host without its own port has SSH's: Telnet's is 23.
+    let port = if route.target.port == sshcraft_model::model::DEFAULT_PORT { sshcraft_telnet::DEFAULT_PORT } else { route.target.port };
+    let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);
+    let term = ctx.settings().terminal.terminal_type;
+    let size = (u16::try_from(cols).unwrap_or(u16::MAX), u16::try_from(rows).unwrap_or(u16::MAX));
+    let (writer, events) = sshcraft_telnet::connect(&route.target.address, port, &term, size, sshcraft_ssh::CONNECT_TIMEOUT)
+        .await
+        .map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    Ok((Arc::new(writer), events, Some(ErrorCode::TelnetUnencrypted), None, None))
+}
+
+#[async_trait::async_trait]
+impl TermWriter for sshcraft_telnet::TelnetWriter {
+    async fn write(&self, data: &[u8]) -> Result<(), String> {
+        sshcraft_telnet::TelnetWriter::write(self, data).await.map_err(|e| e.to_string())
+    }
+
+    async fn resize(&self, cols: u32, rows: u32) -> Result<(), String> {
+        sshcraft_telnet::TelnetWriter::resize(self, to_u16(cols), to_u16(rows)).await.map_err(|e| e.to_string())
+    }
+
+    fn close(&self) {
+        let writer = self.clone();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move { writer.close().await });
+        }
+    }
 }
 
 /// Connects to a host along its route and signs in on every hop; no shell yet. The notice is

@@ -5800,6 +5800,7 @@ dependencies = [
  "sshcraft-ssh",
  "sshcraft-store",
  "sshcraft-sync",
+ "sshcraft-telnet",
  "strum",
  "sys-locale",
  "tempfile",
@@ -6045,6 +6046,15 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "sshcraft-telnet"
+version = "0.1.1"
+dependencies = [
+ "sshcraft-model",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

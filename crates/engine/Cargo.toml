@@ -20,6 +20,7 @@ sshcraft-fido = { workspace = true }
 sshcraft-ssh = { workspace = true }
 sshcraft-import = { workspace = true }
 sshcraft-local = { workspace = true }
+sshcraft-telnet = { workspace = true }
 sshcraft-sync = { workspace = true }
 sshcraft-proto = { workspace = true }
 zeroize = { workspace = true }

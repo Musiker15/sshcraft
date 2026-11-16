@@ -18,6 +18,7 @@ sshcraft-import = { path = "crates/import" }
 sshcraft-proto = { path = "crates/proto" }
 sshcraft-ssh = { path = "crates/ssh" }
 sshcraft-local = { path = "crates/local" }
+sshcraft-telnet = { path = "crates/telnet" }
 sshcraft-sync = { path = "crates/sync" }
 sshcraft-fido = { path = "crates/fido" }
 sshcraft-server-lib = { path = "crates/server" }

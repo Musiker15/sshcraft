@@ -394,3 +394,19 @@ fn a_question_shows_which_tab_it_belongs_to() {
     h.run_steps(2);
     assert_eq!(h.state().ui.page, Page::Tab(0));
 }
+
+#[test]
+fn notices_beside_a_connection_are_named() {
+    use sshcraft_engine::ErrorCode;
+    use sshcraft_ui_egui::session_tab::notice_text;
+    for code in [
+        ErrorCode::AgentForwardingUnavailable,
+        ErrorCode::X11Unavailable,
+        ErrorCode::X11NotAllowed,
+        ErrorCode::CertificateExpired,
+        ErrorCode::TelnetUnencrypted,
+    ] {
+        assert!(notice_text(code).is_some(), "{code:?}");
+    }
+    assert_eq!(notice_text(ErrorCode::Network), None);
+}
