@@ -389,6 +389,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Compose field under the terminal" => "Eingabefeld unter dem Terminal",
         "Write here; Ctrl+Enter sends it, Esc closes" => "Hier schreiben; Strg+Enter sendet, Esc schließt",
         "Recent pastes" => "Letzte Einfügungen",
+        "On the bar" => "In der Leiste",
+        "Values" => "Werte",
         "Nothing pasted yet." => "Noch nichts eingefügt.",
         "Previous command" => "Vorheriger Befehl",
         "Next command" => "Nächster Befehl",

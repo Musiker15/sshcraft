@@ -1053,10 +1053,46 @@ fn draw_suggestions(app: &SshcraftApp, ui: &Ui, id: SessionId, rect: Rect, font:
     });
 }
 
+/// The snippet bar above the terminal, when snippets are pinned to it; returns the room left
+/// below it.
+fn snippet_bar(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, mut full: Rect) -> Rect {
+    // The snippet bar above the terminal, when snippets are pinned to it.
+    let bar: Vec<(String, String)> = app
+        .data
+        .settings
+        .terminal
+        .snippet_bar
+        .iter()
+        .filter_map(|sid| app.data.snippets.iter().find(|s| s.id == *sid).map(|s| (s.id.clone(), s.name.clone())))
+        .collect();
+    if !bar.is_empty() {
+        let bar_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.min.y + SNIPPET_BAR_HEIGHT).min(full.max.y)));
+        full.min.y = bar_rect.max.y;
+        let mut clicked = None;
+        ui.scope_builder(UiBuilder::new().max_rect(bar_rect.shrink2(egui::vec2(4.0, 2.0))), |ui| {
+            ui.horizontal(|ui| {
+                for (sid, name) in &bar {
+                    let label: String = visible(name).chars().take(24).collect();
+                    if ui.small_button(label).on_hover_text(visible(name)).clicked() {
+                        clicked = Some(sid.clone());
+                    }
+                }
+            });
+        });
+        if let Some(sid) = clicked {
+            crate::pages::snippets::run_from_bar(app, &sid, id);
+        }
+    }
+    full
+}
+
+/// The height of the snippet bar above a terminal, in points.
+const SNIPPET_BAR_HEIGHT: f32 = 26.0;
+
 /// The terminal of session `id` and its status line in the rest of `ui`; `focused` is the pane
 /// the keyboard and the terminal commands go to.
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
-    let full = ui.available_rect_before_wrap();
+    let full = snippet_bar(app, ui, id, ui.available_rect_before_wrap());
     let composing = app.terminals.get(&id).is_some_and(|t| t.compose.is_some());
     let compose_height = if composing { crate::terminal::compose::COMPOSE_HEIGHT } else { 0.0 };
     let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));

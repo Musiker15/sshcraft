@@ -228,7 +228,14 @@ pub struct Terminal {
     /// Patterns that act when an output line matches, at most [`MAX_PATTERNS`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Trigger>,
+    /// Snippets (by id) shown as buttons above each terminal, in order, at most
+    /// [`MAX_SNIPPET_BAR`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub snippet_bar: Vec<String>,
 }
+
+/// The most snippets on the bar above a terminal.
+pub const MAX_SNIPPET_BAR: usize = 12;
 
 /// Highlights and triggers each keep at most this many entries.
 pub const MAX_PATTERNS: usize = 32;
@@ -292,6 +299,7 @@ impl Default for Terminal {
             server_notifications: true,
             highlights: Vec::new(),
             triggers: Vec::new(),
+            snippet_bar: Vec::new(),
         }
     }
 }
@@ -377,6 +385,9 @@ impl EngineSettings {
         self.terminal.highlights.truncate(MAX_PATTERNS);
         self.terminal.triggers.retain(|t| compile_pattern(&t.pattern).is_some());
         self.terminal.triggers.truncate(MAX_PATTERNS);
+        let mut seen = std::collections::BTreeSet::new();
+        self.terminal.snippet_bar.retain(|id| !id.is_empty() && id.len() <= 64 && seen.insert(id.clone()));
+        self.terminal.snippet_bar.truncate(MAX_SNIPPET_BAR);
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

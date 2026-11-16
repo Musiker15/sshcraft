@@ -392,3 +392,11 @@ fn a_pattern_too_large_to_compile_is_refused() {
     assert!(crate::settings::compile_pattern("(a{1000}){1000}").is_none());
     assert!(crate::settings::compile_pattern("warn(ing)?").is_some());
 }
+
+#[test]
+fn the_snippet_bar_is_unique_and_bounded() {
+    let s = with(|s| s.terminal.snippet_bar = (0..20).map(|i| format!("s{}", i % 15)).chain([String::new()]).collect());
+    assert_eq!(s.terminal.snippet_bar.len(), crate::settings::MAX_SNIPPET_BAR);
+    assert_eq!(s.terminal.snippet_bar[0], "s0");
+    assert!(!s.terminal.snippet_bar.iter().any(String::is_empty));
+}

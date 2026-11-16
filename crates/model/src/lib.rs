@@ -9,6 +9,7 @@ pub mod keytypes;
 pub mod logtext;
 pub mod model;
 pub mod os_detect;
+pub mod placeholders;
 pub mod policy;
 pub mod proxy_command;
 pub mod secret_ref;
