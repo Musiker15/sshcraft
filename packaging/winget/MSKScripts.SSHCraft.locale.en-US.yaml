@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
 # Template: `cargo xtask stores SHA256SUMS.txt` fills it in (docs/releasing.md, "Stores").
 PackageIdentifier: MSKScripts.SSHCraft
 PackageVersion: {{version}}
@@ -21,4 +21,4 @@ Tags:
   - sync
 ReleaseNotesUrl: https://github.com/Musiker15/sshcraft/releases/tag/v{{version}}
 ManifestType: defaultLocale
-ManifestVersion: 1.10.0
+ManifestVersion: 1.28.0

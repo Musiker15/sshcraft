@@ -5674,7 +5674,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "craft-quit",
@@ -5696,7 +5696,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "clap",
@@ -5713,7 +5713,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5754,7 +5754,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-fido"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "ciborium",
@@ -5774,7 +5774,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-import"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "csv",
  "data-encoding",
@@ -5792,7 +5792,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-link"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "data-encoding",
  "futures",
@@ -5811,7 +5811,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-local"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "portable-pty",
  "serde",
@@ -5824,7 +5824,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -5839,7 +5839,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "getrandom 0.4.3",
  "hmac",
@@ -5852,7 +5852,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-platform"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "directories",
  "if-addrs",
@@ -5862,7 +5862,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chacha20poly1305",
  "data-encoding",
@@ -5881,7 +5881,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "sshcraft-server-lib",
@@ -5893,7 +5893,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-server-lib"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -5921,7 +5921,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-ssh"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "data-encoding",
@@ -5940,7 +5940,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -5961,7 +5961,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-sync"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "data-encoding",
  "futures",
@@ -5986,7 +5986,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-term"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alacritty_terminal",
  "bitflags 2.13.2",
@@ -5997,7 +5997,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-ui-egui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",
@@ -7694,7 +7694,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
 ]
