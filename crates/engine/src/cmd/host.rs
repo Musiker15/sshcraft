@@ -32,6 +32,12 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         command("host.delete", "Delete a host", "{ id }", run_delete),
         command(
+            "host.shortcut",
+            "Put a shortcut to the host on the desktop",
+            "{ host_id, dir?: the folder, the desktop if missing } -> { path }",
+            run_shortcut,
+        ),
+        command(
             "host.bulk_update",
             "Change many hosts at once",
             "{ ids: at most 1000, patch: { group_id?, to_top_level?, add_tags?, remove_tags?, username?: empty to inherit, port?: 1 to 65535, key?, agent_forwarding?, x11? } } -> { updated }",
@@ -285,6 +291,29 @@ fn run_recent(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
         let RecentParams { limit } = parse("host.recent", params)?;
         to_value(&ctx.session.store().recent_hosts(limit.min(100))?)
+    })
+}
+
+#[derive(Deserialize)]
+struct ShortcutParams {
+    host_id: HostId,
+    #[serde(default)]
+    dir: Option<std::path::PathBuf>,
+}
+
+/// A shortcut that starts SSHCraft with `--open-host <id>`; it carries nothing but the id.
+fn run_shortcut(ctx: Ctx, params: Value) -> Out {
+    sync_run(move || {
+        let ShortcutParams { host_id, dir } = parse("host.shortcut", params)?;
+        let host = ctx.session.store().list_hosts()?.into_iter().find(|h| h.id == host_id).ok_or_else(|| CommandError::code(ErrorCode::NotFound))?;
+        let failed = |e: &dyn std::fmt::Display| CommandError::Failed { code: ErrorCode::Io, detail: Some(e.to_string()) };
+        let exe = std::env::current_exe().map_err(|e| failed(&e))?;
+        let dir = match dir {
+            Some(dir) => dir,
+            None => sshcraft_platform::shortcut::desktop_dir().map_err(|e| failed(&e))?,
+        };
+        let path = sshcraft_platform::shortcut::create(&dir, &host.name, &exe, &host_id.0).map_err(|e| failed(&e))?;
+        Ok(serde_json::json!({ "path": path }))
     })
 }
 

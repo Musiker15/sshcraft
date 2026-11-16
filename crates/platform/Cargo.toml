@@ -11,6 +11,10 @@ publish = false
 directories = { workspace = true }
 thiserror = { workspace = true }
 if-addrs = "0.15.0"
+uuid = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+mslnk = "0.1.8"
 
 [dev-dependencies]
 tempfile = { workspace = true }

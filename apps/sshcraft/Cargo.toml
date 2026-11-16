@@ -16,6 +16,7 @@ sshcraft-engine = { workspace = true }
 sshcraft-fido = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-model = { workspace = true }
+uuid = { workspace = true }
 sshcraft-ui-egui = { workspace = true }
 sshcraft-link = { workspace = true }
 craft-window = { workspace = true }

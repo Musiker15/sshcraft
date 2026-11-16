@@ -27,6 +27,39 @@ pub struct ControlArgs {
 /// A link as given, with where it points.
 pub type Link = (String, sshcraft_model::ssh_url::Target);
 
+/// What the start was asked to open: a link, or a saved host (`--open-host <id>`, from a
+/// desktop shortcut).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Open {
+    Link(Link),
+    Host(sshcraft_model::model::HostId),
+}
+
+/// Takes a link or `--open-host <id>` out of `args`: the other arguments and what to open.
+pub fn take_open(args: &[String]) -> Result<(Vec<String>, Option<Open>), String> {
+    let (args, link) = take_link(args)?;
+    let mut rest = Vec::new();
+    let mut host = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--open-host" {
+            let id = it.next().ok_or("--open-host needs a host id")?;
+            let id = uuid::Uuid::parse_str(id).map_err(|_| "--open-host: not a host id".to_string())?;
+            if host.replace(sshcraft_model::model::HostId(id)).is_some() {
+                return Err("only one --open-host at a time".into());
+            }
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    match (link, host) {
+        (Some(_), Some(_)) => Err("a link and --open-host together".into()),
+        (Some(link), None) => Ok((rest, Some(Open::Link(link)))),
+        (None, Some(id)) => Ok((rest, Some(Open::Host(id)))),
+        (None, None) => Ok((rest, None)),
+    }
+}
+
 /// Takes an `ssh://` link out of `args` (the desktop passes one when a link is opened): the
 /// other arguments, and the link with where it points. A second link or a link that is not
 /// valid is an error, shown before anything starts.
@@ -171,6 +204,17 @@ mod tests {
         assert_eq!(take_link(&args(&[])).unwrap().1, None);
         assert!(take_link(&args(&["ssh://-oProxyCommand=calc@host"])).is_err());
         assert!(take_link(&args(&["ssh://a", "ssh://b"])).is_err());
+    }
+
+    #[test]
+    fn a_shortcut_names_one_host() {
+        let id = "6f9619ff-8b86-d011-b42d-00c04fc964ff";
+        let (rest, open) = take_open(&args(&["--open-host", id])).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(open, Some(Open::Host(sshcraft_model::model::HostId(uuid::Uuid::parse_str(id).unwrap()))));
+        assert!(take_open(&args(&["--open-host"])).is_err());
+        assert!(take_open(&args(&["--open-host", "web; calc"])).is_err());
+        assert!(take_open(&args(&["--open-host", id, "ssh://host"])).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]

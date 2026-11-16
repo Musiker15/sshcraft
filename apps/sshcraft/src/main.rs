@@ -41,6 +41,17 @@ fn start_problem(error: &EngineError, lang: Lang) -> String {
     }
 }
 
+/// Leaves what to open for the SSHCraft that already runs; whether that worked.
+fn hand_over(open: &control::Open) -> bool {
+    let Ok(config_dir) = sshcraft_platform::config_dir() else { return false };
+    let dir = sshcraft_ui_egui::handoff::dir_in(&config_dir);
+    match open {
+        control::Open::Link((url, _)) => sshcraft_ui_egui::handoff::write(&dir, url),
+        control::Open::Host(id) => sshcraft_ui_egui::handoff::write_host(&dir, *id),
+    }
+    .is_ok()
+}
+
 /// The window around the app.
 struct Shell {
     app: SshcraftApp,
@@ -121,7 +132,7 @@ fn show_problem(text: String) -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (args, link) = match control::take_link(&args) {
+    let (args, open) = match control::take_open(&args) {
         Ok(found) => found,
         Err(problem) => {
             set_language(system_language());
@@ -157,13 +168,7 @@ fn main() -> ExitCode {
         match Session::open(config) {
             Ok((session, report)) => (session, report.vault),
             // SSHCraft runs already: it takes the link from the handoff folder.
-            Err(sshcraft_engine::EngineError::DataInUse)
-                if let Some((url, _)) = &link
-                    && let Ok(config_dir) = sshcraft_platform::config_dir()
-                    && sshcraft_ui_egui::handoff::write(&sshcraft_ui_egui::handoff::dir_in(&config_dir), url).is_ok() =>
-            {
-                return ExitCode::SUCCESS;
-            }
+            Err(sshcraft_engine::EngineError::DataInUse) if open.as_ref().is_some_and(hand_over) => return ExitCode::SUCCESS,
             Err(e) => return show_problem(start_problem(&e, system_language())),
         }
     };
@@ -182,8 +187,10 @@ fn main() -> ExitCode {
             app.window_frame = window_frame;
             app.report_vault(vault);
             app.handoff_dir = sshcraft_platform::config_dir().ok().map(|d| sshcraft_ui_egui::handoff::dir_in(&d));
-            if let Some((_, target)) = &link {
-                sshcraft_ui_egui::quick_connect::open(&mut app, target.name());
+            match &open {
+                Some(control::Open::Link((_, target))) => sshcraft_ui_egui::quick_connect::open(&mut app, target.name()),
+                Some(control::Open::Host(id)) => app.ui.connect_request = Some(sshcraft_ui_egui::state::ConnectRequest::Host(*id)),
+                None => {}
             }
             #[cfg(target_os = "macos")]
             sshcraft_ui_egui::menus::install_native(&mut app, &cc.egui_ctx);

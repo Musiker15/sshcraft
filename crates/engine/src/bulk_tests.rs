@@ -85,3 +85,23 @@ async fn limits_and_agents_are_refused() {
     let conn = session.agent_connection("claude-code", crate::caller::Via::Mcp).unwrap();
     assert!(session.execute(conn.caller(), "host.bulk_update", json!({ "ids": [], "patch": {} })).await.is_err());
 }
+
+#[tokio::test]
+async fn a_shortcut_carries_only_the_host_id() {
+    let (_dir, session) = open();
+    let h = host("web", &[]);
+    session.execute(Caller::User, "host.save", json!({ "host": h })).await.unwrap();
+    let desk = tempfile::tempdir().unwrap();
+    let out = session.execute(Caller::User, "host.shortcut", json!({ "host_id": h.id, "dir": desk.path() })).await.unwrap();
+    let path = std::path::PathBuf::from(out["path"].as_str().unwrap());
+    assert!(path.starts_with(desk.path()));
+    let bytes = std::fs::read(&path).unwrap();
+    let address = "web.example.org";
+    let wide: Vec<u8> = address.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    assert!(
+        !bytes.windows(address.len()).any(|w| w == address.as_bytes()) && !bytes.windows(wide.len()).any(|w| w == wide.as_slice()),
+        "no address in it"
+    );
+    let conn = session.agent_connection("claude-code", crate::caller::Via::Mcp).unwrap();
+    assert!(session.execute(conn.caller(), "host.shortcut", json!({ "host_id": h.id, "dir": desk.path() })).await.is_err(), "never for agents");
+}

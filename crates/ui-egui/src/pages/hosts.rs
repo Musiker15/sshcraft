@@ -449,6 +449,19 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all
                     }
                 }
             });
+            if ui.button(tr("Desktop shortcut")).clicked() {
+                app.runner.run(
+                    "host.shortcut",
+                    json!({ "host_id": id }),
+                    Box::new(|app, result| match result {
+                        Ok(v) => {
+                            let path = v.get("path").and_then(serde_json::Value::as_str).map(visible).unwrap_or_default();
+                            app.toasts.info(&trf("The shortcut is at {path}.", &[("path", &path)]));
+                        }
+                        Err(e) => app.toasts.error(&e.to_string()),
+                    }),
+                );
+            }
             if ui.button(tr("Forget host key")).clicked() {
                 app.run_reported("host.forget_key", json!({ "host_id": id }));
             }

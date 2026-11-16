@@ -29,6 +29,7 @@ host.list
 host.reachable
 host.recent
 host.save
+host.shortcut
 hostkey.export
 hostkey.list
 hostkey.remove

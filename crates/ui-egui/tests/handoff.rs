@@ -39,3 +39,36 @@ fn at_most_eight_files_are_taken_at_once() {
     assert_eq!(handoff::take(drop.path()).len(), handoff::MAX_FILES);
     assert_eq!(handoff::take(drop.path()).len(), 2);
 }
+
+#[test]
+fn a_shortcut_opens_only_a_saved_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let drop = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let id = sshcraft_model::model::HostId(uuid::Uuid::new_v4());
+    let host = serde_json::json!({ "id": id, "name": "web", "settings": { "address": "127.0.0.1", "port": 1 } });
+    session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "host.save", serde_json::json!({ "host": host }))).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.state().data.hosts.iter().any(|r| r.host.id == id) {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.state_mut().handoff_dir = Some(drop.path().to_path_buf());
+    handoff::write_host(drop.path(), sshcraft_model::model::HostId(uuid::Uuid::new_v4())).unwrap();
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        h.run_steps(1);
+    }
+    assert!(!drop.path().read_dir().unwrap().any(|e| e.unwrap().path().extension().is_some_and(|x| x == "json")), "the file was taken");
+    assert!(h.state().ui.tabs.is_empty(), "an unknown id opens nothing");
+    h.state_mut().handoff_next = 0.0;
+    handoff::write_host(drop.path(), id).unwrap();
+    h.run_steps(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.state().ui.tabs.is_empty() {
+        assert!(std::time::Instant::now() < deadline, "the saved host opens");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}
