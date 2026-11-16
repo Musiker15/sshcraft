@@ -59,7 +59,13 @@ impl eframe::App for App {
                 Notice::Reply(bytes) => self.send(&bytes),
                 Notice::Title(title) => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(format!("{title} - SSHCraft terminal"))),
                 Notice::ClipboardWrite(text) => eprintln!("a program wants {} bytes in the clipboard (not done here)", text.len()),
-                Notice::ResetTitle | Notice::Bell | Notice::WorkingDirectory(_) | Notice::CommandStarted | Notice::CommandFinished { .. } => {}
+                Notice::ResetTitle
+                | Notice::Bell
+                | Notice::WorkingDirectory(_)
+                | Notice::CommandStarted
+                | Notice::CommandFinished { .. }
+                | Notice::Notification { .. }
+                | Notice::ProgramStatusChanged => {}
             }
         }
         let response = TerminalView { term: &mut self.term, palette: &self.palette, font, ligatures: true }.show(ui);

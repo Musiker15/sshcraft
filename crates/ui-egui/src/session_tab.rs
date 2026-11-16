@@ -430,7 +430,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                         tab.cwd = Some(dir);
                     }
                 }
-                Notice::CommandStarted | Notice::CommandFinished { .. } => {}
+                Notice::CommandStarted | Notice::CommandFinished { .. } | Notice::Notification { .. } | Notice::ProgramStatusChanged => {}
             }
         }
         // The host's name once the data has it, unless a program named the pane.

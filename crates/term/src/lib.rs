@@ -14,6 +14,7 @@ pub mod input;
 pub mod limits;
 mod listener;
 mod marks;
+mod progstatus;
 mod screen;
 mod search;
 mod selection;
@@ -24,6 +25,7 @@ use alacritty_terminal::term::{Config, Osc52, Term};
 use alacritty_terminal::vte::ansi::Processor;
 
 pub use commands::{CommandRecord, CommandRow, CommandState, MAX_COMMANDS, MAX_OUTPUT_BYTES};
+pub use progstatus::{BlockedKind, ProgramRecord, ProgramState};
 pub use screen::{CellFlags, CellView, CursorShape, CursorView, Screen, SelectionView, TermColor, TermModes};
 pub use search::{SearchError, SearchMatch, SearchQuery};
 pub use selection::{GridPoint, SelectionKind};
@@ -38,6 +40,9 @@ pub enum Direction {
 use filter::Prefilter;
 use limits::{DEFAULT_SCROLLBACK, MAX_CELLS, MAX_CLIPBOARD_BYTES, MAX_COLS, MAX_ROWS, MAX_SCROLLBACK, MAX_TITLE_CHARS, MIN_COLS, MIN_ROWS};
 use listener::Listener;
+
+const ALL_PROGRAM_STATES: [ProgramState; 5] =
+    [ProgramState::Idle, ProgramState::Working, ProgramState::Done, ProgramState::Blocked, ProgramState::Error];
 
 /// How a terminal is set up.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +106,13 @@ pub enum Notice {
     CommandFinished {
         exit: Option<i32>,
     },
+    /// A message for the desktop (OSC 9, OSC 777): plain, bounded text.
+    Notification {
+        title: Option<String>,
+        body: String,
+    },
+    /// The program status records changed (OSC 7501).
+    ProgramStatusChanged,
 }
 
 /// The size in bytes of one grid cell of the emulator, for memory budgets.
@@ -125,10 +137,15 @@ fn hides_text(c: char) -> bool {
     c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
-/// A title as it may be shown: without control and bidi characters, at most
-/// [`MAX_TITLE_CHARS`] characters.
+/// Text from a program as it may be shown: without control and bidi characters, at most `max`
+/// characters.
+pub(crate) fn clean_text(text: &str, max: usize) -> String {
+    text.chars().filter(|c| !hides_text(*c)).take(max).collect()
+}
+
+/// A title as it may be shown: at most [`MAX_TITLE_CHARS`] characters.
 fn clean_title(title: &str) -> String {
-    title.chars().filter(|c| !hides_text(*c)).take(MAX_TITLE_CHARS).collect()
+    clean_text(title, MAX_TITLE_CHARS)
 }
 
 /// One terminal.
@@ -147,6 +164,10 @@ pub struct Terminal {
     extras_changes: usize,
     /// What the shell reported about its commands (OSC 133).
     commands: commands::Commands,
+    /// What programs reported about themselves (OSC 7501).
+    programs: progstatus::Programs,
+    /// Whether the program status changed since the notices were last taken.
+    programs_changed: bool,
 }
 
 impl Terminal {
@@ -165,6 +186,8 @@ impl Terminal {
             last_match: None,
             extras_changes: 0,
             commands: commands::Commands::default(),
+            programs: progstatus::Programs::default(),
+            programs_changed: false,
         }
     }
 
@@ -174,12 +197,22 @@ impl Terminal {
         filtered.clear();
         self.prefilter.filter(bytes, &mut filtered);
         // A shell mark applies to the line the cursor is on when the parser reaches it.
-        let marks = std::mem::take(&mut self.prefilter.shell_marks);
+        let events = std::mem::take(&mut self.prefilter.events);
         let mut done = 0;
-        for (offset, mark) in marks {
+        for (offset, event) in events {
             self.advance(filtered.get(done..offset).unwrap_or_default());
             done = offset.max(done);
-            self.apply_shell_mark(mark);
+            match event {
+                filter::FilterEvent::Shell(mark) => {
+                    if mark == filter::ShellMark::PromptStart {
+                        // A prompt means the programs of the last command are gone.
+                        self.programs_changed |= self.programs.drop_states(&[ProgramState::Idle, ProgramState::Working, ProgramState::Blocked]);
+                    }
+                    self.apply_shell_mark(mark);
+                }
+                filter::FilterEvent::Status(report) => self.programs_changed |= self.programs.apply(report),
+                filter::FilterEvent::Reset => self.programs_changed |= self.programs.drop_states(&ALL_PROGRAM_STATES),
+            }
         }
         self.advance(filtered.get(done..).unwrap_or_default());
         // A large feed must not keep its buffer for the life of the terminal.
@@ -238,10 +271,28 @@ impl Terminal {
         self.screen().text()
     }
 
+    /// What programs reported about themselves (OSC 7501), the one updated longest ago first.
+    pub fn program_status(&self) -> Vec<ProgramRecord> {
+        self.programs.records()
+    }
+
+    /// The most urgent state any program reported: blocked, error, done, working, idle.
+    pub fn status_summary(&self) -> Option<ProgramState> {
+        self.programs.summary()
+    }
+
+    /// Drops the programs that are done or failed: the user has seen them (they typed).
+    pub fn drop_finished(&mut self) {
+        self.programs_changed |= self.programs.drop_states(&[ProgramState::Done, ProgramState::Error]);
+    }
+
     /// Answers and notices since the last call.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         let cwd = self.prefilter.cwd.take().map(Notice::WorkingDirectory);
         let commands = self.take_command_notices();
+        let replies = std::mem::take(&mut self.prefilter.replies).into_iter().map(Notice::Reply);
+        let notifications = std::mem::take(&mut self.prefilter.notifications).into_iter().map(|(title, body)| Notice::Notification { title, body });
+        let changed = std::mem::take(&mut self.programs_changed).then_some(Notice::ProgramStatusChanged);
         self.listener
             .take()
             .into_iter()
@@ -257,6 +308,9 @@ impl Terminal {
             })
             .chain(cwd)
             .chain(commands)
+            .chain(replies)
+            .chain(notifications)
+            .chain(changed)
             .collect()
     }
 }

@@ -5,6 +5,7 @@
 //! acts on what it has.)
 
 use crate::limits::MAX_OSC_BYTES;
+use crate::progstatus::{self, Report};
 
 const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
@@ -40,8 +41,25 @@ pub(crate) enum ShellMark {
     CommandEnd(Option<i32>),
 }
 
-/// Shell marks kept for one feed; more are dropped (each takes at least eight bytes of input).
-const MAX_SHELL_MARKS: usize = 1 << 16;
+/// Something the terminal applies once the parser reached the point where it came.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FilterEvent {
+    Shell(ShellMark),
+    /// A program status report (OSC 7501).
+    Status(Report),
+    /// A full reset (`ESC c`).
+    Reset,
+}
+
+/// Events kept for one feed; more are dropped (each takes at least two bytes of input).
+const MAX_EVENTS: usize = 1 << 16;
+/// Notifications kept for one feed; the interface limits how many it shows anyway.
+const MAX_NOTIFICATIONS: usize = 64;
+/// Answers kept for one feed.
+const MAX_REPLIES: usize = 16;
+/// The longest notification title and body, in characters.
+pub(crate) const MAX_NOTIFY_TITLE: usize = 128;
+pub(crate) const MAX_NOTIFY_BODY: usize = 1024;
 
 #[derive(Debug, Default)]
 pub(crate) struct Prefilter {
@@ -50,9 +68,13 @@ pub(crate) struct Prefilter {
     osc: Vec<u8>,
     /// The working directory the last OSC 7 named.
     pub(crate) cwd: Option<String>,
-    /// Shell marks of this feed, each with the length of the filtered output when it came: the
-    /// parser has to reach that point before the mark applies to the cursor line.
-    pub(crate) shell_marks: Vec<(usize, ShellMark)>,
+    /// Events of this feed, each with the length of the filtered output when it came: the parser
+    /// has to reach that point before it applies (a shell mark to the cursor line, for example).
+    pub(crate) events: Vec<(usize, FilterEvent)>,
+    /// Desktop notifications (OSC 9, OSC 777): title and body.
+    pub(crate) notifications: Vec<(Option<String>, String)>,
+    /// Answers to send back (the OSC 7501 capability query).
+    pub(crate) replies: Vec<Vec<u8>>,
 }
 
 impl Prefilter {
@@ -85,6 +107,9 @@ impl Prefilter {
                 }
                 _ => {
                     out.extend_from_slice(&[ESC, byte]);
+                    if byte == b'c' {
+                        self.event(out.len(), FilterEvent::Reset);
+                    }
                     State::Ground
                 }
             },
@@ -133,10 +158,23 @@ impl Prefilter {
     /// Passes the held-back OSC string on and goes back to ground, keeping `ESC` pending when the
     /// string was ended by one.
     fn release(&mut self, out: &mut Vec<u8>) -> State {
+        // The parser knows none of OSC 133, 7501, 9 and 777, so they are not passed on.
         if let Some(mark) = shell_mark(&self.osc) {
-            // The parser does not know OSC 133, so it is not passed on.
-            if self.shell_marks.len() < MAX_SHELL_MARKS {
-                self.shell_marks.push((out.len(), mark));
+            self.event(out.len(), FilterEvent::Shell(mark));
+        } else if let Some(body) = osc_body(&self.osc, b"\x1b]7501;") {
+            match progstatus::parse(body).filter(|_| self.osc.len() <= progstatus::MAX_REPORT_BYTES) {
+                Some(Report::Query) => {
+                    if self.replies.len() < MAX_REPLIES {
+                        let end: &[u8] = if self.osc.ends_with(&[BEL]) { &[BEL] } else { b"\x1b\\" };
+                        self.replies.push([b"\x1b]7501;?", end].concat());
+                    }
+                }
+                Some(report) => self.event(out.len(), FilterEvent::Status(report)),
+                None => {}
+            }
+        } else if let Some(notification) = notification(&self.osc) {
+            if self.notifications.len() < MAX_NOTIFICATIONS {
+                self.notifications.push(notification);
             }
         } else {
             if let Some(dir) = working_directory(&self.osc) {
@@ -150,6 +188,12 @@ impl Prefilter {
             self.osc.clear();
         }
         State::Ground
+    }
+
+    fn event(&mut self, offset: usize, event: FilterEvent) {
+        if self.events.len() < MAX_EVENTS {
+            self.events.push((offset, event));
+        }
     }
 
     /// The state after dropping `byte` of an overlong OSC string.
@@ -182,6 +226,24 @@ fn shell_mark(osc: &[u8]) -> Option<ShellMark> {
         }
         _ => None,
     }
+}
+
+/// A desktop notification from `ESC ] 9 ; body` or `ESC ] 777 ; notify ; title ; body`, as plain
+/// bounded text. `ESC ] 9 ; 4 ; ...` and other numbered forms are progress reports of ConEmu, not
+/// notifications.
+fn notification(osc: &[u8]) -> Option<(Option<String>, String)> {
+    if let Some(body) = osc_body(osc, b"\x1b]9;") {
+        let text = String::from_utf8_lossy(body);
+        let numbered = text.split_once(';').is_some_and(|(first, _)| !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()));
+        if numbered {
+            return None;
+        }
+        return Some((None, crate::clean_text(&text, MAX_NOTIFY_BODY)));
+    }
+    let body = osc_body(osc, b"\x1b]777;notify;")?;
+    let text = String::from_utf8_lossy(body);
+    let (title, body) = text.split_once(';').unwrap_or((&text, ""));
+    Some((Some(crate::clean_text(title, MAX_NOTIFY_TITLE)), crate::clean_text(body, MAX_NOTIFY_BODY)))
 }
 
 /// The longest working directory OSC 7 may name, in characters.
@@ -252,7 +314,14 @@ mod tests {
         let mut out = Vec::new();
         filter.filter(b"ab\x1b]133;A\x07cd\x1b]133;D;7\x1b\\e\x1b]133;D;x\x07", &mut out);
         assert_eq!(out, b"abcde");
-        assert_eq!(filter.shell_marks, vec![(2, ShellMark::PromptStart), (4, ShellMark::CommandEnd(Some(7))), (5, ShellMark::CommandEnd(None))]);
+        assert_eq!(
+            filter.events,
+            vec![
+                (2, FilterEvent::Shell(ShellMark::PromptStart)),
+                (4, FilterEvent::Shell(ShellMark::CommandEnd(Some(7)))),
+                (5, FilterEvent::Shell(ShellMark::CommandEnd(None)))
+            ]
+        );
     }
 
     #[test]

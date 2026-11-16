@@ -5989,6 +5989,7 @@ name = "sshcraft-term"
 version = "0.1.1"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.23.1",
  "bitflags 2.13.2",
  "chrono",
  "cursor-icon",
