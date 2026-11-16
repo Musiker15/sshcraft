@@ -1,6 +1,6 @@
 # SSHCraft roadmap
 
-> **Last updated:** 2026-11-16 · **Stage:** first release v0.1.0 out; S1 next
+> **Last updated:** 2026-11-17 · **Stage:** first release out; F4 done, F5 next
 
 SSHCraft reached its first feature set (sub-plans 1 to 15: hosts, keys, connections, workspaces,
 port forwarding, snippets, session logs, sync, sharing, AI agents) as a Tauri app, kept at the tag
@@ -22,7 +22,8 @@ detail is in [docs/roadmap.md](docs/roadmap.md), the open work in [docs/gaps.md]
 | M1 to M3 | Android, iOS and iPadOS | later |
 | S1 | SFTP | after V1 |
 | F3 | Terminal comfort: shell integration, notifications, triggers, hints, compose, snippet placeholders, login scripts, program status | done |
-| F4 to F7 | Connections, persistent sessions, terminal extras, targets and automation | open |
+| F4 | Connections and organisation: shared connections, Wake-on-LAN and knocking, X11, Unix sockets, `ssh://` links, quick connect, bulk edit, reachability, desktop shortcuts, server load | done |
+| F5 to F7 | Persistent sessions, terminal extras, targets and automation | open |
 
 A database client is planned as a separate sister app after V1; it reaches server databases
 through a tunnel that SSHCraft opens for it.

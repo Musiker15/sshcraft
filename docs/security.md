@@ -14,7 +14,10 @@ where it can have one.
    into a command line a shell evaluates; local programs start with argument lists. (Code
    execution bugs in Tabby and Electerm.)
 2. **Links never run anything.** `ssh://` and other links at most open the connection dialog with
-   checked fields. (`tabby://run`, Electerm's deep-link code execution.)
+   checked fields: a user or host that starts with `-` or holds control characters or spaces is
+   refused, a password in a link is refused, and nothing connects before the user presses
+   Connect. A desktop shortcut carries a host id only and opens nothing but a host saved on the
+   device. (`tabby://run`, Electerm's deep-link code execution.)
 3. **Escape sequences are bounded.** OSC 52 may only write, never read, and only after consent per
    host; file transfer over the terminal (ZMODEM, trzsz) never starts by itself; queries whose
    answer could inject input are off. (Tabby's ZMODEM auto-start, Electerm's clipboard leak.)

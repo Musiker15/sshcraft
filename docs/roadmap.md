@@ -36,9 +36,9 @@ submissions follow. Next is S1 (SFTP).
 | F2 | Passwords as references to a password manager; TOTP; desktop app lock; trash and versions; encrypted backup file; the list of connections SSHCraft makes |
 | V1 | Signed packages for every desktop target, checksums, SBOM, winget, Homebrew, Flathub, server program, Docker image |
 | F3 | Shell integration (OSC 133) with gutter, jumps and output copy; desktop notifications; highlights and triggers; colour, badge and theme per host; hint mode; paste history and compose field; snippet placeholders and bar; login scripts with per-device approval; program status (OSC 7501) |
+| F4 | One shared connection per host; Wake-on-LAN, port knocking and programs before and after connecting; X11 forwarding; forwarding to Unix sockets; `ssh://` links and quick connect; changing many hosts at once; reachability in the host list; desktop shortcuts; server load under the terminal; shared hosts that ask for the member's own sign-in |
 
 ## After the first release
 
-M1 to M3 (Android, iOS and iPadOS), S1 (SFTP), F4 (connections and
-organisation), F5 (persistent sessions, tmux, Mosh, Eternal Terminal, Telnet), F6 (terminal
+M1 to M3 (Android, iOS and iPadOS), S1 (SFTP), F5 (persistent sessions, tmux, Mosh, Eternal Terminal, Telnet), F6 (terminal
 extras), F7 (targets and automation). A database client follows as a separate sister app.
