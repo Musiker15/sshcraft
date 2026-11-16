@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 30] = [
+pub const SHORTCUT_ACTIONS: [&str; 31] = [
     "palette",
     "newTab",
     "closeTab",
@@ -62,6 +62,8 @@ pub const SHORTCUT_ACTIONS: [&str; 30] = [
     "about",
     // Added with quick connect (F4).
     "quickConnect",
+    // Added with the hex view (F6).
+    "hexView",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];

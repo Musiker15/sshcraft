@@ -410,3 +410,36 @@ fn notices_beside_a_connection_are_named() {
     }
     assert_eq!(notice_text(ErrorCode::Network), None);
 }
+
+#[test]
+fn the_hex_view_keeps_bytes_only_while_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, host) =
+        session.runtime().block_on(sshcraft_engine::testing::test_host(&session, "hex", sshcraft_ssh::testing::TestAuth::default(), true));
+    h.state_mut().ui.connect_request = Some(sshcraft_ui_egui::state::ConnectRequest::Host(host));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !h.state().terminals.values().any(|t| matches!(t.status, Some(sshcraft_engine::SessionStatus::Connected { .. }))) {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    let id = *h.state().terminals.keys().next().unwrap();
+    sshcraft_ui_egui::session_tab::send_bytes(h.state(), id, b"before\n");
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert!(h.state().terminals[&id].hex.is_none(), "closed: nothing kept");
+    sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.hex");
+    h.run_steps(2);
+    sshcraft_ui_egui::session_tab::send_bytes(h.state(), id, b"after\n");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.state().terminals[&id].hex.as_ref().is_some_and(|x| x.lines().join("\n").contains("|after")) {
+        assert!(std::time::Instant::now() < deadline, "the echo did not reach the hex view");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    let dump = h.state().terminals[&id].hex.as_ref().unwrap().lines().join("\n");
+    assert!(!dump.contains("before"), "nothing from before it opened: {dump}");
+}

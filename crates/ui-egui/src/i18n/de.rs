@@ -34,6 +34,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Hex view of what the session received" => "Hex-Ansicht dessen, was die Sitzung empfangen hat",
+        "Received since the view opened ({count} bytes kept)" => "Empfangen, seit die Ansicht offen ist ({count} Bytes gehalten)",
         "Telnet came from elsewhere: allow it in the host's form to use it here." => {
             "Telnet kam von anderswo: Erlaube es im Formular des Hosts, um es hier zu nutzen."
         }
