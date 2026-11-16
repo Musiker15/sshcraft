@@ -639,8 +639,17 @@ impl server::Handler for Handler {
             self.records.exec_input.lock().unwrap().extend_from_slice(data);
             let text = String::from_utf8_lossy(data).into_owned();
             let mut replies = self.records.exec_replies.lock().unwrap();
-            if let Some(at) = replies.iter().position(|(trigger, _)| text.contains(trigger.as_str())) {
-                let (_, answer) = replies.remove(at);
+            // Several commands may come in one packet: each is answered, in the order they came.
+            let mut due: Vec<(usize, String)> = Vec::new();
+            replies.retain(|(trigger, answer)| match text.find(trigger.as_str()) {
+                Some(at) => {
+                    due.push((at, answer.clone()));
+                    false
+                }
+                None => true,
+            });
+            due.sort_by_key(|(at, _)| *at);
+            for (_, answer) in due {
                 session.data(channel, answer.into_bytes())?;
             }
             return Ok(());

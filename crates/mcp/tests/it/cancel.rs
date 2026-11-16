@@ -48,7 +48,11 @@ async fn a_gone_mcp_process_ends_its_sessions_and_questions() {
         assert!(std::time::Instant::now() < deadline, "the agent's connection is still open");
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    assert!(cancelled(&w.agent_log().await));
+    // The log entry is written as the connection winds down: it may come a moment later.
+    while !cancelled(&w.agent_log().await) {
+        assert!(std::time::Instant::now() < deadline, "no cancelled call in the agent log");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
