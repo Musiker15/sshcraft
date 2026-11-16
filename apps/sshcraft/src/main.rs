@@ -4,6 +4,7 @@
 //! SSHCraft, the desktop app: opens the engine on the user's data and shows the window.
 
 mod control;
+mod dropdown;
 mod platform;
 
 use std::process::ExitCode;
@@ -41,6 +42,11 @@ fn start_problem(error: &EngineError, lang: Lang) -> String {
     }
 }
 
+/// Asks the SSHCraft that already runs to come to the front; whether that worked.
+fn reveal_running() -> bool {
+    sshcraft_platform::config_dir().is_ok_and(|d| sshcraft_ui_egui::handoff::write_reveal(&sshcraft_ui_egui::handoff::dir_in(&d)).is_ok())
+}
+
 /// Leaves what to open for the SSHCraft that already runs; whether that worked.
 fn hand_over(open: &control::Open) -> bool {
     let Ok(config_dir) = sshcraft_platform::config_dir() else { return false };
@@ -55,6 +61,8 @@ fn hand_over(open: &control::Open) -> bool {
 /// The window around the app.
 struct Shell {
     app: SshcraftApp,
+    /// The dropdown window's global shortcut.
+    dropdown: dropdown::Dropdown,
     /// The control channel, while the app runs with `--control`.
     _control: Option<sshcraft_link::Server>,
 }
@@ -69,6 +77,14 @@ impl eframe::App for Shell {
     /// consent, and the control channel answers.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.app.logic(ctx);
+        // The shortcut follows the setting; a press shows or hides the window.
+        let wanted = self.app.data.settings.appearance.dropdown_shortcut.clone();
+        if let Err(why) = self.dropdown.sync(wanted.as_deref()) {
+            self.app.toasts.error(&sshcraft_ui_egui::i18n::trf("The dropdown shortcut could not be set: {why}", &[("why", &why)]));
+        }
+        if self.dropdown.take_pressed() {
+            sshcraft_ui_egui::dropdown::toggle(&mut self.app, ctx);
+        }
         // Last, so it sees the quit question's `CancelClose` (craft-quit: macOS quits through
         // AppKit, not by closing the window).
         craft_quit::on_close_request(ctx);
@@ -169,6 +185,8 @@ fn main() -> ExitCode {
             Ok((session, report)) => (session, report.vault),
             // SSHCraft runs already: it takes the link from the handoff folder.
             Err(sshcraft_engine::EngineError::DataInUse) if open.as_ref().is_some_and(hand_over) => return ExitCode::SUCCESS,
+            // A plain second start brings the running window to the front (also a hidden one).
+            Err(sshcraft_engine::EngineError::DataInUse) if open.is_none() && reveal_running() => return ExitCode::SUCCESS,
             Err(e) => return show_problem(start_problem(&e, system_language())),
         }
     };
@@ -207,7 +225,8 @@ fn main() -> ExitCode {
                 }
                 None => None,
             };
-            Ok(Box::new(Shell { app, _control: control }))
+            let dropdown = dropdown::Dropdown::new(&cc.egui_ctx);
+            Ok(Box::new(Shell { app, dropdown, _control: control }))
         }),
     );
     // The window and the app are gone; the engine's tasks get a moment to end.

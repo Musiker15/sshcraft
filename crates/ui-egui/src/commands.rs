@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 30] = [
+static COMMANDS: [UiCommand; 31] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     cmd("ui.app.quick_connect", "quickConnect", "Quick connect", &["Ctrl+Shift+O"]),
@@ -97,6 +97,7 @@ static COMMANDS: [UiCommand; 30] = [
         enabled: in_terminal,
         ..cmd("ui.terminal.paste_history", "pasteHistory", "Paste again from the recent pastes", &["Ctrl+Shift+Y"])
     },
+    UiCommand { scope: Scope::Terminal, enabled: in_terminal, ..cmd("ui.terminal.hex", "hexView", "Hex view of what the session received", &[]) },
     UiCommand {
         scope: Scope::Terminal,
         enabled: in_terminal,

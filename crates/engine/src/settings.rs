@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 30] = [
+pub const SHORTCUT_ACTIONS: [&str; 31] = [
     "palette",
     "newTab",
     "closeTab",
@@ -62,6 +62,8 @@ pub const SHORTCUT_ACTIONS: [&str; 30] = [
     "about",
     // Added with quick connect (F4).
     "quickConnect",
+    // Added with the hex view (F6).
+    "hexView",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
@@ -185,6 +187,9 @@ pub struct Appearance {
     /// The host list shows whether each host answers (a TCP connect every minute). Off by
     /// default: it reaches out to every host shown.
     pub show_reachability: bool,
+    /// A global shortcut that shows SSHCraft at the top of the screen or hides it; `None`: off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dropdown_shortcut: Option<String>,
 }
 
 impl Default for Appearance {
@@ -197,6 +202,7 @@ impl Default for Appearance {
             host_view: HostView::Grid,
             ligatures: true,
             show_reachability: false,
+            dropdown_shortcut: None,
         }
     }
 }
@@ -377,6 +383,8 @@ impl EngineSettings {
     pub fn sanitized(mut self) -> Self {
         let defaults = Appearance::default();
         let a = &mut self.appearance;
+        // A shortcut SSHCraft cannot read is dropped, not guessed at.
+        a.dropdown_shortcut = a.dropdown_shortcut.take().filter(|c| valid_combo(c));
         a.font_size = a.font_size.clamp(*FONT_SIZES.start(), *FONT_SIZES.end());
         let family = a.font_family.trim();
         a.font_family = if family.is_empty() || family.chars().count() > MAX_FONT_FAMILY { defaults.font_family } else { family.to_owned() };
@@ -431,6 +439,7 @@ pub fn read_tauri_settings(store: &Store) -> EngineSettings {
             host_view: field(&map, "host_view").unwrap_or(d.appearance.host_view),
             ligatures: d.appearance.ligatures,
             show_reachability: d.appearance.show_reachability,
+            dropdown_shortcut: None,
         };
         out.terminal.terminal_type = field(&map, "terminal_type").unwrap_or(d.terminal.terminal_type);
         out.terminal.clipboard_osc52 = field(&map, "clipboard_osc52").unwrap_or(d.terminal.clipboard_osc52);

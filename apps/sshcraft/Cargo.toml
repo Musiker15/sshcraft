@@ -17,6 +17,7 @@ sshcraft-fido = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-model = { workspace = true }
 uuid = { workspace = true }
+global-hotkey = "0.10.0"
 sshcraft-ui-egui = { workspace = true }
 sshcraft-link = { workspace = true }
 craft-window = { workspace = true }

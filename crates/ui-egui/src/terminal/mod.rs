@@ -4,6 +4,7 @@
 pub mod blocks;
 pub mod compose;
 pub mod fonts;
+pub mod hex;
 pub mod highlight;
 pub mod hints;
 mod keys;

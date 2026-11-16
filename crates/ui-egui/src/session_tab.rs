@@ -84,6 +84,8 @@ pub struct SessionTab {
     paste_picker: bool,
     /// A program waited for the user at the last status change.
     program_blocked: bool,
+    /// What the session received while the hex view is open; `None` while it is closed.
+    pub hex: Option<crate::terminal::hex::HexBuffer>,
     /// This session runs tmux in control mode: its output is read here, never shown.
     pub tmux: Option<Box<crate::tmux_mode::Control>>,
     /// This terminal shows a tmux pane: (the control session, the pane).
@@ -364,6 +366,7 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 program_blocked: false,
                 tmux: tmux_control.then(Box::default),
                 tmux_pane: None,
+                hex: None,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -451,6 +454,7 @@ pub fn open_tmux_pane(app: &mut SshcraftApp, control: SessionId, pane: u32) -> O
         program_blocked: false,
         tmux: None,
         tmux_pane: Some((control, pane)),
+        hex: None,
     };
     app.terminals.insert(id, tab);
     Some(id)
@@ -768,7 +772,17 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             continue;
         }
         if let Some(pump) = tab.pump.as_mut() {
-            let outcome = pump.frame(&mut tab.term, FrameBudget::DEFAULT);
+            // With the hex view open, what goes into the terminal goes into it too.
+            let (term, hex) = (&mut tab.term, &mut tab.hex);
+            let outcome = pump.frame_into(
+                &mut |slice| {
+                    term.feed(slice);
+                    if let Some(hex) = hex.as_mut() {
+                        hex.push(slice);
+                    }
+                },
+                FrameBudget::DEFAULT,
+            );
             if outcome.fed > 0 {
                 tab.mark_output();
                 // Commands get the time their start or end arrived, shown or not.
@@ -993,6 +1007,74 @@ fn status_text(status: Option<&SessionStatus>) -> (String, bool) {
             (text.to_string(), true)
         }
     }
+}
+
+/// A terminal command (palette or shortcut) for the tab `tab` of session `id`.
+fn run_terminal_command(tab: &mut SessionTab, command: &str, ctx: &egui::Context, id: SessionId) {
+    match command {
+        "ui.terminal.copy" => {
+            if let Some(text) = tab.term.selection_text() {
+                ctx.copy_text(text);
+            }
+        }
+        "ui.terminal.paste" => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+        "ui.terminal.prev_command" => {
+            tab.term.jump_to_prompt(sshcraft_term::Direction::Up);
+        }
+        "ui.terminal.next_command" => {
+            tab.term.jump_to_prompt(sshcraft_term::Direction::Down);
+        }
+        "ui.terminal.compose" => {
+            tab.compose = if tab.compose.is_some() { None } else { Some(String::new()) };
+            if tab.compose.is_some() {
+                ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("sshcraft-compose", id))));
+            }
+        }
+        "ui.terminal.paste_history" => tab.paste_picker = !tab.paste_picker,
+        "ui.terminal.hex" => tab.hex = if tab.hex.is_some() { None } else { Some(crate::terminal::hex::HexBuffer::default()) },
+        "ui.terminal.hints" => {
+            let found = crate::terminal::hints::find_hints(&tab.term.screen());
+            let labels = crate::terminal::hints::labels(found.len());
+            tab.hints = (!found.is_empty()).then(|| labels.into_iter().zip(found).collect());
+            tab.hint_typed.clear();
+        }
+        "ui.terminal.copy_output" => {
+            if let Some(text) = tab.term.last_finished_output() {
+                ctx.copy_text(text);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The hex view in `rect`, below the terminal, while it is open.
+fn hex_panel(app: &SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect) {
+    let Some(hex) = app.terminals.get(&id).and_then(|t| t.hex.as_ref()) else { return };
+    if rect.width() < 24.0 || rect.height() < 24.0 {
+        return;
+    }
+    let tokens = Tokens::get(ui.ctx());
+    ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+        egui::Frame::new().fill(tokens.panel).inner_margin(6.0).show(ui, |ui| {
+            // A pane too small for the margin gets no negative size.
+            ui.set_min_size((rect.size() - egui::vec2(12.0, 12.0)).max(egui::Vec2::ZERO));
+            ui.label(
+                egui::RichText::new(trf("Received since the view opened ({count} bytes kept)", &[("count", &hex.len().to_string())]))
+                    .small()
+                    .color(tokens.text_dim),
+            );
+            egui::ScrollArea::vertical().id_salt(("sshcraft-hex", id)).stick_to_bottom(true).auto_shrink([false, false]).show_rows(
+                ui,
+                14.0,
+                hex.line_count(),
+                |ui, range| {
+                    for line in &hex.rows(range) {
+                        ui.label(egui::RichText::new(line).monospace().size(12.0).color(tokens.text));
+                    }
+                },
+            );
+        });
+    });
 }
 
 /// How often the resource bar asks the server again, in seconds.
@@ -1350,8 +1432,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let full = snippet_bar(app, ui, id, ui.available_rect_before_wrap());
     let composing = app.terminals.get(&id).is_some_and(|t| t.compose.is_some());
     let compose_height = if composing { crate::terminal::compose::COMPOSE_HEIGHT } else { 0.0 };
-    let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
-    let compose_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), pos2(full.max.x, (term_rect.max.y + compose_height).min(full.max.y)));
+    let whole = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
+    // The hex view takes the lower part, below the terminal: nothing of one reaches the other.
+    let hex_open = app.terminals.get(&id).is_some_and(|t| t.hex.is_some());
+    let term_rect = if hex_open { Rect::from_min_max(whole.min, pos2(whole.max.x, whole.lerp_inside(egui::vec2(0.0, 0.6)).y)) } else { whole };
+    let hex_rect = Rect::from_min_max(pos2(whole.min.x, term_rect.max.y), whole.max);
+    let compose_rect = Rect::from_min_max(pos2(full.min.x, whole.max.y), pos2(full.max.x, (whole.max.y + compose_height).min(full.max.y)));
     let status_rect = Rect::from_min_max(pos2(full.min.x, compose_rect.max.y), full.max);
     // Ctrl+Enter sends the compose field, before the terminal or the field itself sees the key.
     let compose_send = focused && composing && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
@@ -1393,39 +1479,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         return;
     };
     for command in pending {
-        match command {
-            "ui.terminal.copy" => {
-                if let Some(text) = tab.term.selection_text() {
-                    ctx.copy_text(text);
-                }
-            }
-            "ui.terminal.paste" => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
-            "ui.terminal.prev_command" => {
-                tab.term.jump_to_prompt(sshcraft_term::Direction::Up);
-            }
-            "ui.terminal.next_command" => {
-                tab.term.jump_to_prompt(sshcraft_term::Direction::Down);
-            }
-            "ui.terminal.compose" => {
-                tab.compose = if tab.compose.is_some() { None } else { Some(String::new()) };
-                if tab.compose.is_some() {
-                    ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("sshcraft-compose", id))));
-                }
-            }
-            "ui.terminal.paste_history" => tab.paste_picker = !tab.paste_picker,
-            "ui.terminal.hints" => {
-                let found = crate::terminal::hints::find_hints(&tab.term.screen());
-                let labels = crate::terminal::hints::labels(found.len());
-                tab.hints = (!found.is_empty()).then(|| labels.into_iter().zip(found).collect());
-                tab.hint_typed.clear();
-            }
-            "ui.terminal.copy_output" => {
-                if let Some(text) = tab.term.last_finished_output() {
-                    ctx.copy_text(text);
-                }
-            }
-            _ => {}
-        }
+        run_terminal_command(tab, command, &ctx, id);
     }
     // The suggestion list takes its keys before the terminal sees them, and only while the
     // terminal has the keyboard (not a search field or a dialog).
@@ -1498,6 +1552,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         let mark = ui.put(at, egui::Label::new(egui::RichText::new(tr("Rec")).small().color(tokens.danger)));
         mark.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr("Rec")));
     }
+    hex_panel(app, ui, id, hex_rect);
     if let Some(size) = response.resize
         && can_send
     {

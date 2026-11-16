@@ -79,6 +79,7 @@ async fn saved_settings_come_back() {
             host_view: HostView::List,
             ligatures: false,
             show_reachability: true,
+            dropdown_shortcut: Some("Ctrl+`".into()),
         };
         s.terminal.terminal_type = "vt100".into();
         s.terminal.clipboard_osc52 = Osc52::Off;
@@ -151,7 +152,7 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 30);
+    assert_eq!(SHORTCUT_ACTIONS.len(), 31);
     for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about", "quickConnect"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
@@ -229,6 +230,7 @@ async fn takeover_copies_every_field() {
             host_view: HostView::List,
             ligatures: true,
             show_reachability: false,
+            dropdown_shortcut: None,
         }
     );
     assert_eq!(s.terminal.terminal_type, "vt220");
@@ -401,4 +403,15 @@ fn the_snippet_bar_is_unique_and_bounded() {
     assert_eq!(s.terminal.snippet_bar.len(), crate::settings::MAX_SNIPPET_BAR);
     assert_eq!(s.terminal.snippet_bar[0], "s0");
     assert!(!s.terminal.snippet_bar.iter().any(String::is_empty));
+}
+
+#[test]
+fn a_dropdown_shortcut_sshcraft_cannot_read_is_dropped() {
+    let mut s = EngineSettings::default();
+    s.appearance.dropdown_shortcut = Some("Ctrl+Alt+T".into());
+    assert_eq!(s.clone().sanitized().appearance.dropdown_shortcut.as_deref(), Some("Ctrl+Alt+T"));
+    for bad in ["T", "Shift+Ctrl+T", "Ctrl+$(id)", ""] {
+        s.appearance.dropdown_shortcut = Some(bad.into());
+        assert_eq!(s.clone().sanitized().appearance.dropdown_shortcut, None, "{bad}");
+    }
 }

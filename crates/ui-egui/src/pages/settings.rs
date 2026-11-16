@@ -62,6 +62,9 @@ pub struct SettingsView {
     /// The font family being typed, saved when the field is left.
     #[serde(skip)]
     pub font_family: Option<String>,
+    /// The dropdown shortcut being typed, taken when the field is left and only when valid.
+    #[serde(skip)]
+    pub dropdown_shortcut: Option<String>,
     /// The shells this device offers, fetched when the terminal section is first shown.
     #[serde(skip)]
     pub shells: Option<Vec<Value>>,
@@ -197,6 +200,23 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.end_row();
         ui.label(tr("Ligatures"));
         ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
+        ui.end_row();
+        ui.label(tr("Dropdown window"));
+        ui.horizontal(|ui| {
+            // Typed as a draft: half a combination is never saved or registered system-wide.
+            let typed = app.ui.settings.dropdown_shortcut.get_or_insert_with(|| a.dropdown_shortcut.clone().unwrap_or_default());
+            let response = ui
+                .add(egui::TextEdit::singleline(typed).hint_text("Ctrl+`").desired_width(120.0).char_limit(40))
+                .on_hover_text(tr("A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off."));
+            let text = typed.trim().to_string();
+            let valid = text.is_empty() || sshcraft_engine::settings::valid_combo(&text);
+            if response.lost_focus() && valid {
+                a.dropdown_shortcut = (!text.is_empty()).then_some(text);
+                app.ui.settings.dropdown_shortcut = None;
+            } else if !valid {
+                ui.label(egui::RichText::new(tr("Like Ctrl+` or Ctrl+Alt+T")).color(crate::theme::Tokens::get(ui.ctx()).danger));
+            }
+        });
         ui.end_row();
         ui.label(tr("Reachability"));
         ui.checkbox(&mut a.show_reachability, tr("Show in the host list whether each host answers (connects to them every minute)"));

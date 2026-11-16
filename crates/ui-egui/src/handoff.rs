@@ -14,6 +14,8 @@ use sshcraft_model::ssh_url::{Target, parse_url};
 pub enum Handed {
     Link(Target),
     Host(HostId),
+    /// A plain second start: the running window comes to the front.
+    Reveal,
 }
 
 /// Files taken in one look.
@@ -32,6 +34,11 @@ pub fn dir_in(config_dir: &Path) -> PathBuf {
 /// reader never sees half a file.
 pub fn write(dir: &Path, link: &str) -> std::io::Result<()> {
     write_value(dir, &serde_json::json!({ "link": link }))
+}
+
+/// Asks the running SSHCraft to come to the front.
+pub fn write_reveal(dir: &Path) -> std::io::Result<()> {
+    write_value(dir, &serde_json::json!({ "reveal": true }))
 }
 
 /// Leaves the host a desktop shortcut opens.
@@ -60,9 +67,11 @@ pub fn take(dir: &Path) -> Vec<Handed> {
         let value = text.and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
         let link = value.as_ref().and_then(|v| v.get("link")).and_then(|l| l.as_str()).and_then(|l| parse_url(l).ok());
         let host = value.as_ref().and_then(|v| v.get("open_host")).and_then(|h| serde_json::from_value::<HostId>(h.clone()).ok());
-        match (link, host) {
-            (Some(target), None) => out.push(Handed::Link(target)),
-            (None, Some(id)) => out.push(Handed::Host(id)),
+        let reveal = value.as_ref().and_then(|v| v.get("reveal")).and_then(serde_json::Value::as_bool) == Some(true);
+        match (link, host, reveal) {
+            (Some(target), None, false) => out.push(Handed::Link(target)),
+            (None, Some(id), false) => out.push(Handed::Host(id)),
+            (None, None, true) => out.push(Handed::Reveal),
             _ => {}
         }
     }
@@ -80,15 +89,18 @@ pub fn poll(app: &mut crate::app::SshcraftApp, ctx: &egui::Context) {
     }
     app.handoff_next = now + EVERY;
     match take(&dir).into_iter().next() {
-        Some(Handed::Link(target)) if app.ui.quick_connect.is_none() => {
-            crate::quick_connect::open(app, target.name());
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        Some(Handed::Link(target)) => {
+            if app.ui.quick_connect.is_none() {
+                crate::quick_connect::open(app, target.name());
+            }
+            crate::dropdown::reveal(app, ctx);
         }
         // Only a host saved here; an id from anywhere else opens nothing.
         Some(Handed::Host(id)) if app.data.hosts.iter().any(|r| r.host.id == id) => {
             app.ui.connect_request = Some(crate::state::ConnectRequest::Host(id));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            crate::dropdown::reveal(app, ctx);
         }
+        Some(Handed::Reveal) => crate::dropdown::reveal(app, ctx),
         _ => {}
     }
 }
