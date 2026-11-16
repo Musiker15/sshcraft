@@ -711,6 +711,38 @@ async fn forward_input(input: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec
 }
 
 /// The whole life of one tab: connect, pump output, reconnect after a drop, end.
+/// A line from SSHCraft itself in the terminal of the session, set apart from the server's output.
+fn local_note(shared: &Shared, text: &str) {
+    let bytes = format!(
+        "
+[2m[SSHCraft] {text}[0m
+"
+    )
+    .into_bytes();
+    shared.flow.add(bytes.len());
+    shared.sink.data(bytes);
+}
+
+/// The login script of `host_id` when this device approved exactly these steps; says so in the
+/// terminal when one is set but not approved.
+fn login_script(ctx: &Context, host_id: HostId, shared: &Shared) -> Option<crate::login_script::LoginScript> {
+    let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
+    let host = store.list_hosts().ok()?.into_iter().find(|h| h.id == host_id)?;
+    let groups = store.list_groups().ok()?;
+    let steps = sshcraft_model::login_script::login_script_for(&host, &groups).filter(|s| !s.is_empty())?;
+    sshcraft_model::login_script::check(&steps).ok()?;
+    let digest = sshcraft_store::store::command_digest(&sshcraft_model::login_script::approval_argv(&steps));
+    if !store.command_approved(&digest).unwrap_or(false) {
+        drop(store);
+        local_note(
+            shared,
+            "This host has a login script that is not allowed on this device yet. Open the host, tick Allow this login script on this device, and save.",
+        );
+        return None;
+    }
+    Some(crate::login_script::LoginScript::new(steps, std::time::Instant::now()))
+}
+
 async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let sink = shared.sink.clone();
     let mut attempt = 0u32;
@@ -722,6 +754,7 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
         let reason = match connect_target(&ctx, &target, &shared.size, &opened).await {
             Ok((writer, mut events, notice, prober)) => {
                 *shared.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(writer.clone());
+                let script_writer = writer.clone();
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
                 // Output from before the drop may still wait in the stream unacknowledged: it keeps
                 // counting, so a reconnect does not let the session read another watermark's worth.
@@ -729,6 +762,10 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                 if let SessionTarget::Host { host_id } = &target {
                     remember_connection(&ctx, *host_id);
                 }
+                let mut script = match &target {
+                    SessionTarget::Host { host_id } => login_script(&ctx, *host_id, &shared),
+                    _ => None,
+                };
                 ever_connected = true;
                 attempt = 0;
                 let mut reason = Disconnect::Lost("connection closed".into());
@@ -750,8 +787,19 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                     };
                     match event {
                         Some(ShellEvent::Data(bytes)) => {
+                            let fed = script.as_mut().map(|s| s.feed(&bytes, std::time::Instant::now()));
                             shared.flow.add(bytes.len());
                             sink.data(bytes);
+                            match fed {
+                                Some(crate::login_script::Feed::Send(line)) => {
+                                    // The answer goes like typing: a failed write ends nothing.
+                                    let _sent = script_writer.write(&line).await;
+                                }
+                                Some(crate::login_script::Feed::TimedOut) => {
+                                    local_note(&shared, "The login script stopped: a step did not see its text within 15 seconds.");
+                                }
+                                Some(crate::login_script::Feed::Nothing) | None => {}
+                            }
                         }
                         Some(ShellEvent::Ended(r)) => {
                             reason = r;

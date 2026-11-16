@@ -17,7 +17,12 @@ type Out = futures::future::BoxFuture<'static, Result<Value, CommandError>>;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         query("group.list", "Groups", "none", run_list),
-        command("group.save", "Save a group", "{ group: the group as group.list returns it, without password flags }", run_save),
+        command(
+            "group.save",
+            "Save a group",
+            "{ group: the group as group.list returns it, without password flags, approve_command?, approve_login_script? }",
+            run_save,
+        ),
         command("group.delete", "Delete a group", "{ id }", run_delete),
     ]
 }
@@ -53,11 +58,15 @@ struct SaveParams {
     /// As for `host.save`: the user entered the proxy command in this save.
     #[serde(default)]
     approve_command: bool,
+    /// As for `host.save`: the user entered the login script in this save.
+    #[serde(default)]
+    approve_login_script: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut group, approve_command } = parse("group.save", params)?;
+        let SaveParams { mut group, approve_command, approve_login_script } = parse("group.save", params)?;
+        super::host::check_login_script("group.save", &group.defaults)?;
         let id = group.id.0.to_string();
         let (orphans, before) = {
             let store = ctx.session.store();
@@ -72,6 +81,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         }
         if approve_command {
             super::host::approve_commands(&ctx, [&group.defaults])?;
+        }
+        if approve_login_script {
+            super::host::approve_login_scripts(&ctx, [&group.defaults])?;
         }
         servers.extend(drop_orphans(&ctx.session, &orphans)?);
         ctx.session.announce(&servers);

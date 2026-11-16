@@ -6,6 +6,7 @@
 pub mod appearance;
 pub mod forward;
 pub mod keytypes;
+pub mod login_script;
 pub mod logtext;
 pub mod model;
 pub mod os_detect;

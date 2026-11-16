@@ -27,7 +27,7 @@ pub fn specs() -> Vec<CommandSpec> {
         command(
             "host.save",
             "Save a host",
-            "{ host: the host as host.list returns it, without password flags, approve_command?: the user entered its proxy command }",
+            "{ host: the host as host.list returns it, without password flags, approve_command?: the user entered its proxy command, approve_login_script?: the user entered its login script }",
             run_save,
         ),
         command("host.delete", "Delete a host", "{ id }", run_delete),
@@ -144,11 +144,16 @@ struct SaveParams {
     /// host's address without asking.
     #[serde(default)]
     approve_secret_ref: bool,
+    /// The user entered the login script in this save (the form sets it only when the script
+    /// changed there); anything else never approves one.
+    #[serde(default)]
+    approve_login_script: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command, approve_secret_ref } = parse("host.save", params)?;
+        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script } = parse("host.save", params)?;
+        check_login_script("host.save", &host.settings)?;
         let id = host.id.0.to_string();
         let (orphans, before) = {
             let store = ctx.session.store();
@@ -164,6 +169,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         }
         if approve_command {
             approve_commands(&ctx, [&host.settings])?;
+        }
+        if approve_login_script {
+            approve_login_scripts(&ctx, [&host.settings])?;
         }
         if approve_secret_ref
             && ctx.caller.is_user()
@@ -197,6 +205,29 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
     for s in settings {
         if let Some(Proxy::Command { argv }) = &s.proxy {
             store.approve_command(&sshcraft_store::store::command_digest(argv))?;
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a login script past its limits.
+pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSettings) -> Result<(), CommandError> {
+    match &settings.login_script {
+        Some(steps) => sshcraft_model::login_script::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string())),
+        None => Ok(()),
+    }
+}
+
+/// Approves the login scripts the user entered, like [`approve_commands`]: only the user, and
+/// only the exact steps.
+pub(crate) fn approve_login_scripts<'a>(ctx: &Ctx, settings: impl IntoIterator<Item = &'a ConnectionSettings>) -> Result<(), CommandError> {
+    if !ctx.caller.is_user() {
+        return Ok(());
+    }
+    let store = ctx.session.store();
+    for s in settings {
+        if let Some(steps) = s.login_script.as_deref().filter(|s| !s.is_empty()) {
+            store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::login_script::approval_argv(steps)))?;
         }
     }
     Ok(())

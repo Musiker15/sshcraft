@@ -16,6 +16,9 @@ pub mod gate;
 pub mod journal;
 pub mod links;
 pub mod listing;
+#[cfg(test)]
+mod login_approval_tests;
+pub mod login_script;
 pub mod passcli;
 pub mod prompts;
 pub mod recording;

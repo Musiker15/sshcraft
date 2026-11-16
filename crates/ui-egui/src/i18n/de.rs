@@ -308,6 +308,14 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Dark" => "Dunkel",
         "Light" => "Hell",
         "Tab colour" => "Tab-Farbe",
+        "Login script" => "Anmeldeskript",
+        "After connecting: wait for a text, then send a line. Never put a password here." => {
+            "Nach dem Verbinden: auf einen Text warten, dann eine Zeile senden. Niemals ein Passwort hier eintragen."
+        }
+        "Wait for" => "Warten auf",
+        "send" => "senden",
+        "Add a step" => "Schritt hinzufügen",
+        "Allow this login script on this device" => "Dieses Anmeldeskript auf diesem Gerät erlauben",
         "Own colour" => "Eigene Farbe",
         "Badge" => "Abzeichen",
         "e.g. PROD" => "z. B. PROD",

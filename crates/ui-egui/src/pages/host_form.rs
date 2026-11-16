@@ -4,6 +4,7 @@
 
 use egui::Ui;
 use serde_json::json;
+use sshcraft_model::login_script::LoginStep;
 use sshcraft_model::model::{ConnectionSettings, EnvVar, Group, GroupId, Host, HostId, HostOs, KeyRef, Proxy, ProxyEndpoint};
 use sshcraft_model::secret_ref::{Manager, SecretRef, SecretRefError};
 
@@ -114,6 +115,10 @@ pub struct HostForm {
     pub totp: String,
     pub has_totp: bool,
     pub remove_totp: bool,
+    /// The login script as the form opened.
+    pub opened_script: Option<Vec<LoginStep>>,
+    /// Allow the login script on this device with this save.
+    pub allow_script: bool,
 }
 
 impl HostForm {
@@ -122,6 +127,7 @@ impl HostForm {
         let port = host.settings.port.map(|p| p.to_string()).unwrap_or_default();
         let opened_proxy = host.settings.proxy.clone();
         let opened_ref = host.settings.password_ref.clone();
+        let opened_script = host.settings.login_script.clone();
         Self {
             host,
             editing,
@@ -136,6 +142,8 @@ impl HostForm {
             totp: String::new(),
             has_totp: false,
             remove_totp: false,
+            opened_script,
+            allow_script: false,
         }
     }
 }
@@ -195,6 +203,8 @@ pub struct GroupForm {
     pub port: String,
     pub error: Option<String>,
     pub opened_proxy: Option<Proxy>,
+    pub opened_script: Option<Vec<LoginStep>>,
+    pub allow_script: bool,
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -269,6 +279,46 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     });
     ui.end_row();
     *value = (!a.is_empty()).then_some(a);
+}
+
+/// The login script: steps that wait for a text and send a line. Changing it here allows it on
+/// this device with the save; a script that came another way (sync, an agent) is allowed only by
+/// ticking the box.
+fn login_script_editor(ui: &mut Ui, value: &mut Option<Vec<LoginStep>>, opened: &Option<Vec<LoginStep>>, allow: &mut bool) {
+    use sshcraft_model::login_script::{MAX_EXPECT_CHARS, MAX_SEND_CHARS, MAX_STEPS, check};
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(tr("Login script")).strong());
+    ui.label(tr("After connecting: wait for a text, then send a line. Never put a password here."));
+    let steps = value.get_or_insert_with(Vec::new);
+    let mut remove = None;
+    for (i, step) in steps.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(tr("Wait for"));
+            ui.add(egui::TextEdit::singleline(&mut step.expect).char_limit(MAX_EXPECT_CHARS).desired_width(140.0));
+            ui.label(tr("send"));
+            ui.add(egui::TextEdit::singleline(&mut step.send).char_limit(MAX_SEND_CHARS).desired_width(200.0));
+            if ui.small_button("×").on_hover_text(tr("Remove")).clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        steps.remove(i);
+    }
+    if steps.len() < MAX_STEPS && ui.button(tr("Add a step")).clicked() {
+        steps.push(LoginStep { expect: String::new(), send: String::new() });
+    }
+    if let Err(e) = check(steps) {
+        ui.label(egui::RichText::new(e.to_string()).color(crate::theme::Tokens::get(ui.ctx()).danger));
+    }
+    if steps.is_empty() {
+        *value = opened.as_ref().filter(|o| o.is_empty()).cloned();
+        return;
+    }
+    if *value != *opened {
+        *allow = true;
+    }
+    ui.checkbox(allow, tr("Allow this login script on this device"));
 }
 
 fn tri_state(ui: &mut Ui, label: &str, value: &mut Option<bool>, inherited: &From<bool>) {
@@ -568,6 +618,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
                 ui.separator();
                 settings_editor(ui, app, &mut form.host.settings, &mut form.port, &inherited, Some(form.host.id));
+                login_script_editor(ui, &mut form.host.settings.login_script, &form.opened_script, &mut form.allow_script);
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
                 password_ref_field(ui, &mut form.host.settings.password_ref);
                 totp_field(ui, &mut form.totp, form.has_totp, &mut form.remove_totp);
@@ -605,6 +656,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                     json!({
                         "host": form.host,
                         "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy),
+                        "approve_login_script": form.allow_script && form.host.settings.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                         "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
                     }),
                     Box::new(move |app, result| {
@@ -677,6 +729,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
                 ui.separator();
                 settings_editor(ui, app, &mut form.group.defaults, &mut form.port, &inherited, None);
+                login_script_editor(ui, &mut form.group.defaults.login_script, &form.opened_script, &mut form.allow_script);
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
             },
         );
@@ -707,7 +760,11 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 let generation = app.forms.start().unwrap_or_default();
                 app.runner.run(
                     "group.save",
-                    json!({ "group": form.group, "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy) }),
+                    json!({
+                        "group": form.group,
+                        "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy),
+                        "approve_login_script": form.allow_script && form.group.defaults.login_script.as_ref().is_some_and(|s| !s.is_empty()),
+                    }),
                     Box::new(move |app, result| {
                         let current = app.forms.done(generation);
                         match result {
@@ -740,6 +797,19 @@ impl GroupForm {
         let tags = group.tags.join(", ");
         let port = group.defaults.port.map(|p| p.to_string()).unwrap_or_default();
         let opened_proxy = group.defaults.proxy.clone();
-        Self { group, editing, password: String::new(), has_password, remove_password: false, tags, port, error: None, opened_proxy }
+        let opened_script = group.defaults.login_script.clone();
+        Self {
+            group,
+            editing,
+            password: String::new(),
+            has_password,
+            remove_password: false,
+            tags,
+            port,
+            error: None,
+            opened_proxy,
+            opened_script,
+            allow_script: false,
+        }
     }
 }
