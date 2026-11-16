@@ -316,3 +316,20 @@ fn chosen_hosts_change_together() {
     let beta = h.state().data.hosts.iter().find(|r| r.host.id == b).unwrap().host.tags.clone();
     assert!(beta.is_empty(), "a host not chosen keeps its tags");
 }
+
+#[test]
+fn a_host_shared_without_its_sign_in_asks_for_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let id = HostId(uuid::Uuid::new_v4());
+    let host = json!({ "id": id, "name": "shared", "settings": { "address": "10.0.0.9", "credentials_from_member": true } });
+    run(&session, "host.save", json!({ "host": host }));
+    until(&mut h, "the host", |app| app.data.hosts.iter().any(|r| r.host.id == id));
+    assert!(h.query_by_label("Add your own sign-in").is_some());
+    // With a key of the member's own, the hint goes.
+    let mut host = run(&session, "host.list", json!({})).as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap().clone();
+    host["settings"]["key"] = json!({ "kind": "agent", "fingerprint": "SHA256:abc" });
+    run(&session, "host.save", json!({ "host": host }));
+    until(&mut h, "the key", |app| app.data.hosts.iter().any(|r| r.host.id == id && r.host.settings.key.is_some()));
+    assert!(h.query_by_label("Add your own sign-in").is_none());
+}

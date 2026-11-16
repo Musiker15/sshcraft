@@ -312,6 +312,9 @@ fn to_copy_refs(store: &Store, server: ServerId, area: Uuid, settings: &mut Conn
             None => None,
         })
     };
+    // The owner signs in with something: whether it is still there after the copy decides
+    // whether the member is asked for a sign-in of their own.
+    let had = settings.key.is_some() || settings.password.is_some();
     settings.key = match settings.key.take() {
         Some(KeyRef::Stored { id }) => copy_in(store, server, area, ItemKind::Key, id.0)?.map(|copy| KeyRef::Stored { id: KeyId(copy) }),
         _ => None,
@@ -323,6 +326,7 @@ fn to_copy_refs(store: &Store, server: ServerId, area: Uuid, settings: &mut Conn
         e.password = password(e.password)?;
     }
     settings.identity = None;
+    settings.credentials_from_member = (had && settings.key.is_none() && settings.password.is_none()).then_some(true);
     if let Some(jumps) = &mut settings.jump_hosts {
         for jump in jumps.iter_mut() {
             if let Some(copy) = copy_in(store, server, area, ItemKind::Host, jump.0)? {

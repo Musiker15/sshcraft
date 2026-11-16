@@ -71,6 +71,10 @@ pub struct ConnectionSettings {
     /// Forward X11 to this computer's display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x11: Option<bool>,
+    /// Set on a shared copy whose owner signs in with a key or password that was not shared:
+    /// the member adds a sign-in of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credentials_from_member: Option<bool>,
     /// Merged with the groups above: a name set lower wins.
     #[serde(default)]
     pub env: Vec<EnvVar>,
@@ -444,6 +448,8 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
         x11: levels.iter().find_map(|l| l.settings.x11),
+        // Worked out for each copy, never inherited.
+        credentials_from_member: None,
         env: normalize_env(&env),
         session_log: levels.iter().find_map(|l| l.settings.session_log),
         appearance: Some(crate::appearance::merge(levels.iter().map(|l| l.settings.appearance.as_ref()))).filter(|a| !a.is_empty()),

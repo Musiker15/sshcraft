@@ -73,6 +73,12 @@ fn select(app: &mut SshcraftApp, pos: usize, id: HostId, modifiers: egui::Modifi
     }
 }
 
+/// A shared host whose owner's sign-in was not shared, and that has none of its own yet.
+pub fn needs_own_sign_in(host: &sshcraft_model::model::Host) -> bool {
+    let s = &host.settings;
+    s.credentials_from_member == Some(true) && s.key.is_none() && s.password.is_none() && s.identity.is_none() && s.password_ref.is_none()
+}
+
 /// One change to every chosen host.
 fn bulk(app: &mut SshcraftApp, patch: serde_json::Value) {
     let ids: Vec<HostId> = app.ui.hosts.selection.hosts.iter().copied().collect();
@@ -387,6 +393,11 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all
         let response = elided_label(ui, &row.host.name, MAX_NAME_WIDTH, tokens.text, FontId::proportional(14.0));
         if let Some(address) = &row.host.settings.address {
             elided_label(ui, address, 140.0, tokens.text_dim, FontId::proportional(13.0));
+        }
+        if needs_own_sign_in(&row.host) {
+            ui.label(egui::RichText::new(tr("Add your own sign-in")).color(tokens.warning).small()).on_hover_text(tr(
+                "This host was shared without its key or password. Edit it and choose a key or password of your own; it stays on your devices.",
+            ));
         }
         let id = row.host.id;
         if response.clicked() {

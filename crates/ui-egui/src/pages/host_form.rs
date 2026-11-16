@@ -715,6 +715,15 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                     ui.end_row();
                 });
                 ui.separator();
+                if crate::pages::hosts::needs_own_sign_in(&form.host) {
+                    let warning = crate::theme::Tokens::get(ui.ctx()).warning;
+                    ui.label(
+                        egui::RichText::new(tr(
+                            "This host was shared without its key or password. Choose a key or password of your own; it stays on your devices.",
+                        ))
+                        .color(warning),
+                    );
+                }
                 settings_editor(ui, app, &mut form.host.settings, &mut form.port, &inherited, Some(form.host.id));
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
                 password_ref_field(ui, &mut form.host.settings.password_ref);

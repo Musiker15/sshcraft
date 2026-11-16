@@ -34,6 +34,13 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Add your own sign-in" => "Eigene Anmeldung ergänzen",
+        "This host was shared without its key or password. Edit it and choose a key or password of your own; it stays on your devices." => {
+            "Dieser Host wurde ohne Schlüssel oder Passwort geteilt. Bearbeite ihn und wähle einen eigenen Schlüssel oder ein eigenes Passwort, das bleibt auf deinen Geräten."
+        }
+        "This host was shared without its key or password. Choose a key or password of your own; it stays on your devices." => {
+            "Dieser Host wurde ohne Schlüssel oder Passwort geteilt. Wähle einen eigenen Schlüssel oder ein eigenes Passwort, das bleibt auf deinen Geräten."
+        }
         "{count} hosts chosen" => "{count} Hosts ausgewählt",
         "Tag" => "Tag",
         "Add tag" => "Tag hinzufügen",

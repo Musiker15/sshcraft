@@ -303,6 +303,7 @@ async fn agent_keys_are_not_shared() {
     assert_eq!(outcome.agent_keys_skipped, 1);
     sync(&b).await;
     assert_eq!(b.hosts()[0].settings.key, None);
+    assert_eq!(b.hosts()[0].settings.credentials_from_member, Some(true), "the member is asked for a sign-in of their own");
 }
 
 #[tokio::test]
@@ -337,10 +338,13 @@ async fn keys_go_along_only_when_asked() {
     assert!(matches!(b.hosts()[0].settings.key, Some(KeyRef::Stored { id }) if id == b_keys[0].id));
     assert!(c.store.lock().unwrap().list_key_records().unwrap().is_empty());
     assert_eq!(c.hosts()[0].settings.key, None);
+    assert_eq!(c.hosts()[0].settings.credentials_from_member, Some(true), "shared without its key: the member brings one");
+    assert_eq!(b.hosts()[0].settings.credentials_from_member, None, "shared with its key: nothing to bring");
     // The owner keeps its key on the host.
     sync(&a).await;
     let mine = a.hosts().into_iter().find(|h| h.id == one.id).unwrap();
     assert!(matches!(mine.settings.key, Some(KeyRef::Stored { .. })));
+    assert_eq!(mine.settings.credentials_from_member, None, "the owner's original never carries it");
 }
 
 // ---------- Task 7: copies follow their original
