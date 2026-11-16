@@ -292,11 +292,17 @@ async fn a_missing_proxy_program_says_so() {
     }
 }
 
+/// A password made for one test run.
+fn fresh_password() -> String {
+    format!("{:016x}", rand::random::<u64>())
+}
+
 #[tokio::test]
 async fn a_route_whose_jump_host_ended_counts_as_closed() {
-    let mut jump = password_server("a").await;
-    let inner = password_server("b").await;
-    let params = route(vec![hop("jump", "127.0.0.1", jump.port, "a"), hop("inner", "127.0.0.1", inner.port, "b")], None);
+    let (a, b) = (fresh_password(), fresh_password());
+    let mut jump = password_server(&a).await;
+    let inner = password_server(&b).await;
+    let params = route(vec![hop("jump", "127.0.0.1", jump.port, &a), hop("inner", "127.0.0.1", inner.port, &b)], None);
     let session = go(params, Arc::default()).await.unwrap();
     assert!(!session.is_closed());
     jump.stop();
@@ -309,8 +315,9 @@ async fn a_route_whose_jump_host_ended_counts_as_closed() {
 
 #[tokio::test]
 async fn the_last_user_letting_go_runs_the_hook_once() {
-    let server = password_server("a").await;
-    let session = Arc::new(go(route(vec![hop("t", "127.0.0.1", server.port, "a")], None), Arc::default()).await.unwrap());
+    let pw = fresh_password();
+    let server = password_server(&pw).await;
+    let session = Arc::new(go(route(vec![hop("t", "127.0.0.1", server.port, &pw)], None), Arc::default()).await.unwrap());
     let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let seen = ran.clone();
     session.on_last_drop(Box::new(move || {
