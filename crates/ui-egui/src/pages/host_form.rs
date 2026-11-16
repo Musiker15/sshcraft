@@ -4,6 +4,7 @@
 
 use egui::Ui;
 use serde_json::json;
+use sshcraft_model::hooks::ConnectStep;
 use sshcraft_model::login_script::LoginStep;
 use sshcraft_model::model::{ConnectionSettings, EnvVar, Group, GroupId, Host, HostId, HostOs, KeyRef, Proxy, ProxyEndpoint};
 use sshcraft_model::secret_ref::{Manager, SecretRef, SecretRefError};
@@ -117,6 +118,8 @@ pub struct HostForm {
     pub remove_totp: bool,
     /// The login script as the form opened.
     pub opened_script: Option<Vec<LoginStep>>,
+    /// The steps before and after connecting as the form opened.
+    pub opened_steps: (Option<Vec<ConnectStep>>, Option<Vec<ConnectStep>>),
     /// Allow the login script on this device with this save.
     pub allow_script: bool,
 }
@@ -128,7 +131,9 @@ impl HostForm {
         let opened_proxy = host.settings.proxy.clone();
         let opened_ref = host.settings.password_ref.clone();
         let opened_script = host.settings.login_script.clone();
+        let opened_steps = (host.settings.before_connect.clone(), host.settings.after_disconnect.clone());
         Self {
+            opened_steps,
             host,
             editing,
             password: String::new(),
@@ -205,6 +210,7 @@ pub struct GroupForm {
     pub opened_proxy: Option<Proxy>,
     pub opened_script: Option<Vec<LoginStep>>,
     pub allow_script: bool,
+    pub opened_steps: (Option<Vec<ConnectStep>>, Option<Vec<ConnectStep>>),
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -279,6 +285,91 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     });
     ui.end_row();
     *value = (!a.is_empty()).then_some(a);
+}
+
+/// A list of steps before connecting or after the session (`which` names it). Lines are kept
+/// as typed; a step takes them once they read.
+fn steps_editor(ui: &mut Ui, title: &str, which: &str, owner: Option<HostId>, value: &mut Option<Vec<ConnectStep>>) {
+    use sshcraft_model::hooks::{MAX_STEPS, check};
+    use sshcraft_model::proxy_command;
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(title).strong());
+    let steps = value.get_or_insert_with(Vec::new);
+    let mut remove = None;
+    for (i, step) in steps.iter_mut().enumerate() {
+        let id = egui::Id::unique("sshcraft-step").with((which, owner, i));
+        ui.horizontal(|ui| {
+            match step {
+                ConnectStep::WakeOnLan { mac, broadcast, wait_secs, .. } => {
+                    ui.label(tr("Wake-on-LAN"));
+                    ui.add(egui::TextEdit::singleline(mac).hint_text("aa:bb:cc:dd:ee:ff").desired_width(140.0));
+                    let mut address = broadcast.clone().unwrap_or_default();
+                    if ui.add(egui::TextEdit::singleline(&mut address).hint_text("255.255.255.255").desired_width(110.0)).changed() {
+                        *broadcast = (!address.trim().is_empty()).then(|| address.trim().to_string());
+                    }
+                    ui.label(tr("then wait"));
+                    ui.add(egui::DragValue::new(wait_secs).range(0..=300).suffix(" s"));
+                }
+                ConnectStep::Knock { ports, delay_ms } => {
+                    ui.label(tr("Knock on ports"));
+                    let joined = ports.iter().map(u16::to_string).collect::<Vec<_>>().join(", ");
+                    let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or(joined);
+                    if ui.add(egui::TextEdit::singleline(&mut text).hint_text("7000, 8000, 9000").desired_width(160.0)).changed() {
+                        *ports = text.split([',', ' ']).filter(|p| !p.is_empty()).filter_map(|p| p.parse().ok()).collect();
+                    }
+                    ui.data_mut(|d| d.insert_temp(id, text));
+                    ui.label(tr("pause"));
+                    ui.add(egui::DragValue::new(delay_ms).range(0..=5000).suffix(" ms"));
+                }
+                ConnectStep::Command { argv, wait_secs } => {
+                    ui.label(tr("Program"));
+                    let mut line = ui
+                        .data(|d| d.get_temp::<String>(id))
+                        .filter(|l| proxy_command::split(l).map_or(true, |w| w == *argv))
+                        .unwrap_or_else(|| proxy_command::join(argv));
+                    let edited = ui
+                        .add(
+                            egui::TextEdit::singleline(&mut line)
+                                .hint_text("wg-quick up office")
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(220.0),
+                        )
+                        .changed();
+                    if edited && let Ok(words) = proxy_command::split(&line) {
+                        *argv = words;
+                    }
+                    ui.data_mut(|d| d.insert_temp(id, line));
+                    ui.label(tr("then wait"));
+                    ui.add(egui::DragValue::new(wait_secs).range(0..=300).suffix(" s"));
+                }
+            }
+            if ui.small_button("×").on_hover_text(tr("Remove")).clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        steps.remove(i);
+    }
+    if steps.len() < MAX_STEPS {
+        ui.horizontal(|ui| {
+            if ui.small_button(tr("Add Wake-on-LAN")).clicked() {
+                steps.push(ConnectStep::WakeOnLan { mac: String::new(), broadcast: None, port: None, wait_secs: 30 });
+            }
+            if ui.small_button(tr("Add knocking")).clicked() {
+                steps.push(ConnectStep::Knock { ports: Vec::new(), delay_ms: 200 });
+            }
+            if ui.small_button(tr("Add a program")).clicked() {
+                steps.push(ConnectStep::Command { argv: Vec::new(), wait_secs: 0 });
+            }
+        });
+    }
+    if let Err(e) = check(steps) {
+        ui.label(egui::RichText::new(e.to_string()).color(crate::theme::Tokens::get(ui.ctx()).danger));
+    }
+    if steps.is_empty() {
+        *value = None;
+    }
 }
 
 /// The login script: steps that wait for a text and send a line. Changing it here allows it on
@@ -618,10 +709,13 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
                 ui.separator();
                 settings_editor(ui, app, &mut form.host.settings, &mut form.port, &inherited, Some(form.host.id));
-                login_script_editor(ui, &mut form.host.settings.login_script, &form.opened_script, &mut form.allow_script);
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
                 password_ref_field(ui, &mut form.host.settings.password_ref);
                 totp_field(ui, &mut form.totp, form.has_totp, &mut form.remove_totp);
+                // Rarer settings last.
+                login_script_editor(ui, &mut form.host.settings.login_script, &form.opened_script, &mut form.allow_script);
+                steps_editor(ui, tr("Before connecting"), "before", Some(form.host.id), &mut form.host.settings.before_connect);
+                steps_editor(ui, tr("After the session"), "after", Some(form.host.id), &mut form.host.settings.after_disconnect);
             },
         );
         if let Some(error) = &form.error {
@@ -655,7 +749,9 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                     "host.save",
                     json!({
                         "host": form.host,
-                        "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy),
+                        // A program the user wrote or changed here is allowed with the save.
+                        "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy)
+                            || (form.host.settings.before_connect.clone(), form.host.settings.after_disconnect.clone()) != form.opened_steps,
                         "approve_login_script": form.allow_script && form.host.settings.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                         "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
                     }),
@@ -729,8 +825,11 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
                 ui.separator();
                 settings_editor(ui, app, &mut form.group.defaults, &mut form.port, &inherited, None);
-                login_script_editor(ui, &mut form.group.defaults.login_script, &form.opened_script, &mut form.allow_script);
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
+                // Rarer settings last.
+                login_script_editor(ui, &mut form.group.defaults.login_script, &form.opened_script, &mut form.allow_script);
+                steps_editor(ui, tr("Before connecting"), "before", None, &mut form.group.defaults.before_connect);
+                steps_editor(ui, tr("After the session"), "after", None, &mut form.group.defaults.after_disconnect);
             },
         );
         if let Some(error) = &form.error {
@@ -762,7 +861,8 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                     "group.save",
                     json!({
                         "group": form.group,
-                        "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy),
+                        "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy)
+                            || (form.group.defaults.before_connect.clone(), form.group.defaults.after_disconnect.clone()) != form.opened_steps,
                         "approve_login_script": form.allow_script && form.group.defaults.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                     }),
                     Box::new(move |app, result| {
@@ -798,7 +898,9 @@ impl GroupForm {
         let port = group.defaults.port.map(|p| p.to_string()).unwrap_or_default();
         let opened_proxy = group.defaults.proxy.clone();
         let opened_script = group.defaults.login_script.clone();
+        let opened_steps = (group.defaults.before_connect.clone(), group.defaults.after_disconnect.clone());
         Self {
+            opened_steps,
             group,
             editing,
             password: String::new(),

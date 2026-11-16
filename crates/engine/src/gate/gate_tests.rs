@@ -1110,3 +1110,15 @@ async fn agents_cannot_aim_a_login_script() {
     let r = call(&w, &conn, "host.save", json!({ "host": { "id": w.web.id.0, "group": gw.id.0 } })).await;
     assert!(is_denied(&r), "{r:?}");
 }
+
+#[tokio::test]
+async fn agents_cannot_aim_a_program_before_connecting() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let mut gw = group("vpn", None);
+    gw.defaults.before_connect = Some(vec![sshcraft_model::hooks::ConnectStep::Command { argv: vec!["wg-quick".into(), "up".into()], wait_secs: 0 }]);
+    w.add_group(&gw);
+    let conn = w.conn();
+    let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gw.id.0, "address": "evil.example" } })).await;
+    assert!(is_denied(&r), "{r:?}");
+}

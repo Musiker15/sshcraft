@@ -97,6 +97,21 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "Trash" => "Papierkorb",
         "Connections" => "Verbindungen",
+        "Wake-on-LAN before connecting to {count} hosts or groups" => "Wake-on-LAN vor dem Verbinden zu {count} Hosts oder Gruppen",
+        "Port knocking before connecting to {count} hosts or groups" => "Port-Knocking vor dem Verbinden zu {count} Hosts oder Gruppen",
+        "Local programs before or after connecting to {count} hosts or groups, once allowed" => {
+            "Lokale Programme vor oder nach dem Verbinden zu {count} Hosts oder Gruppen, sobald erlaubt"
+        }
+        "Wake-on-LAN" => "Wake-on-LAN",
+        "then wait" => "dann warten",
+        "Knock on ports" => "An Ports klopfen",
+        "pause" => "Pause",
+        "Program" => "Programm",
+        "Add Wake-on-LAN" => "Wake-on-LAN hinzufügen",
+        "Add knocking" => "Klopfen hinzufügen",
+        "Add a program" => "Programm hinzufügen",
+        "Before connecting" => "Vor dem Verbinden",
+        "After the session" => "Nach der Sitzung",
         "Tabs, port forwards and commands to one host share its connection" => {
             "Tabs, Portweiterleitungen und Befehle zu einem Host teilen sich seine Verbindung"
         }

@@ -235,6 +235,8 @@ struct Live {
     task: JoinHandle<()>,
     /// Present while the session is recorded into a session log.
     recorder: Option<Arc<crate::recording::Recorder>>,
+    /// The host, for its steps after the session.
+    host: Option<HostId>,
 }
 
 pub struct SessionManager {
@@ -544,7 +546,12 @@ impl SessionManager {
             size: Arc::new(Mutex::new((cols, rows))),
             flow: Arc::new(Flow::default()),
         };
+        let host = match &target {
+            SessionTarget::Host { host_id } => Some(*host_id),
+            _ => None,
+        };
         let live = Live {
+            host,
             input,
             writer: shared.writer.clone(),
             size: shared.size.clone(),
@@ -612,6 +619,13 @@ impl SessionManager {
             live.task.abort();
             if let Some(recorder) = live.recorder {
                 recorder.finish();
+            }
+            // The host's steps after the session (a VPN down), whatever ended it.
+            if let Some(host) = live.host {
+                let ctx = self.ctx.clone();
+                self.ctx.runtime.spawn(async move {
+                    let _done = crate::hooks::run(&ctx, host, crate::hooks::When::After).await;
+                });
             }
         }
     }
@@ -1206,6 +1220,8 @@ pub(crate) async fn connect_session(
     if share && let Some(session) = ctx.pool.get(pool_key) {
         return Ok((session, None));
     }
+    // Wake the computer, knock, start the VPN: before every new connection.
+    crate::hooks::run(ctx, host_id, crate::hooks::When::Before).await?;
     let mut hops = Vec::new();
     for resolved in &route.jumps {
         // A jump host that cannot be used is named.
@@ -1333,7 +1349,13 @@ async fn referenced_password(
 /// A proxy command runs only when it was set on this device or allowed here once: one that
 /// came with sync, a share or an agent's change is asked about first, and the answer is kept.
 async fn allow_command(ctx: &Context, host_name: &str, argv: &[String]) -> Result<(), Failure> {
-    let digest = sshcraft_store::store::command_digest(argv);
+    allow_program(ctx, host_name, argv, argv).await
+}
+
+/// Lets a local program run once this device allowed `digest_of` (its arguments, maybe with a
+/// prefix saying what it is for); else asks the user with `argv` shown.
+pub(crate) async fn allow_program(ctx: &Context, host_name: &str, digest_of: &[String], argv: &[String]) -> Result<(), Failure> {
+    let digest = sshcraft_store::store::command_digest(digest_of);
     let approved = ctx
         .store
         .lock()

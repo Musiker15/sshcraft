@@ -5,6 +5,7 @@
 
 pub mod appearance;
 pub mod forward;
+pub mod hooks;
 pub mod keytypes;
 pub mod login_script;
 pub mod logtext;

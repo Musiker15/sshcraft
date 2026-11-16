@@ -206,16 +206,25 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
         if let Some(Proxy::Command { argv }) = &s.proxy {
             store.approve_command(&sshcraft_store::store::command_digest(argv))?;
         }
+        // The programs of the steps before and after connecting, entered in the same form.
+        for steps in [&s.before_connect, &s.after_disconnect].into_iter().flatten() {
+            for argv in sshcraft_model::hooks::commands(steps) {
+                store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::hooks::approval_argv(argv)))?;
+            }
+        }
     }
     Ok(())
 }
 
 /// Refuses a login script past its limits.
 pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSettings) -> Result<(), CommandError> {
-    match &settings.login_script {
-        Some(steps) => sshcraft_model::login_script::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string())),
-        None => Ok(()),
+    if let Some(steps) = &settings.login_script {
+        sshcraft_model::login_script::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
     }
+    for steps in [&settings.before_connect, &settings.after_disconnect].into_iter().flatten() {
+        sshcraft_model::hooks::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
+    }
+    Ok(())
 }
 
 /// Approves the login scripts the user entered, like [`approve_commands`]: only the user, and

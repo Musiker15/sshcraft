@@ -13,6 +13,7 @@ pub mod error;
 pub mod events;
 pub mod forwards;
 pub mod gate;
+mod hooks;
 pub mod journal;
 pub mod links;
 pub mod listing;

@@ -81,6 +81,12 @@ pub struct ConnectionSettings {
     /// `Some(vec![])` means "none", not "inherit".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login_script: Option<Vec<crate::login_script::LoginStep>>,
+    /// Steps before connecting (wake, knock, a program); a program runs only once allowed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_connect: Option<Vec<crate::hooks::ConnectStep>>,
+    /// Steps after the session ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_disconnect: Option<Vec<crate::hooks::ConnectStep>>,
 }
 
 impl ConnectionSettings {
@@ -435,6 +441,8 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         session_log: levels.iter().find_map(|l| l.settings.session_log),
         appearance: Some(crate::appearance::merge(levels.iter().map(|l| l.settings.appearance.as_ref()))).filter(|a| !a.is_empty()),
         login_script: levels.iter().find_map(|l| l.settings.login_script.clone()),
+        before_connect: levels.iter().find_map(|l| l.settings.before_connect.clone()),
+        after_disconnect: levels.iter().find_map(|l| l.settings.after_disconnect.clone()),
     }
 }
 

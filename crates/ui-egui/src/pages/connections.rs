@@ -34,6 +34,9 @@ fn purpose(v: &Value) -> String {
     match text(v, "kind").as_str() {
         "sync" => trf("Sync with {name}: HTTPS, and a WebSocket for changes", &[("name", &name)]),
         "password_manager" => trf("{name}: passwords of {count} hosts or groups, fetched when connecting", &[("name", &name), ("count", &count)]),
+        "wake_on_lan" => trf("Wake-on-LAN before connecting to {count} hosts or groups", &[("count", &count)]),
+        "port_knock" => trf("Port knocking before connecting to {count} hosts or groups", &[("count", &count)]),
+        "connect_program" => trf("Local programs before or after connecting to {count} hosts or groups, once allowed", &[("count", &count)]),
         "ssh_agent" => tr("Keys from the SSH agent (Proton Pass), when a host uses one").to_owned(),
         "agent_port" => tr("AI agents connect here, from this computer only").to_owned(),
         "update_check" => tr("SSHCraft does not check for updates and sends no telemetry").to_owned(),

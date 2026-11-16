@@ -2203,3 +2203,92 @@ async fn reuse_can_be_turned_off() {
     let (_b, _) = connected_tab(&f).await;
     assert_eq!(f.server.connections(), 2);
 }
+
+mod steps {
+    use super::*;
+    use sshcraft_model::hooks::{ConnectStep, approval_argv, magic_packet};
+
+    fn set_before(f: &Fixture, steps: Vec<ConnectStep>) {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.before_connect = Some(steps);
+        store.upsert_host(&host).unwrap();
+    }
+
+    async fn open_until_done(f: &Fixture) -> Vec<SessionStatus> {
+        let sink = Arc::new(RecordingSink::default());
+        f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+        sink.statuses()
+    }
+
+    /// The test binary itself: `--list` lists no test for an unknown name and exits 0.
+    fn quiet_program() -> Vec<String> {
+        vec![std::env::current_exe().unwrap().to_string_lossy().into_owned(), "--list".into(), "no-such-test-xyz".into()]
+    }
+
+    #[tokio::test]
+    async fn knocks_reach_the_ports_in_order() {
+        let f = fixture(true).await;
+        let a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (pa, pb) = (a.local_addr().unwrap().port(), b.local_addr().unwrap().port());
+        let order = Arc::new(Mutex::new(Vec::new()));
+        for (listener, port) in [(a, pa), (b, pb)] {
+            let order = order.clone();
+            tokio::spawn(async move {
+                if listener.accept().await.is_ok() {
+                    order.lock().unwrap().push(port);
+                }
+            });
+        }
+        set_before(&f, vec![ConnectStep::Knock { ports: vec![pa, pb], delay_ms: 50 }]);
+        assert!(connected(&open_until_done(&f).await));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(*order.lock().unwrap(), vec![pa, pb]);
+    }
+
+    #[tokio::test]
+    async fn wake_on_lan_sends_the_magic_packet() {
+        let f = fixture(true).await;
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = socket.local_addr().unwrap().port();
+        set_before(
+            &f,
+            vec![ConnectStep::WakeOnLan { mac: "01:02:03:04:05:06".into(), broadcast: Some("127.0.0.1".into()), port: Some(port), wait_secs: 0 }],
+        );
+        assert!(connected(&open_until_done(&f).await));
+        let mut buf = [0u8; 200];
+        let n = tokio::time::timeout(Duration::from_secs(2), socket.recv(&mut buf)).await.unwrap().unwrap();
+        assert_eq!(&buf[..n], &magic_packet([1, 2, 3, 4, 5, 6]));
+    }
+
+    #[tokio::test]
+    async fn a_program_not_allowed_here_never_runs() {
+        // The prompter answers no: the program is refused before anything connects.
+        let f = fixture(false).await;
+        set_before(&f, vec![ConnectStep::Command { argv: vec!["sshcraft-no-such-program".into()], wait_secs: 0 }]);
+        let statuses = open_until_done(&f).await;
+        assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
+        assert_eq!(f.server.connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_allowed_program_runs_before_connecting() {
+        let f = fixture(true).await;
+        let argv = quiet_program();
+        f.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&approval_argv(&argv))).unwrap();
+        set_before(&f, vec![ConnectStep::Command { argv, wait_secs: 0 }]);
+        assert!(connected(&open_until_done(&f).await));
+    }
+
+    #[tokio::test]
+    async fn a_failing_program_stops_the_connection() {
+        let f = fixture(true).await;
+        let argv = vec![std::env::current_exe().unwrap().to_string_lossy().into_owned(), "--no-such-flag".into()];
+        f.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&approval_argv(&argv))).unwrap();
+        set_before(&f, vec![ConnectStep::Command { argv, wait_secs: 0 }]);
+        let statuses = open_until_done(&f).await;
+        assert_eq!(ended_code(&statuses), Some(ErrorCode::ConnectStepFailed));
+    }
+}

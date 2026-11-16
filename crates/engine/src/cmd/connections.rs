@@ -17,7 +17,8 @@ pub fn specs() -> Vec<CommandSpec> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Connection {
-    /// `sync`, `password_manager`, `ssh_agent`, `agent_port`, `update_check`.
+    /// `sync`, `password_manager`, `wake_on_lan`, `port_knock`, `connect_program`, `ssh_agent`,
+    /// `agent_port`, `update_check`.
     pub kind: &'static str,
     /// Where to: an address, a program, a pipe; `none` for what SSHCraft never does.
     pub target: String,
@@ -61,6 +62,23 @@ fn run_list(ctx: Ctx, _params: Value) -> Out {
                 count,
                 active: true,
             });
+        }
+        // Steps before and after connecting that reach out by themselves.
+        let mut wake = 0;
+        let mut knock = 0;
+        let mut program = 0;
+        for s in &levels {
+            let steps: Vec<&sshcraft_model::hooks::ConnectStep> = [&s.before_connect, &s.after_disconnect].into_iter().flatten().flatten().collect();
+            wake += usize::from(steps.iter().any(|st| matches!(st, sshcraft_model::hooks::ConnectStep::WakeOnLan { .. })));
+            knock += usize::from(steps.iter().any(|st| matches!(st, sshcraft_model::hooks::ConnectStep::Knock { .. })));
+            program += usize::from(steps.iter().any(|st| matches!(st, sshcraft_model::hooks::ConnectStep::Command { .. })));
+        }
+        for (kind, count, target) in
+            [("wake_on_lan", wake, "UDP broadcast"), ("port_knock", knock, "TCP"), ("connect_program", program, "local program")]
+        {
+            if count > 0 {
+                out.push(Connection { kind, target: target.to_owned(), name: String::new(), count, active: true });
+            }
         }
         out.push(Connection {
             kind: "ssh_agent",
