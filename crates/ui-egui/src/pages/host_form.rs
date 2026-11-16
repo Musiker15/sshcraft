@@ -310,11 +310,13 @@ fn persistence_row(ui: &mut Ui, value: &mut Option<sshcraft_model::persist::Pers
             None => tr("No"),
             Some(Tool::Tmux) => "tmux",
             Some(Tool::Screen) => "screen",
+            Some(Tool::TmuxControl) => tr("tmux, windows as tabs"),
         };
         egui::ComboBox::from_id_salt("sshcraft-persistence").selected_text(shown).show_ui(ui, |ui| {
             ui.selectable_value(&mut tool, None, tr("No"));
             ui.selectable_value(&mut tool, Some(Tool::Tmux), "tmux");
             ui.selectable_value(&mut tool, Some(Tool::Screen), "screen");
+            ui.selectable_value(&mut tool, Some(Tool::TmuxControl), tr("tmux, windows as tabs"));
         });
         match tool {
             None => *value = None,

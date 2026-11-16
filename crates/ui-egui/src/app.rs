@@ -224,8 +224,7 @@ impl SshcraftApp {
             return;
         }
         if let Some(PaneSlot::Session { session }) = t.panes.remove(pane) {
-            self.terminals.remove(&session);
-            self.run_reported("session.close", serde_json::json!({ "id": session }));
+            crate::session_tab::close_session(self, session);
         }
     }
 
@@ -306,9 +305,9 @@ impl SshcraftApp {
             return;
         }
         let tab = self.ui.tabs.remove(i);
-        for session in tab.panes.sessions() {
-            self.terminals.remove(&session);
-            self.run_reported("session.close", serde_json::json!({ "id": session }));
+        let sessions: Vec<_> = tab.panes.sessions().collect();
+        for session in sessions {
+            crate::session_tab::close_session(self, session);
         }
         self.ui.page = match self.ui.page {
             Page::Tab(shown) if shown == i => {

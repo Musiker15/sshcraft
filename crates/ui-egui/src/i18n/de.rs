@@ -34,6 +34,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "tmux, windows as tabs" => "tmux, Fenster als Tabs",
         "Keep the session" => "Sitzung behalten",
         "Every connect attaches to this session again, also after the connection dropped." => {
             "Jedes Verbinden hängt sich wieder an diese Sitzung, auch nach einem Verbindungsabbruch."

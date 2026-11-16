@@ -12,6 +12,8 @@ pub const MAX_NAME: usize = 64;
 pub enum Tool {
     Tmux,
     Screen,
+    /// tmux in control mode: its windows become SSHCraft tabs.
+    TmuxControl,
 }
 
 /// Which multiplexer and which of its sessions.
@@ -45,6 +47,7 @@ impl Persistence {
         Some(match self.tool {
             Tool::Tmux => format!("tmux new-session -A -s {}", self.name),
             Tool::Screen => format!("screen -D -RR {}", self.name),
+            Tool::TmuxControl => format!("tmux -CC new-session -A -s {}", self.name),
         })
     }
 }
@@ -69,6 +72,8 @@ mod tests {
         assert_eq!(tmux.command().as_deref(), Some("tmux new-session -A -s work"));
         let screen = Persistence { tool: Tool::Screen, name: "work".into() };
         assert_eq!(screen.command().as_deref(), Some("screen -D -RR work"));
+        let control = Persistence { tool: Tool::TmuxControl, name: "work".into() };
+        assert_eq!(control.command().as_deref(), Some("tmux -CC new-session -A -s work"));
         assert_eq!(Persistence { tool: Tool::Tmux, name: "a;b".into() }.command(), None);
     }
 }

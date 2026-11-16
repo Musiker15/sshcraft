@@ -65,6 +65,11 @@ impl Pump {
 
     /// Feeds up to `budget` of output into `term`.
     pub fn frame(&mut self, term: &mut Terminal, budget: FrameBudget) -> PumpOutcome {
+        self.frame_into(&mut |slice| term.feed(slice), budget)
+    }
+
+    /// [`Pump::frame`] into `feed` instead of a terminal (the tmux control stream).
+    pub fn frame_into(&mut self, feed: &mut dyn FnMut(&[u8]), budget: FrameBudget) -> PumpOutcome {
         let start = Instant::now();
         let mut out = PumpOutcome::default();
         loop {
@@ -87,7 +92,7 @@ impl Pump {
             let take = FEED_SLICE.min(room).min(self.held());
             let end = self.offset + take;
             if let Some(slice) = self.pending.get(self.offset..end) {
-                term.feed(slice);
+                feed(slice);
             }
             self.offset = end;
             out.fed += take;

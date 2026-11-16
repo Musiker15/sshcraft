@@ -89,6 +89,8 @@ struct Records {
     terms: Mutex<Vec<String>>,
     /// What clients sent on the standard input of `exec` channels.
     exec_input: Mutex<Vec<u8>>,
+    /// `exec` keeps its channel open after the output (a program that keeps running).
+    exec_keep_open: std::sync::atomic::AtomicBool,
     /// The protocol and cookie of the last `x11-req`.
     x11_request: Mutex<Option<(String, String)>>,
     /// Sent in X11 setups instead of the requested cookie.
@@ -163,6 +165,11 @@ impl TestServer {
 
     pub fn received_env(&self) -> Vec<(String, String)> {
         self.records.env.lock().unwrap().clone()
+    }
+
+    /// Keeps `exec` channels open after their output, like a program that keeps running.
+    pub fn set_exec_keep_open(&self, open: bool) {
+        self.records.exec_keep_open.store(open, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// The protocol and cookie of the last X11 request.
@@ -590,10 +597,14 @@ impl server::Handler for Handler {
         let stderr = self.records.exec_stderr.lock().unwrap().clone();
         let status = *self.records.exec_status.lock().unwrap();
         let delay = *self.records.exec_delay.lock().unwrap();
+        let keep_open = self.records.exec_keep_open.load(std::sync::atomic::Ordering::SeqCst);
         let handle = session.handle();
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             let _ = handle.data(channel, Bytes::from(output.into_bytes())).await;
+            if keep_open {
+                return;
+            }
             if !stderr.is_empty() {
                 let _ = handle.extended_data(channel, 1, Bytes::from(stderr.into_bytes())).await;
             }
