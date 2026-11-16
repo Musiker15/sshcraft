@@ -198,6 +198,9 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Ligatures"));
         ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
         ui.end_row();
+        ui.label(tr("Reachability"));
+        ui.checkbox(&mut a.show_reachability, tr("Show in the host list whether each host answers (connects to them every minute)"));
+        ui.end_row();
         ui.label(tr("Hosts as"));
         ui.horizontal(|ui| {
             ui.radio_value(&mut a.host_view, HostView::Grid, tr("Grid"));
@@ -277,6 +280,12 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             });
             ui.checkbox(&mut t.server_notifications, tr("Servers may show desktop notifications, always with the host's name"));
         });
+        ui.end_row();
+        ui.label(tr("Connections"));
+        ui.checkbox(&mut t.reuse_connections, tr("Tabs, port forwards and commands to one host share its connection"));
+        ui.end_row();
+        ui.label(tr("Server resources"));
+        ui.checkbox(&mut t.resource_bar, tr("Show load, memory and disk under SSH terminals (runs a command on the server every 10 seconds)"));
         ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));

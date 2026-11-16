@@ -31,7 +31,25 @@ pub fn specs() -> Vec<CommandSpec> {
             run_save,
         ),
         command("host.delete", "Delete a host", "{ id }", run_delete),
+        command(
+            "host.shortcut",
+            "Put a shortcut to the host on the desktop",
+            "{ host_id, dir?: the folder, the desktop if missing } -> { path }",
+            run_shortcut,
+        ),
+        command(
+            "host.bulk_update",
+            "Change many hosts at once",
+            "{ ids: at most 1000, patch: { group_id?, to_top_level?, add_tags?, remove_tags?, username?: empty to inherit, port?: 1 to 65535, key?, agent_forwarding?, x11? } } -> { updated }",
+            run_bulk_update,
+        ),
         query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
+        query(
+            "host.reachable",
+            "Check whether hosts answer",
+            "{ ids: at most 500 host ids } -> [{ id, reachable: true, false, or null behind a jump host or proxy }]",
+            run_reachable,
+        ),
         command("host.forget_key", "Forget the host key", "{ host_id }", run_forget_key),
         query("host.info", "Host details", "{ host: id or unique name }", run_info),
         command("host.exec", "Run a command on a host", "{ host: id or unique name, command, timeout_secs?: 1 to 600, 60 if missing }", run_exec),
@@ -148,11 +166,19 @@ struct SaveParams {
     /// changed there); anything else never approves one.
     #[serde(default)]
     approve_login_script: bool,
+    /// Programs of the steps before and after connecting that the user entered in this save;
+    /// only those the host runs are allowed, never one that came another way.
+    #[serde(default)]
+    approve_programs: Vec<Vec<String>>,
+    /// The user switched X11 forwarding on (or allowed it) in this save.
+    #[serde(default)]
+    approve_x11: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script } = parse("host.save", params)?;
+        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script, approve_programs, approve_x11 } =
+            parse("host.save", params)?;
         check_login_script("host.save", &host.settings)?;
         let id = host.id.0.to_string();
         let (orphans, before) = {
@@ -169,6 +195,10 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         }
         if approve_command {
             approve_commands(&ctx, [&host.settings])?;
+        }
+        approve_step_programs(&ctx, &host.settings, &approve_programs)?;
+        if approve_x11 {
+            approve_x11_for(&ctx, &host.settings, &host.id.0.to_string())?;
         }
         if approve_login_script {
             approve_login_scripts(&ctx, [&host.settings])?;
@@ -210,12 +240,39 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
     Ok(())
 }
 
+/// Allows X11 forwarding on this device for the level `id` when it switches it on; only the
+/// user can.
+pub(crate) fn approve_x11_for(ctx: &Ctx, settings: &ConnectionSettings, id: &str) -> Result<(), CommandError> {
+    if ctx.caller.is_user() && settings.x11 == Some(true) {
+        ctx.session.store().approve_command(&sshcraft_store::store::command_digest(&crate::sessions::x11_approval(id)))?;
+    }
+    Ok(())
+}
+
+/// Allows the step programs the user entered: each of `entered` that `settings` runs before or
+/// after connecting. A program the host or group got another way stays unapproved.
+pub(crate) fn approve_step_programs(ctx: &Ctx, settings: &ConnectionSettings, entered: &[Vec<String>]) -> Result<(), CommandError> {
+    if !ctx.caller.is_user() || entered.is_empty() {
+        return Ok(());
+    }
+    let store = ctx.session.store();
+    for steps in [&settings.before_connect, &settings.after_disconnect].into_iter().flatten() {
+        for argv in sshcraft_model::hooks::commands(steps).filter(|argv| entered.contains(argv)) {
+            store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::hooks::approval_argv(argv)))?;
+        }
+    }
+    Ok(())
+}
+
 /// Refuses a login script past its limits.
 pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSettings) -> Result<(), CommandError> {
-    match &settings.login_script {
-        Some(steps) => sshcraft_model::login_script::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string())),
-        None => Ok(()),
+    if let Some(steps) = &settings.login_script {
+        sshcraft_model::login_script::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
     }
+    for steps in [&settings.before_connect, &settings.after_disconnect].into_iter().flatten() {
+        sshcraft_model::hooks::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
+    }
+    Ok(())
 }
 
 /// Approves the login scripts the user entered, like [`approve_commands`]: only the user, and
@@ -265,6 +322,202 @@ fn run_recent(ctx: Ctx, params: Value) -> Out {
         let RecentParams { limit } = parse("host.recent", params)?;
         to_value(&ctx.session.store().recent_hosts(limit.min(100))?)
     })
+}
+
+#[derive(Deserialize)]
+struct ShortcutParams {
+    host_id: HostId,
+    #[serde(default)]
+    dir: Option<std::path::PathBuf>,
+}
+
+/// A shortcut that starts SSHCraft with `--open-host <id>`; it carries nothing but the id.
+fn run_shortcut(ctx: Ctx, params: Value) -> Out {
+    sync_run(move || {
+        let ShortcutParams { host_id, dir } = parse("host.shortcut", params)?;
+        let host = ctx.session.store().list_hosts()?.into_iter().find(|h| h.id == host_id).ok_or_else(|| CommandError::code(ErrorCode::NotFound))?;
+        let failed = |e: &dyn std::fmt::Display| CommandError::Failed { code: ErrorCode::Io, detail: Some(e.to_string()) };
+        let exe = std::env::current_exe().map_err(|e| failed(&e))?;
+        let dir = match dir {
+            Some(dir) => dir,
+            None => sshcraft_platform::shortcut::desktop_dir().map_err(|e| failed(&e))?,
+        };
+        let path = sshcraft_platform::shortcut::create(&dir, &host.name, &exe, &host_id.0).map_err(|e| failed(&e))?;
+        Ok(serde_json::json!({ "path": path }))
+    })
+}
+
+/// The most hosts one `host.bulk_update` call changes.
+const MAX_BULK: usize = 1000;
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct BulkPatch {
+    #[serde(default)]
+    group_id: Option<sshcraft_model::model::GroupId>,
+    #[serde(default)]
+    to_top_level: bool,
+    #[serde(default)]
+    add_tags: Vec<String>,
+    #[serde(default)]
+    remove_tags: Vec<String>,
+    /// An empty name: inherited again.
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    key: Option<sshcraft_model::model::KeyRef>,
+    #[serde(default)]
+    agent_forwarding: Option<bool>,
+    #[serde(default)]
+    x11: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct BulkParams {
+    ids: Vec<HostId>,
+    patch: BulkPatch,
+}
+
+impl BulkPatch {
+    /// Applies the change; passwords, proxies, scripts and everything else stay as they are.
+    fn apply(&self, host: &mut Host) {
+        if self.to_top_level {
+            host.group_id = None;
+        } else if let Some(group) = self.group_id {
+            host.group_id = Some(group);
+        }
+        let mut tags: Vec<String> = host.tags.iter().filter(|t| !self.remove_tags.contains(t)).cloned().collect();
+        tags.extend(self.add_tags.iter().filter(|t| !host.tags.contains(t)).cloned());
+        host.tags = sshcraft_model::model::normalize_tags(&tags);
+        if let Some(user) = &self.username {
+            host.settings.username = (!user.trim().is_empty()).then(|| user.trim().to_string());
+        }
+        if let Some(port) = self.port {
+            host.settings.port = Some(port);
+        }
+        if let Some(key) = &self.key {
+            host.settings.key = Some(key.clone());
+        }
+        if let Some(on) = self.agent_forwarding {
+            host.settings.agent_forwarding = Some(on);
+        }
+        if let Some(on) = self.x11 {
+            host.settings.x11 = Some(on);
+        }
+    }
+}
+
+/// Changes many hosts the same way. Each is saved through `host.save`, so every check, the
+/// earlier version and the sync queue work as for one host; unknown ids are skipped.
+fn run_bulk_update(ctx: Ctx, params: Value) -> Out {
+    use futures::FutureExt;
+    async move {
+        let BulkParams { ids, patch } = parse("host.bulk_update", params)?;
+        if ids.len() > MAX_BULK {
+            return Err(CommandError::bad_params("host.bulk_update", format!("at most {MAX_BULK} ids")));
+        }
+        if patch.port == Some(0) {
+            return Err(CommandError::bad_params("host.bulk_update", "the port must be 1 to 65535"));
+        }
+        if patch.username.as_deref().is_some_and(|u| u.chars().count() > 100 || u.chars().any(char::is_control)) {
+            return Err(CommandError::bad_params("host.bulk_update", "the user name is not valid"));
+        }
+        let hosts: Vec<Host> = {
+            let all = ctx.session.store().list_hosts()?;
+            all.into_iter().filter(|h| ids.contains(&h.id)).collect()
+        };
+        let mut updated = 0usize;
+        for mut host in hosts {
+            let before = host.clone();
+            patch.apply(&mut host);
+            if host == before {
+                continue;
+            }
+            ctx.session.execute(ctx.caller.clone(), "host.save", serde_json::json!({ "host": host })).await?;
+            updated += 1;
+        }
+        Ok(serde_json::json!({ "updated": updated }))
+    }
+    .boxed()
+}
+
+/// The most hosts one `host.reachable` call checks.
+const MAX_REACHABLE: usize = 500;
+/// Checks running at once.
+const REACHABLE_PARALLEL: usize = 16;
+/// How long one TCP connect may take.
+const REACHABLE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Deserialize)]
+struct ReachableParams {
+    ids: Vec<HostId>,
+}
+
+#[derive(serde::Serialize)]
+struct Reachable {
+    id: HostId,
+    /// `None`: behind a jump host or proxy, where a direct connect says nothing.
+    reachable: Option<bool>,
+}
+
+/// Checks still running, a name lookup included: a lookup that hangs keeps its place after the
+/// check gave up, so hanging lookups cannot pile up threads.
+static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(REACHABLE_PARALLEL);
+
+/// Whether `address:port` takes a TCP connection within [`REACHABLE_TIMEOUT`]; `None` when no
+/// check could start because earlier ones still hang.
+async fn probe(address: String, port: u16) -> Option<bool> {
+    let permit = PROBES.try_acquire().ok()?;
+    let address = address.trim_start_matches('[').trim_end_matches(']').to_string();
+    // The lookup keeps its place until it returns, also after this check gave up on it.
+    let lookup = tokio::task::spawn_blocking(move || {
+        let _held = permit;
+        std::net::ToSocketAddrs::to_socket_addrs(&(address.as_str(), port)).map(Iterator::collect::<Vec<_>>)
+    });
+    let Ok(Ok(Ok(addrs))) = tokio::time::timeout(REACHABLE_TIMEOUT, lookup).await else { return Some(false) };
+    let connect = tokio::net::TcpStream::connect(&addrs[..]);
+    Some(matches!(tokio::time::timeout(REACHABLE_TIMEOUT, connect).await, Ok(Ok(_))))
+}
+
+/// Opens a TCP connection to each host's address and port and closes it again; no SSH.
+fn run_reachable(ctx: Ctx, params: Value) -> Out {
+    use futures::{FutureExt, StreamExt};
+    async move {
+        let ReachableParams { ids } = parse("host.reachable", params)?;
+        if ids.len() > MAX_REACHABLE {
+            return Err(CommandError::bad_params("host.reachable", format!("at most {MAX_REACHABLE} ids")));
+        }
+        // Each host: where to connect, or `None` when the route is not direct.
+        let targets: Vec<(HostId, Option<(String, u16)>)> = {
+            let store = ctx.session.store();
+            let hosts = store.list_hosts()?;
+            let groups = store.list_groups()?;
+            ids.iter()
+                .filter_map(|id| hosts.iter().find(|h| h.id == *id))
+                .map(|host| {
+                    let chain = host.group_id.map(|g| group_chain(&groups, g)).unwrap_or_default();
+                    let refs: Vec<&Group> = chain.iter().collect();
+                    let jumps =
+                        host.settings.jump_hosts.clone().or_else(|| refs.iter().find_map(|g| g.defaults.jump_hosts.clone())).unwrap_or_default();
+                    let proxy = host.settings.proxy.clone().or_else(|| refs.iter().find_map(|g| g.defaults.proxy.clone()));
+                    let direct = jumps.is_empty() && matches!(proxy, None | Some(Proxy::Direct));
+                    (host.id, direct.then(|| effective_endpoint(host, &refs).ok()).flatten())
+                })
+                .collect()
+        };
+        let checks = targets.into_iter().map(|(id, target)| async move {
+            let reachable = match target {
+                Some((address, port)) => probe(address, port).await,
+                None => None,
+            };
+            Reachable { id, reachable }
+        });
+        let out: Vec<Reachable> = futures::stream::iter(checks).buffer_unordered(REACHABLE_PARALLEL).collect().await;
+        to_value(&out)
+    }
+    .boxed()
 }
 
 #[derive(Deserialize)]

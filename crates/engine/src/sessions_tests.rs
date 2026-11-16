@@ -2147,3 +2147,265 @@ async fn a_login_script_not_approved_here_never_sends() {
     assert!(!seen(&sink, "pong"), "an unapproved script sent its line");
     assert!(seen(&sink, "not allowed on this device yet"));
 }
+
+async fn connected_tab(f: &Fixture) -> (SessionId, Arc<RecordingSink>) {
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    (id, sink)
+}
+
+#[tokio::test]
+async fn two_tabs_to_one_host_share_a_connection() {
+    let f = fixture(true).await;
+    let (_a, _) = connected_tab(&f).await;
+    let (b, sink_b) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 1, "the second tab signed in again");
+    // The shared connection carries both shells.
+    f.manager.write(b, b"shared\n").unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !sink_b.data.lock().unwrap().windows(6).any(|w| w == b"shared") {
+        assert!(tokio::time::Instant::now() < deadline, "no echo on the shared connection");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_connection_ends_with_its_last_user() {
+    let f = fixture(true).await;
+    let (a, _) = connected_tab(&f).await;
+    f.manager.close(a);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (_b, _) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 2, "a connection nobody uses any more is not handed out");
+}
+
+#[tokio::test]
+async fn reuse_can_be_turned_off() {
+    let mut f = fixture(true).await;
+    f.manager = SessionManager::new(ManagerParts {
+        store: f.store.clone(),
+        vault: Some(f.vault.clone()),
+        prompter: f.prompter.clone(),
+        auth: Arc::new(sshcraft_ssh::NoPrompter),
+        agent: Arc::new(TestAgents { keys: vec![f.key.clone()], reachable: true }),
+        presence: Arc::new(FakePresence::new(&[Presence::Verified])),
+        security: None,
+        settings: Arc::new(|| {
+            let mut settings = crate::settings::EngineSettings::default();
+            settings.terminal.reuse_connections = false;
+            settings
+        }),
+        runtime: tokio::runtime::Handle::current(),
+        delay_scale: 0.01,
+    });
+    let (_a, _) = connected_tab(&f).await;
+    let (_b, _) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 2);
+}
+
+mod steps {
+    use super::*;
+    use sshcraft_model::hooks::{ConnectStep, approval_argv, magic_packet};
+
+    fn set_before(f: &Fixture, steps: Vec<ConnectStep>) {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.before_connect = Some(steps);
+        store.upsert_host(&host).unwrap();
+    }
+
+    async fn open_until_done(f: &Fixture) -> Vec<SessionStatus> {
+        let sink = Arc::new(RecordingSink::default());
+        f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+        sink.statuses()
+    }
+
+    /// The test binary itself: `--list` lists no test for an unknown name and exits 0.
+    fn quiet_program() -> Vec<String> {
+        vec![std::env::current_exe().unwrap().to_string_lossy().into_owned(), "--list".into(), "no-such-test-xyz".into()]
+    }
+
+    #[tokio::test]
+    async fn knocks_reach_the_ports_in_order() {
+        let f = fixture(true).await;
+        let a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (pa, pb) = (a.local_addr().unwrap().port(), b.local_addr().unwrap().port());
+        let order = Arc::new(Mutex::new(Vec::new()));
+        for (listener, port) in [(a, pa), (b, pb)] {
+            let order = order.clone();
+            tokio::spawn(async move {
+                if listener.accept().await.is_ok() {
+                    order.lock().unwrap().push(port);
+                }
+            });
+        }
+        set_before(&f, vec![ConnectStep::Knock { ports: vec![pa, pb], delay_ms: 50 }]);
+        assert!(connected(&open_until_done(&f).await));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(*order.lock().unwrap(), vec![pa, pb]);
+    }
+
+    #[tokio::test]
+    async fn wake_on_lan_sends_the_magic_packet() {
+        let f = fixture(true).await;
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = socket.local_addr().unwrap().port();
+        set_before(
+            &f,
+            vec![ConnectStep::WakeOnLan { mac: "01:02:03:04:05:06".into(), broadcast: Some("127.0.0.1".into()), port: Some(port), wait_secs: 0 }],
+        );
+        assert!(connected(&open_until_done(&f).await));
+        let mut buf = [0u8; 200];
+        let n = tokio::time::timeout(Duration::from_secs(2), socket.recv(&mut buf)).await.unwrap().unwrap();
+        assert_eq!(&buf[..n], &magic_packet([1, 2, 3, 4, 5, 6]));
+    }
+
+    #[tokio::test]
+    async fn a_program_not_allowed_here_never_runs() {
+        // The prompter answers no: the program is refused before anything connects.
+        let f = fixture(false).await;
+        set_before(&f, vec![ConnectStep::Command { argv: vec!["sshcraft-no-such-program".into()], wait_secs: 0 }]);
+        let statuses = open_until_done(&f).await;
+        assert_eq!(ended_code(&statuses), Some(ErrorCode::ProxyCommandNotAllowed));
+        assert_eq!(f.server.connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_allowed_program_runs_before_connecting() {
+        let f = fixture(true).await;
+        let argv = quiet_program();
+        f.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&approval_argv(&argv))).unwrap();
+        set_before(&f, vec![ConnectStep::Command { argv, wait_secs: 0 }]);
+        assert!(connected(&open_until_done(&f).await));
+    }
+
+    /// A listener that counts the connections it gets (a knock target).
+    async fn knock_counter() -> (u16, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = count.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        (port, count)
+    }
+
+    #[tokio::test]
+    async fn a_knock_reaches_an_ipv6_address_in_brackets() {
+        let f = fixture(true).await;
+        let Ok(listener) = tokio::net::TcpListener::bind("[::1]:0").await else { return };
+        let port = listener.local_addr().unwrap().port();
+        let knocked = Arc::new(AtomicUsize::new(0));
+        let seen = knocked.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.address = Some("[::1]".into());
+            host.settings.before_connect = Some(vec![ConnectStep::Knock { ports: vec![port], delay_ms: 0 }]);
+            store.upsert_host(&host).unwrap();
+        }
+        let _ = open_until_done(&f).await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while knocked.load(Ordering::SeqCst) == 0 {
+            assert!(tokio::time::Instant::now() < deadline, "the knock never reached [::1]");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn the_steps_after_run_once_the_last_tab_lets_go() {
+        let f = fixture(true).await;
+        let (port, knocks) = knock_counter().await;
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.after_disconnect = Some(vec![ConnectStep::Knock { ports: vec![port], delay_ms: 0 }]);
+            store.upsert_host(&host).unwrap();
+        }
+        let (a, _) = connected_tab(&f).await;
+        let (b, _) = connected_tab(&f).await;
+        assert_eq!(f.server.connections(), 1, "the tabs share one connection");
+        f.manager.close(a);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(knocks.load(Ordering::SeqCst), 0, "the other tab still uses the connection");
+        f.manager.close(b);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while knocks.load(Ordering::SeqCst) == 0 {
+            assert!(tokio::time::Instant::now() < deadline, "the steps after never ran");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(knocks.load(Ordering::SeqCst), 1, "once");
+    }
+
+    #[tokio::test]
+    async fn a_failing_program_stops_the_connection() {
+        let f = fixture(true).await;
+        let argv = vec![std::env::current_exe().unwrap().to_string_lossy().into_owned(), "--no-such-flag".into()];
+        f.store.lock().unwrap().approve_command(&sshcraft_store::store::command_digest(&approval_argv(&argv))).unwrap();
+        set_before(&f, vec![ConnectStep::Command { argv, wait_secs: 0 }]);
+        let statuses = open_until_done(&f).await;
+        assert_eq!(ended_code(&statuses), Some(ErrorCode::ConnectStepFailed));
+    }
+}
+
+#[tokio::test]
+async fn the_resource_probe_runs_its_fixed_command_over_the_tab() {
+    let f = fixture(true).await;
+    f.server.set_exec_output("0.50 0.4 0.3 1/2 3\n@@SSHCRAFT@@\nMemTotal: 1000 kB\nMemAvailable: 250 kB\n@@SSHCRAFT@@\n");
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    let r = f.manager.resources(id).await.unwrap().unwrap();
+    assert_eq!((r.load, r.memory_percent, r.disk_percent), (Some(0.5), Some(75), None));
+    assert!(f.server.received_commands().contains(&sshcraft_model::resources::PROBE.to_owned()));
+    assert!(f.manager.resources(uuid::Uuid::new_v4()).await.is_err(), "no such tab");
+}
+
+#[tokio::test]
+async fn tabs_opened_at_once_wait_for_one_connection() {
+    let f = fixture(true).await;
+    let sinks: Vec<Arc<RecordingSink>> = (0..3).map(|_| Arc::new(RecordingSink::default())).collect();
+    for sink in &sinks {
+        f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    }
+    for sink in &sinks {
+        sink.wait_for(connected).await;
+    }
+    assert_eq!(f.server.connections(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_command_never_rides_on_the_users_tab() {
+    let f = fixture(true).await;
+    let (_tab, _) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 1);
+    let _ = crate::agent_sessions::AgentSessions::exec(&f.manager, f.host_id, "true", 1024, Duration::from_secs(10)).await;
+    assert_eq!(f.server.connections(), 2, "a connection of its own");
+}
+
+#[tokio::test]
+async fn x11_not_allowed_here_is_never_requested() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.x11 = Some(true);
+        store.upsert_host(&host).unwrap();
+    }
+    let (_tab, sink) = connected_tab(&f).await;
+    assert!(sink.statuses().contains(&SessionStatus::Connected { notice: Some(ErrorCode::X11NotAllowed) }));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(f.server.x11_request(), None, "the server never hears of X11");
+}

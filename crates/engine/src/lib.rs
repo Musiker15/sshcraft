@@ -6,6 +6,8 @@
 
 pub mod agent_link;
 pub mod agent_sessions;
+#[cfg(test)]
+mod bulk_tests;
 pub mod caller;
 pub mod cmd;
 pub mod consent;
@@ -13,6 +15,7 @@ pub mod error;
 pub mod events;
 pub mod forwards;
 pub mod gate;
+mod hooks;
 pub mod journal;
 pub mod links;
 pub mod listing;
@@ -20,7 +23,10 @@ pub mod listing;
 mod login_approval_tests;
 pub mod login_script;
 pub mod passcli;
+mod pool;
 pub mod prompts;
+#[cfg(test)]
+mod reachable_tests;
 pub mod recording;
 pub mod secrets;
 pub mod sessions;

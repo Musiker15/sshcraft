@@ -71,6 +71,8 @@ pub enum ErrorCode {
     SecretRefNotAllowed,
     /// The password manager could not give the password (not installed, locked, no such item).
     SecretRefFailed,
+    /// A program of a step before or after connecting did not start, failed or ran too long.
+    ConnectStepFailed,
     /// The stored TOTP secret is not Base32.
     TotpInvalid,
     PasswordRejected,
@@ -79,6 +81,11 @@ pub enum ErrorCode {
     SerialFailed,
     JumpIncomplete,
     AgentForwardingUnavailable,
+    /// X11 forwarding was asked for, but this computer has no display.
+    X11Unavailable,
+    /// X11 forwarding came through sync, a share or an import and was not allowed on this
+    /// device: the session runs without it.
+    X11NotAllowed,
     CertificateMismatch,
     InvalidCertificate,
     /// The certificate had expired: signed in with the key alone.

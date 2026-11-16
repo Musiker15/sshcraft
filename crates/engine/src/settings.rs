@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 29] = [
+pub const SHORTCUT_ACTIONS: [&str; 30] = [
     "palette",
     "newTab",
     "closeTab",
@@ -60,6 +60,8 @@ pub const SHORTCUT_ACTIONS: [&str; 29] = [
     // Added with the menus (R7).
     "quit",
     "about",
+    // Added with quick connect (F4).
+    "quickConnect",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];
@@ -180,6 +182,9 @@ pub struct Appearance {
     pub host_view: HostView,
     /// Neighbouring characters may join into one glyph where the font has ligatures (`->`).
     pub ligatures: bool,
+    /// The host list shows whether each host answers (a TCP connect every minute). Off by
+    /// default: it reaches out to every host shown.
+    pub show_reachability: bool,
 }
 
 impl Default for Appearance {
@@ -191,6 +196,7 @@ impl Default for Appearance {
             font_size: 14,
             host_view: HostView::Grid,
             ligatures: true,
+            show_reachability: false,
         }
     }
 }
@@ -228,6 +234,11 @@ pub struct Terminal {
     /// Patterns that act when an output line matches, at most [`MAX_PATTERNS`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Trigger>,
+    /// Tabs, port forwards and commands to one host share its SSH connection.
+    pub reuse_connections: bool,
+    /// A bar under SSH terminals with the server's load, memory and disk, read every ten
+    /// seconds while the tab is shown. Off by default: it runs a command on the server.
+    pub resource_bar: bool,
     /// Snippets (by id) shown as buttons above each terminal, in order, at most
     /// [`MAX_SNIPPET_BAR`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -300,6 +311,8 @@ impl Default for Terminal {
             highlights: Vec::new(),
             triggers: Vec::new(),
             snippet_bar: Vec::new(),
+            reuse_connections: true,
+            resource_bar: false,
         }
     }
 }
@@ -417,6 +430,7 @@ pub fn read_tauri_settings(store: &Store) -> EngineSettings {
             font_size: field(&map, "font_size").unwrap_or(d.appearance.font_size),
             host_view: field(&map, "host_view").unwrap_or(d.appearance.host_view),
             ligatures: d.appearance.ligatures,
+            show_reachability: d.appearance.show_reachability,
         };
         out.terminal.terminal_type = field(&map, "terminal_type").unwrap_or(d.terminal.terminal_type);
         out.terminal.clipboard_osc52 = field(&map, "clipboard_osc52").unwrap_or(d.terminal.clipboard_osc52);

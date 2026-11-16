@@ -70,9 +70,11 @@ impl AgentSessions {
     ) -> Result<sshcraft_ssh::RunOutput, ExecError> {
         let ctx = manager.context();
         let run = async {
-            let (session, _) = connect_session(&ctx, host, &OpenedKeys::default()).await.map_err(failure_code)?;
+            // An agent's command never rides on the user's open tab: signing in asks the user
+            // where the host needs it, and that question is their consent.
+            let (session, _) = connect_session(&ctx, host, &OpenedKeys::default(), false).await.map_err(failure_code)?;
             let output = session.run(command, limit).await;
-            session.disconnect().await;
+            crate::pool::release(session).await;
             output.map_err(|e| (ErrorCode::Session, Some(e.to_string())))
         };
         tokio::time::timeout(timeout, run).await.map_err(|_| (ErrorCode::Timeout, None))?

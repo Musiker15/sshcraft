@@ -78,6 +78,7 @@ async fn saved_settings_come_back() {
             font_size: 15,
             host_view: HostView::List,
             ligatures: false,
+            show_reachability: true,
         };
         s.terminal.terminal_type = "vt100".into();
         s.terminal.clipboard_osc52 = Osc52::Off;
@@ -150,8 +151,8 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 29);
-    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about"] {
+    assert_eq!(SHORTCUT_ACTIONS.len(), 30);
+    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about", "quickConnect"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
     assert!(SHORTCUT_ACTIONS.contains(&"bookmark"));
@@ -227,6 +228,7 @@ async fn takeover_copies_every_field() {
             font_size: 17,
             host_view: HostView::List,
             ligatures: true,
+            show_reachability: false,
         }
     );
     assert_eq!(s.terminal.terminal_type, "vt220");

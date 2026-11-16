@@ -6,6 +6,8 @@ use uuid::Uuid;
 pub const MAX_FORWARDS_PER_HOST: usize = 50;
 const MAX_NAME: usize = 100;
 const MAX_ADDRESS: usize = 253;
+/// The longest Unix socket path, in bytes (`sun_path` holds 108 with its final zero).
+const MAX_SOCKET_PATH: usize = 107;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -32,6 +34,9 @@ pub enum ForwardKind {
     Remote,
     /// `-D`: a SOCKS5 proxy here; every connection picks its own target.
     Dynamic,
+    /// `-L port:/path`: a port here reaches a Unix socket on the server. The path is the
+    /// rule's `target_host`, its `target_port` is 0.
+    Socket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +69,11 @@ fn address_ok(address: &str) -> bool {
     !address.is_empty() && address.chars().count() <= MAX_ADDRESS && !address.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
+/// An absolute path that fits a Unix socket address, without control characters.
+pub fn socket_path_ok(path: &str) -> bool {
+    path.starts_with('/') && path.len() <= MAX_SOCKET_PATH && !path.chars().any(char::is_control)
+}
+
 pub fn validate(rule: &ForwardRule) -> Result<(), ForwardError> {
     if rule.name.chars().count() > MAX_NAME || rule.name.chars().any(char::is_control) {
         return Err(ForwardError::Invalid("name"));
@@ -74,6 +84,8 @@ pub fn validate(rule: &ForwardRule) -> Result<(), ForwardError> {
     match rule.kind {
         ForwardKind::Dynamic if !rule.target_host.is_empty() || rule.target_port != 0 => Err(ForwardError::Invalid("target")),
         ForwardKind::Dynamic => Ok(()),
+        ForwardKind::Socket if !socket_path_ok(&rule.target_host) || rule.target_port != 0 => Err(ForwardError::Invalid("target")),
+        ForwardKind::Socket => Ok(()),
         _ if !address_ok(&rule.target_host) || rule.target_port == 0 => Err(ForwardError::Invalid("target")),
         _ => Ok(()),
     }
@@ -121,6 +133,7 @@ mod tests {
     fn rule(kind: ForwardKind) -> ForwardRule {
         let (target_host, target_port) = match kind {
             ForwardKind::Dynamic => (String::new(), 0),
+            ForwardKind::Socket => ("/run/postgresql/.s.PGSQL.5432".to_owned(), 0),
             _ => ("db.internal".to_owned(), 5432),
         };
         ForwardRule {
@@ -140,7 +153,7 @@ mod tests {
 
     #[test]
     fn valid_rules_of_every_kind() {
-        for kind in [ForwardKind::Local, ForwardKind::Remote, ForwardKind::Dynamic] {
+        for kind in [ForwardKind::Local, ForwardKind::Remote, ForwardKind::Dynamic, ForwardKind::Socket] {
             assert_eq!(validate(&rule(kind)), Ok(()), "{kind:?}");
         }
     }
@@ -202,5 +215,32 @@ mod tests {
         zero["bind_port"] = serde_json::json!(0);
         let values = vec![serde_json::to_value(&good).unwrap(), bad, zero, serde_json::json!("x")];
         assert_eq!(parse_rules(values), vec![good]);
+    }
+
+    #[test]
+    fn a_socket_rule_needs_an_absolute_short_path() {
+        let mut r = rule(ForwardKind::Socket);
+        r.target_host = "relative.sock".into();
+        assert!(invalid(r));
+        let mut r = rule(ForwardKind::Socket);
+        r.target_host = format!("/{}", "s".repeat(108));
+        assert!(invalid(r));
+        let mut r = rule(ForwardKind::Socket);
+        r.target_host = "/run/a
+b.sock"
+            .into();
+        assert!(invalid(r));
+        let mut r = rule(ForwardKind::Socket);
+        r.target_port = 22;
+        assert!(invalid(r));
+        let mut r = rule(ForwardKind::Socket);
+        r.target_host = "/run/my app/app.sock".into();
+        assert_eq!(validate(&r), Ok(()));
+    }
+
+    #[test]
+    fn an_older_version_skips_a_socket_rule() {
+        let value = serde_json::json!({ "id": ForwardId::new(), "kind": "carrier_pigeon", "bind_address": "127.0.0.1", "bind_port": 1 });
+        assert!(parse_rules(vec![value]).is_empty());
     }
 }

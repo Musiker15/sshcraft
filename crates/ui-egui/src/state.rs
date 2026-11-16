@@ -87,6 +87,11 @@ pub struct UiState {
     pub connect_request: Option<ConnectRequest>,
     #[serde(skip)]
     pub new_tab_query: String,
+    /// The quick connect field on the new-tab page.
+    #[serde(skip)]
+    pub quick_text: String,
+    #[serde(skip)]
+    pub quick_connect: Option<crate::quick_connect::QuickConnect>,
     #[serde(skip)]
     pub host_form: Option<crate::pages::host_form::HostForm>,
     #[serde(skip)]

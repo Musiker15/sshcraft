@@ -14,8 +14,9 @@ What the package installs:
   MCP server for agents), with the folder on `PATH`: the user's for a per-user install, the
   system's for a per-machine one.
 - A desktop shortcut only when its box is ticked; the choice is kept for updates.
-- No file types and no `ssh://` handler. Links never run anything; a link handler comes with F1
-  and only opens the connection dialog.
+- No file types. SSHCraft is offered for `ssh://` links as a capability
+  (`Software\RegisteredApplications`), so no other program loses them; the user picks SSHCraft in
+  the default apps. A link only fills the quick connect dialog.
 - Nothing while the Tauri version of SSHCraft is installed (its uninstall entry `SSHCraft`): the
   two would sync with the same device key. The installer says to uninstall it first; its
   uninstaller keeps the data unless "Delete the application data" is ticked.

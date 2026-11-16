@@ -22,6 +22,7 @@ pub mod hostkeys;
 mod proxy;
 pub mod socks;
 mod tunnel;
+pub mod x11;
 pub use auth::{Auth, AuthPromptLine, AuthPrompter, AuthRequest, CodeMaker, NoPrompter, certificate_valid_now};
 pub use tunnel::{MAX_TUNNEL_CONNECTIONS, Tunnel};
 
@@ -155,6 +156,9 @@ pub struct SessionOptions {
     pub agent_forwarding: Option<Arc<dyn AgentOpener>>,
     /// Sent before the shell starts; the server takes only what its `AcceptEnv` allows.
     pub env: Vec<(String, String)>,
+    /// Forward X11 to this display (on the target only). `None`: an X11 channel the server
+    /// opens is refused.
+    pub x11: Option<x11::X11Options>,
 }
 
 /// How to reach a host: the proxy (for the first connection only), then each hop in turn, the
@@ -274,6 +278,8 @@ pub use sshcraft_model::policy::ShellEvent;
 struct ClientHandler {
     /// Set on the target when forwarding is on; jump hosts never get the agent.
     agent: Option<Arc<dyn AgentOpener>>,
+    /// Set on the target when X11 forwarding is on.
+    x11: Option<Arc<x11::Forward>>,
     host_name: String,
     address: String,
     port: u16,
@@ -338,6 +344,22 @@ impl client::Handler for ClientHandler {
             let mut stream = channel.into_stream();
             let _ = tokio::io::copy_bidirectional(&mut stream, &mut agent).await;
         });
+        Ok(())
+    }
+
+    /// An X11 connection; refused unless a shell asked for forwarding (dropping the reply
+    /// refuses it).
+    async fn server_channel_open_x11(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        if let Some(forward) = &self.x11 {
+            forward.accept(channel, reply).await;
+        }
         Ok(())
     }
 
@@ -462,6 +484,17 @@ pub struct Session {
     certificate_expired: bool,
     /// Targets of this session's remote forwardings.
     remotes: tunnel::Remotes,
+    x11: Option<Arc<x11::Forward>>,
+    /// Runs once the last user let go of the connection (the steps after a session).
+    on_drop: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(f) = self.on_drop.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+            f();
+        }
+    }
 }
 
 pub struct Shell {
@@ -505,6 +538,7 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
     let mut certificate_expired = false;
     let remotes = tunnel::Remotes::default();
     let mut target_announcements = None;
+    let x11 = params.options.x11.map(|o| Arc::new(x11::Forward::new(o)));
     for (index, hop) in params.hops.into_iter().enumerate() {
         let host_name = hop.host_name.clone();
         let wrap = |error: SshError| {
@@ -538,6 +572,7 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
             announce,
             used: used.clone(),
             agent: if index == last { params.options.agent_forwarding.clone() } else { None },
+            x11: if index == last { x11.clone() } else { None },
             host_name: hop.host_name.clone(),
             address: hop.address.clone(),
             port: hop.port,
@@ -591,6 +626,8 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
         jumps: Arc::new(connected),
         certificate_expired,
         remotes,
+        x11,
+        on_drop: std::sync::Mutex::new(None),
     })
 }
 
@@ -598,14 +635,20 @@ impl Session {
     /// Listens on `bind_address:bind_port` here; connections reach `target_host:target_port`
     /// as seen from the server (`ssh -L`).
     pub async fn forward_local(&self, bind_address: &str, bind_port: u16, target_host: &str, target_port: u16) -> Result<Tunnel, SshError> {
-        let target = Some((target_host.to_owned(), target_port));
+        let target = tunnel::Dest::Tcp(target_host.to_owned(), target_port);
         tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, target).await
+    }
+
+    /// Listens on `bind_address:bind_port` here; connections reach the Unix socket `path` on
+    /// the server (`ssh -L port:/path`).
+    pub async fn forward_socket(&self, bind_address: &str, bind_port: u16, path: &str) -> Result<Tunnel, SshError> {
+        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, tunnel::Dest::Socket(path.to_owned())).await
     }
 
     /// A SOCKS5 proxy on `bind_address:bind_port` here; each connection asks for its own target
     /// (`ssh -D`).
     pub async fn forward_dynamic(&self, bind_address: &str, bind_port: u16) -> Result<Tunnel, SshError> {
-        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, None).await
+        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, tunnel::Dest::Socks).await
     }
 
     /// The server listens on `bind_address:bind_port`; connections reach
@@ -617,6 +660,16 @@ impl Session {
     /// Checks the connection to the target.
     pub fn prober(&self) -> Prober {
         Prober { handle: self.handle.clone() }
+    }
+
+    /// Whether the connection to the target or to a jump host ended.
+    pub fn is_closed(&self) -> bool {
+        self.handle.is_closed() || self.jumps.iter().any(|j| j.is_closed())
+    }
+
+    /// Runs `f` once the last user of this connection let go of it.
+    pub fn on_last_drop(&self, f: Box<dyn FnOnce() + Send>) {
+        *self.on_drop.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(f);
     }
 
     /// Completes once the connection to the target or to a jump host is gone.
@@ -656,6 +709,11 @@ impl Session {
         }
         if self.forward_agent {
             channel.agent_forward(false).await.map_err(protocol)?;
+        }
+        if let Some(forward) = &self.x11 {
+            // Marked first: the server may open a channel as soon as it has the request.
+            forward.mark_requested();
+            channel.request_x11(false, false, x11::PROTOCOL, forward.fake_hex(), forward.screen()).await.map_err(protocol)?;
         }
         channel.request_shell(false).await.map_err(protocol)?;
         let (mut read, write) = channel.split();

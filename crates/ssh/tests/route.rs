@@ -291,3 +291,41 @@ async fn a_missing_proxy_program_says_so() {
         other => panic!("expected a proxy error, got {:?}", other.err()),
     }
 }
+
+/// A password made for one test run.
+fn fresh_password() -> String {
+    format!("{:016x}", rand::random::<u64>())
+}
+
+#[tokio::test]
+async fn a_route_whose_jump_host_ended_counts_as_closed() {
+    let (a, b) = (fresh_password(), fresh_password());
+    let mut jump = password_server(&a).await;
+    let inner = password_server(&b).await;
+    let params = route(vec![hop("jump", "127.0.0.1", jump.port, &a), hop("inner", "127.0.0.1", inner.port, &b)], None);
+    let session = go(params, Arc::default()).await.unwrap();
+    assert!(!session.is_closed());
+    jump.stop();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !session.is_closed() {
+        assert!(tokio::time::Instant::now() < deadline, "still counted as open");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn the_last_user_letting_go_runs_the_hook_once() {
+    let pw = fresh_password();
+    let server = password_server(&pw).await;
+    let session = Arc::new(go(route(vec![hop("t", "127.0.0.1", server.port, &pw)], None), Arc::default()).await.unwrap());
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = ran.clone();
+    session.on_last_drop(Box::new(move || {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }));
+    let second = session.clone();
+    drop(session);
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 0, "another user still holds it");
+    drop(second);
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

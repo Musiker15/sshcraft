@@ -30,6 +30,21 @@ connection to a host without a symbol, SSHCraft reads `/etc/os-release` (or `una
 a separate channel and stores the result; it can also be set by hand in the host form. Each
 device asks a host only once, also when the answer is not recognized.
 
+## Changing many hosts at once
+
+Ctrl+click picks hosts one by one, Shift+click picks the range from the last click. While hosts
+are picked, a bar above the list moves them to a group, adds or removes a tag, or sets the user
+(empty takes it from the group again). Each host is saved as if it had been edited on its own:
+it gets an earlier version, passwords and keys stay as they are, and sync sends the change.
+
+## Reachability
+
+With *Settings › Appearance › Reachability* switched on, a dot in front of each host shows
+whether it answers: green when a TCP connection to its address and port opens within two
+seconds, red when not. SSHCraft checks the hosts in view once a minute, at most 16 at a time,
+without signing in. Hosts behind a jump host or proxy stay grey, since a direct connection says
+nothing about them. It is off by default because it reaches out to every host in the list.
+
 ## Import
 
 *Hosts → New → Import* reads one source, shows a preview and creates exactly the entries left

@@ -38,6 +38,12 @@ pub fn specs() -> Vec<CommandSpec> {
         query("session.list_dir", "List a directory of a session", "{ id, dir, prefix }", run_list_dir),
         command("session.bookmark", "Bookmark the recording", "{ id, text }", run_bookmark),
         query("session.recording", "Whether a session is recorded", "{ id }", run_recording),
+        query(
+            "session.resources",
+            "Load, memory and disk of a session's server",
+            "{ id } -> { load, memory_percent, memory_total_kib, disk_percent } or null",
+            run_resources,
+        ),
     ]
 }
 
@@ -217,6 +223,15 @@ fn run_bookmark(ctx: Ctx, params: Value) -> Out {
         })?;
         to_value(&mark)
     })
+}
+
+fn run_resources(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let IdParams { id } = parse("session.resources", params)?;
+        let found = ctx.session.sessions().resources(id).await.map_err(|e| CommandError::new(ErrorCode::Session, e))?;
+        to_value(&found)
+    }
+    .boxed()
 }
 
 fn run_recording(ctx: Ctx, params: Value) -> Out {

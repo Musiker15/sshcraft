@@ -68,6 +68,13 @@ pub struct ConnectionSettings {
     pub proxy: Option<Proxy>,
     #[serde(default)]
     pub agent_forwarding: Option<bool>,
+    /// Forward X11 to this computer's display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x11: Option<bool>,
+    /// Set on a shared copy whose owner signs in with a key or password that was not shared:
+    /// the member adds a sign-in of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credentials_from_member: Option<bool>,
     /// Merged with the groups above: a name set lower wins.
     #[serde(default)]
     pub env: Vec<EnvVar>,
@@ -81,6 +88,12 @@ pub struct ConnectionSettings {
     /// `Some(vec![])` means "none", not "inherit".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login_script: Option<Vec<crate::login_script::LoginStep>>,
+    /// Steps before connecting (wake, knock, a program); a program runs only once allowed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_connect: Option<Vec<crate::hooks::ConnectStep>>,
+    /// Steps after the session ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_disconnect: Option<Vec<crate::hooks::ConnectStep>>,
 }
 
 impl ConnectionSettings {
@@ -302,6 +315,7 @@ pub struct ResolvedHost {
     /// Never [`Proxy::Direct`]: that resolves to `None`.
     pub proxy: Option<Proxy>,
     pub agent_forwarding: bool,
+    pub x11: bool,
     pub env: Vec<EnvVar>,
     pub jump_hosts: Vec<HostId>,
 }
@@ -391,6 +405,7 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
     let totp = levels.iter().find_map(|l| l.settings.totp);
     let proxy = levels.iter().find_map(|l| l.settings.proxy.clone()).filter(|p| *p != Proxy::Direct);
     let agent_forwarding = levels.iter().find_map(|l| l.settings.agent_forwarding).unwrap_or(false);
+    let x11 = levels.iter().find_map(|l| l.settings.x11).unwrap_or(false);
     let jump_hosts = levels.iter().find_map(|l| l.settings.jump_hosts.clone()).unwrap_or_default();
     let env: Vec<EnvVar> = levels.iter().rev().flat_map(|l| l.settings.env.iter().cloned()).collect();
     Ok(ResolvedHost {
@@ -405,6 +420,7 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
         totp,
         proxy,
         agent_forwarding,
+        x11,
         env: normalize_env(&env),
         jump_hosts,
     })
@@ -431,10 +447,15 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         jump_hosts: levels.iter().find_map(|l| l.settings.jump_hosts.clone()),
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
+        x11: levels.iter().find_map(|l| l.settings.x11),
+        // Worked out for each copy, never inherited.
+        credentials_from_member: None,
         env: normalize_env(&env),
         session_log: levels.iter().find_map(|l| l.settings.session_log),
         appearance: Some(crate::appearance::merge(levels.iter().map(|l| l.settings.appearance.as_ref()))).filter(|a| !a.is_empty()),
         login_script: levels.iter().find_map(|l| l.settings.login_script.clone()),
+        before_connect: levels.iter().find_map(|l| l.settings.before_connect.clone()),
+        after_disconnect: levels.iter().find_map(|l| l.settings.after_disconnect.clone()),
     }
 }
 

@@ -408,3 +408,21 @@ async fn stopping_a_failed_rule_reports_stopped() {
     assert!(matches!(sink.states().last(), Some(ForwardState::Stopped)));
     assert!(forwards.statuses().is_empty());
 }
+
+#[tokio::test]
+async fn a_socket_rule_reaches_the_socket_on_the_server() {
+    use tokio::io::AsyncReadExt;
+    let f = fixture(true).await;
+    let port = free_port().await;
+    let socket = ForwardRule { kind: ForwardKind::Socket, target_host: "/run/app.sock".into(), target_port: 0, ..local_rule(port, 0) };
+    let rule = add_rule(&f.store, f.host_id, socket);
+    let sink = Arc::new(Recorder::default());
+    let forwards = ForwardManager::new(f.manager.context(), sink.clone());
+    forwards.start(f.host_id, rule).unwrap();
+    sink.wait_for(|s| running_count(s) == 1).await;
+    let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let mut path = [0u8; 13];
+    client.read_exact(&mut path).await.unwrap();
+    assert_eq!(&path, b"/run/app.sock");
+    forwards.stop(f.host_id, rule);
+}

@@ -13,6 +13,10 @@ all hosts.
 | Local | `-L 127.0.0.1:8080:db:5432` | A port on this device reaches `db:5432` as seen from the server, for example a database that only listens there. |
 | Remote | `-R localhost:9000:127.0.0.1:3000` | A port on the server reaches `127.0.0.1:3000` as seen from this device, for example to show a local web server. |
 | Dynamic | `-D 127.0.0.1:1080` | A SOCKS5 proxy on this device. Programs that use it reach anything the server can reach. |
+| Unix socket | `-L 127.0.0.1:5432:/run/postgresql/.s.PGSQL.5432` | A port on this device reaches a Unix socket on the server, for example a database or the Docker socket. The path is absolute and at most 107 bytes. |
+
+SSHCraft 0.1 does not know socket rules: it hides them, and saving the host there drops
+them on every device the host syncs to. Update all devices before you add one.
 
 The dynamic proxy speaks SOCKS5 without authentication and only `CONNECT` (no `BIND`, no UDP,
 no SOCKS4). Targets can be IPv4, IPv6 or names; names are resolved on the server.

@@ -220,6 +220,7 @@ async fn open(session: &sshcraft_ssh::Session, rule: &ForwardRule) -> Result<Tun
         ForwardKind::Local => session.forward_local(&rule.bind_address, rule.bind_port, &rule.target_host, rule.target_port).await,
         ForwardKind::Remote => session.forward_remote(&rule.bind_address, rule.bind_port, &rule.target_host, rule.target_port).await,
         ForwardKind::Dynamic => session.forward_dynamic(&rule.bind_address, rule.bind_port).await,
+        ForwardKind::Socket => session.forward_socket(&rule.bind_address, rule.bind_port, &rule.target_host).await,
     }
 }
 
@@ -246,7 +247,10 @@ async fn run(ctx: Arc<Context>, reporter: Arc<Reporter>, key: RuleKey, generatio
     loop {
         report(ForwardState::Starting);
         let started = async {
-            let (session, notice) = connect_session(&ctx, key.0, &opened).await?;
+            // A remote forward keeps a connection of its own: the server's channels for it are
+            // routed per connection.
+            let share = rule.kind != ForwardKind::Remote;
+            let (session, notice) = connect_session(&ctx, key.0, &opened, share).await?;
             let tunnel = open(&session, &rule).await.map_err(|e| tunnel_failure(e, ever_running))?;
             Ok::<_, Failure>((session, tunnel, notice))
         }

@@ -76,3 +76,19 @@ fn the_compose_field_sends_its_text_with_ctrl_enter() {
     until(&mut h, "the echo", |app| app.terminals[&id].term.visible_text().contains("echo composed-line"));
     assert_eq!(h.state().terminals[&id].compose_text().map(String::as_str), Some(""), "sent text is cleared");
 }
+
+#[test]
+fn the_resource_bar_asks_the_server_only_when_switched_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (id, server) = tab(&mut h);
+    server.set_exec_output("0.25 0 0 1/1 1\n@@SSHCRAFT@@\nMemTotal: 1000 kB\nMemAvailable: 500 kB\n@@SSHCRAFT@@\n");
+    h.run_steps(5);
+    assert!(!server.received_commands().contains(&sshcraft_model::resources::PROBE.to_owned()), "off by default");
+    let mut settings = session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", serde_json::json!({}))).unwrap();
+    settings["terminal"]["resource_bar"] = serde_json::json!(true);
+    session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.save", serde_json::json!({ "settings": settings }))).unwrap();
+    until(&mut h, "the resources", |app| app.terminals.get(&id).is_some_and(|t| t.resources.is_some()));
+    let r = h.state().terminals[&id].resources.clone().unwrap();
+    assert_eq!(sshcraft_ui_egui::session_tab::resources_text(&r), "load 0.25  ·  memory 50 % / 0.0 GiB");
+}

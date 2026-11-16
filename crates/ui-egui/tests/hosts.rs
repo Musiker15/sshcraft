@@ -277,3 +277,59 @@ fn the_host_form_takes_a_password_reference() {
         app.data.hosts.iter().any(|r| r.host.settings.password_ref.as_ref().is_some_and(|p| p.reference == "op://Servers/vaulted/password"))
     });
 }
+
+#[test]
+fn reachability_is_checked_only_when_switched_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let id = HostId(uuid::Uuid::new_v4());
+    let port = listener.local_addr().unwrap().port();
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "up", "settings": { "address": "127.0.0.1", "port": port } } }));
+    until(&mut h, "the host", |app| app.data.hosts.iter().any(|r| r.host.id == id));
+    h.run_steps(5);
+    assert!(h.state().ui.hosts.reachability.hosts.is_empty(), "off by default: nothing is checked");
+    let mut settings = run(&session, "settings.get", json!({}));
+    settings["appearance"]["show_reachability"] = json!(true);
+    run(&session, "settings.save", json!({ "settings": settings }));
+    until(&mut h, "the check", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
+}
+
+#[test]
+fn chosen_hosts_change_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (a, b, c) = (add_host(&session, "alpha", None, &[]), add_host(&session, "beta", None, &[]), add_host(&session, "gamma", None, &[]));
+    until(&mut h, "the hosts", |app| app.data.hosts.len() == 3);
+    h.get_by_label("alpha").click();
+    h.run_steps(1);
+    h.get_by_label("gamma").click_modifiers(egui::Modifiers::SHIFT);
+    h.run_steps(1);
+    h.get_by_label("beta").click_modifiers(egui::Modifiers::COMMAND);
+    h.run_steps(2);
+    let chosen = h.state().ui.hosts.selection.hosts.clone();
+    assert!(chosen.contains(&a) && chosen.contains(&c) && !chosen.contains(&b), "{chosen:?}");
+    h.state_mut().ui.hosts.selection.tag = "prod".into();
+    h.run_steps(1);
+    h.get_by_label("Add tag").click();
+    until(&mut h, "the tags", |app| app.data.hosts.iter().filter(|r| r.host.tags.contains(&"prod".to_string())).count() == 2);
+    let beta = h.state().data.hosts.iter().find(|r| r.host.id == b).unwrap().host.tags.clone();
+    assert!(beta.is_empty(), "a host not chosen keeps its tags");
+}
+
+#[test]
+fn a_host_shared_without_its_sign_in_asks_for_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let id = HostId(uuid::Uuid::new_v4());
+    let host = json!({ "id": id, "name": "shared", "settings": { "address": "10.0.0.9", "credentials_from_member": true } });
+    run(&session, "host.save", json!({ "host": host }));
+    until(&mut h, "the host", |app| app.data.hosts.iter().any(|r| r.host.id == id));
+    assert!(h.query_by_label("Add your own sign-in").is_some());
+    // With a key of the member's own, the hint goes.
+    let mut host = run(&session, "host.list", json!({})).as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap().clone();
+    host["settings"]["key"] = json!({ "kind": "agent", "fingerprint": "SHA256:abc" });
+    run(&session, "host.save", json!({ "host": host }));
+    until(&mut h, "the key", |app| app.data.hosts.iter().any(|r| r.host.id == id && r.host.settings.key.is_some()));
+    assert!(h.query_by_label("Add your own sign-in").is_none());
+}

@@ -151,18 +151,26 @@ async fn until_stopped(work: impl Future<Output = ()>, mut stop: watch::Receiver
     }
 }
 
-/// Listens on `bind_address:bind_port`; each connection goes to `target`, or with `None` to
-/// where its SOCKS5 request says.
-pub(crate) async fn listen(
-    handle: Handle,
-    jumps: Jumps,
-    bind_address: &str,
-    bind_port: u16,
-    target: Option<(String, u16)>,
-) -> Result<Tunnel, SshError> {
+/// Where a local tunnel's connections go.
+#[derive(Clone)]
+pub(crate) enum Dest {
+    /// A host and port as seen from the server.
+    Tcp(String, u16),
+    /// A Unix socket on the server.
+    Socket(String),
+    /// Wherever the SOCKS5 request says.
+    Socks,
+}
+
+/// Listens on `bind_address:bind_port`; each connection goes to `target`.
+pub(crate) async fn listen(handle: Handle, jumps: Jumps, bind_address: &str, bind_port: u16, target: Dest) -> Result<Tunnel, SshError> {
     let listeners = bind(bind_address, bind_port).await?;
-    let bound_port = listeners[0].local_addr().map_err(|e| SshError::Bind(e.to_string()))?.port();
-    let target = target.map(|(host, port)| (unbracket(&host).to_owned(), port));
+    let bound_port =
+        listeners.first().ok_or_else(|| SshError::Bind("no listener".into()))?.local_addr().map_err(|e| SshError::Bind(e.to_string()))?.port();
+    let target = match target {
+        Dest::Tcp(host, port) => Dest::Tcp(unbracket(&host).to_owned(), port),
+        other => other,
+    };
     let (stop_tx, stop) = watch::channel(());
     let count = Arc::new(AtomicUsize::new(0));
     let refused = Arc::new(AtomicUsize::new(0));
@@ -188,18 +196,20 @@ pub(crate) async fn listen(
     Ok(Tunnel { bound_port, count, refused, _stop: stop_tx, accept, remote: None })
 }
 
-async fn connection(handle: Handle, mut stream: TcpStream, peer: SocketAddr, target: Option<(String, u16)>, _slot: Slot, refused: Arc<AtomicUsize>) {
-    let socks = target.is_none();
-    let (host, port) = match target {
-        Some(target) => target,
-        None => match tokio::time::timeout(SOCKS_TIMEOUT, socks::read_request(&mut stream)).await {
-            Ok(Ok(target)) => target,
-            _ => return,
-        },
+async fn connection(handle: Handle, mut stream: TcpStream, peer: SocketAddr, target: Dest, _slot: Slot, refused: Arc<AtomicUsize>) {
+    let socks = matches!(target, Dest::Socks);
+    let opened = match target {
+        Dest::Socket(path) => tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_direct_streamlocal(path)).await,
+        Dest::Tcp(host, port) => {
+            tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_direct_tcpip(host, u32::from(port), peer.ip().to_string(), u32::from(peer.port())))
+                .await
+        }
+        Dest::Socks => {
+            let Ok(Ok((host, port))) = tokio::time::timeout(SOCKS_TIMEOUT, socks::read_request(&mut stream)).await else { return };
+            tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_direct_tcpip(host, u32::from(port), peer.ip().to_string(), u32::from(peer.port())))
+                .await
+        }
     };
-    let opened =
-        tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_direct_tcpip(host, u32::from(port), peer.ip().to_string(), u32::from(peer.port())))
-            .await;
     let Ok(Ok(channel)) = opened else {
         refused.fetch_add(1, Ordering::SeqCst);
         if socks {

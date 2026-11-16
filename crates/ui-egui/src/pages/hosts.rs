@@ -34,6 +34,143 @@ pub struct HostsView {
     pub search: String,
     #[serde(skip)]
     pub cache: HostsCache,
+    #[serde(skip)]
+    pub reachability: Reachability,
+    #[serde(skip)]
+    pub selection: Selection,
+}
+
+/// Hosts chosen with Ctrl or Shift click, for one change to all of them.
+#[derive(Debug, Clone, Default)]
+pub struct Selection {
+    pub hosts: std::collections::HashSet<HostId>,
+    /// Where a Shift click counts from: a position in the shown hosts.
+    pub anchor: Option<usize>,
+    /// The fields of the bar.
+    pub tag: String,
+    pub user: String,
+}
+
+/// A click on the host at position `pos` of the shown list: Ctrl toggles it, Shift takes the
+/// range from the last click, a plain click clears the choice.
+fn select(app: &mut SshcraftApp, pos: usize, id: HostId, modifiers: egui::Modifiers) {
+    let selection = &mut app.ui.hosts.selection;
+    if modifiers.shift
+        && let Some(anchor) = selection.anchor
+    {
+        let (from, to) = (anchor.min(pos), anchor.max(pos));
+        let range: Vec<HostId> =
+            app.ui.hosts.cache.shown.get(from..=to).unwrap_or_default().iter().filter_map(|&k| app.data.hosts.get(k)).map(|r| r.host.id).collect();
+        selection.hosts.extend(range);
+    } else if modifiers.command {
+        if !selection.hosts.remove(&id) {
+            selection.hosts.insert(id);
+        }
+        selection.anchor = Some(pos);
+    } else {
+        selection.hosts.clear();
+        selection.anchor = Some(pos);
+    }
+}
+
+/// A shared host whose owner's sign-in was not shared, and that has none of its own yet.
+pub fn needs_own_sign_in(host: &sshcraft_model::model::Host) -> bool {
+    let s = &host.settings;
+    s.credentials_from_member == Some(true) && s.key.is_none() && s.password.is_none() && s.identity.is_none() && s.password_ref.is_none()
+}
+
+/// One change to every chosen host.
+fn bulk(app: &mut SshcraftApp, patch: serde_json::Value) {
+    let ids: Vec<HostId> = app.ui.hosts.selection.hosts.iter().copied().collect();
+    app.run_reported("host.bulk_update", json!({ "ids": ids, "patch": patch }));
+}
+
+/// The bar over the list while hosts are chosen.
+fn selection_bar(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
+    let count = app.ui.hosts.selection.hosts.len();
+    if count == 0 {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label(trf("{count} hosts chosen", &[("count", &count.to_string())]));
+        ui.menu_button(tr("Move to"), |ui| {
+            for (target, path) in host_form::group_targets(all_groups, None) {
+                if ui.button(path).clicked() {
+                    let patch = match target {
+                        Some(group) => json!({ "group_id": group }),
+                        None => json!({ "to_top_level": true }),
+                    };
+                    bulk(app, patch);
+                }
+            }
+        });
+        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.selection.tag).hint_text(tr("Tag")).desired_width(100.0).char_limit(32));
+        let tag = app.ui.hosts.selection.tag.trim().to_string();
+        if ui.add_enabled(!tag.is_empty(), egui::Button::new(tr("Add tag"))).clicked() {
+            bulk(app, json!({ "add_tags": [tag] }));
+        }
+        if ui.add_enabled(!tag.is_empty(), egui::Button::new(tr("Remove tag"))).clicked() {
+            bulk(app, json!({ "remove_tags": [tag] }));
+        }
+        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.selection.user).hint_text(tr("User")).desired_width(100.0).char_limit(100));
+        if ui.button(tr("Set user")).on_hover_text(tr("Empty: take the user from the group again")).clicked() {
+            let user = app.ui.hosts.selection.user.trim().to_string();
+            bulk(app, json!({ "username": user }));
+        }
+        if ui.button(tr("Clear choice")).clicked() {
+            app.ui.hosts.selection = Selection::default();
+        }
+    });
+    ui.add_space(4.0);
+}
+
+/// The last answer of `host.reachable`: `None` behind a jump host or proxy.
+#[derive(Debug, Clone, Default)]
+pub struct Reachability {
+    pub hosts: std::collections::HashMap<HostId, Option<bool>>,
+    /// When the last check started, in the window's time.
+    pub checked_at: Option<f64>,
+    pub loading: bool,
+}
+
+/// How often the list checks again while it is shown.
+const REACHABILITY_EVERY: f64 = 60.0;
+/// The most hosts one check asks for (the command's limit).
+const REACHABILITY_MAX: usize = 500;
+
+/// Checks the shown hosts once a minute while the setting is on.
+fn refresh_reachability(app: &mut SshcraftApp, ctx: &egui::Context) {
+    if !app.data.settings.appearance.show_reachability {
+        app.ui.hosts.reachability = Reachability::default();
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let state = &app.ui.hosts.reachability;
+    let due = state.checked_at.is_none_or(|at| now - at >= REACHABILITY_EVERY);
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(REACHABILITY_EVERY));
+    if !due || state.loading {
+        return;
+    }
+    let ids: Vec<HostId> = app.ui.hosts.cache.shown.iter().filter_map(|&k| app.data.hosts.get(k)).map(|r| r.host.id).take(REACHABILITY_MAX).collect();
+    app.ui.hosts.reachability.checked_at = Some(now);
+    if ids.is_empty() {
+        return;
+    }
+    app.ui.hosts.reachability.loading = true;
+    app.runner.run(
+        "host.reachable",
+        json!({ "ids": ids }),
+        Box::new(|app, result| {
+            app.ui.hosts.reachability.loading = false;
+            if let Ok(serde_json::Value::Array(rows)) = result {
+                for row in rows {
+                    if let Ok(id) = serde_json::from_value::<HostId>(row["id"].clone()) {
+                        app.ui.hosts.reachability.hosts.insert(id, row["reachable"].as_bool());
+                    }
+                }
+            }
+        }),
+    );
 }
 
 /// The page's lists, worked out again only when the data or the view changed: with thousands of
@@ -234,16 +371,49 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
     });
 }
 
-fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[Group]) {
+fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all_groups: &[Group]) {
     let tokens = Tokens::get(ui.ctx());
+    if app.ui.hosts.selection.hosts.contains(&row.host.id) {
+        ui.painter().rect_filled(ui.max_rect(), f32::from(tokens.radius), tokens.row_selected);
+    }
     ui.horizontal(|ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
         draw(ui.painter(), Icon::Host, icon, tokens.text_dim);
+        if app.data.settings.appearance.show_reachability {
+            let (color, text) = match app.ui.hosts.reachability.hosts.get(&row.host.id) {
+                Some(Some(true)) => (tokens.success, tr("Answers")),
+                Some(Some(false)) => (tokens.danger, tr("Does not answer")),
+                Some(None) => (tokens.text_dim, tr("Behind a jump host or proxy: not checked")),
+                None => (tokens.text_dim, tr("Not checked yet")),
+            };
+            let (dot, response) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+            ui.painter().circle_filled(dot.center(), 4.0, color);
+            response.on_hover_text(text);
+        }
         let response = elided_label(ui, &row.host.name, MAX_NAME_WIDTH, tokens.text, FontId::proportional(14.0));
         if let Some(address) = &row.host.settings.address {
             elided_label(ui, address, 140.0, tokens.text_dim, FontId::proportional(13.0));
         }
+        if needs_own_sign_in(&row.host) {
+            ui.label(egui::RichText::new(tr("Add your own sign-in")).color(tokens.warning).small()).on_hover_text(tr(
+                "This host was shared without its key or password. Edit it and choose a key or password of your own; it stays on your devices.",
+            ));
+        }
         let id = row.host.id;
+        if response.clicked() {
+            // The modifiers of the release that made the click; held keys as a fallback.
+            let modifiers = ui.input(|i| {
+                i.events
+                    .iter()
+                    .rev()
+                    .find_map(|e| match e {
+                        egui::Event::PointerButton { pressed: false, modifiers, .. } => Some(*modifiers),
+                        _ => None,
+                    })
+                    .unwrap_or(i.modifiers)
+            });
+            select(app, pos, id, modifiers);
+        }
         if response.double_clicked() {
             app.ui.connect_request = Some(ConnectRequest::Host(id));
         }
@@ -279,6 +449,19 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
                     }
                 }
             });
+            if ui.button(tr("Desktop shortcut")).clicked() {
+                app.runner.run(
+                    "host.shortcut",
+                    json!({ "host_id": id }),
+                    Box::new(|app, result| match result {
+                        Ok(v) => {
+                            let path = v.get("path").and_then(serde_json::Value::as_str).map(visible).unwrap_or_default();
+                            app.toasts.info(&trf("The shortcut is at {path}.", &[("path", &path)]));
+                        }
+                        Err(e) => app.toasts.error(&e.to_string()),
+                    }),
+                );
+            }
             if ui.button(tr("Forget host key")).clicked() {
                 app.run_reported("host.forget_key", json!({ "host_id": id }));
             }
@@ -344,6 +527,7 @@ fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     update_cache(app);
+    refresh_reachability(app, ui.ctx());
     let all_groups = app.ui.hosts.cache.groups.clone();
     ui.horizontal(|ui| {
         ui.heading(tr("Hosts"));
@@ -372,6 +556,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(6.0);
     path(app, ui, &all_groups);
     tag_chips(app, ui);
+    selection_bar(app, ui, &all_groups);
     ui.add_space(6.0);
     let sub = app.ui.hosts.cache.sub.clone();
     let shown = app.ui.hosts.cache.shown.clone();
@@ -393,7 +578,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
                         if let Some(g) = sub.get(i) {
                             group_entry(app, ui, g);
                         } else if let Some(row) = i.checked_sub(sub.len()).and_then(|j| shown.get(j)).and_then(|&k| app.data.hosts.get(k)).cloned() {
-                            host_entry(app, ui, &row, &all_groups);
+                            host_entry(app, ui, i - sub.len(), &row, &all_groups);
                         }
                     });
                 }

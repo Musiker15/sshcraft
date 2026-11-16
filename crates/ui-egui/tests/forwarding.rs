@@ -67,6 +67,10 @@ fn the_summary_shows_the_ssh_option() {
     socks.target_port = 0;
     assert_eq!(ssh_option(&socks), "-D 127.0.0.1:1080");
     assert_eq!(ssh_option(&rule(ForwardKind::Local, "::1", 8080)), "-L [::1]:8080:db.internal:5432", "IPv6 in brackets");
+    let mut socket = rule(ForwardKind::Socket, "127.0.0.1", 5432);
+    socket.target_host = "/run/postgresql/.s.PGSQL.5432".into();
+    socket.target_port = 0;
+    assert_eq!(ssh_option(&socket), "-L 127.0.0.1:5432:/run/postgresql/.s.PGSQL.5432");
 }
 
 #[test]

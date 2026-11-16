@@ -118,8 +118,10 @@ copies of the group and the picked hosts (also from subgroups, laid out flat in 
 with what they inherit in between written into them), and a single host is shared the same way. The owner's
 devices keep each copy in step with its original in both directions, last change wins. Keys go
 along only when asked for, and keys from the SSH agent (Proton Pass) never do; the recipient then
-assigns a key of their own, which stays on their device. The key the owner uses for a shared
-item without its key stays private to the owner but follows to the owner's other devices.
+assigns a key of their own, which stays on their device. Such a host shows *Add your own
+sign-in* in the list and in its form until the recipient has chosen a key or password. The key
+the owner uses for a shared item without its key stays private to the owner but follows to the
+owner's other devices.
 
 **Roles.** *Read* shows the items; changes the recipient makes are not sent and are reset to the
 owner's state. *Read and change* sends changes back. In a share of some hosts or of one host,

@@ -258,14 +258,27 @@ try {
   }
   $installDir = @($registry | Where-Object { $_[0] -eq '-1' -and $_[1] -eq "Software\$($policy.name)" -and $_[2] -eq 'InstallDir' -and $_[3] -eq '[INSTALLFOLDER]' })
   if ($installDir.Count -ne 1) { throw 'A context-sensitive installation-folder record is required.' }
-  # SSHCraft's own rules: the desktop shortcut only when ticked, no link handler and no file
-  # type (links never run anything), and no install beside the Tauri version.
+  # SSHCraft's own rules: the desktop shortcut only when ticked, no file type and only the one
+  # link handler below (links never run anything), and no install beside the Tauri version.
   $shortcut = @(Read-Rows $database 'SELECT `Component`, `Condition` FROM `Component`' 2 | Where-Object { $_[0] -eq 'DesktopShortcutComponent' })
   if ($shortcut.Count -ne 1 -or $shortcut[0][1] -ne 'DESKTOPSHORTCUT = "1"') { throw 'The desktop shortcut must be installed only when its box is ticked.' }
   $default = @(Read-Rows $database 'SELECT `Action`, `Source`, `Target` FROM `CustomAction`' 3 | Where-Object { $_[0] -eq 'DefaultDesktopShortcut' })
   if ($default.Count -ne 1 -or $default[0][1] -ne 'DESKTOPSHORTCUT' -or $default[0][2] -ne '0') { throw 'A fresh install must default to no desktop shortcut.' }
-  if (@($registry | Where-Object { $_[2] -eq 'URL Protocol' -or $_[1] -match '^Software\\Classes(\\|$)' }).Count) {
-    throw 'The package must register no link handler and no file type.'
+  # One link handler is allowed: SSHCraft.ssh, offered to Windows for ssh:// as a capability. It
+  # starts SSHCraft with the link as its only argument, and SSHCraft only fills the quick connect
+  # dialog with it (docs/security.md, rule 2). Any other class, and any file type, stays out.
+  $allowedClasses = @(
+    'Software\Classes\SSHCraft.ssh|',
+    'Software\Classes\SSHCraft.ssh|URL Protocol',
+    'Software\Classes\SSHCraft.ssh\DefaultIcon|',
+    'Software\Classes\SSHCraft.ssh\shell\open\command|'
+  )
+  foreach ($row in @($registry | Where-Object { $_[1] -match '^Software\\Classes(\\|$)' -or $_[2] -eq 'URL Protocol' })) {
+    if ("$($row[1])|$($row[2])" -notin $allowedClasses) { throw 'The package must register no file type and no link handler but SSHCraft.ssh.' }
+  }
+  $open = @($registry | Where-Object { $_[1] -eq 'Software\Classes\SSHCraft.ssh\shell\open\command' })
+  if ($open.Count -ne 1 -or $open[0][3] -ne '"[#SshcraftExe]" "%1"') {
+    throw 'The ssh:// handler must start SSHCraft with the link as its only argument.'
   }
   $legacy = @(Read-Rows $database 'SELECT `Condition` FROM `LaunchCondition`' 1 | Where-Object { $_[0] -match 'TAURI_SSHCRAFT_U' -and $_[0] -match 'TAURI_SSHCRAFT_M' })
   if ($legacy.Count -ne 1) { throw 'The install must stop while the Tauri version is installed.' }

@@ -151,6 +151,36 @@ device** in the form and save. Agents can never allow one.
 Never put a password in a login script: it is stored as plain settings, not in the vault. Limits:
 16 steps, 256 characters to wait for, 1024 to send, no control characters.
 
+## Steps before connecting and after the session
+
+A host or group can do something before SSHCraft connects and after the session ends:
+
+- **Wake-on-LAN** sends the magic packet for a MAC address (to `255.255.255.255` or a broadcast
+  address you give) and then waits as long as you say, so the computer has time to start.
+- **Port knocking** opens a connection to each port of the host's address in turn, with a pause
+  between them. The ports are meant to stay closed, so a refused knock is fine.
+- **A program** on this device, for example `wg-quick up office` before and `wg-quick down office`
+  after. It starts from its argument list, never through a shell, and may run for a minute.
+
+A program is treated like a proxy command: it runs only once you allowed exactly these
+arguments on this device. A program you write in the host or group form is allowed when you
+save, and only that one; one that came through sync, a share or an agent does not run, and
+connecting asks before it starts. The steps after the session run when the last tab, forward or
+command using the connection is gone, and a program there that was never allowed is left out
+without asking. Wake-on-LAN and knocking need no approval: a failed wake or knock does
+not stop the connection. Limits: 16 steps per list, 64 ports per knock, waits of at most 300
+seconds.
+
+## Sharing one connection
+
+Tabs, port forwards and commands to the same host share one SSH connection while it is open, so
+a second tab opens at once and asks nothing again. The connection closes when the last user of
+it is gone. Remote forwards keep a connection of their own, because the server routes their
+traffic per connection, and commands from AI agents always get a connection of their own, so
+signing in asks you where the host needs it. Tabs opened at the same moment wait for one
+connection. Locking the app closes every shared connection. Switch it off under
+*Settings › Terminal › Connections* to give every tab its own.
+
 ## Agent forwarding
 
 Off unless switched on for a host or group. When on, the target (never a jump host) may use the
@@ -160,12 +190,58 @@ own vault are never forwarded. Anyone with root on the server can use the forwar
 time, so switch it on only where you need it. A server that opens an agent channel without
 forwarding switched on is refused.
 
+## X11 forwarding
+
+Off unless switched on for a host or group. Programs on the server then open their windows on
+this computer's X server: `DISPLAY` on Linux, FreeBSD and macOS (XQuartz), display `:0` on
+Windows (VcXsrv, X410 and similar listen there). The server gets a random cookie, never the real
+one. Each X11 connection the server opens must start with that cookie; SSHCraft swaps it for the
+real cookie from `xauth` before the bytes reach the X server, and closes any connection with
+another cookie. A server that opens an X11 channel without forwarding switched on is refused.
+Anyone with root on the server can watch an X11 session, so switch it on only where you need it.
+
+Switching it on in the host or group form allows it on this device. X11 forwarding that came
+another way (sync, a share, an import) stays off, and the status line says so, until you tick
+**Allow X11 forwarding on this device** in the form and save.
+
 ## Environment variables
 
 Name and value pairs on hosts and groups; a name set lower in the tree wins. SSHCraft sends them
 before the shell starts, but the server only takes what its `AcceptEnv` allows (OpenSSH accepts
 `LANG` and `LC_*` by default). Names are letters, digits and underscores, not starting with a
 digit, at most 64 per level.
+
+## Quick connect and `ssh://` links
+
+*Quick connect* (the new-tab page, the command palette or `Ctrl+Shift+O`) takes `user@host:port`,
+`host` or `[2001:db8::1]:22`. A saved host with the same address, port and user opens; otherwise
+SSHCraft saves one under that name and opens it, so host keys, questions and history work as for
+every host. You can delete it later.
+
+An `ssh://user@host:port` link from a browser or another program fills the same dialog and waits
+for you to press Connect; a link never connects by itself. The link is checked first: a user or
+host starting with `-`, control characters, spaces, a password in the link or a port outside
+1 to 65535 are refused, and so are host names outside ASCII (an international name works in
+its `xn--` form). A link comes alone: SSHCraft refuses one that arrives with other options. When
+SSHCraft already runs, the link goes to the open window. On Windows
+the installer offers SSHCraft for `ssh://` links in the default apps, on Linux and FreeBSD the
+desktop file declares it. On macOS links do not reach SSHCraft yet ([gaps.md](gaps.md)).
+
+## Desktop shortcuts
+
+*Desktop shortcut* in a host's context menu puts a shortcut on the desktop that opens that host:
+a `.lnk` file on Windows, a `.desktop` file on Linux and FreeBSD. It starts
+`sshcraft --open-host <id>` and carries nothing but the host's id, no address and no password.
+When SSHCraft already runs, the host opens there, and only when it is saved on this device.
+
+## Server resources
+
+With *Settings › Terminal › Server resources* switched on, the status line under an SSH terminal
+shows the server's load, memory and disk. SSHCraft reads them every ten seconds while the tab is
+shown, with one fixed command over the tab's connection (`/proc/loadavg`, `/proc/meminfo` and
+`df -P /`). It is off by default because it runs a command on the server; servers without
+`/proc` show what they can. A key with a forced command (`command=` in `authorized_keys`) runs
+that command instead, every ten seconds, so leave the bar off for such hosts.
 
 ## Local terminal and serial port
 

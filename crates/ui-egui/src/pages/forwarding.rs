@@ -21,6 +21,7 @@ pub fn ssh_option(rule: &ForwardRule) -> String {
         ForwardKind::Local => format!("-L {bind}:{}:{}", bracket(&rule.target_host), rule.target_port),
         ForwardKind::Remote => format!("-R {bind}:{}:{}", bracket(&rule.target_host), rule.target_port),
         ForwardKind::Dynamic => format!("-D {bind}"),
+        ForwardKind::Socket => format!("-L {bind}:{}", rule.target_host),
     }
 }
 
@@ -257,7 +258,11 @@ fn problem(app: &SshcraftApp, form: &ForwardForm) -> Option<String> {
     if !address_ok(&r.bind_address) {
         return Some(tr("The address has no spaces and at most 253 characters.").to_string());
     }
-    if r.bind_port == 0 || (r.kind != ForwardKind::Dynamic && (r.target_port == 0 || !address_ok(&r.target_host))) {
+    if r.kind == ForwardKind::Socket {
+        if r.bind_port == 0 || !sshcraft_model::forward::socket_path_ok(&r.target_host) {
+            return Some(tr("The socket needs an absolute path of at most 107 bytes.").to_string());
+        }
+    } else if r.bind_port == 0 || (r.kind != ForwardKind::Dynamic && (r.target_port == 0 || !address_ok(&r.target_host))) {
         return Some(tr("Ports are 1 to 65535, and the target needs an address.").to_string());
     }
     (r.name.chars().count() > 100).then(|| tr("A name has at most 100 characters.").to_string())
@@ -270,6 +275,7 @@ fn form_grid(ui: &mut Ui, form: &mut ForwardForm, hosts: &[(HostId, String)]) {
             ui.radio_value(&mut form.rule.kind, ForwardKind::Local, tr("Local (-L)"));
             ui.radio_value(&mut form.rule.kind, ForwardKind::Remote, tr("Remote (-R)"));
             ui.radio_value(&mut form.rule.kind, ForwardKind::Dynamic, tr("Dynamic, SOCKS (-D)"));
+            ui.radio_value(&mut form.rule.kind, ForwardKind::Socket, tr("Unix socket (-L)"));
         });
         ui.end_row();
         ui.label(tr("Host"));
@@ -293,7 +299,11 @@ fn form_grid(ui: &mut Ui, form: &mut ForwardForm, hosts: &[(HostId, String)]) {
             ui.add(egui::DragValue::new(&mut form.rule.bind_port).range(1..=65535));
         });
         ui.end_row();
-        if form.rule.kind != ForwardKind::Dynamic {
+        if form.rule.kind == ForwardKind::Socket {
+            ui.label(tr("Socket on the server"));
+            ui.add(egui::TextEdit::singleline(&mut form.rule.target_host).hint_text("/run/app.sock").desired_width(320.0).char_limit(107));
+            ui.end_row();
+        } else if form.rule.kind != ForwardKind::Dynamic {
             ui.label(if form.rule.kind == ForwardKind::Remote { tr("Target here") } else { tr("Target from the server") });
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut form.rule.target_host).desired_width(200.0).char_limit(253));
@@ -321,8 +331,14 @@ fn wizard(app: &mut SshcraftApp, ctx: &egui::Context) {
         // A new kind brings its own default address.
         if form.rule.kind != before {
             form.rule.bind_address = if form.rule.kind == ForwardKind::Remote { "localhost" } else { "127.0.0.1" }.into();
-            if form.rule.kind == ForwardKind::Dynamic {
+            // A socket path is no host name, and a host name no socket path.
+            if before == ForwardKind::Socket || form.rule.kind == ForwardKind::Socket {
                 form.rule.target_host.clear();
+            }
+            if matches!(form.rule.kind, ForwardKind::Dynamic | ForwardKind::Socket) {
+                if form.rule.kind == ForwardKind::Dynamic {
+                    form.rule.target_host.clear();
+                }
                 form.rule.target_port = 0;
             } else if form.rule.target_port == 0 {
                 form.rule.target_port = 80;

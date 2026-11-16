@@ -4,6 +4,7 @@
 
 mod legacy;
 mod lock;
+pub mod shortcut;
 
 pub use legacy::{current_user_sid, is_legacy_pipe_name, is_own_legacy_pipe, legacy_in_pipes, legacy_instance_running, parse_whoami_sid};
 pub use lock::{DataLock, lock_data_dir};

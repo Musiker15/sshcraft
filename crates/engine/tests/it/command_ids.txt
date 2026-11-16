@@ -19,14 +19,17 @@ group.save
 history.clear
 history.list
 history.record
+host.bulk_update
 host.delete
 host.exec
 host.export
 host.forget_key
 host.info
 host.list
+host.reachable
 host.recent
 host.save
+host.shortcut
 hostkey.export
 hostkey.list
 hostkey.remove
@@ -85,6 +88,7 @@ session.open
 session.read
 session.recording
 session.resize
+session.resources
 session.send
 settings.get
 settings.save

@@ -168,6 +168,13 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
             app.ui.connect_request = Some(crate::state::ConnectRequest::Serial);
         }
     });
+    ui.add_space(8.0);
+    ui.label(tr("Quick connect"));
+    let mut text = std::mem::take(&mut app.ui.quick_text);
+    if let Some(problem) = crate::quick_connect::field(app, ui, &mut text) {
+        app.toasts.error(&problem);
+    }
+    app.ui.quick_text = text;
     crate::pages::templates::list(app, ui);
     ui.add_space(8.0);
     ui.add(egui::TextEdit::singleline(&mut app.ui.new_tab_query).hint_text(tr("Search hosts")).desired_width(320.0));

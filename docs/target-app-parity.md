@@ -1,6 +1,6 @@
 # Target app parity: Termius
 
-> **Last updated:** 2026-11-16 · **Target:** Termius (desktop)
+> **Last updated:** 2026-11-17 · **Target:** Termius (desktop)
 
 Where SSHCraft stands against Termius, area by area, after the rebuild (R1 to R7). The full comparison
 with other clients, with sources, is the German
@@ -19,7 +19,11 @@ with other clients, with sources, is the German
 | Workspaces: split, focus, broadcast, templates | yes | yes |
 | Hosts and groups: nesting, tags, icons, import, export | yes | yes |
 | Keys: generate, import, passphrase, authorized_keys, certificates, FIDO2, device-bound keys | yes | yes (FIDO2 and device-bound keys on Windows) |
-| Port forwarding: local, remote, dynamic | yes | yes |
+| Port forwarding: local, remote, dynamic | yes | yes, and to Unix sockets on the server |
+| Shared connection per host, Wake-on-LAN, port knocking, programs before and after connecting, X11 forwarding | not compared yet | yes (F4); programs only after they were allowed on the device |
+| Quick connect, `ssh://` links, desktop shortcuts for hosts | yes | yes (F4); links only fill the dialog, not on macOS yet |
+| Changing many hosts at once, reachability in the host list, server load under the terminal | yes | yes (F4); reachability and load off by default |
+| Shared hosts that ask each member for their own sign-in | team plans | yes |
 | Snippets, history, completion | yes | yes, with placeholders and a snippet bar |
 | Shell integration (command marks and exit codes), notification when a command ends, triggers and highlights, hint mode, compose field, login scripts, program status of agents | not compared yet | yes (F3); login scripts only after they were allowed on the device |
 | Colour, badge and theme per host or group | not compared yet | yes |

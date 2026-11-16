@@ -33,6 +33,68 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Add variable" => "Variable hinzufügen",
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
+        "X11 forwarding" => "X11-Weiterleitung",
+        "Allow X11 forwarding on this device" => "X11-Weiterleitung auf diesem Gerät erlauben",
+        "X11 forwarding that came through sync, a share or an import stays off until allowed here." => {
+            "Eine X11-Weiterleitung, die über Sync, eine Freigabe oder einen Import kam, bleibt aus, bis sie hier erlaubt wird."
+        }
+        "load {load}" => "Last {load}",
+        "memory {percent} %" => "Speicher {percent} %",
+        "disk {percent} %" => "Platte {percent} %",
+        "Server resources" => "Server-Ressourcen",
+        "Show load, memory and disk under SSH terminals (runs a command on the server every 10 seconds)" => {
+            "Last, Speicher und Platte unter SSH-Terminals zeigen (führt alle 10 Sekunden einen Befehl auf dem Server aus)"
+        }
+        "Load, memory and disk of the server under SSH terminals, every 10 seconds" => {
+            "Last, Speicher und Platte des Servers unter SSH-Terminals, alle 10 Sekunden"
+        }
+        "Desktop shortcut" => "Verknüpfung auf dem Desktop",
+        "The shortcut is at {path}." => "Die Verknüpfung liegt unter {path}.",
+        "Add your own sign-in" => "Eigene Anmeldung ergänzen",
+        "This host was shared without its key or password. Edit it and choose a key or password of your own; it stays on your devices." => {
+            "Dieser Host wurde ohne Schlüssel oder Passwort geteilt. Bearbeite ihn und wähle einen eigenen Schlüssel oder ein eigenes Passwort, das bleibt auf deinen Geräten."
+        }
+        "This host was shared without its key or password. Choose a key or password of your own; it stays on your devices." => {
+            "Dieser Host wurde ohne Schlüssel oder Passwort geteilt. Wähle einen eigenen Schlüssel oder ein eigenes Passwort, das bleibt auf deinen Geräten."
+        }
+        "{count} hosts chosen" => "{count} Hosts ausgewählt",
+        "Tag" => "Tag",
+        "Add tag" => "Tag hinzufügen",
+        "Remove tag" => "Tag entfernen",
+        "Set user" => "Benutzer setzen",
+        "Empty: take the user from the group again" => "Leer: den Benutzer wieder von der Gruppe übernehmen",
+        "Clear choice" => "Auswahl aufheben",
+        "Quick connect" => "Schnellverbindung",
+        "Only user@host:port or an ssh:// link without a path." => "Nur benutzer@host:port oder ein ssh://-Link ohne Pfad.",
+        "Type a host to connect to." => "Gib einen Host ein, mit dem verbunden werden soll.",
+        "That is too long for a host." => "Das ist zu lang für einen Host.",
+        "A link carries no password; SSHCraft asks for it when connecting." => {
+            "Ein Link enthält kein Passwort, SSHCraft fragt beim Verbinden danach."
+        }
+        "The user name has spaces, control characters or starts with -." => {
+            "Der Benutzername enthält Leerzeichen oder Steuerzeichen oder beginnt mit -."
+        }
+        "The host has spaces or characters a host name cannot have." => {
+            "Der Host enthält Leerzeichen oder Zeichen, die ein Hostname nicht haben kann."
+        }
+        "The port must be 1 to 65535." => "Der Port muss zwischen 1 und 65535 liegen.",
+        "A new host is saved under this name; you can delete it later." => {
+            "Ein neuer Host wird unter diesem Namen gespeichert, du kannst ihn später löschen."
+        }
+        "Whether the hosts in the list answer, every minute while it is shown" => {
+            "Ob die Hosts in der Liste antworten, jede Minute, solange sie angezeigt wird"
+        }
+        "Reachability" => "Erreichbarkeit",
+        "Show in the host list whether each host answers (connects to them every minute)" => {
+            "In der Hostliste zeigen, ob jeder Host antwortet (verbindet sich jede Minute mit ihnen)"
+        }
+        "Answers" => "Antwortet",
+        "Does not answer" => "Antwortet nicht",
+        "Behind a jump host or proxy: not checked" => "Hinter einem Jump-Host oder Proxy: nicht geprüft",
+        "Not checked yet" => "Noch nicht geprüft",
+        "Unix socket (-L)" => "Unix-Socket (-L)",
+        "Socket on the server" => "Socket auf dem Server",
+        "The socket needs an absolute path of at most 107 bytes." => "Der Socket braucht einen absoluten Pfad mit höchstens 107 Bytes.",
         "Agent key {fingerprint}" => "Agent-Schlüssel {fingerprint}",
         "All hosts" => "Alle Hosts",
         "Cancel" => "Abbrechen",
@@ -97,6 +159,24 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "Trash" => "Papierkorb",
         "Connections" => "Verbindungen",
+        "Wake-on-LAN before connecting to {count} hosts or groups" => "Wake-on-LAN vor dem Verbinden zu {count} Hosts oder Gruppen",
+        "Port knocking before connecting to {count} hosts or groups" => "Port-Knocking vor dem Verbinden zu {count} Hosts oder Gruppen",
+        "Local programs before or after connecting to {count} hosts or groups, once allowed" => {
+            "Lokale Programme vor oder nach dem Verbinden zu {count} Hosts oder Gruppen, sobald erlaubt"
+        }
+        "Wake-on-LAN" => "Wake-on-LAN",
+        "then wait" => "dann warten",
+        "Knock on ports" => "An Ports klopfen",
+        "pause" => "Pause",
+        "Program" => "Programm",
+        "Add Wake-on-LAN" => "Wake-on-LAN hinzufügen",
+        "Add knocking" => "Klopfen hinzufügen",
+        "Add a program" => "Programm hinzufügen",
+        "Before connecting" => "Vor dem Verbinden",
+        "After the session" => "Nach der Sitzung",
+        "Tabs, port forwards and commands to one host share its connection" => {
+            "Tabs, Portweiterleitungen und Befehle zu einem Host teilen sich seine Verbindung"
+        }
         "Every connection SSHCraft makes by itself is listed under Settings › Connections." => {
             "Jede Verbindung, die SSHCraft selbst aufbaut, steht unter Einstellungen › Verbindungen."
         }
