@@ -44,9 +44,10 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 29] = [
+static COMMANDS: [UiCommand; 30] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
+    cmd("ui.app.quick_connect", "quickConnect", "Quick connect", &["Ctrl+Shift+O"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.next", "nextTab", "Next tab", &["Ctrl+Tab", "Ctrl+PageDown"]) },
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.previous", "prevTab", "Previous tab", &["Ctrl+Shift+Tab", "Ctrl+PageUp"]) },
@@ -123,6 +124,7 @@ pub fn run(app: &mut SshcraftApp, id: &str) {
     match id {
         "ui.palette" => app.ui.palette.toggle(),
         "ui.tab.new" => app.open_new_tab(),
+        "ui.app.quick_connect" => crate::quick_connect::open(app, String::new()),
         "ui.tab.close" => app.close_tab(),
         "ui.tab.next" => app.cycle_tab(1),
         "ui.tab.previous" => app.cycle_tab(-1),

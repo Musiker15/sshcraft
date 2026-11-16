@@ -154,3 +154,37 @@ fn the_sidebar_has_every_page() {
     }
     assert!(tops.windows(2).all(|w| w[0] < w[1]), "in this order: {tops:?}");
 }
+
+#[test]
+fn quick_connect_saves_a_host_and_opens_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = sshcraft_ui_egui::testing::app_harness(dir.path());
+    sshcraft_ui_egui::quick_connect::open(h.state_mut(), "tester@127.0.0.1:2222".into());
+    h.run_steps(2);
+    h.get_by_label("Connect").click();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.state().data.hosts.iter().any(|r| r.host.name == "tester@127.0.0.1:2222") {
+        assert!(std::time::Instant::now() < deadline, "the host was not saved");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    assert!(h.state().ui.quick_connect.is_none(), "the dialog closes");
+    assert_eq!(h.state().ui.tabs.len(), 1, "the host opens in a tab");
+    let row = h.state().data.hosts.iter().find(|r| r.host.name == "tester@127.0.0.1:2222").unwrap();
+    assert_eq!(row.host.settings.username.as_deref(), Some("tester"));
+    assert_eq!(row.host.settings.port, Some(2222));
+}
+
+#[test]
+fn quick_connect_refuses_an_option_as_user_and_saves_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = sshcraft_ui_egui::testing::app_harness(dir.path());
+    sshcraft_ui_egui::quick_connect::open(h.state_mut(), "-oProxyCommand=calc@host".into());
+    h.run_steps(2);
+    h.get_by_label("Connect").click();
+    h.run_steps(5);
+    let dialog = h.state().ui.quick_connect.clone().expect("the dialog stays open");
+    assert!(dialog.error.is_some());
+    assert!(h.state().data.hosts.is_empty());
+}

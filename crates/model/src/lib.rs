@@ -15,4 +15,5 @@ pub mod placeholders;
 pub mod policy;
 pub mod proxy_command;
 pub mod secret_ref;
+pub mod ssh_url;
 pub mod totp;

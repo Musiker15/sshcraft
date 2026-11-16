@@ -151,8 +151,8 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 29);
-    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about"] {
+    assert_eq!(SHORTCUT_ACTIONS.len(), 30);
+    for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about", "quickConnect"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
     assert!(SHORTCUT_ACTIONS.contains(&"bookmark"));

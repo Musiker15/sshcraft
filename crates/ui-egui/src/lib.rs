@@ -22,6 +22,7 @@ pub mod pages;
 pub mod palette;
 pub mod panes;
 pub mod prompts;
+pub mod quick_connect;
 pub mod quit;
 pub mod runner;
 pub mod session_tab;

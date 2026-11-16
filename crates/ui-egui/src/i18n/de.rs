@@ -34,6 +34,23 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Quick connect" => "Schnellverbindung",
+        "Only user@host:port or an ssh:// link without a path." => "Nur benutzer@host:port oder ein ssh://-Link ohne Pfad.",
+        "Type a host to connect to." => "Gib einen Host ein, mit dem verbunden werden soll.",
+        "That is too long for a host." => "Das ist zu lang für einen Host.",
+        "A link carries no password; SSHCraft asks for it when connecting." => {
+            "Ein Link enthält kein Passwort, SSHCraft fragt beim Verbinden danach."
+        }
+        "The user name has spaces, control characters or starts with -." => {
+            "Der Benutzername enthält Leerzeichen oder Steuerzeichen oder beginnt mit -."
+        }
+        "The host has spaces or characters a host name cannot have." => {
+            "Der Host enthält Leerzeichen oder Zeichen, die ein Hostname nicht haben kann."
+        }
+        "The port must be 1 to 65535." => "Der Port muss zwischen 1 und 65535 liegen.",
+        "A new host is saved under this name; you can delete it later." => {
+            "Ein neuer Host wird unter diesem Namen gespeichert, du kannst ihn später löschen."
+        }
         "Whether the hosts in the list answer, every minute while it is shown" => {
             "Ob die Hosts in der Liste antworten, jede Minute, solange sie angezeigt wird"
         }

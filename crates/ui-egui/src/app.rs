@@ -391,6 +391,7 @@ impl SshcraftApp {
         crate::shell::show(self, ui);
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
+        crate::quick_connect::show(self, &ctx);
         crate::session_tab::show_clipboard_question(self, &ctx);
         crate::pages::templates::show_dialog(self, &ctx);
         crate::pages::snippets::dialogs(self, &ctx);
