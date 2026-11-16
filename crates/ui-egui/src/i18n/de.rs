@@ -34,6 +34,52 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "No containers found." => "Keine Container gefunden.",
+        "Letters, digits, dots, dashes and underscores, starting with a letter or digit" => {
+            "Buchstaben, Ziffern, Punkte, Bindestriche und Unterstriche, am Anfang ein Buchstabe oder eine Ziffer"
+        }
+        "Lowercase letters, digits, dots and dashes, starting and ending with a letter or digit" => {
+            "Kleinbuchstaben, Ziffern, Punkte und Bindestriche, am Anfang und Ende ein Buchstabe oder eine Ziffer"
+        }
+        "Only Kubernetes has namespaces" => "Nur Kubernetes hat Namespaces",
+        "The container name or namespace has characters SSHCraft does not put into a command." => {
+            "Der Name des Containers oder der Namespace enthält Zeichen, die SSHCraft in keinen Befehl schreibt."
+        }
+        "Snippets typed in this order once a session starts, not again after a reconnect." => {
+            "Snippets, die beim Start einer Sitzung einmal in dieser Reihenfolge getippt werden, nach einem Wiederverbinden nicht noch einmal."
+        }
+        "Snippet not on this device" => "Snippet nicht auf diesem Gerät",
+        "Save as dynamic group" => "Als dynamische Gruppe speichern",
+        "A dynamic group has that name already." => "Eine dynamische Gruppe mit diesem Namen gibt es schon.",
+        "Tags: {tags}" => "Tags: {tags}",
+        "Search: {text}" => "Suche: {text}",
+        "Macros" => "Makros",
+        "Run from the command palette on the focused terminal. One step per line: text to wait for => line to send, or just the line to send at once." => {
+            "Laufen über die Befehlspalette im fokussierten Terminal. Ein Schritt pro Zeile: Text, auf den gewartet wird => Zeile, die gesendet wird, oder nur die Zeile, die sofort gesendet wird."
+        }
+        "{count} steps" => "{count} Schritte",
+        "New macro" => "Neues Makro",
+        "A macro has that name already." => "Ein Makro mit diesem Namen gibt es schon.",
+        "1 to 16 steps, lines without control characters." => "1 bis 16 Schritte, Zeilen ohne Steuerzeichen.",
+        "Macro {name} stopped." => "Makro {name} angehalten.",
+        "Macro {name} stopped: a step did not see its text within 15 seconds." => {
+            "Makro {name} angehalten: Ein Schritt hat seinen Text nicht innerhalb von 15 Sekunden gesehen."
+        }
+        "Macro: {name}" => "Makro: {name}",
+        "Stop the macro" => "Makro anhalten",
+        "Launch actions" => "Startaktionen",
+        "Snippets typed once when a session starts, not again after a reconnect." => {
+            "Snippets, die beim Start einer Sitzung einmal getippt werden, nach einem Wiederverbinden nicht noch einmal."
+        }
+        "Allow the launch actions on this device" => "Die Startaktionen auf diesem Gerät erlauben",
+        "Launch actions that came through sync, a share or an import are not typed until allowed here." => {
+            "Startaktionen, die über Sync, eine Freigabe oder einen Import kamen, werden erst getippt, wenn sie hier erlaubt sind."
+        }
+        "Container" => "Container",
+        "name" => "Name",
+        "Ask the host which containers run there" => "Den Host fragen, welche Container dort laufen",
+        "Pick" => "Auswählen",
+        "namespace" => "Namespace",
         "Dropdown window" => "Dropdown-Fenster",
         "A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off." => {
             "Ein Kürzel, das SSHCraft aus jedem Programm oben am Bildschirm zeigt und wieder ausblendet. Leer: aus."

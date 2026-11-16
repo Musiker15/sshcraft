@@ -80,6 +80,7 @@ async fn saved_settings_come_back() {
             ligatures: false,
             show_reachability: true,
             dropdown_shortcut: Some("Ctrl+`".into()),
+            smart_groups: vec![SmartGroup { name: "Web".into(), tags: vec!["web".into()], query: "prod".into() }],
         };
         s.terminal.terminal_type = "vt100".into();
         s.terminal.clipboard_osc52 = Osc52::Off;
@@ -231,6 +232,7 @@ async fn takeover_copies_every_field() {
             ligatures: true,
             show_reachability: false,
             dropdown_shortcut: None,
+            smart_groups: Vec::new(),
         }
     );
     assert_eq!(s.terminal.terminal_type, "vt220");
@@ -414,4 +416,54 @@ fn a_dropdown_shortcut_sshcraft_cannot_read_is_dropped() {
         s.appearance.dropdown_shortcut = Some(bad.into());
         assert_eq!(s.clone().sanitized().appearance.dropdown_shortcut, None, "{bad}");
     }
+}
+
+#[test]
+fn macros_sshcraft_cannot_run_are_dropped() {
+    use sshcraft_model::login_script::LoginStep;
+    let step = |expect: &str, send: &str| LoginStep { expect: expect.into(), send: send.into() };
+    let mut s = EngineSettings::default();
+    s.terminal.macros = vec![
+        Macro { name: "deploy".into(), steps: vec![step("", "make deploy"), step("done", "exit")] },
+        Macro { name: "Deploy".into(), steps: vec![step("", "twice")] },
+        Macro { name: "".into(), steps: vec![step("", "x")] },
+        Macro { name: "empty".into(), steps: vec![] },
+        Macro { name: "bad\n".into(), steps: vec![step("", "x")] },
+        Macro { name: "control".into(), steps: vec![step("", "a\u{7}b")] },
+    ];
+    let kept: Vec<String> = s.sanitized().terminal.macros.into_iter().map(|m| m.name).collect();
+    assert_eq!(kept, vec!["deploy".to_string()]);
+}
+
+#[test]
+fn dynamic_groups_sshcraft_cannot_use_are_dropped() {
+    let g = |name: &str, tags: &[&str], query: &str| SmartGroup {
+        name: name.into(),
+        tags: tags.iter().map(|t| t.to_string()).collect(),
+        query: query.into(),
+    };
+    let mut s = EngineSettings::default();
+    s.appearance.smart_groups = vec![
+        g("Web", &["web"], ""),
+        g("web", &["other"], ""),
+        g("Filters nothing", &[], "  "),
+        g("Bad\u{7}", &["a"], ""),
+        g("Tag", &["a\nb"], ""),
+        g("Search", &[], "prod"),
+    ];
+    s.appearance.smart_groups.extend((0..40).map(|i| g(&format!("g{i}"), &["t"], "")));
+    let kept: Vec<String> = s.sanitized().appearance.smart_groups.into_iter().map(|g| g.name).collect();
+    assert_eq!(kept[..2], ["Web".to_string(), "Search".to_string()]);
+    assert_eq!(kept.len(), MAX_SMART_GROUPS);
+}
+
+#[test]
+fn names_that_differ_only_in_case_clash() {
+    use sshcraft_model::login_script::LoginStep;
+    assert!(same_name("Über", "über"));
+    assert!(!same_name("Über", "Ober"));
+    let mut s = EngineSettings::default();
+    let m = |name: &str| Macro { name: name.into(), steps: vec![LoginStep { expect: String::new(), send: "x".into() }] };
+    s.terminal.macros = vec![m("Über"), m("über")];
+    assert_eq!(s.sanitized().terminal.macros.len(), 1);
 }

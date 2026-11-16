@@ -4,9 +4,11 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod appearance;
+pub mod container;
 pub mod forward;
 pub mod hooks;
 pub mod keytypes;
+pub mod launch;
 pub mod login_script;
 pub mod logtext;
 pub mod model;

@@ -27,6 +27,43 @@ const MAX_FONT_FAMILY: usize = 200;
 /// Terminal types a session may ask for (`TERM`); the first is the default.
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
+/// Whether two names of macros or dynamic groups count as the same: case is ignored, also
+/// beyond ASCII.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// Macros kept at most.
+pub const MAX_MACROS: usize = 64;
+/// The longest macro name.
+pub const MAX_MACRO_NAME: usize = 64;
+
+/// A named sequence of steps, like a login script, run on demand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Macro {
+    pub name: String,
+    pub steps: Vec<sshcraft_model::login_script::LoginStep>,
+}
+
+impl Macro {
+    /// A name of 1 to 64 characters without control characters, and steps within the limits of
+    /// a login script.
+    pub fn valid(&self) -> bool {
+        !self.name.trim().is_empty()
+            && self.name.chars().count() <= MAX_MACRO_NAME
+            && !self.name.chars().any(char::is_control)
+            && !self.steps.is_empty()
+            && self.steps.len() <= sshcraft_model::login_script::MAX_STEPS
+            // Unlike a login script, a step may wait for nothing: it sends at once.
+            && self.steps.iter().all(|s| {
+                s.expect.chars().count() <= 256
+                    && s.send.chars().count() <= 1024
+                    && !s.expect.chars().any(char::is_control)
+                    && !s.send.chars().any(char::is_control)
+            })
+    }
+}
+
 /// Actions a shortcut can trigger.
 pub const SHORTCUT_ACTIONS: [&str; 31] = [
     "palette",
@@ -190,6 +227,40 @@ pub struct Appearance {
     /// A global shortcut that shows SSHCraft at the top of the screen or hides it; `None`: off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dropdown_shortcut: Option<String>,
+    /// Saved filters of the host list, shown as chips above it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub smart_groups: Vec<SmartGroup>,
+}
+
+/// Dynamic groups kept at most.
+pub const MAX_SMART_GROUPS: usize = 32;
+/// Tags one dynamic group asks for at most.
+pub const MAX_SMART_TAGS: usize = 16;
+/// The longest tag and search text of a dynamic group.
+pub const MAX_SMART_TEXT: usize = 256;
+
+/// A saved filter of the host list: the hosts in any group that carry all `tags` and match
+/// `query` like the search field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmartGroup {
+    pub name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub query: String,
+}
+
+impl SmartGroup {
+    /// A name like a macro's, at least one tag or a search, all without control characters.
+    pub fn valid(&self) -> bool {
+        let text = |s: &str, max: usize| s.chars().count() <= max && !s.chars().any(char::is_control);
+        !self.name.trim().is_empty()
+            && text(&self.name, MAX_MACRO_NAME)
+            && (!self.tags.is_empty() || !self.query.trim().is_empty())
+            && self.tags.len() <= MAX_SMART_TAGS
+            && self.tags.iter().all(|t| !t.trim().is_empty() && text(t, MAX_SMART_TEXT))
+            && text(&self.query, MAX_SMART_TEXT)
+    }
 }
 
 impl Default for Appearance {
@@ -203,6 +274,7 @@ impl Default for Appearance {
             ligatures: true,
             show_reachability: false,
             dropdown_shortcut: None,
+            smart_groups: Vec::new(),
         }
     }
 }
@@ -242,6 +314,10 @@ pub struct Terminal {
     pub triggers: Vec<Trigger>,
     /// Tabs, port forwards and commands to one host share its SSH connection.
     pub reuse_connections: bool,
+    /// Named sequences of steps (wait for a text, then send a line), run on a terminal from the
+    /// command palette. Kept on this device.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub macros: Vec<Macro>,
     /// A bar under SSH terminals with the server's load, memory and disk, read every ten
     /// seconds while the tab is shown. Off by default: it runs a command on the server.
     pub resource_bar: bool,
@@ -318,6 +394,7 @@ impl Default for Terminal {
             triggers: Vec::new(),
             snippet_bar: Vec::new(),
             reuse_connections: true,
+            macros: Vec::new(),
             resource_bar: false,
         }
     }
@@ -382,7 +459,15 @@ impl EngineSettings {
     /// Keeps values in their allowed ranges.
     pub fn sanitized(mut self) -> Self {
         let defaults = Appearance::default();
+        // Macros SSHCraft cannot run are dropped, the rest kept up to the limit, names unique.
+        let mut seen = std::collections::HashSet::new();
+        self.terminal.macros.retain(|m| m.valid() && seen.insert(m.name.trim().to_lowercase()));
+        self.terminal.macros.truncate(MAX_MACROS);
         let a = &mut self.appearance;
+        // Dynamic groups SSHCraft cannot use are dropped, the rest kept up to the limit.
+        let mut names = std::collections::HashSet::new();
+        a.smart_groups.retain(|g| g.valid() && names.insert(g.name.trim().to_lowercase()));
+        a.smart_groups.truncate(MAX_SMART_GROUPS);
         // A shortcut SSHCraft cannot read is dropped, not guessed at.
         a.dropdown_shortcut = a.dropdown_shortcut.take().filter(|c| valid_combo(c));
         a.font_size = a.font_size.clamp(*FONT_SIZES.start(), *FONT_SIZES.end());
@@ -440,6 +525,7 @@ pub fn read_tauri_settings(store: &Store) -> EngineSettings {
             ligatures: d.appearance.ligatures,
             show_reachability: d.appearance.show_reachability,
             dropdown_shortcut: None,
+            smart_groups: Vec::new(),
         };
         out.terminal.terminal_type = field(&map, "terminal_type").unwrap_or(d.terminal.terminal_type);
         out.terminal.clipboard_osc52 = field(&map, "clipboard_osc52").unwrap_or(d.terminal.clipboard_osc52);

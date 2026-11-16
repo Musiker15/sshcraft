@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last updated:** 2026-11-16
+> **Last updated:** 2026-11-17
 
 The ranked list of open work. Pick from the top. When work lands, remove or update its row.
 
@@ -12,6 +12,8 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 2c | No portable mode: the vault's master key lives in the system keyring, so a copy on a USB stick needs a passphrase unlock before the engine starts | later |
 | 2f | No images in the terminal (Sixel, Kitty, iTerm2) and no file transfer through the terminal (ZMODEM, trzsz); files go over SFTP once S1 is there | not planned for now |
 | 2e | No Mosh and no Eternal Terminal: both would need their own UDP or TCP protocol beside SSH and a server program; tmux sessions that stay cover a dropped connection | not planned for now |
+| 2g | No Kerberos (GSSAPI) sign-in: the SSH library has no GSSAPI, and adding it means binding the system's Kerberos libraries on every platform | not planned for now |
+| 2h | No smart cards or hardware tokens through PKCS#11: loading a PKCS#11 module calls C code from a library the user names, which needs `unsafe` outside `crates/fido`; FIDO2 security keys work | not planned for now |
 | 2d | No secure keyboard entry on macOS: it needs `EnableSecureEventInput`, reachable only through `unsafe` outside `crates/fido`, and a Mac to try | later |
 | 3 | The Windows x64 MSI is tried by hand (installs and runs); the Linux packages, the Flatpak sandbox and the CLI on `PATH` are not yet | later |
 | 4 | The MSI stops while the Tauri version is installed and says to uninstall it, instead of removing it itself (spec section 2). Running that uninstaller from the MSI waits until its silent mode is tried on a machine with the Tauri version, so it cannot delete the data | later |

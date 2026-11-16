@@ -515,6 +515,23 @@ impl SessionManager {
         self
     }
 
+    /// The containers (pods) `runtime` runs on a host, each name checked: connects like a tab
+    /// does, runs the fixed listing command, opens no shell.
+    pub async fn list_containers(
+        &self,
+        host_id: HostId,
+        runtime: sshcraft_model::container::Runtime,
+        namespace: Option<String>,
+    ) -> Result<Vec<String>, (ErrorCode, Option<String>)> {
+        const LIMIT: usize = 64 * 1024;
+        let command = sshcraft_model::container::list_command(runtime, namespace.as_deref()).ok_or((ErrorCode::ContainerNameInvalid, namespace))?;
+        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default(), true).await.map_err(failure_code)?;
+        let output = session.exec(&command, LIMIT).await.map_err(|e| (ErrorCode::Session, Some(e.to_string())));
+        crate::pool::release(session).await;
+        let output = output?;
+        Ok(sshcraft_model::container::parse_list(runtime, &String::from_utf8_lossy(&output), output.len() >= LIMIT))
+    }
+
     /// Puts a public key into `authorized_keys` on a host: connects like a tab does (with every
     /// question), runs one command, opens no shell.
     pub async fn install_key(&self, host_id: HostId, key: KeyRef) -> Result<InstallOutcome, (ErrorCode, Option<String>)> {
@@ -539,6 +556,15 @@ impl SessionManager {
     }
 
     pub fn open(&self, target: SessionTarget, cols: u32, rows: u32, sink: Arc<dyn SessionSink>) -> SessionId {
+        self.start(target, cols, rows, sink, true)
+    }
+
+    /// [`Self::open`] for a tab the user reconnects: its launch actions ran already.
+    pub fn reopen(&self, target: SessionTarget, cols: u32, rows: u32, sink: Arc<dyn SessionSink>) -> SessionId {
+        self.start(target, cols, rows, sink, false)
+    }
+
+    fn start(&self, target: SessionTarget, cols: u32, rows: u32, sink: Arc<dyn SessionSink>, launch: bool) -> SessionId {
         // `open` may come from a thread outside the runtime (the interface); the session and
         // the recorder's flushing run on the engine's runtime either way.
         let _runtime = self.ctx.runtime.enter();
@@ -562,7 +588,7 @@ impl SessionManager {
             size: shared.size.clone(),
             flow: shared.flow.clone(),
             // The session's questions carry its id.
-            task: self.ctx.runtime.spawn(crate::prompts::ASKING_SESSION.scope(id, run(self.ctx.clone(), target, shared))),
+            task: self.ctx.runtime.spawn(crate::prompts::ASKING_SESSION.scope(id, run(self.ctx.clone(), target, shared, launch))),
             recorder,
         };
         self.sessions().insert(id, live);
@@ -774,10 +800,60 @@ fn login_script(ctx: &Context, host_id: HostId, shared: &Shared) -> Option<crate
     Some(crate::login_script::LoginScript::new(steps, std::time::Instant::now()))
 }
 
-async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
+/// Launch actions to type: their texts, each followed by Enter, and whether they wait for a
+/// login script (on Telnet the first prompt is the device's own login).
+struct Launch {
+    bytes: Vec<u8>,
+    needs_script: bool,
+}
+
+/// The host's launch actions; `None` without any, when they are not allowed on this device or the
+/// session stays in tmux or screen (the terminal says so), or the vault is locked.
+fn launch_actions(ctx: &Context, host_id: HostId, shared: &Shared) -> Option<Launch> {
+    let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
+    let host = store.list_hosts().ok()?.into_iter().find(|h| h.id == host_id)?;
+    let groups = store.list_groups().ok()?;
+    let (level, ids) = sshcraft_model::launch::launch_for(&host, &groups).filter(|(_, ids)| !ids.is_empty())?;
+    let route = lookup(&store, host_id).ok()?;
+    let snippets = sshcraft_store::snippets::list(ctx.vault.as_ref()?, &store).ok()?;
+    let texts: Vec<String> = ids
+        .iter()
+        .take(sshcraft_model::launch::MAX_LAUNCH)
+        .filter_map(|id| snippets.iter().find(|s| s.id == *id))
+        .map(|s| s.content.clone())
+        .collect();
+    // A snippet with blanks to fill needs the user: it is not typed by itself.
+    let texts: Vec<String> = texts.into_iter().filter(|t| sshcraft_model::placeholders::find(t).is_empty()).collect();
+    if texts.is_empty() {
+        return None;
+    }
+    // A session that stays may run a program already: typing into it would hit that program.
+    if route.target.persistence.is_some() && route.target.container.is_none() {
+        drop(store);
+        local_note(shared, "Launch actions are not typed into a session that stays (tmux or screen): a program may run there already.");
+        return None;
+    }
+    let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(&level, &texts));
+    if !store.command_approved(&digest).unwrap_or(false) {
+        drop(store);
+        local_note(
+            shared,
+            "This host has launch actions that are not allowed on this device yet. Open the host, tick Allow the launch actions on this device, and save.",
+        );
+        return None;
+    }
+    Some(Launch {
+        bytes: texts.iter().flat_map(|t| t.trim_end_matches(['\r', '\n']).bytes().chain(std::iter::once(b'\r'))).collect(),
+        needs_script: route.target.protocol == sshcraft_model::model::Protocol::Telnet,
+    })
+}
+
+async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared, launch_wanted: bool) {
     let sink = shared.sink.clone();
     let mut attempt = 0u32;
     let mut ever_connected = false;
+    // Launch actions on the first connect only, and not when the user reconnects a tab.
+    let mut launch_wanted = launch_wanted;
     let opened = OpenedKeys::default();
     let mut wake = ctx.wake.subscribe();
     loop {
@@ -797,6 +873,24 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                     SessionTarget::Host { host_id } => login_script(&ctx, *host_id, &shared),
                     _ => None,
                 };
+                // Launch actions after the login script.
+                let mut launch = match &target {
+                    SessionTarget::Host { host_id } if launch_wanted => launch_actions(&ctx, *host_id, &shared),
+                    _ => None,
+                };
+                launch_wanted = false;
+                if script.is_none()
+                    && let Some(l) = launch.take()
+                {
+                    if l.needs_script {
+                        local_note(
+                            &shared,
+                            "Launch actions on a Telnet host wait for a login script that signs in. This host has none, so they are not typed.",
+                        );
+                    } else {
+                        let _sent = script_writer.write(&l.bytes).await;
+                    }
+                }
                 ever_connected = true;
                 attempt = 0;
                 let mut reason = Disconnect::Lost("connection closed".into());
@@ -828,8 +922,15 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                                 }
                                 Some(crate::login_script::Feed::TimedOut) => {
                                     local_note(&shared, "The login script stopped: a step did not see its text within 15 seconds.");
+                                    // What follows is not what the script expected: nothing more is typed.
+                                    launch = None;
                                 }
                                 Some(crate::login_script::Feed::Nothing) | None => {}
+                            }
+                            if script.as_ref().is_some_and(crate::login_script::LoginScript::completed)
+                                && let Some(l) = launch.take()
+                            {
+                                let _sent = script_writer.write(&l.bytes).await;
                             }
                         }
                         Some(ShellEvent::Ended(r)) => {
@@ -1209,10 +1310,12 @@ async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u3
     if route.target.protocol == sshcraft_model::model::Protocol::Telnet {
         return connect_telnet(ctx, &route, size).await;
     }
-    let persistence = route.target.persistence;
-    let command = match &persistence {
-        Some(p) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
-        None => None,
+    let persistence = route.target.persistence.clone();
+    // A container opens instead of the host's shell; otherwise a session that stays.
+    let command = match (&route.target.container, &persistence) {
+        (Some(c), _) => Some(c.command().ok_or_else(|| end_error(ErrorCode::ContainerNameInvalid, Some(c.name.clone())))?),
+        (None, Some(p)) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
+        (None, None) => None,
     };
     let (session, notice) = connect_session(ctx, host_id, opened, true).await?;
     let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);

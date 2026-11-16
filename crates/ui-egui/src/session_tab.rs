@@ -84,6 +84,8 @@ pub struct SessionTab {
     paste_picker: bool,
     /// A program waited for the user at the last status change.
     program_blocked: bool,
+    /// The macro running on this terminal.
+    pub macro_run: Option<crate::macros::MacroRun>,
     /// What the session received while the hex view is open; `None` while it is closed.
     pub hex: Option<crate::terminal::hex::HexBuffer>,
     /// This session runs tmux in control mode: its output is read here, never shown.
@@ -265,7 +267,9 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
     let asked_from = app.ui.page;
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
     let scrollback = app.data.settings.terminal.scrollback;
-    let params = json!({ "target": target, "cols": 100, "rows": 30 });
+    // Reconnecting a pane opens its session again: launch actions ran already.
+    let again = matches!(replace, Some(PaneSlot::Session { .. }));
+    let params = json!({ "target": target, "cols": 100, "rows": 30, "again": again });
     // A host whose session is tmux in control mode: its windows become tabs.
     let tmux_control = host.is_some_and(|h| crate::pages::hosts::uses_tmux_control(app, h));
     let old = match replace {
@@ -367,6 +371,7 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 tmux: tmux_control.then(Box::default),
                 tmux_pane: None,
                 hex: None,
+                macro_run: None,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -455,6 +460,7 @@ pub fn open_tmux_pane(app: &mut SshcraftApp, control: SessionId, pane: u32) -> O
         tmux: None,
         tmux_pane: Some((control, pane)),
         hex: None,
+        macro_run: None,
     };
     app.terminals.insert(id, tab);
     Some(id)
@@ -752,6 +758,18 @@ fn desktop_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, ti
     }
 }
 
+/// Running macros read what their terminals received this frame; those waiting for nothing new
+/// still time out.
+fn tick_macros(app: &mut SshcraftApp, feeds: Vec<(SessionId, Vec<u8>)>) {
+    for (id, bytes) in feeds {
+        crate::macros::tick(app, id, &bytes);
+    }
+    let running: Vec<SessionId> = app.terminals.values().filter(|t| t.macro_run.is_some()).map(|t| t.id).collect();
+    for id in running {
+        crate::macros::tick(app, id, &[]);
+    }
+}
+
 pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     if app.terminals.is_empty() {
         return;
@@ -761,6 +779,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     let capture = !app.patterns.triggers.is_empty();
     let mut more = false;
     let mut starts = Vec::new();
+    let mut macro_feeds: Vec<(SessionId, Vec<u8>)> = Vec::new();
     let mut ask_recording = Vec::new();
     let ids: Vec<SessionId> = app.terminals.keys().copied().collect();
     for id in ids {
@@ -772,7 +791,10 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             continue;
         }
         if let Some(pump) = tab.pump.as_mut() {
-            // With the hex view open, what goes into the terminal goes into it too.
+            // With the hex view open, what goes into the terminal goes into it too; a running
+            // macro reads it.
+            let watching = tab.macro_run.is_some();
+            let mut seen = Vec::new();
             let (term, hex) = (&mut tab.term, &mut tab.hex);
             let outcome = pump.frame_into(
                 &mut |slice| {
@@ -780,9 +802,15 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                     if let Some(hex) = hex.as_mut() {
                         hex.push(slice);
                     }
+                    if watching {
+                        seen.extend_from_slice(slice);
+                    }
                 },
                 FrameBudget::DEFAULT,
             );
+            if watching {
+                macro_feeds.push((id, seen));
+            }
             if outcome.fed > 0 {
                 tab.mark_output();
                 // Commands get the time their start or end arrived, shown or not.
@@ -872,6 +900,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             tab.title = title;
         }
     }
+    tick_macros(app, macro_feeds);
     for (id, bytes) in starts {
         send(app, id, &bytes);
     }
@@ -972,6 +1001,7 @@ pub fn notice_text(code: sshcraft_engine::ErrorCode) -> Option<&'static str> {
         ErrorCode::TelnetNotAllowed => tr("Telnet came from elsewhere: allow it in the host's form to use it here."),
         ErrorCode::TelnetDirectOnly => tr("Telnet goes straight to the device, without jump host or proxy."),
         ErrorCode::SessionNameInvalid => tr("The tmux or screen session name has characters SSHCraft does not put into a command."),
+        ErrorCode::ContainerNameInvalid => tr("The container name or namespace has characters SSHCraft does not put into a command."),
         _ => return None,
     })
 }

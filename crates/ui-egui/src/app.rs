@@ -437,6 +437,16 @@ impl SshcraftApp {
                         crate::pages::templates::open(self, &template);
                     }
                 }
+                crate::palette::RUN_MACRO => {
+                    if let (Some(id), Some(name)) = (crate::macros::focused_session(self), arg.as_deref()) {
+                        crate::macros::start(self, id, name);
+                    }
+                }
+                crate::palette::STOP_MACRO => {
+                    if let Some(id) = crate::macros::focused_session(self) {
+                        crate::macros::stop(self, id);
+                    }
+                }
                 crate::palette::RUN_SNIPPET => {
                     if let Some(snippet) = arg {
                         crate::pages::snippets::open_run(self, &snippet);

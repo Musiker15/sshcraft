@@ -27,7 +27,7 @@ pub fn specs() -> Vec<CommandSpec> {
         command(
             "session.open",
             "Open a session",
-            "{ target: { kind: host, host_id } | { kind: local, shell, cwd? } | { kind: serial, settings }, cols, rows }; agents: { host: id or unique name }",
+            "{ target: { kind: host, host_id } | { kind: local, shell, cwd? } | { kind: serial, settings }, cols, rows, again?: true when the user reconnects a tab (no launch actions) }; agents: { host: id or unique name }",
             run_open,
         ),
         // Keystrokes never go into the journal.
@@ -52,6 +52,8 @@ struct UserOpen {
     target: SessionTarget,
     cols: u32,
     rows: u32,
+    #[serde(default)]
+    again: bool,
 }
 
 #[derive(Deserialize)]
@@ -81,7 +83,7 @@ fn run_open(ctx: Ctx, params: Value) -> Out {
             let id = session.agent_sessions().open(session.sessions(), host.id);
             return Ok(json!({ "session": id }));
         }
-        let UserOpen { target, cols, rows } = parse("session.open", params)?;
+        let UserOpen { target, cols, rows, again } = parse("session.open", params)?;
         // A local shell starts only when it is one this device offers (or the user's own): a
         // caller cannot start any program it likes.
         if let SessionTarget::Local { shell, .. } = &target
@@ -90,7 +92,8 @@ fn run_open(ctx: Ctx, params: Value) -> Out {
             return Err(CommandError::code(ErrorCode::LocalShellFailed));
         }
         let (sender, receiver) = mpsc::unbounded_channel();
-        let id = session.sessions().open(target, cols, rows, Arc::new(StreamSink { sender, waker: session.terminal_waker() }));
+        let sink = Arc::new(StreamSink { sender, waker: session.terminal_waker() });
+        let id = if again { session.sessions().reopen(target, cols, rows, sink) } else { session.sessions().open(target, cols, rows, sink) };
         if let Some(flow) = session.sessions().flow(id) {
             session.park_terminal(TerminalStream::new(id, receiver, flow));
         }

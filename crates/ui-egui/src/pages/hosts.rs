@@ -32,6 +32,11 @@ pub struct HostsView {
     pub group: Option<GroupId>,
     pub tags: Vec<String>,
     pub search: String,
+    /// The dynamic group applied: hosts from every group are shown.
+    pub smart: Option<String>,
+    /// The name being typed for a new dynamic group.
+    #[serde(skip)]
+    pub smart_draft: Option<String>,
     #[serde(skip)]
     pub cache: HostsCache,
     #[serde(skip)]
@@ -81,7 +86,11 @@ pub fn uses_tmux_control(app: &SshcraftApp, id: HostId) -> bool {
     let persistence = row.host.settings.persistence.clone().or_else(|| chain.iter().find_map(|g| g.defaults.persistence.clone()));
     // A Telnet host has no tmux behind it: the engine never runs it there.
     let protocol = row.host.settings.protocol.or_else(|| chain.iter().find_map(|g| g.defaults.protocol)).unwrap_or_default();
-    protocol == sshcraft_model::model::Protocol::Ssh && persistence.is_some_and(|p| p.tool == sshcraft_model::persist::Tool::TmuxControl)
+    // Nor does a container: the engine opens it instead, from any level.
+    let container = row.host.settings.container.is_some() || chain.iter().any(|g| g.defaults.container.is_some());
+    protocol == sshcraft_model::model::Protocol::Ssh
+        && !container
+        && persistence.is_some_and(|p| p.tool == sshcraft_model::persist::Tool::TmuxControl)
 }
 
 /// A shared host whose owner's sign-in was not shared, and that has none of its own yet.
@@ -184,11 +193,15 @@ fn refresh_reachability(app: &mut SshcraftApp, ctx: &egui::Context) {
     );
 }
 
+/// What the lists were worked out for: the data version, the group, the tags, the search and
+/// whether a dynamic group is applied.
+type CacheKey = (u64, Option<GroupId>, Vec<String>, String, bool);
+
 /// The page's lists, worked out again only when the data or the view changed: with thousands of
 /// hosts, filtering and sorting them in every frame would not fit a frame.
 #[derive(Debug, Clone, Default)]
 pub struct HostsCache {
-    key: Option<(u64, Option<GroupId>, Vec<String>, String)>,
+    key: Option<CacheKey>,
     groups: Vec<Group>,
     /// The groups shown at this level.
     sub: Vec<Group>,
@@ -200,7 +213,8 @@ pub struct HostsCache {
 
 fn update_cache(app: &mut SshcraftApp) {
     let view = &app.ui.hosts;
-    let key = (app.data.version, view.group, view.tags.clone(), view.search.clone());
+    let everywhere = view.smart.is_some();
+    let key = (app.data.version, view.group, view.tags.clone(), view.search.clone(), everywhere);
     if view.cache.key.as_ref() == Some(&key) {
         return;
     }
@@ -212,7 +226,7 @@ fn update_cache(app: &mut SshcraftApp) {
         .hosts
         .iter()
         .enumerate()
-        .filter(|(_, r)| if searching { matches(r, &query, &groups) } else { r.host.group_id == view.group })
+        .filter(|(_, r)| if searching { matches(r, &query, &groups) } else { everywhere || r.host.group_id == view.group })
         .map(|(i, _)| i)
         .collect();
     let mut tags: Vec<String> = rows.iter().filter_map(|&i| app.data.hosts.get(i)).flat_map(|r| r.host.tags.iter().cloned()).collect();
@@ -220,7 +234,8 @@ fn update_cache(app: &mut SshcraftApp) {
     tags.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     let mut shown: Vec<usize> = rows.into_iter().filter(|&i| app.data.hosts.get(i).is_some_and(|r| has_all_tags(&r.host.tags, &view.tags))).collect();
     shown.sort_by_cached_key(|&i| app.data.hosts.get(i).map(|r| r.host.name.to_lowercase()));
-    let mut sub: Vec<Group> = if searching { Vec::new() } else { groups.iter().filter(|g| g.parent_id == view.group).cloned().collect() };
+    let mut sub: Vec<Group> =
+        if searching || everywhere { Vec::new() } else { groups.iter().filter(|g| g.parent_id == view.group).cloned().collect() };
     sub.sort_by_key(|g| g.name.to_lowercase());
     app.ui.hosts.cache = HostsCache { key: Some(key), groups, sub, tags, shown };
 }
@@ -317,15 +332,108 @@ fn path(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
     let tokens = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         if elided_label(ui, tr("All hosts"), MAX_NAME_WIDTH, tokens.accent, FontId::proportional(14.0)).clicked() {
+            leave_smart(app);
             app.ui.hosts.group = None;
         }
         for g in chain(app.ui.hosts.group, all_groups).into_iter().rev() {
             ui.label(egui::RichText::new("/").color(tokens.text_dim));
             if elided_label(ui, &g.name, MAX_NAME_WIDTH, tokens.text, FontId::proportional(14.0)).clicked() {
+                leave_smart(app);
                 app.ui.hosts.group = Some(g.id);
             }
         }
     });
+}
+
+/// Leaves the dynamic group applied, with its filter.
+fn leave_smart(app: &mut SshcraftApp) {
+    if app.ui.hosts.smart.take().is_some() {
+        app.ui.hosts.tags.clear();
+        app.ui.hosts.search.clear();
+    }
+}
+
+/// What a dynamic group filters, for its tooltip.
+fn describe(group: &sshcraft_engine::settings::SmartGroup) -> String {
+    let mut parts = Vec::new();
+    if !group.tags.is_empty() {
+        parts.push(trf("Tags: {tags}", &[("tags", &visible(&group.tags.join(", ")))]));
+    }
+    if !group.query.trim().is_empty() {
+        parts.push(trf("Search: {text}", &[("text", &visible(&group.query))]));
+    }
+    parts.join("\n")
+}
+
+/// The dynamic groups: saved filters over the hosts of every group. A click applies one, a second
+/// click leaves it; the tags and search chosen can be saved as a new one.
+fn smart_chips(app: &mut SshcraftApp, ui: &mut Ui) {
+    use sshcraft_engine::settings::{MAX_SMART_GROUPS, SmartGroup};
+    let saved = app.data.settings.appearance.smart_groups.clone();
+    // One removed on this device is no longer applied.
+    if app.ui.hosts.smart.as_ref().is_some_and(|s| !saved.iter().any(|g| &g.name == s)) {
+        app.ui.hosts.smart = None;
+    }
+    let view = &app.ui.hosts;
+    let can_save = view.smart.is_none()
+        && view.smart_draft.is_none()
+        && (!view.tags.is_empty() || !view.search.trim().is_empty())
+        && saved.len() < MAX_SMART_GROUPS;
+    if saved.is_empty() && !can_save && view.smart_draft.is_none() {
+        return;
+    }
+    let mut remove = None;
+    ui.horizontal_wrapped(|ui| {
+        for g in &saved {
+            let on = app.ui.hosts.smart.as_deref() == Some(g.name.as_str());
+            let response = ui.selectable_label(on, visible(&g.name)).on_hover_text(describe(g));
+            if response.clicked() {
+                if on {
+                    leave_smart(app);
+                } else {
+                    app.ui.hosts.smart = Some(g.name.clone());
+                    app.ui.hosts.tags = g.tags.clone();
+                    app.ui.hosts.search = g.query.clone();
+                }
+            }
+            response.context_menu(|ui| {
+                if ui.button(tr("Delete")).clicked() {
+                    remove = Some(g.name.clone());
+                }
+            });
+        }
+        if can_save && ui.small_button(tr("Save as dynamic group")).clicked() {
+            app.ui.hosts.smart_draft = Some(String::new());
+        }
+    });
+    if let Some(name) = remove {
+        if app.ui.hosts.smart.as_ref() == Some(&name) {
+            leave_smart(app);
+        }
+        crate::pages::settings::save(app, |s| s.appearance.smart_groups.retain(|g| g.name != name));
+    }
+    let Some(mut name) = app.ui.hosts.smart_draft.take() else { return };
+    let group = SmartGroup { name: name.trim().to_string(), tags: app.ui.hosts.tags.clone(), query: app.ui.hosts.search.trim().to_string() };
+    let clash = saved.iter().any(|g| sshcraft_engine::settings::same_name(&g.name, &group.name));
+    let mut keep = true;
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(200.0));
+        if ui.add_enabled(group.valid() && !clash, egui::Button::new(tr("Save"))).clicked() {
+            let applied = group.name.clone();
+            crate::pages::settings::save(app, |s| s.appearance.smart_groups.push(group));
+            app.ui.hosts.smart = Some(applied);
+            keep = false;
+        }
+        if ui.button(tr("Cancel")).clicked() {
+            keep = false;
+        }
+        if clash {
+            ui.label(egui::RichText::new(tr("A dynamic group has that name already.")).color(Tokens::get(ui.ctx()).danger));
+        }
+    });
+    if keep {
+        app.ui.hosts.smart_draft = Some(name);
+    }
 }
 
 fn tag_chips(app: &mut SshcraftApp, ui: &mut Ui) {
@@ -565,6 +673,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         }
     });
     ui.add_space(6.0);
+    smart_chips(app, ui);
     path(app, ui, &all_groups);
     tag_chips(app, ui);
     selection_bar(app, ui, &all_groups);

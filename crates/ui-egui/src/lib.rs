@@ -18,6 +18,7 @@ pub mod keymap;
 pub mod link;
 pub mod lock;
 pub mod log_viewer;
+pub mod macros;
 pub mod menus;
 pub mod notify;
 pub mod pages;

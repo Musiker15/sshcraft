@@ -2495,3 +2495,184 @@ async fn telnet_from_elsewhere_is_not_used_until_allowed() {
     assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::TelnetNotAllowed));
     assert!(tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(), "the device never hears from us");
 }
+
+#[tokio::test]
+async fn a_container_target_opens_the_fixed_exec_command() {
+    use sshcraft_model::container::{Container, Runtime, Shell};
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.container = Some(Container { runtime: Runtime::Docker, name: "web".into(), namespace: None, shell: Shell::Bash });
+        store.upsert_host(&host).unwrap();
+    }
+    let (_tab, _) = connected_tab(&f).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !f.server.received_commands().contains(&"docker exec -it web bash".to_owned()) {
+        assert!(tokio::time::Instant::now() < deadline, "{:?}", f.server.received_commands());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_container_name_from_elsewhere_never_reaches_a_command() {
+    use sshcraft_model::container::{Container, Runtime, Shell};
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.container = Some(Container { runtime: Runtime::Docker, name: "web;id".into(), namespace: None, shell: Shell::Sh });
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::ContainerNameInvalid));
+    assert!(f.server.received_commands().is_empty());
+}
+
+#[tokio::test]
+async fn listed_containers_are_checked() {
+    let f = fixture(true).await;
+    f.server.set_exec_output("web\nbad name\n$(id)\ndb_1\n");
+    let names = f.manager.list_containers(f.host_id, sshcraft_model::container::Runtime::Docker, None).await.unwrap();
+    assert_eq!(names, vec!["web".to_string(), "db_1".to_string()]);
+    assert!(f.server.received_commands().contains(&"docker ps --format '{{.Names}}'".to_owned()));
+}
+
+mod launch {
+    use super::*;
+    use sshcraft_model::model::SnippetId;
+    use sshcraft_store::snippets::Snippet;
+
+    /// A snippet with `content` and the host launching it; returns the snippet's text.
+    fn launching(f: &Fixture, content: &str) -> String {
+        let snippet =
+            Snippet { id: SnippetId::new(), name: "start".into(), package: String::new(), content: content.into(), default_targets: Vec::new() };
+        let store = f.store.lock().unwrap();
+        sshcraft_store::snippets::save(&f.vault, &store, &snippet).unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.launch = Some(vec![snippet.id]);
+        store.upsert_host(&host).unwrap();
+        content.to_owned()
+    }
+
+    fn allow(f: &Fixture, texts: &[String]) {
+        allow_for(f, &f.host_id.0.to_string(), texts);
+    }
+
+    fn allow_for(f: &Fixture, level: &str, texts: &[String]) {
+        let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(level, texts));
+        f.store.lock().unwrap().approve_command(&digest).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_approval_for_another_host_does_not_count() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo other-host");
+        allow_for(&f, &uuid::Uuid::new_v4().to_string(), &[text]);
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo other-host"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn a_reconnected_tab_types_no_launch_actions() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo again-not");
+        allow(&f, &[text]);
+        // The tab's Reconnect button opens the session again.
+        let sink = Arc::new(RecordingSink::default());
+        f.manager.reopen(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+        sink.wait_for(|s| connected_count(s) == 1).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo again-not"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn launch_actions_are_not_typed_into_a_session_that_stays() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo into-tmux");
+        allow(&f, &[text]);
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.persistence = Some(sshcraft_model::persist::Persistence { tool: sshcraft_model::persist::Tool::Tmux, name: "work".into() });
+            store.upsert_host(&host).unwrap();
+        }
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo into-tmux"), "{out}");
+        assert!(out.contains("session that stays"), "the terminal says why: {out}");
+    }
+
+    #[tokio::test]
+    async fn launch_actions_on_telnet_wait_for_a_login_script() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let f = fixture(true).await;
+        let text = launching(&f, "echo at-login-prompt");
+        allow(&f, &[text]);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let device = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket.write_all(b"login: ").await.unwrap();
+            let mut buf = [0u8; 64];
+            tokio::time::timeout(Duration::from_millis(500), socket.read(&mut buf)).await.ok().and_then(Result::ok).map(|n| buf[..n].to_vec())
+        });
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.protocol = Some(sshcraft_model::model::Protocol::Telnet);
+            host.settings.port = Some(port);
+            store.upsert_host(&host).unwrap();
+            store.approve_command(&sshcraft_store::store::command_digest(&crate::sessions::telnet_approval(&f.host_id.0.to_string()))).unwrap();
+        }
+        let sink = Arc::new(RecordingSink::default());
+        f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+        let heard = device.await.unwrap();
+        assert!(heard.as_ref().is_none_or(|b| !String::from_utf8_lossy(b).contains("at-login-prompt")), "{heard:?}");
+    }
+
+    async fn output_after(sink: &RecordingSink, wait: Duration) -> String {
+        tokio::time::sleep(wait).await;
+        sink.data_text()
+    }
+
+    #[tokio::test]
+    async fn an_allowed_launch_action_is_typed_once_on_connect() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo launched-ok");
+        allow(&f, &[text]);
+        let (_tab, sink) = connected_tab(&f).await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !sink.data_text().contains("echo launched-ok") {
+            assert!(tokio::time::Instant::now() < deadline, "not typed: {}", sink.data_text());
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let out = output_after(&sink, Duration::from_millis(300)).await;
+        assert_eq!(out.matches("echo launched-ok").count(), 1, "once: {out}");
+    }
+
+    #[tokio::test]
+    async fn a_launch_action_from_elsewhere_is_not_typed() {
+        let f = fixture(true).await;
+        launching(&f, "echo not-allowed-here");
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo not-allowed-here"), "{out}");
+        assert!(out.contains("launch actions that are not allowed"), "the terminal says why: {out}");
+    }
+
+    #[tokio::test]
+    async fn a_changed_snippet_needs_a_new_approval() {
+        let f = fixture(true).await;
+        let old = launching(&f, "echo old-text");
+        allow(&f, &[old]);
+        // The snippet changes (through sync, say): its new text was never allowed.
+        launching(&f, "echo new-text");
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo new-text") && !out.contains("echo old-text"), "{out}");
+    }
+}

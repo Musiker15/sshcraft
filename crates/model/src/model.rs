@@ -81,6 +81,12 @@ pub struct ConnectionSettings {
     /// Forward X11 to this computer's display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x11: Option<bool>,
+    /// Snippets typed once when a session first connects; only once allowed on this device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<Vec<SnippetId>>,
+    /// A container on the host to open instead of the host's shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<crate::container::Container>,
     /// SSH unless set to Telnet (for devices that speak nothing else).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<Protocol>,
@@ -333,6 +339,7 @@ pub struct ResolvedHost {
     pub agent_forwarding: bool,
     pub x11: bool,
     pub persistence: Option<crate::persist::Persistence>,
+    pub container: Option<crate::container::Container>,
     pub protocol: Protocol,
     pub env: Vec<EnvVar>,
     pub jump_hosts: Vec<HostId>,
@@ -425,6 +432,7 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
     let agent_forwarding = levels.iter().find_map(|l| l.settings.agent_forwarding).unwrap_or(false);
     let x11 = levels.iter().find_map(|l| l.settings.x11).unwrap_or(false);
     let persistence = levels.iter().find_map(|l| l.settings.persistence.clone());
+    let container = levels.iter().find_map(|l| l.settings.container.clone());
     let protocol = levels.iter().find_map(|l| l.settings.protocol).unwrap_or_default();
     let jump_hosts = levels.iter().find_map(|l| l.settings.jump_hosts.clone()).unwrap_or_default();
     let env: Vec<EnvVar> = levels.iter().rev().flat_map(|l| l.settings.env.iter().cloned()).collect();
@@ -442,6 +450,7 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
         agent_forwarding,
         x11,
         persistence,
+        container,
         protocol,
         env: normalize_env(&env),
         jump_hosts,
@@ -471,6 +480,8 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
         x11: levels.iter().find_map(|l| l.settings.x11),
         persistence: levels.iter().find_map(|l| l.settings.persistence.clone()),
+        container: levels.iter().find_map(|l| l.settings.container.clone()),
+        launch: levels.iter().find_map(|l| l.settings.launch.clone()),
         protocol: levels.iter().find_map(|l| l.settings.protocol),
         // Worked out for each copy, never inherited.
         credentials_from_member: None,
