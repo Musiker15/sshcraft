@@ -36,6 +36,86 @@ pub struct HostsView {
     pub cache: HostsCache,
     #[serde(skip)]
     pub reachability: Reachability,
+    #[serde(skip)]
+    pub selection: Selection,
+}
+
+/// Hosts chosen with Ctrl or Shift click, for one change to all of them.
+#[derive(Debug, Clone, Default)]
+pub struct Selection {
+    pub hosts: std::collections::HashSet<HostId>,
+    /// Where a Shift click counts from: a position in the shown hosts.
+    pub anchor: Option<usize>,
+    /// The fields of the bar.
+    pub tag: String,
+    pub user: String,
+}
+
+/// A click on the host at position `pos` of the shown list: Ctrl toggles it, Shift takes the
+/// range from the last click, a plain click clears the choice.
+fn select(app: &mut SshcraftApp, pos: usize, id: HostId, modifiers: egui::Modifiers) {
+    let selection = &mut app.ui.hosts.selection;
+    if modifiers.shift
+        && let Some(anchor) = selection.anchor
+    {
+        let (from, to) = (anchor.min(pos), anchor.max(pos));
+        let range: Vec<HostId> =
+            app.ui.hosts.cache.shown.get(from..=to).unwrap_or_default().iter().filter_map(|&k| app.data.hosts.get(k)).map(|r| r.host.id).collect();
+        selection.hosts.extend(range);
+    } else if modifiers.command {
+        if !selection.hosts.remove(&id) {
+            selection.hosts.insert(id);
+        }
+        selection.anchor = Some(pos);
+    } else {
+        selection.hosts.clear();
+        selection.anchor = Some(pos);
+    }
+}
+
+/// One change to every chosen host.
+fn bulk(app: &mut SshcraftApp, patch: serde_json::Value) {
+    let ids: Vec<HostId> = app.ui.hosts.selection.hosts.iter().copied().collect();
+    app.run_reported("host.bulk_update", json!({ "ids": ids, "patch": patch }));
+}
+
+/// The bar over the list while hosts are chosen.
+fn selection_bar(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
+    let count = app.ui.hosts.selection.hosts.len();
+    if count == 0 {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label(trf("{count} hosts chosen", &[("count", &count.to_string())]));
+        ui.menu_button(tr("Move to"), |ui| {
+            for (target, path) in host_form::group_targets(all_groups, None) {
+                if ui.button(path).clicked() {
+                    let patch = match target {
+                        Some(group) => json!({ "group_id": group }),
+                        None => json!({ "to_top_level": true }),
+                    };
+                    bulk(app, patch);
+                }
+            }
+        });
+        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.selection.tag).hint_text(tr("Tag")).desired_width(100.0).char_limit(32));
+        let tag = app.ui.hosts.selection.tag.trim().to_string();
+        if ui.add_enabled(!tag.is_empty(), egui::Button::new(tr("Add tag"))).clicked() {
+            bulk(app, json!({ "add_tags": [tag] }));
+        }
+        if ui.add_enabled(!tag.is_empty(), egui::Button::new(tr("Remove tag"))).clicked() {
+            bulk(app, json!({ "remove_tags": [tag] }));
+        }
+        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.selection.user).hint_text(tr("User")).desired_width(100.0).char_limit(100));
+        if ui.button(tr("Set user")).on_hover_text(tr("Empty: take the user from the group again")).clicked() {
+            let user = app.ui.hosts.selection.user.trim().to_string();
+            bulk(app, json!({ "username": user }));
+        }
+        if ui.button(tr("Clear choice")).clicked() {
+            app.ui.hosts.selection = Selection::default();
+        }
+    });
+    ui.add_space(4.0);
 }
 
 /// The last answer of `host.reachable`: `None` behind a jump host or proxy.
@@ -285,8 +365,11 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
     });
 }
 
-fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[Group]) {
+fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all_groups: &[Group]) {
     let tokens = Tokens::get(ui.ctx());
+    if app.ui.hosts.selection.hosts.contains(&row.host.id) {
+        ui.painter().rect_filled(ui.max_rect(), f32::from(tokens.radius), tokens.row_selected);
+    }
     ui.horizontal(|ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
         draw(ui.painter(), Icon::Host, icon, tokens.text_dim);
@@ -306,6 +389,20 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[G
             elided_label(ui, address, 140.0, tokens.text_dim, FontId::proportional(13.0));
         }
         let id = row.host.id;
+        if response.clicked() {
+            // The modifiers of the release that made the click; held keys as a fallback.
+            let modifiers = ui.input(|i| {
+                i.events
+                    .iter()
+                    .rev()
+                    .find_map(|e| match e {
+                        egui::Event::PointerButton { pressed: false, modifiers, .. } => Some(*modifiers),
+                        _ => None,
+                    })
+                    .unwrap_or(i.modifiers)
+            });
+            select(app, pos, id, modifiers);
+        }
         if response.double_clicked() {
             app.ui.connect_request = Some(ConnectRequest::Host(id));
         }
@@ -435,6 +532,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(6.0);
     path(app, ui, &all_groups);
     tag_chips(app, ui);
+    selection_bar(app, ui, &all_groups);
     ui.add_space(6.0);
     let sub = app.ui.hosts.cache.sub.clone();
     let shown = app.ui.hosts.cache.shown.clone();
@@ -456,7 +554,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
                         if let Some(g) = sub.get(i) {
                             group_entry(app, ui, g);
                         } else if let Some(row) = i.checked_sub(sub.len()).and_then(|j| shown.get(j)).and_then(|&k| app.data.hosts.get(k)).cloned() {
-                            host_entry(app, ui, &row, &all_groups);
+                            host_entry(app, ui, i - sub.len(), &row, &all_groups);
                         }
                     });
                 }

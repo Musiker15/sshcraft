@@ -294,3 +294,25 @@ fn reachability_is_checked_only_when_switched_on() {
     run(&session, "settings.save", json!({ "settings": settings }));
     until(&mut h, "the check", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
 }
+
+#[test]
+fn chosen_hosts_change_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (a, b, c) = (add_host(&session, "alpha", None, &[]), add_host(&session, "beta", None, &[]), add_host(&session, "gamma", None, &[]));
+    until(&mut h, "the hosts", |app| app.data.hosts.len() == 3);
+    h.get_by_label("alpha").click();
+    h.run_steps(1);
+    h.get_by_label("gamma").click_modifiers(egui::Modifiers::SHIFT);
+    h.run_steps(1);
+    h.get_by_label("beta").click_modifiers(egui::Modifiers::COMMAND);
+    h.run_steps(2);
+    let chosen = h.state().ui.hosts.selection.hosts.clone();
+    assert!(chosen.contains(&a) && chosen.contains(&c) && !chosen.contains(&b), "{chosen:?}");
+    h.state_mut().ui.hosts.selection.tag = "prod".into();
+    h.run_steps(1);
+    h.get_by_label("Add tag").click();
+    until(&mut h, "the tags", |app| app.data.hosts.iter().filter(|r| r.host.tags.contains(&"prod".to_string())).count() == 2);
+    let beta = h.state().data.hosts.iter().find(|r| r.host.id == b).unwrap().host.tags.clone();
+    assert!(beta.is_empty(), "a host not chosen keeps its tags");
+}

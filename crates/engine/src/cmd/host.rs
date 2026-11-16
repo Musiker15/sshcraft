@@ -31,6 +31,12 @@ pub fn specs() -> Vec<CommandSpec> {
             run_save,
         ),
         command("host.delete", "Delete a host", "{ id }", run_delete),
+        command(
+            "host.bulk_update",
+            "Change many hosts at once",
+            "{ ids: at most 1000, patch: { group_id?, to_top_level?, add_tags?, remove_tags?, username?: empty to inherit, port?: 1 to 65535, key?, agent_forwarding?, x11? } } -> { updated }",
+            run_bulk_update,
+        ),
         query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
         query(
             "host.reachable",
@@ -280,6 +286,102 @@ fn run_recent(ctx: Ctx, params: Value) -> Out {
         let RecentParams { limit } = parse("host.recent", params)?;
         to_value(&ctx.session.store().recent_hosts(limit.min(100))?)
     })
+}
+
+/// The most hosts one `host.bulk_update` call changes.
+const MAX_BULK: usize = 1000;
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct BulkPatch {
+    #[serde(default)]
+    group_id: Option<sshcraft_model::model::GroupId>,
+    #[serde(default)]
+    to_top_level: bool,
+    #[serde(default)]
+    add_tags: Vec<String>,
+    #[serde(default)]
+    remove_tags: Vec<String>,
+    /// An empty name: inherited again.
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    key: Option<sshcraft_model::model::KeyRef>,
+    #[serde(default)]
+    agent_forwarding: Option<bool>,
+    #[serde(default)]
+    x11: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct BulkParams {
+    ids: Vec<HostId>,
+    patch: BulkPatch,
+}
+
+impl BulkPatch {
+    /// Applies the change; passwords, proxies, scripts and everything else stay as they are.
+    fn apply(&self, host: &mut Host) {
+        if self.to_top_level {
+            host.group_id = None;
+        } else if let Some(group) = self.group_id {
+            host.group_id = Some(group);
+        }
+        let mut tags: Vec<String> = host.tags.iter().filter(|t| !self.remove_tags.contains(t)).cloned().collect();
+        tags.extend(self.add_tags.iter().filter(|t| !host.tags.contains(t)).cloned());
+        host.tags = sshcraft_model::model::normalize_tags(&tags);
+        if let Some(user) = &self.username {
+            host.settings.username = (!user.trim().is_empty()).then(|| user.trim().to_string());
+        }
+        if let Some(port) = self.port {
+            host.settings.port = Some(port);
+        }
+        if let Some(key) = &self.key {
+            host.settings.key = Some(key.clone());
+        }
+        if let Some(on) = self.agent_forwarding {
+            host.settings.agent_forwarding = Some(on);
+        }
+        if let Some(on) = self.x11 {
+            host.settings.x11 = Some(on);
+        }
+    }
+}
+
+/// Changes many hosts the same way. Each is saved through `host.save`, so every check, the
+/// earlier version and the sync queue work as for one host; unknown ids are skipped.
+fn run_bulk_update(ctx: Ctx, params: Value) -> Out {
+    use futures::FutureExt;
+    async move {
+        let BulkParams { ids, patch } = parse("host.bulk_update", params)?;
+        if ids.len() > MAX_BULK {
+            return Err(CommandError::bad_params("host.bulk_update", format!("at most {MAX_BULK} ids")));
+        }
+        if patch.port == Some(0) {
+            return Err(CommandError::bad_params("host.bulk_update", "the port must be 1 to 65535"));
+        }
+        if patch.username.as_deref().is_some_and(|u| u.chars().count() > 100 || u.chars().any(char::is_control)) {
+            return Err(CommandError::bad_params("host.bulk_update", "the user name is not valid"));
+        }
+        let hosts: Vec<Host> = {
+            let all = ctx.session.store().list_hosts()?;
+            all.into_iter().filter(|h| ids.contains(&h.id)).collect()
+        };
+        let mut updated = 0usize;
+        for mut host in hosts {
+            let before = host.clone();
+            patch.apply(&mut host);
+            if host == before {
+                continue;
+            }
+            ctx.session.execute(ctx.caller.clone(), "host.save", serde_json::json!({ "host": host })).await?;
+            updated += 1;
+        }
+        Ok(serde_json::json!({ "updated": updated }))
+    }
+    .boxed()
 }
 
 /// The most hosts one `host.reachable` call checks.

@@ -19,6 +19,7 @@ group.save
 history.clear
 history.list
 history.record
+host.bulk_update
 host.delete
 host.exec
 host.export

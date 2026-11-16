@@ -6,6 +6,8 @@
 
 pub mod agent_link;
 pub mod agent_sessions;
+#[cfg(test)]
+mod bulk_tests;
 pub mod caller;
 pub mod cmd;
 pub mod consent;
