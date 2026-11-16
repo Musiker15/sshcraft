@@ -52,6 +52,24 @@
     <binary>sshcraft</binary>
     <binary>sshcraft-cli</binary>
   </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Hosts and groups</caption>
+      <image>https://raw.githubusercontent.com/Musiker15/sshcraft/v0.1.1/assets/screenshots/hosts.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Hosts in the dark theme</caption>
+      <image>https://raw.githubusercontent.com/Musiker15/sshcraft/v0.1.1/assets/screenshots/hosts-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Snippets</caption>
+      <image>https://raw.githubusercontent.com/Musiker15/sshcraft/v0.1.1/assets/screenshots/snippets.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Port forwarding</caption>
+      <image>https://raw.githubusercontent.com/Musiker15/sshcraft/v0.1.1/assets/screenshots/forwarding.png</image>
+    </screenshot>
+  </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="@VERSION@" date="@DATE@"/>

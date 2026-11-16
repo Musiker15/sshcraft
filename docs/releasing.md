@@ -23,8 +23,11 @@ These need the repository's settings and secrets, so only the owner sets them up
 1. **Branch `release`**, created from `main`, with branch protection: no force push, no deletion.
 2. **Environment `release`** (Settings, Environments), limited to the branch `release`. The
    signing jobs and the draft release run in it, and only the `release` branch may use it.
-3. **Secrets** in that environment, each optional: a missing one leaves its artifact unsigned
-   and the job summary says so.
+3. **Secrets** in that environment. On the `release` branch the shared workflow refuses to build
+   Windows without a certificate or Azure Trusted Signing, and macOS without the Apple secrets;
+   it has no switch to leave a platform out or unsigned. Without them, see
+   [Unsigned releases](#unsigned-releases). `LINUX_SIGNING_KEY` is optional: without it the
+   Linux packages are unsigned.
 
    | Secret | For |
    |---|---|
@@ -53,8 +56,8 @@ changes it.
    `SSHCraft v0.2.0` then has every artifact and `SHA256SUMS.txt`, its notes generated from the
    merged pull requests.
 4. **Check it.** Install a package or two and go through the hand-test list of the last pull
-   requests. A `::warning::` in a job summary means a secret was missing and that artifact is
-   unsigned.
+   requests. A `::warning::` in a job summary means the Linux key was missing and those
+   packages are unsigned.
 5. **Attach the SBOM** to the draft before publishing it:
 
    ```sh
@@ -76,6 +79,25 @@ workflow refuses to touch that version again: set a new one first.
 (no signing, no draft). The optional `version` input overrides `Cargo.toml` for that run only. A
 run by hand with dry run off asks for the `release` environment, so from any branch but `release`
 its signing jobs stop there.
+
+## Unsigned releases
+
+SSHCraft has no Windows certificate and no Apple developer account, so the pipeline above stops
+on the `release` branch. Until the shared workflow can leave a platform out or unsigned (that
+needs a change in `storytold/craft-common-actions`), a release is put together by hand from a dry
+run on `main`, which builds everything but macOS without signing:
+
+```sh
+gh workflow run release.yml --ref main -f dry-run=true           # wait until it is green
+gh run download <run-id> --dir dist/draft                        # every release-* artifact
+cd dist/draft && find . -type f -exec mv {} . \; && find . -type d -empty -delete
+sha256sum -- * > SHA256SUMS.txt
+cargo xtask sbom dist/draft/sshcraft-<v>.cdx.json                 # from the workspace root
+gh release create v<v> --draft --target <commit> --title "SSHCraft v<v>" --generate-notes dist/draft/*
+```
+
+The draft then has no macOS packages and nothing signed, which the release notes should say. The
+maintainer checks and publishes it as above.
 
 ## What gets built
 
