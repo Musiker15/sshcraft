@@ -24,6 +24,7 @@ with other clients, with sources, is the German
 | Quick connect, `ssh://` links, desktop shortcuts for hosts | yes | yes (F4); links only fill the dialog, not on macOS yet |
 | Changing many hosts at once, reachability in the host list, server load under the terminal | yes | yes (F4); reachability and load off by default |
 | Shared hosts that ask each member for their own sign-in | team plans | yes |
+| Sessions that stay (tmux, screen), tmux windows as tabs, Telnet | Mosh, Telnet | yes (F5); no Mosh and no Eternal Terminal |
 | Snippets, history, completion | yes | yes, with placeholders and a snippet bar |
 | Shell integration (command marks and exit codes), notification when a command ends, triggers and highlights, hint mode, compose field, login scripts, program status of agents | not compared yet | yes (F3); login scripts only after they were allowed on the device |
 | Colour, badge and theme per host or group | not compared yet | yes |
