@@ -30,6 +30,14 @@ connection to a host without a symbol, SSHCraft reads `/etc/os-release` (or `una
 a separate channel and stores the result; it can also be set by hand in the host form. Each
 device asks a host only once, also when the answer is not recognized.
 
+## Dynamic groups
+
+A dynamic group is a saved filter: the hosts of every group that carry all of its tags and match
+its search. Choose tags or type a search, then **Save as dynamic group** and give it a name. The
+dynamic groups sit as chips above the host list. A click shows their hosts, a second click (or a
+click on the path) goes back to the groups. Right-click a chip to delete it. Dynamic groups are
+kept on this device, at most 32.
+
 ## Changing many hosts at once
 
 Ctrl+click picks hosts one by one, Shift+click picks the range from the last click. While hosts

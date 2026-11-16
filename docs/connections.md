@@ -151,6 +151,19 @@ device** in the form and save. Agents can never allow one.
 Never put a password in a login script: it is stored as plain settings, not in the vault. Limits:
 16 steps, 256 characters to wait for, 1024 to send, no control characters.
 
+## Launch actions
+
+Launch actions are snippets that SSHCraft types into the terminal once a session has connected,
+for example `cd /srv/app` or a `tail -f` you always start. Pick up to eight in the host or group
+form; they are typed in that order, each followed by Enter, after a login script has finished.
+They run on the first connect of a tab only. A reconnect does not type them again.
+
+Like a login script, launch actions run only once you allowed exactly these texts on this device.
+Picking them in the form allows them when you save. If a snippet's text changes later (through
+sync, say), it has to be allowed again. Launch actions that came another way (sync, a share, an
+agent) are not typed; the terminal says so until you tick **Allow the launch actions on this
+device** and save. A snippet with placeholders is skipped, since nobody is there to fill them in.
+
 ## Steps before connecting and after the session
 
 A host or group can do something before SSHCraft connects and after the session ends:
@@ -260,6 +273,21 @@ out a little differently from SSHCraft's grid, and a tab shows at most 16 panes.
 panes of a tmux tab with tmux itself; SSHCraft keeps the tab as tmux has it. tmux answers the
 programs' terminal queries in its panes, so SSHCraft does not answer them a second time. After a
 reconnect SSHCraft lists the windows again: windows closed in between go, new ones come.
+
+## Containers
+
+A host can open a shell in a container on it instead of its own shell: pick Docker, Podman or
+Kubernetes under *Container* in the host or group form, give the container's name and choose the
+shell (`sh`, `bash`, `zsh` or `ash`). For Kubernetes the name is the pod's, and a namespace is
+optional; without one, kubectl's current namespace is used. For a saved host, **List** asks it
+which containers or pods run there and offers their names to pick from.
+
+SSHCraft builds a fixed command from these values, such as `docker exec -it NAME bash` or
+`kubectl exec -it -n NAMESPACE NAME -- sh`. Names may only hold letters, digits, dots, dashes and
+underscores and must not start with a dash (Kubernetes names lowercase only); SSHCraft refuses
+any other name when saving and again before connecting, also one that came through sync. A host
+cannot have both a container and a session that stays. The container runtime must be installed
+on the server and usable by the user who signs in.
 
 ## Telnet
 

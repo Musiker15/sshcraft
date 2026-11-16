@@ -39,7 +39,8 @@ submissions follow. Next is S1 (SFTP).
 | F4 | One shared connection per host; Wake-on-LAN, port knocking and programs before and after connecting; X11 forwarding; forwarding to Unix sockets; `ssh://` links and quick connect; changing many hosts at once; reachability in the host list; desktop shortcuts; server load under the terminal; shared hosts that ask for the member's own sign-in |
 | F5 | tmux and screen sessions attached again on every connect; tmux control mode with windows as tabs; Telnet hosts; Mosh and Eternal Terminal left out |
 | F6 | Hex view of what a session received; dropdown window on a global shortcut; images and file transfer through the terminal left out |
+| F7 | Containers on a host as targets (Docker, Podman, Kubernetes); launch actions typed once when a session starts, allowed per device; macros from steps, run from the palette; dynamic groups from saved filters; Kerberos and PKCS#11 left out |
 
 ## After the first release
 
-M1 to M3 (Android, iOS and iPadOS), S1 (SFTP), F7 (targets and automation). A database client follows as a separate sister app.
+M1 to M3 (Android, iOS and iPadOS), S1 (SFTP). A database client follows as a separate sister app.

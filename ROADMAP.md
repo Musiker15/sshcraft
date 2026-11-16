@@ -1,6 +1,6 @@
 # SSHCraft roadmap
 
-> **Last updated:** 2026-11-17 · **Stage:** first release out; F6 done, F7 next
+> **Last updated:** 2026-11-17 · **Stage:** first release out; F7 done
 
 SSHCraft reached its first feature set (sub-plans 1 to 15: hosts, keys, connections, workspaces,
 port forwarding, snippets, session logs, sync, sharing, AI agents) as a Tauri app, kept at the tag
@@ -25,7 +25,7 @@ detail is in [docs/roadmap.md](docs/roadmap.md), the open work in [docs/gaps.md]
 | F4 | Connections and organisation: shared connections, Wake-on-LAN and knocking, X11, Unix sockets, `ssh://` links, quick connect, bulk edit, reachability, desktop shortcuts, server load | done |
 | F5 | Persistent sessions: tmux and screen attached again on every connect, tmux windows as tabs, Telnet | done |
 | F6 | Terminal extras: hex view, dropdown window on a global shortcut; no images and no ZMODEM or trzsz | done |
-| F7 | Targets and automation | open |
+| F7 | Targets and automation: containers as targets, launch actions, macros, dynamic groups; no Kerberos and no PKCS#11 | done |
 
 A database client is planned as a separate sister app after V1; it reaches server databases
 through a tunnel that SSHCraft opens for it.

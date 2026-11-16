@@ -47,6 +47,21 @@ Tick **On the bar** next to a snippet to get a button for it above every termina
 A click runs it in that pane at once, or opens the run dialog for that pane when the snippet has
 placeholders.
 
+## Macros
+
+A macro is a named list of steps for the terminal you are in. Each step sends a line, either at
+once or after a text appeared in the output, like the steps of a login script. Write them under
+**Settings > Terminal > Macros**, one step per line: `text to wait for => line to send`, or just
+the line to send at once. Run a macro from the command palette (*Macro: NAME*); *Stop the macro*
+ends it. A step that does not see its text within 15 seconds stops the macro, and SSHCraft says
+so. With broadcast on, the lines go to every terminal that receives what you type.
+
+Macros are kept on this device: at most 64, each with up to 16 steps, 256 characters to wait for
+and 1024 to send. Never put a password in one, as macros are stored as plain settings.
+
+Snippets a host types when its session starts are called launch actions; see
+[connections.md](connections.md#launch-actions).
+
 ## Terminal sidebar
 
 Ctrl+Shift+S (or the panel button at the right of the tab strip) shows snippets and the history
