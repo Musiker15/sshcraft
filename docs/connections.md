@@ -249,14 +249,17 @@ that command instead, every ten seconds, so leave the bar off for such hosts.
 Every connect attaches to the same session again, also after the connection dropped or the
 computer slept, so programs keep running in between. The session name has letters, digits,
 dots, dashes and underscores only; SSHCraft puts it into a fixed command
-(`tmux new-session -A -s NAME` or `screen -D -RR NAME`) and refuses any other name, also one
+(`tmux new-session -A -s NAME` or `screen -xRR NAME`) and refuses any other name, also one
 that came through sync. tmux or screen must be installed on the server.
 
 *tmux, windows as tabs* runs tmux in control mode (`tmux -CC`). Each tmux window becomes a tab,
 each of its panes a pane in that tab, and typing goes to tmux as keys. Closing a tab only stops
 showing it; once the last one is closed, SSHCraft detaches and the tmux session keeps running.
 SSHCraft tells tmux the size of each pane. With more than two panes in a window, tmux may lay them
-out a little differently from SSHCraft's grid.
+out a little differently from SSHCraft's grid, and a tab shows at most 16 panes. Split and move
+panes of a tmux tab with tmux itself; SSHCraft keeps the tab as tmux has it. tmux answers the
+programs' terminal queries in its panes, so SSHCraft does not answer them a second time. After a
+reconnect SSHCraft lists the windows again: windows closed in between go, new ones come.
 
 ## Telnet
 
@@ -264,6 +267,9 @@ Some devices (switches, old routers, lab gear) speak only Telnet. Set *Protocol*
 host form; without a port of its own, the host uses port 23. Telnet is not encrypted, so the
 form and the status line say so. SSHCraft never sends a stored password or key over it: the
 device asks, and you type. Telnet goes straight to the host, never through a jump host or proxy.
+Choosing Telnet in the form allows it on this device; Telnet that came through sync, a share or
+an import is not used until you tick **Allow Telnet on this device**, so nobody else can switch
+your connection to plaintext. The steps before connecting and after the session run as for SSH.
 SSHCraft agrees to echo, suppress go-ahead, binary, terminal type and window size, and refuses
 every other option.
 

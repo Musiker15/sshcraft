@@ -92,6 +92,8 @@ pub enum ErrorCode {
     TelnetUnencrypted,
     /// Telnet goes straight to the host: no jump host, no proxy.
     TelnetDirectOnly,
+    /// Telnet came through sync, a share or an import and was not allowed on this device.
+    TelnetNotAllowed,
     CertificateMismatch,
     InvalidCertificate,
     /// The certificate had expired: signed in with the key alone.

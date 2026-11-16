@@ -91,6 +91,8 @@ struct Records {
     exec_input: Mutex<Vec<u8>>,
     /// `exec` keeps its channel open after the output (a program that keeps running).
     exec_keep_open: std::sync::atomic::AtomicBool,
+    /// Input that makes an open `exec` channel answer: (text in the input, answer), each once.
+    exec_replies: Mutex<Vec<(String, String)>>,
     /// The protocol and cookie of the last `x11-req`.
     x11_request: Mutex<Option<(String, String)>>,
     /// Sent in X11 setups instead of the requested cookie.
@@ -165,6 +167,11 @@ impl TestServer {
 
     pub fn received_env(&self) -> Vec<(String, String)> {
         self.records.env.lock().unwrap().clone()
+    }
+
+    /// Answers `answer` on an `exec` channel once its input contains `trigger`, once per pair.
+    pub fn set_exec_replies(&self, replies: Vec<(String, String)>) {
+        *self.records.exec_replies.lock().unwrap() = replies;
     }
 
     /// Keeps `exec` channels open after their output, like a program that keeps running.
@@ -630,6 +637,12 @@ impl server::Handler for Handler {
     async fn data(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
         if self.execs.contains(&channel) {
             self.records.exec_input.lock().unwrap().extend_from_slice(data);
+            let text = String::from_utf8_lossy(data).into_owned();
+            let mut replies = self.records.exec_replies.lock().unwrap();
+            if let Some(at) = replies.iter().position(|(trigger, _)| text.contains(trigger.as_str())) {
+                let (_, answer) = replies.remove(at);
+                session.data(channel, answer.into_bytes())?;
+            }
             return Ok(());
         }
         if !self.sessions.contains(&channel) {

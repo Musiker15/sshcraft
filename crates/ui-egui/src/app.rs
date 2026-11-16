@@ -200,6 +200,11 @@ impl SshcraftApp {
     /// Adds a new-pane page beside the focused pane of the shown tab.
     pub fn split(&mut self) {
         let Page::Tab(i) = self.ui.page else { return };
+        // A tmux window's panes follow tmux; split there with tmux's own keys.
+        if crate::tmux_mode::is_tmux_tab(self, i) {
+            self.toasts.info(tr("This tab shows a tmux window: split it with tmux."));
+            return;
+        }
         let slot = self.new_pane();
         let Some(tab) = self.ui.tabs.get_mut(i) else { return };
         if !tab.panes.add(slot) {
@@ -230,6 +235,9 @@ impl SshcraftApp {
 
     /// Moves pane `pane` of tab `tab` into a tab of its own, without reconnecting.
     pub fn move_pane_to_own_tab(&mut self, tab: usize, pane: usize) {
+        if crate::tmux_mode::is_tmux_tab(self, tab) {
+            return;
+        }
         let Some(t) = self.ui.tabs.get_mut(tab) else { return };
         if t.panes.panes.len() <= 1 {
             return;

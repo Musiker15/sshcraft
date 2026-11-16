@@ -37,6 +37,11 @@ pub enum TelnetError {
 pub struct TelnetWriter {
     stream: Arc<tokio::sync::Mutex<OwnedWriteHalf>>,
     negotiator: Arc<Mutex<Negotiator>>,
+    /// The task reading from the device: ended on close, so a device that keeps quiet does not
+    /// keep it (and the socket) alive.
+    reader: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
+    /// Kept as long as the connection: the steps after the session run when it goes.
+    _keep: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl TelnetWriter {
@@ -53,9 +58,18 @@ impl TelnetWriter {
         }
     }
 
-    /// Ends the connection.
+    /// Ends the connection, the reading side included.
     pub async fn close(&self) {
+        if let Some(reader) = self.reader.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            reader.abort();
+        }
         let _ = self.stream.lock().await.shutdown().await;
+    }
+
+    /// Keeps `value` alive as long as this connection (its reader and writers).
+    pub fn keep(mut self, value: Arc<dyn std::any::Any + Send + Sync>) -> Self {
+        self._keep = Some(value);
+        self
     }
 }
 
@@ -75,10 +89,12 @@ pub async fn connect(
     let _ = stream.set_nodelay(true);
     let (mut read, write) = stream.into_split();
     let negotiator = Arc::new(Mutex::new(Negotiator::new(term, size)));
-    let writer = TelnetWriter { stream: Arc::new(tokio::sync::Mutex::new(write)), negotiator: negotiator.clone() };
+    let reader = Arc::new(Mutex::new(None));
+    let writer =
+        TelnetWriter { stream: Arc::new(tokio::sync::Mutex::new(write)), negotiator: negotiator.clone(), reader: reader.clone(), _keep: None };
     let (tx, rx) = mpsc::channel(EVENT_BUFFER);
     let answers = writer.clone();
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let mut buf = vec![0u8; 16 * 1024];
         let reason = loop {
             match read.read(&mut buf).await {
@@ -97,12 +113,30 @@ pub async fn connect(
         };
         let _ = tx.send(ShellEvent::Ended(reason)).await;
     });
+    *reader.lock().unwrap_or_else(PoisonError::into_inner) = Some(task.abort_handle());
     Ok((writer, rx))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn closing_ends_the_reader_of_a_quiet_device() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // A device that accepts and then says nothing, keeping the socket open.
+        let quiet = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(socket);
+        });
+        let (writer, mut events) = connect("127.0.0.1", port, "xterm", (80, 24), Duration::from_secs(5)).await.unwrap();
+        writer.close().await;
+        let ended = tokio::time::timeout(Duration::from_secs(2), events.recv()).await;
+        assert!(matches!(ended, Ok(None)), "the reader is gone: {ended:?}");
+        quiet.abort();
+    }
 
     #[tokio::test]
     async fn a_session_negotiates_and_carries_text_both_ways() {

@@ -62,6 +62,8 @@ struct SaveParams {
     approve_programs: Vec<Vec<String>>,
     #[serde(default)]
     approve_x11: bool,
+    #[serde(default)]
+    approve_telnet: bool,
     /// As for `host.save`: the user entered the login script in this save.
     #[serde(default)]
     approve_login_script: bool,
@@ -69,7 +71,8 @@ struct SaveParams {
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut group, approve_command, approve_login_script, approve_programs, approve_x11 } = parse("group.save", params)?;
+        let SaveParams { mut group, approve_command, approve_login_script, approve_programs, approve_x11, approve_telnet } =
+            parse("group.save", params)?;
         super::host::check_login_script("group.save", &group.defaults)?;
         let id = group.id.0.to_string();
         let (orphans, before) = {
@@ -89,6 +92,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         super::host::approve_step_programs(&ctx, &group.defaults, &approve_programs)?;
         if approve_x11 {
             super::host::approve_x11_for(&ctx, &group.defaults, &group.id.0.to_string())?;
+        }
+        if approve_telnet {
+            super::host::approve_telnet_for(&ctx, &group.defaults, &group.id.0.to_string())?;
         }
         if approve_login_script {
             super::host::approve_login_scripts(&ctx, [&group.defaults])?;

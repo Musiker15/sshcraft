@@ -8,6 +8,8 @@
 pub const MAX_LINE: usize = 1 << 20;
 /// Lines kept of one command's answer.
 const MAX_BLOCK_LINES: usize = 10_000;
+/// Bytes kept of one command's answer; lines past it are dropped.
+pub const MAX_BLOCK_BYTES: usize = 4 << 20;
 /// Panes one layout may name.
 const MAX_LAYOUT_PANES: usize = 256;
 /// Bytes per `send-keys` command.
@@ -47,6 +49,8 @@ pub enum Event {
     },
     /// tmux left control mode (the session ended, or it was detached).
     Exit(Option<String>),
+    /// A line before control mode started (`tmux: not found` from the shell).
+    Plain(String),
 }
 
 /// Reads tmux's control mode output.
@@ -55,8 +59,28 @@ pub struct Parser {
     line: Vec<u8>,
     /// The line being read is longer than [`MAX_LINE`]: dropped up to its end.
     skipping: bool,
-    /// Inside a `%begin` block: its lines so far.
-    block: Option<Vec<String>>,
+    /// Inside a `%begin` block: its time and number (only the `%end` with the same pair closes
+    /// it, so pane text that looks like `%end` cannot), its lines and their bytes so far.
+    block: Option<Block>,
+    /// The `ESC P 1000 p` that starts control mode was seen.
+    started: bool,
+}
+
+#[derive(Debug, Default)]
+struct Block {
+    id: String,
+    lines: Vec<String>,
+    bytes: usize,
+}
+
+/// `TIME NUMBER` of `%begin TIME NUMBER FLAGS`.
+fn block_id(args: &str) -> String {
+    args.split(' ').take(2).collect::<Vec<_>>().join(" ")
+}
+
+/// A short clean name: no control characters, at most 128 characters.
+pub fn clean_name(text: &str) -> String {
+    clean(text)
 }
 
 impl Parser {
@@ -67,6 +91,11 @@ impl Parser {
     /// Bytes of an unfinished line held now; never more than [`MAX_LINE`].
     pub fn buffered(&self) -> usize {
         self.line.len()
+    }
+
+    /// Forgets everything half read, for a new connection.
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 
     /// Takes what came from the server and returns the events of every complete line.
@@ -96,17 +125,30 @@ impl Parser {
         let raw = raw.strip_suffix(b"\r").unwrap_or(raw);
         const DCS: &[u8] = b"\x1bP1000p";
         let raw = match raw.windows(DCS.len()).position(|w| w == DCS) {
-            Some(at) => raw.get(at + DCS.len()..).unwrap_or_default(),
+            Some(at) => {
+                self.started = true;
+                raw.get(at + DCS.len()..).unwrap_or_default()
+            }
             None => raw,
         };
-        if let Some(lines) = &mut self.block {
+        if !self.started {
+            let text = clean(&String::from_utf8_lossy(raw));
+            if !text.is_empty() {
+                out.push(Event::Plain(text));
+            }
+            return;
+        }
+        if let Some(block) = &mut self.block {
             let text = String::from_utf8_lossy(raw);
-            if text.starts_with("%end") || text.starts_with("%error") {
-                let ok = text.starts_with("%end");
-                let lines = self.block.take().unwrap_or_default();
-                out.push(Event::Reply { ok, lines });
-            } else if lines.len() < MAX_BLOCK_LINES {
-                lines.push(text.into_owned());
+            let closing = ["%end ", "%error "].iter().find_map(|w| text.strip_prefix(w).map(|rest| (*w, rest)));
+            if let Some((word, rest)) = closing
+                && block_id(rest) == block.id
+            {
+                let lines = self.block.take().map(|b| b.lines).unwrap_or_default();
+                out.push(Event::Reply { ok: word == "%end ", lines });
+            } else if block.lines.len() < MAX_BLOCK_LINES && block.bytes.saturating_add(text.len()) <= MAX_BLOCK_BYTES {
+                block.bytes = block.bytes.saturating_add(text.len());
+                block.lines.push(text.into_owned());
             }
             return;
         }
@@ -117,7 +159,7 @@ impl Parser {
         };
         let text = || String::from_utf8_lossy(args).into_owned();
         match word {
-            b"begin" => self.block = Some(Vec::new()),
+            b"begin" => self.block = Some(Block { id: block_id(&text()), ..Block::default() }),
             b"output" => {
                 if let Some((pane, data)) = split_id(args, b'%') {
                     out.push(Event::Output { pane, data: unescape(data) });
@@ -275,15 +317,49 @@ mod tests {
         );
     }
 
+    /// A parser past the start of control mode.
+    fn started() -> Parser {
+        let mut p = Parser::new();
+        assert!(p.feed(b"\x1bP1000p\n").is_empty());
+        p
+    }
+
     #[test]
     fn a_reply_keeps_its_lines_and_failures_say_so() {
-        let mut p = Parser::new();
+        let mut p = started();
         assert_eq!(p.feed(b"%begin 1 5 1\n@1 %0 main\n%error 1 5 1\n"), vec![Event::Reply { ok: false, lines: vec!["@1 %0 main".into()] }]);
     }
 
     #[test]
-    fn lines_may_arrive_in_pieces() {
+    fn pane_text_that_looks_like_the_end_of_a_reply_stays_text() {
+        let mut p = started();
+        let events = p.feed(b"%begin 9 7 1\n%end 1 1 0\n%exit\n%endless\n%end 9 7 1\n");
+        assert_eq!(events, vec![Event::Reply { ok: true, lines: vec!["%end 1 1 0".into(), "%exit".into(), "%endless".into()] }]);
+    }
+
+    #[test]
+    fn a_reply_keeps_at_most_its_byte_budget() {
+        let mut p = started();
+        let mut big = b"%begin 1 1 1\n".to_vec();
+        for _ in 0..10 {
+            big.extend(std::iter::repeat_n(b'x', MAX_LINE - 1));
+            big.push(b'\n');
+        }
+        big.extend_from_slice(b"%end 1 1 1\n");
+        let Event::Reply { lines, .. } = &p.feed(&big)[0] else { panic!("no reply") };
+        assert!(lines.iter().map(String::len).sum::<usize>() <= MAX_BLOCK_BYTES);
+    }
+
+    #[test]
+    fn lines_before_control_mode_are_plain_text() {
         let mut p = Parser::new();
+        assert_eq!(p.feed(b"bash: tmux: command not found\r\n"), vec![Event::Plain("bash: tmux: command not found".into())]);
+        assert_eq!(p.feed(b"%window-add @1\n"), vec![Event::Plain("%window-add @1".into())], "not before the start");
+    }
+
+    #[test]
+    fn lines_may_arrive_in_pieces() {
+        let mut p = started();
         assert!(p.feed(b"%output %3 ab").is_empty());
         assert_eq!(p.feed(b"c\n"), vec![Event::Output { pane: 3, data: b"abc".to_vec() }]);
     }
@@ -297,7 +373,7 @@ mod tests {
 
     #[test]
     fn hostile_input_is_bounded() {
-        let mut p = Parser::new();
+        let mut p = started();
         // A line without end, then a normal one.
         let mut long = vec![b'x'; MAX_LINE + 10];
         long.extend_from_slice(b"\n%window-add @7\n");
@@ -312,7 +388,7 @@ mod tests {
 
     #[test]
     fn a_line_without_end_is_dropped_not_kept() {
-        let mut p = Parser::new();
+        let mut p = started();
         for _ in 0..3 {
             assert!(p.feed(&vec![b'x'; MAX_LINE]).is_empty());
             assert!(p.buffered() <= MAX_LINE);

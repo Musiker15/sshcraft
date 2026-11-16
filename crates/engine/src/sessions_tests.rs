@@ -2464,6 +2464,8 @@ async fn a_telnet_host_connects_without_signing_in() {
         host.settings.protocol = Some(sshcraft_model::model::Protocol::Telnet);
         host.settings.port = Some(port);
         store.upsert_host(&host).unwrap();
+        // Chosen on this device.
+        store.approve_command(&sshcraft_store::store::command_digest(&crate::sessions::telnet_approval(&f.host_id.0.to_string()))).unwrap();
     }
     let sink = Arc::new(RecordingSink::default());
     let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
@@ -2472,4 +2474,24 @@ async fn a_telnet_host_connects_without_signing_in() {
     f.manager.write(id, b"show ip\r").unwrap();
     assert_eq!(device.await.unwrap(), b"show ip\r\0".to_vec());
     assert_eq!(f.server.connections(), 0, "no SSH, no sign-in");
+}
+
+#[tokio::test]
+async fn telnet_from_elsewhere_is_not_used_until_allowed() {
+    let f = fixture(true).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        // As sync or a share brings it.
+        host.settings.protocol = Some(sshcraft_model::model::Protocol::Telnet);
+        host.settings.port = Some(port);
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::TelnetNotAllowed));
+    assert!(tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(), "the device never hears from us");
 }

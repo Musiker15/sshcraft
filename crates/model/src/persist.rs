@@ -46,7 +46,8 @@ impl Persistence {
         check(&self.name).ok()?;
         Some(match self.tool {
             Tool::Tmux => format!("tmux new-session -A -s {}", self.name),
-            Tool::Screen => format!("screen -D -RR {}", self.name),
+            // `-x` shares the session with another display instead of hanging it up.
+            Tool::Screen => format!("screen -xRR {}", self.name),
             Tool::TmuxControl => format!("tmux -CC new-session -A -s {}", self.name),
         })
     }
@@ -71,7 +72,7 @@ mod tests {
         let tmux = Persistence { tool: Tool::Tmux, name: "work".into() };
         assert_eq!(tmux.command().as_deref(), Some("tmux new-session -A -s work"));
         let screen = Persistence { tool: Tool::Screen, name: "work".into() };
-        assert_eq!(screen.command().as_deref(), Some("screen -D -RR work"));
+        assert_eq!(screen.command().as_deref(), Some("screen -xRR work"));
         let control = Persistence { tool: Tool::TmuxControl, name: "work".into() };
         assert_eq!(control.command().as_deref(), Some("tmux -CC new-session -A -s work"));
         assert_eq!(Persistence { tool: Tool::Tmux, name: "a;b".into() }.command(), None);

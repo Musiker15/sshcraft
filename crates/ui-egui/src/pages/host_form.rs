@@ -6,6 +6,7 @@ use egui::Ui;
 use serde_json::json;
 use sshcraft_model::hooks::ConnectStep;
 use sshcraft_model::login_script::LoginStep;
+use sshcraft_model::model::Protocol::Telnet;
 use sshcraft_model::model::{ConnectionSettings, EnvVar, Group, GroupId, Host, HostId, HostOs, KeyRef, Proxy, ProxyEndpoint};
 use sshcraft_model::secret_ref::{Manager, SecretRef, SecretRefError};
 
@@ -131,6 +132,9 @@ pub struct HostForm {
     /// X11 forwarding as the form opened, and whether to allow it on this device with this save.
     pub opened_x11: Option<bool>,
     pub allow_x11: bool,
+    /// The protocol as the form opened, and whether to allow Telnet on this device with this save.
+    pub opened_protocol: Option<sshcraft_model::model::Protocol>,
+    pub allow_telnet: bool,
 }
 
 impl HostForm {
@@ -145,6 +149,8 @@ impl HostForm {
             opened_steps,
             opened_x11: host.settings.x11,
             allow_x11: false,
+            opened_protocol: host.settings.protocol,
+            allow_telnet: false,
             host,
             editing,
             password: String::new(),
@@ -224,6 +230,9 @@ pub struct GroupForm {
     pub opened_steps: (Option<Vec<ConnectStep>>, Option<Vec<ConnectStep>>),
     pub opened_x11: Option<bool>,
     pub allow_x11: bool,
+    /// The protocol as the form opened, and whether to allow Telnet on this device with this save.
+    pub opened_protocol: Option<sshcraft_model::model::Protocol>,
+    pub allow_telnet: bool,
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -824,6 +833,10 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 steps_editor(ui, tr("Before connecting"), "before", Some(form.host.id), &mut form.host.settings.before_connect);
                 steps_editor(ui, tr("After the session"), "after", Some(form.host.id), &mut form.host.settings.after_disconnect);
                 session_rows(ui, &mut form.host.settings);
+                if form.host.settings.protocol == Some(Telnet) && form.opened_protocol == Some(Telnet) {
+                    ui.checkbox(&mut form.allow_telnet, tr("Allow Telnet on this device"))
+                        .on_hover_text(tr("Telnet that came through sync, a share or an import is not used until allowed here."));
+                }
             },
         );
         if let Some(error) = &form.error {
@@ -863,6 +876,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                         "approve_programs": entered_programs(&form.opened_steps, &form.host.settings.before_connect, &form.host.settings.after_disconnect),
                         // Switched on here, or allowed with the box below.
                         "approve_x11": form.host.settings.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
+                        "approve_telnet": form.host.settings.protocol == Some(Telnet) && (form.opened_protocol != Some(Telnet) || form.allow_telnet),
                         "approve_login_script": form.allow_script && form.host.settings.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                         "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
                     }),
@@ -943,6 +957,10 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 steps_editor(ui, tr("Before connecting"), "before", None, &mut form.group.defaults.before_connect);
                 steps_editor(ui, tr("After the session"), "after", None, &mut form.group.defaults.after_disconnect);
                 session_rows(ui, &mut form.group.defaults);
+                if form.group.defaults.protocol == Some(Telnet) && form.opened_protocol == Some(Telnet) {
+                    ui.checkbox(&mut form.allow_telnet, tr("Allow Telnet on this device"))
+                        .on_hover_text(tr("Telnet that came through sync, a share or an import is not used until allowed here."));
+                }
             },
         );
         if let Some(error) = &form.error {
@@ -979,6 +997,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                         "approve_programs": entered_programs(&form.opened_steps, &form.group.defaults.before_connect, &form.group.defaults.after_disconnect),
                         // Switched on here, or allowed with the box below.
                         "approve_x11": form.group.defaults.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
+                        "approve_telnet": form.group.defaults.protocol == Some(Telnet) && (form.opened_protocol != Some(Telnet) || form.allow_telnet),
                         "approve_login_script": form.allow_script && form.group.defaults.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                     }),
                     Box::new(move |app, result| {
@@ -1019,6 +1038,8 @@ impl GroupForm {
             opened_steps,
             opened_x11: group.defaults.x11,
             allow_x11: false,
+            opened_protocol: group.defaults.protocol,
+            allow_telnet: false,
             group,
             editing,
             password: String::new(),

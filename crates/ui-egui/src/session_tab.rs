@@ -383,11 +383,12 @@ fn pump_tmux(app: &mut SshcraftApp, id: SessionId) -> bool {
     if let Some(status) = &outcome.status {
         tab.status = Some(status.clone());
     }
+    // A (re)connect starts over before its first output is read.
+    if matches!(outcome.status, Some(SessionStatus::Connected { .. })) {
+        crate::tmux_mode::start(app, id);
+    }
     crate::tmux_mode::on_bytes(app, id, &bytes);
     if let Some(status) = outcome.status {
-        if matches!(status, SessionStatus::Connected { .. }) {
-            crate::tmux_mode::start(app, id);
-        }
         for pane in app.terminals.values_mut().filter(|t| t.tmux_pane.is_some_and(|(c, _)| c == id)) {
             pane.status = Some(status.clone());
         }
@@ -796,7 +797,8 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             tab.term.stamp_commands(chrono::Utc::now());
         }
         let host = tab.host;
-        let can_send = !ended(tab.status.as_ref());
+        // tmux answers a pane's terminal queries itself; a second answer would be typed in.
+        let can_send = !ended(tab.status.as_ref()) && tab.tmux_pane.is_none();
         for notice in notices {
             match notice {
                 Notice::Reply(bytes) if can_send => send(app, id, &bytes),
@@ -953,6 +955,9 @@ pub fn notice_text(code: sshcraft_engine::ErrorCode) -> Option<&'static str> {
         ErrorCode::X11NotAllowed => tr("X11 forwarding came from elsewhere and is off until you allow it in the host's form."),
         ErrorCode::CertificateExpired => tr("The certificate had expired: signed in with the key alone."),
         ErrorCode::TelnetUnencrypted => tr("Telnet is not encrypted."),
+        ErrorCode::TelnetNotAllowed => tr("Telnet came from elsewhere: allow it in the host's form to use it here."),
+        ErrorCode::TelnetDirectOnly => tr("Telnet goes straight to the device, without jump host or proxy."),
+        ErrorCode::SessionNameInvalid => tr("The tmux or screen session name has characters SSHCraft does not put into a command."),
         _ => return None,
     })
 }
@@ -1042,6 +1047,7 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
     let mismatch = matches!(tab.status, Some(SessionStatus::Ended { reason: EndReason::HostKeyMismatch, .. }));
     let detail = match &tab.status {
         Some(SessionStatus::Ended { detail: Some(d), .. }) => Some(visible(d)),
+        Some(SessionStatus::Ended { code: Some(code), detail: None, .. }) => notice_text(*code).map(str::to_string),
         _ => None,
     };
     let mut reconnect = false;

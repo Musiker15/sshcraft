@@ -34,6 +34,18 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Telnet came from elsewhere: allow it in the host's form to use it here." => {
+            "Telnet kam von anderswo: Erlaube es im Formular des Hosts, um es hier zu nutzen."
+        }
+        "Telnet goes straight to the device, without jump host or proxy." => "Telnet geht direkt zum Gerät, ohne Jump-Host oder Proxy.",
+        "The tmux or screen session name has characters SSHCraft does not put into a command." => {
+            "Der Name der tmux- oder screen-Sitzung enthält Zeichen, die SSHCraft in keinen Befehl schreibt."
+        }
+        "Allow Telnet on this device" => "Telnet auf diesem Gerät erlauben",
+        "Telnet that came through sync, a share or an import is not used until allowed here." => {
+            "Telnet, das über Sync, eine Freigabe oder einen Import kam, wird erst genutzt, wenn es hier erlaubt wird."
+        }
+        "This tab shows a tmux window: split it with tmux." => "Dieser Tab zeigt ein tmux-Fenster: Teile es mit tmux.",
         "Connected." => "Verbunden.",
         "No SSH agent here to forward." => "Hier läuft kein SSH-Agent, der weitergeleitet werden könnte.",
         "No X server here: X11 forwarding is off." => "Hier läuft kein X-Server: Die X11-Weiterleitung ist aus.",
