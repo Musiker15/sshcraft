@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
 # Template: `cargo xtask stores SHA256SUMS.txt` fills it in (docs/releasing.md, "Stores").
 # The MSI installs for the current account by default and for everyone with ALLUSERS=1
 # (packaging/windows/INSTALLATION.md). The upgrade code never changes.
@@ -34,4 +34,4 @@ Installers:
     InstallerSwitches:
       Custom: ALLUSERS=1
 ManifestType: installer
-ManifestVersion: 1.10.0
+ManifestVersion: 1.28.0
