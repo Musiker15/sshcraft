@@ -27,7 +27,6 @@
   <url type="homepage">https://github.com/musiker15/sshcraft</url>
   <url type="bugtracker">https://github.com/musiker15/sshcraft/issues</url>
   <url type="help">https://github.com/musiker15/sshcraft</url>
-  <url type="vcs-browser">https://github.com/musiker15/sshcraft</url>
   <categories>
     <category>Network</category>
     <category>RemoteAccess</category>
