@@ -75,10 +75,23 @@ pub struct SessionTab {
     hints: Option<Vec<(String, crate::terminal::hints::Hint)>>,
     /// The letters of a label typed so far.
     hint_typed: String,
+    /// The compose field's text while it is open.
+    compose: Option<String>,
+    /// The list of recent pastes is open.
+    paste_picker: bool,
 }
 
 impl SessionTab {
     /// Output arrived: unseen, and waiting if the cursor's line now asks something.
+    /// The compose field's text while it is open.
+    pub fn compose_text(&self) -> Option<&String> {
+        self.compose.as_ref()
+    }
+
+    pub fn compose_text_mut(&mut self) -> Option<&mut String> {
+        self.compose.as_mut()
+    }
+
     /// Whether hint mode shows its labels.
     pub fn hints_shown(&self) -> bool {
         self.hints.is_some()
@@ -304,6 +317,8 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 server_limit: crate::notify::RateLimit::default(),
                 hints: None,
                 hint_typed: String::new(),
+                compose: None,
+                paste_picker: false,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -390,6 +405,69 @@ fn ended(status: Option<&SessionStatus>) -> bool {
 }
 
 /// Feeds every session's output into its terminal and acts on what programs asked for.
+/// The texts pasted in this frame.
+fn ctx_pastes(ctx: &egui::Context) -> Vec<String> {
+    ctx.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Paste(text) = e { Some(text.clone()) } else { None }).collect())
+}
+
+/// The compose field in `rect` and the list of recent pastes over the terminal; returns the bytes
+/// one of them sends.
+fn compose_and_pastes(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, term_rect: Rect, active: bool, send: bool) -> Option<Vec<u8>> {
+    let pastes: Vec<String> = app.pastes.entries().iter().cloned().collect();
+    let tab = app.terminals.get_mut(&id)?;
+    let modes = tab.term.modes();
+    let mut out = None;
+    if let Some(text) = tab.compose.as_mut() {
+        let edit_id = egui::Id::unique(("sshcraft-compose", id));
+        // In the frame it opens the field has no room yet; egui must never get a negative size.
+        let area = rect.shrink(4.0);
+        if area.width() > 0.0 && area.height() > 0.0 {
+            ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
+                let edit = egui::TextEdit::multiline(text)
+                    .id(edit_id)
+                    .hint_text(tr("Write here; Ctrl+Enter sends it, Esc closes"))
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(3)
+                    .font(egui::TextStyle::Monospace);
+                ui.add_sized(area.size(), edit);
+            });
+        }
+        let send = active && send;
+        let close = active && ui.input(|i| i.key_pressed(egui::Key::Escape)) && ui.memory(|m| m.has_focus(edit_id));
+        if send && !text.trim().is_empty() {
+            out = Some(crate::terminal::compose::compose_bytes(text, modes));
+            text.clear();
+        }
+        if close {
+            tab.compose = None;
+        }
+    }
+    if tab.paste_picker {
+        let mut open = true;
+        egui::Window::new(tr("Recent pastes"))
+            .id(egui::Id::unique(("sshcraft-pastes", id)))
+            .fixed_pos(term_rect.min + egui::vec2(24.0, 24.0))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                if pastes.is_empty() {
+                    ui.label(tr("Nothing pasted yet."));
+                }
+                for text in &pastes {
+                    if ui.button(crate::terminal::compose::preview(text)).clicked() {
+                        out = Some(sshcraft_term::input::encode_paste(text, modes));
+                        tab.paste_picker = false;
+                    }
+                }
+            });
+        if !open || (active && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+            tab.paste_picker = false;
+        }
+    }
+    out
+}
+
 /// Takes the keys hint mode needs before the terminal sees them: letters choose a label (in
 /// capitals: to type its text in), Escape leaves. Returns the text chosen and whether to type it.
 fn hint_keys(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) -> Option<(String, bool)> {
@@ -979,8 +1057,20 @@ fn draw_suggestions(app: &SshcraftApp, ui: &Ui, id: SessionId, rect: Rect, font:
 /// the keyboard and the terminal commands go to.
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let full = ui.available_rect_before_wrap();
-    let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT).max(full.min.y)));
-    let status_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), full.max);
+    let composing = app.terminals.get(&id).is_some_and(|t| t.compose.is_some());
+    let compose_height = if composing { crate::terminal::compose::COMPOSE_HEIGHT } else { 0.0 };
+    let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
+    let compose_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), pos2(full.max.x, (term_rect.max.y + compose_height).min(full.max.y)));
+    let status_rect = Rect::from_min_max(pos2(full.min.x, compose_rect.max.y), full.max);
+    // Ctrl+Enter sends the compose field, before the terminal or the field itself sees the key.
+    let compose_send = focused && composing && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+    if focused {
+        // Every paste goes into the history (in memory only).
+        let pasted: Vec<String> = ctx_pastes(ui.ctx());
+        for text in pasted {
+            app.pastes.push(&text);
+        }
+    }
     let ctx = ui.ctx().clone();
     let pending = if focused { std::mem::take(&mut app.ui.pending) } else { Vec::new() };
     let appearance = &app.data.settings.appearance;
@@ -1027,6 +1117,13 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             "ui.terminal.next_command" => {
                 tab.term.jump_to_prompt(sshcraft_term::Direction::Down);
             }
+            "ui.terminal.compose" => {
+                tab.compose = if tab.compose.is_some() { None } else { Some(String::new()) };
+                if tab.compose.is_some() {
+                    ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("sshcraft-compose", id))));
+                }
+            }
+            "ui.terminal.paste_history" => tab.paste_picker = !tab.paste_picker,
             "ui.terminal.hints" => {
                 let found = crate::terminal::hints::find_hints(&tab.term.screen());
                 let labels = crate::terminal::hints::labels(found.len());
@@ -1088,6 +1185,13 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             send(app, target, &typed);
         }
         track_line(app, id, &typed, crate::history::LineContext { broadcast, ..line_context });
+    }
+    if let Some(bytes) = compose_and_pastes(app, ui, id, compose_rect, term_rect, focused && can_send, compose_send)
+        && can_send
+    {
+        for target in broadcast_targets(app, id) {
+            send(app, target, &bytes);
+        }
     }
     if focused {
         update_suggestions(app, id);

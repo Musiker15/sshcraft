@@ -24,6 +24,8 @@ pub struct SshcraftApp {
     pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
     /// Shows desktop notifications.
     pub notifier: Box<dyn crate::notify::Notifier>,
+    /// The last pastes, in memory only.
+    pub pastes: crate::terminal::compose::PasteHistory,
     /// The compiled highlights and triggers of the settings.
     pub patterns: crate::terminal::highlight::Patterns,
     /// The terminals of the open session tabs.
@@ -80,6 +82,7 @@ impl SshcraftApp {
             dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
             notifier: Box::new(crate::notify::Desktop),
             patterns: crate::terminal::highlight::Patterns::default(),
+            pastes: crate::terminal::compose::PasteHistory::default(),
             terminals: std::collections::HashMap::new(),
             // Questions asked before the window subscribed are fetched once.
             prompts: crate::prompts::Prompts::fetch_first(),
