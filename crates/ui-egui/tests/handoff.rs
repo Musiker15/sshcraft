@@ -72,3 +72,19 @@ fn a_shortcut_opens_only_a_saved_host() {
         h.run_steps(1);
     }
 }
+
+#[test]
+fn a_plain_second_start_brings_a_hidden_window_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let drop = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.state_mut().handoff_dir = Some(drop.path().to_path_buf());
+    h.state_mut().dropdown_hidden = true;
+    handoff::write_reveal(drop.path()).unwrap();
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert!(!h.state().dropdown_hidden, "the window is shown again");
+    assert!(handoff::take(drop.path()).is_empty(), "the file was taken");
+}

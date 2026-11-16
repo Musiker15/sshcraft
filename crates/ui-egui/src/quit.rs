@@ -67,12 +67,8 @@ pub fn logic(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
     if !app.ui.quit.asking {
         app.ui.quit.asking = true;
-        // The question needs the window: a minimized one comes back.
-        if ctx.input(|i| i.viewport().minimized) == Some(true) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        }
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        ctx.request_repaint();
+        // The question needs the window: a minimised or hidden one comes back.
+        crate::dropdown::reveal(app, ctx);
     }
 }
 

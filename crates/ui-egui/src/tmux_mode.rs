@@ -213,6 +213,9 @@ fn output(app: &mut SshcraftApp, control: SessionId, pane: u32, data: &[u8]) {
     }
     if let Some(tab) = app.terminals.get_mut(&id) {
         tab.term.feed(data);
+        if let Some(hex) = tab.hex.as_mut() {
+            hex.push(data);
+        }
         tab.mark_output();
     }
 }

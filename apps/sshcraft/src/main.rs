@@ -42,6 +42,11 @@ fn start_problem(error: &EngineError, lang: Lang) -> String {
     }
 }
 
+/// Asks the SSHCraft that already runs to come to the front; whether that worked.
+fn reveal_running() -> bool {
+    sshcraft_platform::config_dir().is_ok_and(|d| sshcraft_ui_egui::handoff::write_reveal(&sshcraft_ui_egui::handoff::dir_in(&d)).is_ok())
+}
+
 /// Leaves what to open for the SSHCraft that already runs; whether that worked.
 fn hand_over(open: &control::Open) -> bool {
     let Ok(config_dir) = sshcraft_platform::config_dir() else { return false };
@@ -180,6 +185,8 @@ fn main() -> ExitCode {
             Ok((session, report)) => (session, report.vault),
             // SSHCraft runs already: it takes the link from the handoff folder.
             Err(sshcraft_engine::EngineError::DataInUse) if open.as_ref().is_some_and(hand_over) => return ExitCode::SUCCESS,
+            // A plain second start brings the running window to the front (also a hidden one).
+            Err(sshcraft_engine::EngineError::DataInUse) if open.is_none() && reveal_running() => return ExitCode::SUCCESS,
             Err(e) => return show_problem(start_problem(&e, system_language())),
         }
     };

@@ -61,6 +61,8 @@ pub struct Dropdown {
     manager: Option<GlobalHotKeyManager>,
     current: Option<(String, HotKey)>,
     pressed: Arc<AtomicBool>,
+    /// The id of the registered hotkey, 0 for none: presses of any other are ignored.
+    id: Arc<std::sync::atomic::AtomicU32>,
     /// The last shortcut the system refused, so it is reported once.
     refused: Option<String>,
 }
@@ -69,17 +71,19 @@ impl Dropdown {
     /// Starts listening; `ctx` is woken on a press, also while the window is hidden.
     pub fn new(ctx: &egui::Context) -> Self {
         let pressed = Arc::new(AtomicBool::new(false));
-        let seen = pressed.clone();
-        let ctx = ctx.clone();
-        let _ = std::thread::Builder::new().name("sshcraft-dropdown".into()).spawn(move || {
+        let id = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let (seen, wanted, ctx) = (pressed.clone(), id.clone(), ctx.clone());
+        let listener = std::thread::Builder::new().name("sshcraft-dropdown".into()).spawn(move || {
             while let Ok(event) = GlobalHotKeyEvent::receiver().recv() {
-                if event.state == HotKeyState::Pressed {
+                if event.state == HotKeyState::Pressed && event.id == wanted.load(Ordering::SeqCst) {
                     seen.store(true, Ordering::SeqCst);
                     ctx.request_repaint();
                 }
             }
         });
-        Self { manager: GlobalHotKeyManager::new().ok(), current: None, pressed, refused: None }
+        // Without its listener a shortcut would do nothing: then there is none.
+        let manager = listener.ok().and_then(|_| GlobalHotKeyManager::new().ok());
+        Self { manager, current: None, pressed, id, refused: None }
     }
 
     /// Registers `wanted` (or nothing) when it changed; a shortcut the system refused comes back
@@ -89,9 +93,14 @@ impl Dropdown {
         if self.current.as_ref().map(|(c, _)| c.as_str()) == wanted || (wanted.is_some() && self.refused.as_deref() == wanted) {
             return Ok(());
         }
-        let Some(manager) = &self.manager else { return Err("global shortcuts are not available here".into()) };
+        let Some(manager) = &self.manager else {
+            // Said once per setting, not every frame.
+            self.refused = wanted.map(str::to_owned);
+            return Err("global shortcuts are not available here".into());
+        };
         if let Some((_, old)) = self.current.take() {
             let _ = manager.unregister(old);
+            self.id.store(0, Ordering::SeqCst);
         }
         let Some(combo) = wanted else {
             self.refused = None;
@@ -103,6 +112,7 @@ impl Dropdown {
         };
         match manager.register(key) {
             Ok(()) => {
+                self.id.store(key.id(), Ordering::SeqCst);
                 self.current = Some((combo.to_owned(), key));
                 self.refused = None;
                 Ok(())

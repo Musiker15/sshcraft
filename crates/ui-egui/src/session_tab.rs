@@ -1047,26 +1047,28 @@ fn run_terminal_command(tab: &mut SessionTab, command: &str, ctx: &egui::Context
     }
 }
 
-/// The hex view over the lower half of the terminal while it is open.
-fn hex_panel(app: &SshcraftApp, ui: &mut Ui, id: SessionId, term_rect: Rect) {
+/// The hex view in `rect`, below the terminal, while it is open.
+fn hex_panel(app: &SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect) {
     let Some(hex) = app.terminals.get(&id).and_then(|t| t.hex.as_ref()) else { return };
+    if rect.width() < 24.0 || rect.height() < 24.0 {
+        return;
+    }
     let tokens = Tokens::get(ui.ctx());
-    let rect = Rect::from_min_max(pos2(term_rect.min.x, term_rect.center().y), term_rect.max);
     ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
         egui::Frame::new().fill(tokens.panel).inner_margin(6.0).show(ui, |ui| {
-            ui.set_min_size(rect.size() - egui::vec2(12.0, 12.0));
+            // A pane too small for the margin gets no negative size.
+            ui.set_min_size((rect.size() - egui::vec2(12.0, 12.0)).max(egui::Vec2::ZERO));
             ui.label(
                 egui::RichText::new(trf("Received since the view opened ({count} bytes kept)", &[("count", &hex.len().to_string())]))
                     .small()
                     .color(tokens.text_dim),
             );
-            let lines = hex.lines();
             egui::ScrollArea::vertical().id_salt(("sshcraft-hex", id)).stick_to_bottom(true).auto_shrink([false, false]).show_rows(
                 ui,
                 14.0,
-                lines.len(),
+                hex.line_count(),
                 |ui, range| {
-                    for line in lines.get(range).unwrap_or_default() {
+                    for line in &hex.rows(range) {
                         ui.label(egui::RichText::new(line).monospace().size(12.0).color(tokens.text));
                     }
                 },
@@ -1430,8 +1432,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let full = snippet_bar(app, ui, id, ui.available_rect_before_wrap());
     let composing = app.terminals.get(&id).is_some_and(|t| t.compose.is_some());
     let compose_height = if composing { crate::terminal::compose::COMPOSE_HEIGHT } else { 0.0 };
-    let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
-    let compose_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), pos2(full.max.x, (term_rect.max.y + compose_height).min(full.max.y)));
+    let whole = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
+    // The hex view takes the lower part, below the terminal: nothing of one reaches the other.
+    let hex_open = app.terminals.get(&id).is_some_and(|t| t.hex.is_some());
+    let term_rect = if hex_open { Rect::from_min_max(whole.min, pos2(whole.max.x, whole.lerp_inside(egui::vec2(0.0, 0.6)).y)) } else { whole };
+    let hex_rect = Rect::from_min_max(pos2(whole.min.x, term_rect.max.y), whole.max);
+    let compose_rect = Rect::from_min_max(pos2(full.min.x, whole.max.y), pos2(full.max.x, (whole.max.y + compose_height).min(full.max.y)));
     let status_rect = Rect::from_min_max(pos2(full.min.x, compose_rect.max.y), full.max);
     // Ctrl+Enter sends the compose field, before the terminal or the field itself sees the key.
     let compose_send = focused && composing && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
@@ -1546,7 +1552,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         let mark = ui.put(at, egui::Label::new(egui::RichText::new(tr("Rec")).small().color(tokens.danger)));
         mark.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr("Rec")));
     }
-    hex_panel(app, ui, id, term_rect);
+    hex_panel(app, ui, id, hex_rect);
     if let Some(size) = response.resize
         && can_send
     {

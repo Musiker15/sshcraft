@@ -38,10 +38,16 @@ from the command palette.
 
 *Settings › Appearance › Dropdown window* takes a shortcut that works from any program: it shows
 SSHCraft at the top of the screen and focuses it, and when SSHCraft is already in front it hides
-the window again. It is off until you set one, for example ``Ctrl+` `` or `Ctrl+Alt+T`. The
-shortcut only shows and hides the window, it never types into a session. If another program
-already holds the combination, or the desktop does not allow global shortcuts (Wayland), SSHCraft
-says so and goes on without it.
+the window again. It is off until you set one, for example ``Ctrl+` `` or `Ctrl+Alt+T`; the field
+takes the combination when you leave it. The shortcut only shows and hides the window, it never
+types into a session. If another program already holds the combination, SSHCraft says so and goes
+on without it.
+
+On Linux and FreeBSD the shortcut minimises the window instead of hiding it, because a desktop
+on Wayland may not pass global shortcuts on, and a hidden window would then be out of reach. A
+hidden or minimised window always comes back when you start SSHCraft again. While the window is
+hidden or minimised, SSHCraft does not draw: output that arrives meanwhile shows when it is back,
+and notifications of commands that ended come then too.
 
 Panes and broadcast are described in [workspaces.md](workspaces.md), the sidebar and the keys of the
 completion list in [snippets.md](snippets.md), bookmarks in [session-logs.md](session-logs.md),

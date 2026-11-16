@@ -37,6 +37,26 @@ impl HexBuffer {
         self.bytes.is_empty()
     }
 
+    /// Where the first whole line starts in the kept bytes (lines start at multiples of 16).
+    fn skip(&self) -> usize {
+        ((PER_LINE - self.dropped % PER_LINE) % PER_LINE).min(self.bytes.len())
+    }
+
+    /// How many lines the kept bytes make.
+    pub fn line_count(&self) -> usize {
+        (self.bytes.len() - self.skip()).div_ceil(PER_LINE)
+    }
+
+    /// Lines `range` of the dump only (what is in view), so a flood does not format 64 KiB
+    /// every frame.
+    pub fn rows(&self, range: std::ops::Range<usize>) -> Vec<String> {
+        let skip = self.skip();
+        let start = range.start.saturating_mul(PER_LINE).saturating_add(skip).min(self.bytes.len());
+        let end = range.end.saturating_mul(PER_LINE).saturating_add(skip).min(self.bytes.len());
+        let bytes: Vec<u8> = self.bytes.range(start..end).copied().collect();
+        hex_dump(&bytes, self.dropped.saturating_add(start))
+    }
+
     /// The kept bytes as hex dump lines, offsets counted from when the view opened.
     pub fn lines(&self) -> Vec<String> {
         let (a, b) = self.bytes.as_slices();
@@ -87,6 +107,17 @@ mod tests {
         assert_eq!(lines.len(), 3);
         assert!(lines[1].starts_with("00000010  "));
         assert!(lines[2].starts_with("00000020  "));
+    }
+
+    #[test]
+    fn rows_are_the_same_lines_as_the_whole_dump() {
+        let mut buf = HexBuffer::default();
+        buf.push(&[3u8; 70_000]);
+        buf.push(b"tail");
+        let all = buf.lines();
+        assert_eq!(buf.line_count(), all.len());
+        assert_eq!(buf.rows(5..9), all[5..9].to_vec());
+        assert_eq!(buf.rows(all.len() - 1..all.len() + 5), all[all.len() - 1..].to_vec());
     }
 
     #[test]
