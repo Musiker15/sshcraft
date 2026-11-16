@@ -11,6 +11,7 @@ pub mod login_script;
 pub mod logtext;
 pub mod model;
 pub mod os_detect;
+pub mod persist;
 pub mod placeholders;
 pub mod policy;
 pub mod proxy_command;

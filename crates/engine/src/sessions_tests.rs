@@ -2409,3 +2409,38 @@ async fn x11_not_allowed_here_is_never_requested() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(f.server.x11_request(), None, "the server never hears of X11");
 }
+
+#[tokio::test]
+async fn a_persistent_session_attaches_to_tmux() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.persistence = Some(sshcraft_model::persist::Persistence { tool: sshcraft_model::persist::Tool::Tmux, name: "work".into() });
+        store.upsert_host(&host).unwrap();
+    }
+    let (_tab, _) = connected_tab(&f).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !f.server.received_commands().contains(&"tmux new-session -A -s work".to_owned()) {
+        assert!(tokio::time::Instant::now() < deadline, "no tmux command: {:?}", f.server.received_commands());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!f.server.requested_terms().is_empty(), "with a terminal");
+}
+
+#[tokio::test]
+async fn a_session_name_from_elsewhere_never_reaches_a_command() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        // As sync could bring it, past the check on save.
+        host.settings.persistence = Some(sshcraft_model::persist::Persistence { tool: sshcraft_model::persist::Tool::Tmux, name: "x;id".into() });
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::SessionNameInvalid));
+    assert!(f.server.received_commands().is_empty());
+}

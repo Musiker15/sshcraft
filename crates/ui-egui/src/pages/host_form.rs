@@ -300,6 +300,40 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     *value = (!a.is_empty()).then_some(a);
 }
 
+/// Whether the shell runs inside tmux or screen, and the session's name.
+fn persistence_row(ui: &mut Ui, value: &mut Option<sshcraft_model::persist::Persistence>) {
+    use sshcraft_model::persist::{Persistence, Tool, check};
+    ui.label(tr("Keep the session"));
+    ui.horizontal(|ui| {
+        let mut tool = value.as_ref().map(|p| p.tool);
+        let shown = match tool {
+            None => tr("No"),
+            Some(Tool::Tmux) => "tmux",
+            Some(Tool::Screen) => "screen",
+        };
+        egui::ComboBox::from_id_salt("sshcraft-persistence").selected_text(shown).show_ui(ui, |ui| {
+            ui.selectable_value(&mut tool, None, tr("No"));
+            ui.selectable_value(&mut tool, Some(Tool::Tmux), "tmux");
+            ui.selectable_value(&mut tool, Some(Tool::Screen), "screen");
+        });
+        match tool {
+            None => *value = None,
+            Some(tool) => {
+                let p = value.get_or_insert_with(|| Persistence { tool, name: "sshcraft".into() });
+                p.tool = tool;
+                ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(140.0).char_limit(64))
+                    .on_hover_text(tr("Every connect attaches to this session again, also after the connection dropped."));
+                if check(&p.name).is_err() {
+                    ui.label(
+                        egui::RichText::new(tr("Letters, digits, dots, dashes and underscores")).color(crate::theme::Tokens::get(ui.ctx()).danger),
+                    );
+                }
+            }
+        }
+    });
+    ui.end_row();
+}
+
 /// X11 forwarding that was already on when the form opened may have come through sync or a
 /// share: it is used only once allowed on this device.
 fn x11_allow(ui: &mut Ui, x11: Option<bool>, opened: Option<bool>, allow: &mut bool) {
@@ -577,6 +611,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
 
         tri_state(ui, tr("Agent forwarding"), &mut s.agent_forwarding, &inherited.agent_forwarding);
         tri_state(ui, tr("X11 forwarding"), &mut s.x11, &inherited.x11);
+        persistence_row(ui, &mut s.persistence);
         tri_state(ui, tr("Record sessions"), &mut s.session_log, &None);
         appearance(ui, &mut s.appearance);
 

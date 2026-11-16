@@ -71,6 +71,9 @@ pub struct ConnectionSettings {
     /// Forward X11 to this computer's display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x11: Option<bool>,
+    /// Run the shell inside tmux or screen on the server and attach to it again on every connect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence: Option<crate::persist::Persistence>,
     /// Set on a shared copy whose owner signs in with a key or password that was not shared:
     /// the member adds a sign-in of their own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,6 +319,7 @@ pub struct ResolvedHost {
     pub proxy: Option<Proxy>,
     pub agent_forwarding: bool,
     pub x11: bool,
+    pub persistence: Option<crate::persist::Persistence>,
     pub env: Vec<EnvVar>,
     pub jump_hosts: Vec<HostId>,
 }
@@ -406,6 +410,7 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
     let proxy = levels.iter().find_map(|l| l.settings.proxy.clone()).filter(|p| *p != Proxy::Direct);
     let agent_forwarding = levels.iter().find_map(|l| l.settings.agent_forwarding).unwrap_or(false);
     let x11 = levels.iter().find_map(|l| l.settings.x11).unwrap_or(false);
+    let persistence = levels.iter().find_map(|l| l.settings.persistence.clone());
     let jump_hosts = levels.iter().find_map(|l| l.settings.jump_hosts.clone()).unwrap_or_default();
     let env: Vec<EnvVar> = levels.iter().rev().flat_map(|l| l.settings.env.iter().cloned()).collect();
     Ok(ResolvedHost {
@@ -421,6 +426,7 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
         proxy,
         agent_forwarding,
         x11,
+        persistence,
         env: normalize_env(&env),
         jump_hosts,
     })
@@ -448,6 +454,7 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
         x11: levels.iter().find_map(|l| l.settings.x11),
+        persistence: levels.iter().find_map(|l| l.settings.persistence.clone()),
         // Worked out for each copy, never inherited.
         credentials_from_member: None,
         env: normalize_env(&env),

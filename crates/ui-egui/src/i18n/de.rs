@@ -34,6 +34,11 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Keep the session" => "Sitzung behalten",
+        "Every connect attaches to this session again, also after the connection dropped." => {
+            "Jedes Verbinden hängt sich wieder an diese Sitzung, auch nach einem Verbindungsabbruch."
+        }
+        "Letters, digits, dots, dashes and underscores" => "Buchstaben, Ziffern, Punkte, Bindestriche und Unterstriche",
         "Allow X11 forwarding on this device" => "X11-Weiterleitung auf diesem Gerät erlauben",
         "X11 forwarding that came through sync, a share or an import stays off until allowed here." => {
             "Eine X11-Weiterleitung, die über Sync, eine Freigabe oder einen Import kam, bleibt aus, bis sie hier erlaubt wird."

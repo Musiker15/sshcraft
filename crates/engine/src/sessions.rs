@@ -1200,11 +1200,21 @@ async fn connect_target(ctx: &Arc<Context>, target: &SessionTarget, size: &Mutex
 }
 
 async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
+    // A session that outlives the connection: the fixed tmux or screen command, attached again on
+    // every connect.
+    let persistence = {
+        let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
+        lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?.target.persistence
+    };
+    let command = match &persistence {
+        Some(p) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
+        None => None,
+    };
     let (session, notice) = connect_session(ctx, host_id, opened, true).await?;
     let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);
     // Read on every connect, so a reconnect uses the type set now.
     let term = ctx.settings().terminal.terminal_type;
-    let shell = session.open_shell(cols, rows, &term).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    let shell = session.open_terminal(cols, rows, &term, command.as_deref()).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
     let prober = Some(session.prober());
     if needs_os(&ctx.store, host_id) {
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session.clone()));

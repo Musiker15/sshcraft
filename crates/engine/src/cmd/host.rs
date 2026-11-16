@@ -272,6 +272,9 @@ pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSet
     for steps in [&settings.before_connect, &settings.after_disconnect].into_iter().flatten() {
         sshcraft_model::hooks::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
     }
+    if let Some(p) = &settings.persistence {
+        sshcraft_model::persist::check(&p.name).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
+    }
     Ok(())
 }
 
