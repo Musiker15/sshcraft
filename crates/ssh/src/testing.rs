@@ -89,6 +89,10 @@ struct Records {
     terms: Mutex<Vec<String>>,
     /// What clients sent on the standard input of `exec` channels.
     exec_input: Mutex<Vec<u8>>,
+    /// `exec` keeps its channel open after the output (a program that keeps running).
+    exec_keep_open: std::sync::atomic::AtomicBool,
+    /// Input that makes an open `exec` channel answer: (text in the input, answer), each once.
+    exec_replies: Mutex<Vec<(String, String)>>,
     /// The protocol and cookie of the last `x11-req`.
     x11_request: Mutex<Option<(String, String)>>,
     /// Sent in X11 setups instead of the requested cookie.
@@ -163,6 +167,16 @@ impl TestServer {
 
     pub fn received_env(&self) -> Vec<(String, String)> {
         self.records.env.lock().unwrap().clone()
+    }
+
+    /// Answers `answer` on an `exec` channel once its input contains `trigger`, once per pair.
+    pub fn set_exec_replies(&self, replies: Vec<(String, String)>) {
+        *self.records.exec_replies.lock().unwrap() = replies;
+    }
+
+    /// Keeps `exec` channels open after their output, like a program that keeps running.
+    pub fn set_exec_keep_open(&self, open: bool) {
+        self.records.exec_keep_open.store(open, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// The protocol and cookie of the last X11 request.
@@ -590,10 +604,14 @@ impl server::Handler for Handler {
         let stderr = self.records.exec_stderr.lock().unwrap().clone();
         let status = *self.records.exec_status.lock().unwrap();
         let delay = *self.records.exec_delay.lock().unwrap();
+        let keep_open = self.records.exec_keep_open.load(std::sync::atomic::Ordering::SeqCst);
         let handle = session.handle();
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             let _ = handle.data(channel, Bytes::from(output.into_bytes())).await;
+            if keep_open {
+                return;
+            }
             if !stderr.is_empty() {
                 let _ = handle.extended_data(channel, 1, Bytes::from(stderr.into_bytes())).await;
             }
@@ -619,6 +637,21 @@ impl server::Handler for Handler {
     async fn data(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
         if self.execs.contains(&channel) {
             self.records.exec_input.lock().unwrap().extend_from_slice(data);
+            let text = String::from_utf8_lossy(data).into_owned();
+            let mut replies = self.records.exec_replies.lock().unwrap();
+            // Several commands may come in one packet: each is answered, in the order they came.
+            let mut due: Vec<(usize, String)> = Vec::new();
+            replies.retain(|(trigger, answer)| match text.find(trigger.as_str()) {
+                Some(at) => {
+                    due.push((at, answer.clone()));
+                    false
+                }
+                None => true,
+            });
+            due.sort_by_key(|(at, _)| *at);
+            for (_, answer) in due {
+                session.data(channel, answer.into_bytes())?;
+            }
             return Ok(());
         }
         if !self.sessions.contains(&channel) {

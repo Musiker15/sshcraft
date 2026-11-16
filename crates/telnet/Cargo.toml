@@ -1,0 +1,16 @@
+[package]
+name = "sshcraft-telnet"
+description = "Telnet connections for the SSHCraft desktop client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sshcraft-model = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

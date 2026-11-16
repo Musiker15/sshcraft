@@ -173,11 +173,14 @@ struct SaveParams {
     /// The user switched X11 forwarding on (or allowed it) in this save.
     #[serde(default)]
     approve_x11: bool,
+    /// The user chose Telnet (or allowed it) in this save.
+    #[serde(default)]
+    approve_telnet: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script, approve_programs, approve_x11 } =
+        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script, approve_programs, approve_x11, approve_telnet } =
             parse("host.save", params)?;
         check_login_script("host.save", &host.settings)?;
         let id = host.id.0.to_string();
@@ -199,6 +202,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         approve_step_programs(&ctx, &host.settings, &approve_programs)?;
         if approve_x11 {
             approve_x11_for(&ctx, &host.settings, &host.id.0.to_string())?;
+        }
+        if approve_telnet {
+            approve_telnet_for(&ctx, &host.settings, &host.id.0.to_string())?;
         }
         if approve_login_script {
             approve_login_scripts(&ctx, [&host.settings])?;
@@ -240,6 +246,14 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
     Ok(())
 }
 
+/// Allows Telnet on this device for the level `id` when it chooses it; only the user can.
+pub(crate) fn approve_telnet_for(ctx: &Ctx, settings: &ConnectionSettings, id: &str) -> Result<(), CommandError> {
+    if ctx.caller.is_user() && settings.protocol == Some(sshcraft_model::model::Protocol::Telnet) {
+        ctx.session.store().approve_command(&sshcraft_store::store::command_digest(&crate::sessions::telnet_approval(id)))?;
+    }
+    Ok(())
+}
+
 /// Allows X11 forwarding on this device for the level `id` when it switches it on; only the
 /// user can.
 pub(crate) fn approve_x11_for(ctx: &Ctx, settings: &ConnectionSettings, id: &str) -> Result<(), CommandError> {
@@ -271,6 +285,9 @@ pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSet
     }
     for steps in [&settings.before_connect, &settings.after_disconnect].into_iter().flatten() {
         sshcraft_model::hooks::check(steps).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
+    }
+    if let Some(p) = &settings.persistence {
+        sshcraft_model::persist::check(&p.name).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
     }
     Ok(())
 }

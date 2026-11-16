@@ -1200,17 +1200,73 @@ async fn connect_target(ctx: &Arc<Context>, target: &SessionTarget, size: &Mutex
 }
 
 async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
+    // A session that outlives the connection: the fixed tmux or screen command, attached again on
+    // every connect.
+    let route = {
+        let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
+        lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
+    };
+    if route.target.protocol == sshcraft_model::model::Protocol::Telnet {
+        return connect_telnet(ctx, &route, size).await;
+    }
+    let persistence = route.target.persistence;
+    let command = match &persistence {
+        Some(p) => Some(p.command().ok_or_else(|| end_error(ErrorCode::SessionNameInvalid, Some(p.name.clone())))?),
+        None => None,
+    };
     let (session, notice) = connect_session(ctx, host_id, opened, true).await?;
     let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);
     // Read on every connect, so a reconnect uses the type set now.
     let term = ctx.settings().terminal.terminal_type;
-    let shell = session.open_shell(cols, rows, &term).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    let shell = session.open_terminal(cols, rows, &term, command.as_deref()).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
     let prober = Some(session.prober());
     if needs_os(&ctx.store, host_id) {
         tokio::spawn(detect_os(ctx.store.clone(), host_id, session.clone()));
     }
     let (writer, events) = shell.split();
     Ok((Arc::new(writer), events, notice, prober, Some(session)))
+}
+
+/// A Telnet host: straight to its address, no sign-in by SSHCraft (the device asks, the user
+/// types), never stored credentials.
+async fn connect_telnet(ctx: &Arc<Context>, route: &Route, size: &Mutex<(u32, u32)>) -> Result<Connected, Failure> {
+    if !route.jumps.is_empty() || route.target.proxy.is_some() {
+        return Err(end_error(ErrorCode::TelnetDirectOnly, None));
+    }
+    // Plaintext only where it was chosen on this device.
+    if !telnet_allowed(&ctx.store.lock().unwrap_or_else(PoisonError::into_inner), route.target.host_id) {
+        return Err(end_error(ErrorCode::TelnetNotAllowed, None));
+    }
+    // Wake the device, knock, start the VPN; the steps after run when the connection goes.
+    crate::hooks::run(ctx, route.target.host_id, crate::hooks::When::Before).await?;
+    let after: Arc<dyn std::any::Any + Send + Sync> = Arc::new(crate::hooks::AfterGuard::new(ctx.clone(), route.target.host_id));
+    // A host without its own port has SSH's: Telnet's is 23.
+    let port = if route.target.port == sshcraft_model::model::DEFAULT_PORT { sshcraft_telnet::DEFAULT_PORT } else { route.target.port };
+    let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);
+    let term = ctx.settings().terminal.terminal_type;
+    let size = (u16::try_from(cols).unwrap_or(u16::MAX), u16::try_from(rows).unwrap_or(u16::MAX));
+    let (writer, events) = sshcraft_telnet::connect(&route.target.address, port, &term, size, sshcraft_ssh::CONNECT_TIMEOUT)
+        .await
+        .map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
+    Ok((Arc::new(writer.keep(after)), events, Some(ErrorCode::TelnetUnencrypted), None, None))
+}
+
+#[async_trait::async_trait]
+impl TermWriter for sshcraft_telnet::TelnetWriter {
+    async fn write(&self, data: &[u8]) -> Result<(), String> {
+        sshcraft_telnet::TelnetWriter::write(self, data).await.map_err(|e| e.to_string())
+    }
+
+    async fn resize(&self, cols: u32, rows: u32) -> Result<(), String> {
+        sshcraft_telnet::TelnetWriter::resize(self, to_u16(cols), to_u16(rows)).await.map_err(|e| e.to_string())
+    }
+
+    fn close(&self) {
+        let writer = self.clone();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move { writer.close().await });
+        }
+    }
 }
 
 /// Connects to a host along its route and signs in on every hop; no shell yet. The notice is
@@ -1389,6 +1445,32 @@ async fn allow_command(ctx: &Context, host_name: &str, argv: &[String]) -> Resul
 
 /// Lets a local program run once this device allowed `digest_of` (its arguments, maybe with a
 /// prefix saying what it is for); else asks the user with `argv` shown.
+/// What allows Telnet on this device for the host or group `id` that chooses it.
+pub(crate) fn telnet_approval(id: &str) -> Vec<String> {
+    vec!["telnet".to_string(), id.to_string()]
+}
+
+/// Whether Telnet for `host_id` was chosen on this device: the level that sets the protocol (the
+/// host, or the nearest group that sets it) was allowed here.
+pub(crate) fn telnet_allowed(store: &Store, host_id: HostId) -> bool {
+    use sshcraft_model::model::Protocol;
+    let (Ok(hosts), Ok(groups)) = (store.list_hosts(), store.list_groups()) else { return false };
+    let Some(host) = hosts.iter().find(|h| h.id == host_id) else { return false };
+    let source = match host.settings.protocol {
+        Some(Protocol::Telnet) => Some(host.id.0.to_string()),
+        Some(Protocol::Ssh) => None,
+        None => host
+            .group_id
+            .map(|g| sshcraft_model::model::group_chain(&groups, g))
+            .unwrap_or_default()
+            .into_iter()
+            .find(|g| g.defaults.protocol.is_some())
+            .filter(|g| g.defaults.protocol == Some(Protocol::Telnet))
+            .map(|g| g.id.0.to_string()),
+    };
+    source.is_some_and(|id| store.command_approved(&sshcraft_store::store::command_digest(&telnet_approval(&id))).unwrap_or(false))
+}
+
 /// What allows X11 forwarding on this device for the host or group `id` that switches it on.
 pub(crate) fn x11_approval(id: &str) -> Vec<String> {
     vec!["x11".to_string(), id.to_string()]

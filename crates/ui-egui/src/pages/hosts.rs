@@ -73,6 +73,17 @@ fn select(app: &mut SshcraftApp, pos: usize, id: HostId, modifiers: egui::Modifi
     }
 }
 
+/// Whether host `id` runs tmux in control mode (set on it or on a group above it).
+pub fn uses_tmux_control(app: &SshcraftApp, id: HostId) -> bool {
+    let Some(row) = app.data.hosts.iter().find(|r| r.host.id == id) else { return false };
+    let groups: Vec<Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
+    let chain = crate::pages::host_form::chain(row.host.group_id, &groups);
+    let persistence = row.host.settings.persistence.clone().or_else(|| chain.iter().find_map(|g| g.defaults.persistence.clone()));
+    // A Telnet host has no tmux behind it: the engine never runs it there.
+    let protocol = row.host.settings.protocol.or_else(|| chain.iter().find_map(|g| g.defaults.protocol)).unwrap_or_default();
+    protocol == sshcraft_model::model::Protocol::Ssh && persistence.is_some_and(|p| p.tool == sshcraft_model::persist::Tool::TmuxControl)
+}
+
 /// A shared host whose owner's sign-in was not shared, and that has none of its own yet.
 pub fn needs_own_sign_in(host: &sshcraft_model::model::Host) -> bool {
     let s = &host.settings;

@@ -42,6 +42,16 @@ pub enum KeyRef {
     Agent { fingerprint: String },
 }
 
+/// How a host is reached.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Protocol {
+    #[default]
+    Ssh,
+    /// Plaintext Telnet: no stored credentials are ever sent over it.
+    Telnet,
+}
+
 /// Connection settings on a group or host. `None` means "not set here".
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionSettings {
@@ -71,6 +81,12 @@ pub struct ConnectionSettings {
     /// Forward X11 to this computer's display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x11: Option<bool>,
+    /// SSH unless set to Telnet (for devices that speak nothing else).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<Protocol>,
+    /// Run the shell inside tmux or screen on the server and attach to it again on every connect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence: Option<crate::persist::Persistence>,
     /// Set on a shared copy whose owner signs in with a key or password that was not shared:
     /// the member adds a sign-in of their own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,6 +332,8 @@ pub struct ResolvedHost {
     pub proxy: Option<Proxy>,
     pub agent_forwarding: bool,
     pub x11: bool,
+    pub persistence: Option<crate::persist::Persistence>,
+    pub protocol: Protocol,
     pub env: Vec<EnvVar>,
     pub jump_hosts: Vec<HostId>,
 }
@@ -406,6 +424,8 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
     let proxy = levels.iter().find_map(|l| l.settings.proxy.clone()).filter(|p| *p != Proxy::Direct);
     let agent_forwarding = levels.iter().find_map(|l| l.settings.agent_forwarding).unwrap_or(false);
     let x11 = levels.iter().find_map(|l| l.settings.x11).unwrap_or(false);
+    let persistence = levels.iter().find_map(|l| l.settings.persistence.clone());
+    let protocol = levels.iter().find_map(|l| l.settings.protocol).unwrap_or_default();
     let jump_hosts = levels.iter().find_map(|l| l.settings.jump_hosts.clone()).unwrap_or_default();
     let env: Vec<EnvVar> = levels.iter().rev().flat_map(|l| l.settings.env.iter().cloned()).collect();
     Ok(ResolvedHost {
@@ -421,6 +441,8 @@ pub fn resolve(host: &Host, chain: &[&Group], identities: &[Identity]) -> Result
         proxy,
         agent_forwarding,
         x11,
+        persistence,
+        protocol,
         env: normalize_env(&env),
         jump_hosts,
     })
@@ -448,6 +470,8 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         proxy: levels.iter().find_map(|l| l.settings.proxy.clone()),
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
         x11: levels.iter().find_map(|l| l.settings.x11),
+        persistence: levels.iter().find_map(|l| l.settings.persistence.clone()),
+        protocol: levels.iter().find_map(|l| l.settings.protocol),
         // Worked out for each copy, never inherited.
         credentials_from_member: None,
         env: normalize_env(&env),

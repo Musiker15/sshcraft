@@ -84,6 +84,10 @@ pub struct SessionTab {
     paste_picker: bool,
     /// A program waited for the user at the last status change.
     program_blocked: bool,
+    /// This session runs tmux in control mode: its output is read here, never shown.
+    pub tmux: Option<Box<crate::tmux_mode::Control>>,
+    /// This terminal shows a tmux pane: (the control session, the pane).
+    pub tmux_pane: Option<(SessionId, u32)>,
 }
 
 impl SessionTab {
@@ -260,6 +264,8 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
     let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
     let scrollback = app.data.settings.terminal.scrollback;
     let params = json!({ "target": target, "cols": 100, "rows": 30 });
+    // A host whose session is tmux in control mode: its windows become tabs.
+    let tmux_control = host.is_some_and(|h| crate::pages::hosts::uses_tmux_control(app, h));
     let old = match replace {
         Some(PaneSlot::Session { session }) => Some(session),
         _ => None,
@@ -356,10 +362,109 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 resources_at: None,
                 paste_picker: false,
                 program_blocked: false,
+                tmux: tmux_control.then(Box::default),
+                tmux_pane: None,
             };
             app.terminals.insert(id, session_tab);
         }),
     );
+}
+
+/// Pumps a tmux control session: its output is the protocol, read by the tmux module, and its
+/// status goes to the panes it shows. Whether more output waits.
+fn pump_tmux(app: &mut SshcraftApp, id: SessionId) -> bool {
+    let Some(tab) = app.terminals.get_mut(&id) else { return false };
+    let Some(pump) = tab.pump.as_mut() else { return false };
+    let mut bytes = Vec::new();
+    let outcome = pump.frame_into(&mut |slice| bytes.extend_from_slice(slice), FrameBudget::DEFAULT);
+    if outcome.closed {
+        tab.pump = None;
+    }
+    if let Some(status) = &outcome.status {
+        tab.status = Some(status.clone());
+    }
+    // A (re)connect starts over before its first output is read.
+    if matches!(outcome.status, Some(SessionStatus::Connected { .. })) {
+        crate::tmux_mode::start(app, id);
+    }
+    crate::tmux_mode::on_bytes(app, id, &bytes);
+    if let Some(status) = outcome.status {
+        for pane in app.terminals.values_mut().filter(|t| t.tmux_pane.is_some_and(|(c, _)| c == id)) {
+            pane.status = Some(status.clone());
+        }
+    }
+    outcome.more
+}
+
+/// Tells the session behind terminal `id` its new size; a tmux pane through its control session.
+fn tell_size(app: &mut SshcraftApp, id: SessionId, cols: u16, rows: u16) {
+    match app.terminals.get(&id).and_then(|t| t.tmux_pane) {
+        Some((control, pane)) => crate::tmux_mode::pane_resized(app, control, pane, cols, rows),
+        None => app.run_reported("session.resize", json!({ "id": id, "cols": cols, "rows": rows })),
+    }
+}
+
+/// A terminal for pane `pane` of the tmux control session `control`; it has no engine session
+/// of its own.
+pub fn open_tmux_pane(app: &mut SshcraftApp, control: SessionId, pane: u32) -> Option<SessionId> {
+    let owner = app.terminals.get(&control)?;
+    let (host, target, name, status) = (owner.host, owner.target.clone(), owner.name.clone(), owner.status.clone());
+    let clipboard_write = app.data.settings.terminal.clipboard_osc52 != Osc52::Off;
+    let scrollback = app.data.settings.terminal.scrollback;
+    let id = uuid::Uuid::new_v4();
+    let term = Terminal::new(TermSize::clamped(100, 30), &TermConfig { clipboard_write, scrollback });
+    let tab = SessionTab {
+        id,
+        host,
+        target,
+        name: name.clone(),
+        titled: false,
+        title: visible(&name),
+        term,
+        pump: None,
+        status,
+        clipboard: None,
+        focus: false,
+        unseen: false,
+        waiting: false,
+        view: None,
+        cwd: None,
+        start: None,
+        capture: crate::history::Capture::default(),
+        history: Vec::new(),
+        history_loaded: false,
+        suggestions: Vec::new(),
+        selected: None,
+        dismissed: false,
+        suggested_for: None,
+        paths: crate::completion::PathCache::default(),
+        path_pending: None,
+        recording: None,
+        command_since: None,
+        server_limit: crate::notify::RateLimit::default(),
+        hints: None,
+        hint_typed: String::new(),
+        compose: None,
+        resources: None,
+        resources_at: None,
+        paste_picker: false,
+        program_blocked: false,
+        tmux: None,
+        tmux_pane: Some((control, pane)),
+    };
+    app.terminals.insert(id, tab);
+    Some(id)
+}
+
+/// Closes the session behind terminal `id`: a tmux pane only stops being shown.
+pub fn close_session(app: &mut SshcraftApp, id: SessionId) {
+    match app.terminals.get(&id).and_then(|t| t.tmux_pane) {
+        Some((control, pane)) => crate::tmux_mode::pane_closed(app, control, pane),
+        None => {
+            app.terminals.remove(&id);
+            app.run_reported("session.close", json!({ "id": id }));
+        }
+    }
 }
 
 /// The new-pane page a connection asked for on it goes into: the focused pane of the shown tab.
@@ -430,6 +535,10 @@ pub fn send_bytes(app: &SshcraftApp, id: SessionId, bytes: &[u8]) {
 
 /// Sends what the terminal (or the user) typed to the session.
 fn send(app: &SshcraftApp, id: SessionId, bytes: &[u8]) {
+    if let Some((control, pane)) = app.terminals.get(&id).and_then(|t| t.tmux_pane) {
+        crate::tmux_mode::type_into(app, control, pane, bytes);
+        return;
+    }
     let params = match std::str::from_utf8(bytes) {
         Ok(text) => json!({ "id": id, "data": text }),
         Err(_) => json!({ "id": id, "data_base64": data_encoding::BASE64.encode(bytes) }),
@@ -654,6 +763,10 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
         let Some(tab) = app.terminals.get_mut(&id) else { continue };
         // Finished lines are kept only while a trigger wants them.
         tab.term.set_line_capture(capture);
+        if tab.tmux.is_some() {
+            more |= pump_tmux(app, id);
+            continue;
+        }
         if let Some(pump) = tab.pump.as_mut() {
             let outcome = pump.frame(&mut tab.term, FrameBudget::DEFAULT);
             if outcome.fed > 0 {
@@ -684,7 +797,8 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             tab.term.stamp_commands(chrono::Utc::now());
         }
         let host = tab.host;
-        let can_send = !ended(tab.status.as_ref());
+        // tmux answers a pane's terminal queries itself; a second answer would be typed in.
+        let can_send = !ended(tab.status.as_ref()) && tab.tmux_pane.is_none();
         for notice in notices {
             match notice {
                 Notice::Reply(bytes) if can_send => send(app, id, &bytes),
@@ -832,10 +946,30 @@ pub fn show_clipboard_question(app: &mut SshcraftApp, ctx: &egui::Context) {
     }
 }
 
+/// What a notice beside a working connection says.
+pub fn notice_text(code: sshcraft_engine::ErrorCode) -> Option<&'static str> {
+    use sshcraft_engine::ErrorCode;
+    Some(match code {
+        ErrorCode::AgentForwardingUnavailable => tr("No SSH agent here to forward."),
+        ErrorCode::X11Unavailable => tr("No X server here: X11 forwarding is off."),
+        ErrorCode::X11NotAllowed => tr("X11 forwarding came from elsewhere and is off until you allow it in the host's form."),
+        ErrorCode::CertificateExpired => tr("The certificate had expired: signed in with the key alone."),
+        ErrorCode::TelnetUnencrypted => tr("Telnet is not encrypted."),
+        ErrorCode::TelnetNotAllowed => tr("Telnet came from elsewhere: allow it in the host's form to use it here."),
+        ErrorCode::TelnetDirectOnly => tr("Telnet goes straight to the device, without jump host or proxy."),
+        ErrorCode::SessionNameInvalid => tr("The tmux or screen session name has characters SSHCraft does not put into a command."),
+        _ => return None,
+    })
+}
+
 fn status_text(status: Option<&SessionStatus>) -> (String, bool) {
     match status {
         None | Some(SessionStatus::Connecting) => (tr("Connecting…").to_string(), false),
-        Some(SessionStatus::Connected { .. }) => (tr("Connected").to_string(), false),
+        Some(SessionStatus::Connected { notice: None }) => (tr("Connected").to_string(), false),
+        Some(SessionStatus::Connected { notice: Some(code) }) => match notice_text(*code) {
+            Some(text) => (format!("{} {}", tr("Connected."), text), false),
+            None => (tr("Connected").to_string(), false),
+        },
         Some(SessionStatus::Reconnecting { attempt, delay_secs }) => (
             trf(
                 "Connection lost. Reconnecting (attempt {attempt}) in {seconds} s.",
@@ -913,6 +1047,7 @@ fn status_line(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId) {
     let mismatch = matches!(tab.status, Some(SessionStatus::Ended { reason: EndReason::HostKeyMismatch, .. }));
     let detail = match &tab.status {
         Some(SessionStatus::Ended { detail: Some(d), .. }) => Some(visible(d)),
+        Some(SessionStatus::Ended { code: Some(code), detail: None, .. }) => notice_text(*code).map(str::to_string),
         _ => None,
     };
     let mut reconnect = false;
@@ -1366,7 +1501,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     if let Some(size) = response.resize
         && can_send
     {
-        app.run_reported("session.resize", json!({ "id": id, "cols": size.cols, "rows": size.rows }));
+        tell_size(app, id, size.cols, size.rows);
     }
     if let Some(text) = response.copy {
         ctx.copy_text(text);

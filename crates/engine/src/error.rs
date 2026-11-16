@@ -86,6 +86,14 @@ pub enum ErrorCode {
     /// X11 forwarding came through sync, a share or an import and was not allowed on this
     /// device: the session runs without it.
     X11NotAllowed,
+    /// The tmux or screen session name is not one SSHCraft puts into a command.
+    SessionNameInvalid,
+    /// A Telnet connection: nothing on it is encrypted.
+    TelnetUnencrypted,
+    /// Telnet goes straight to the host: no jump host, no proxy.
+    TelnetDirectOnly,
+    /// Telnet came through sync, a share or an import and was not allowed on this device.
+    TelnetNotAllowed,
     CertificateMismatch,
     InvalidCertificate,
     /// The certificate had expired: signed in with the key alone.

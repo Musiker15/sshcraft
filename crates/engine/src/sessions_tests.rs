@@ -2409,3 +2409,89 @@ async fn x11_not_allowed_here_is_never_requested() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(f.server.x11_request(), None, "the server never hears of X11");
 }
+
+#[tokio::test]
+async fn a_persistent_session_attaches_to_tmux() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.persistence = Some(sshcraft_model::persist::Persistence { tool: sshcraft_model::persist::Tool::Tmux, name: "work".into() });
+        store.upsert_host(&host).unwrap();
+    }
+    let (_tab, _) = connected_tab(&f).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !f.server.received_commands().contains(&"tmux new-session -A -s work".to_owned()) {
+        assert!(tokio::time::Instant::now() < deadline, "no tmux command: {:?}", f.server.received_commands());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!f.server.requested_terms().is_empty(), "with a terminal");
+}
+
+#[tokio::test]
+async fn a_session_name_from_elsewhere_never_reaches_a_command() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        // As sync could bring it, past the check on save.
+        host.settings.persistence = Some(sshcraft_model::persist::Persistence { tool: sshcraft_model::persist::Tool::Tmux, name: "x;id".into() });
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::SessionNameInvalid));
+    assert!(f.server.received_commands().is_empty());
+}
+
+#[tokio::test]
+async fn a_telnet_host_connects_without_signing_in() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let f = fixture(true).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let device = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        socket.write_all(b"Router> ").await.unwrap();
+        let mut buf = [0u8; 64];
+        let n = socket.read(&mut buf).await.unwrap();
+        buf[..n].to_vec()
+    });
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.protocol = Some(sshcraft_model::model::Protocol::Telnet);
+        host.settings.port = Some(port);
+        store.upsert_host(&host).unwrap();
+        // Chosen on this device.
+        store.approve_command(&sshcraft_store::store::command_digest(&crate::sessions::telnet_approval(&f.host_id.0.to_string()))).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert!(sink.statuses().contains(&SessionStatus::Connected { notice: Some(ErrorCode::TelnetUnencrypted) }));
+    f.manager.write(id, b"show ip\r").unwrap();
+    assert_eq!(device.await.unwrap(), b"show ip\r\0".to_vec());
+    assert_eq!(f.server.connections(), 0, "no SSH, no sign-in");
+}
+
+#[tokio::test]
+async fn telnet_from_elsewhere_is_not_used_until_allowed() {
+    let f = fixture(true).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        // As sync or a share brings it.
+        host.settings.protocol = Some(sshcraft_model::model::Protocol::Telnet);
+        host.settings.port = Some(port);
+        store.upsert_host(&host).unwrap();
+    }
+    let sink = Arc::new(RecordingSink::default());
+    f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::TelnetNotAllowed));
+    assert!(tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(), "the device never hears from us");
+}

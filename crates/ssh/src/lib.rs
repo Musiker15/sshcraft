@@ -702,6 +702,12 @@ impl Session {
 
     /// Opens a shell with a terminal of type `term` (`TERM` on the server).
     pub async fn open_shell(&self, cols: u32, rows: u32, term: &str) -> Result<Shell, SshError> {
+        self.open_terminal(cols, rows, term, None).await
+    }
+
+    /// Opens a terminal of type `term` that runs `command` instead of the login shell (a fixed
+    /// tmux or screen command), or the shell with `None`.
+    pub async fn open_terminal(&self, cols: u32, rows: u32, term: &str, command: Option<&str>) -> Result<Shell, SshError> {
         let channel = self.handle.channel_open_session().await.map_err(protocol)?;
         channel.request_pty(false, term, cols, rows, 0, 0, &[]).await.map_err(protocol)?;
         for (name, value) in self.env.iter() {
@@ -715,7 +721,10 @@ impl Session {
             forward.mark_requested();
             channel.request_x11(false, false, x11::PROTOCOL, forward.fake_hex(), forward.screen()).await.map_err(protocol)?;
         }
-        channel.request_shell(false).await.map_err(protocol)?;
+        match command {
+            Some(command) => channel.exec(false, command).await.map_err(protocol)?,
+            None => channel.request_shell(false).await.map_err(protocol)?,
+        }
         let (mut read, write) = channel.split();
         let (tx, rx) = mpsc::channel(EVENT_BUFFER);
 
