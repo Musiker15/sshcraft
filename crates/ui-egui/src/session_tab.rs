@@ -66,6 +66,10 @@ pub struct SessionTab {
     waiting: bool,
     /// The terminal view's widget, to know whether it has the keyboard.
     view: Option<egui::Id>,
+    /// When the running command started (shell integration), for the notification when it ends.
+    command_since: Option<std::time::Instant>,
+    /// Server messages of this tab shown on the desktop.
+    server_limit: crate::notify::RateLimit,
 }
 
 impl SessionTab {
@@ -281,6 +285,8 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 paths: crate::completion::PathCache::default(),
                 path_pending: None,
                 recording: None,
+                command_since: None,
+                server_limit: crate::notify::RateLimit::default(),
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -367,6 +373,56 @@ fn ended(status: Option<&SessionStatus>) -> bool {
 }
 
 /// Feeds every session's output into its terminal and acts on what programs asked for.
+/// Whether the user looks at tab `id`: the window has the focus and the tab is the one shown.
+fn watched(app: &SshcraftApp, ctx: &egui::Context, id: SessionId) -> bool {
+    let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+    focused && app.ui.shown_terminal == Some(id)
+}
+
+/// The name a notification of tab `id` starts with.
+fn tab_label(app: &SshcraftApp, id: SessionId) -> String {
+    app.terminals.get(&id).map(|t| visible(&t.host.and_then(|h| host_name(app, h)).unwrap_or_else(|| t.name.clone()))).unwrap_or_default()
+}
+
+/// A command ended: a notification when it ran long and nobody watched.
+fn command_finished(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, exit: Option<i32>) {
+    let since = app.terminals.get_mut(&id).and_then(|t| t.command_since.take());
+    let Some(since) = since else { return };
+    let after = app.data.settings.terminal.notify_after_secs;
+    if !crate::notify::command_worth_it(after, since.elapsed(), watched(app, ctx, id)) {
+        return;
+    }
+    let title = trf("Command finished on {host}", &[("host", &tab_label(app, id))]);
+    let body = match exit {
+        Some(0) => tr("It succeeded.").to_string(),
+        Some(code) => trf("It ended with exit code {code}.", &[("code", &code.to_string())]),
+        None => tr("It ended.").to_string(),
+    };
+    app.notifier.notify(&title, &body);
+}
+
+/// A message from the server for the desktop: the host's name first, limited per tab, a toast
+/// instead while the user watches the tab.
+pub(crate) fn server_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, title: Option<&str>, body: &str) {
+    if !app.data.settings.terminal.server_notifications {
+        return;
+    }
+    let allowed = app.terminals.get_mut(&id).is_some_and(|t| t.server_limit.allow(std::time::Instant::now()));
+    if !allowed {
+        return;
+    }
+    let host = tab_label(app, id);
+    let title = match title.filter(|t| !t.is_empty()) {
+        Some(title) => format!("{host}: {title}"),
+        None => host,
+    };
+    if watched(app, ctx, id) {
+        app.toasts.info(&format!("{title}: {body}"));
+    } else {
+        app.notifier.notify(&title, body);
+    }
+}
+
 pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     if app.terminals.is_empty() {
         return;
@@ -430,7 +486,14 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                         tab.cwd = Some(dir);
                     }
                 }
-                Notice::CommandStarted | Notice::CommandFinished { .. } | Notice::Notification { .. } | Notice::ProgramStatusChanged => {}
+                Notice::CommandStarted => {
+                    if let Some(tab) = app.terminals.get_mut(&id) {
+                        tab.command_since = Some(std::time::Instant::now());
+                    }
+                }
+                Notice::CommandFinished { exit } => command_finished(app, ctx, id, exit),
+                Notice::Notification { title, body } => server_message(app, ctx, id, title.as_deref(), &body),
+                Notice::ProgramStatusChanged => {}
             }
         }
         // The host's name once the data has it, unless a program named the pane.

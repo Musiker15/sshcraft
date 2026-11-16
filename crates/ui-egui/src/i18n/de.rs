@@ -386,6 +386,17 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Exit code {code}, {took}, started {time}" => "Exit-Code {code}, {took}, gestartet {time}",
         "Finished, {took}, started {time}" => "Beendet, {took}, gestartet {time}",
         "Waiting for a command" => "Wartet auf einen Befehl",
+        "Command finished on {host}" => "Befehl beendet auf {host}",
+        "It succeeded." => "Er war erfolgreich.",
+        "It ended with exit code {code}." => "Er endete mit Exit-Code {code}.",
+        "It ended." => "Er ist beendet.",
+        "Notifications" => "Benachrichtigungen",
+        "seconds a command must run to notify when it ends in the background; 0 turns it off" => {
+            "Sekunden, die ein Befehl laufen muss, damit sein Ende im Hintergrund gemeldet wird; 0 schaltet es ab"
+        }
+        "Servers may show desktop notifications, always with the host's name" => {
+            "Server dürfen Desktop-Benachrichtigungen zeigen, immer mit dem Namen des Hosts"
+        }
         "Switch between grid and one large pane" => "Zwischen Raster und einem großen Bereich wechseln",
         "Broadcast on" => "Rundsenden an",
         "Broadcast on or off" => "Rundsenden an oder aus",

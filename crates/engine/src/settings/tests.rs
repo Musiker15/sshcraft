@@ -359,3 +359,12 @@ fn integrations_default_off() {
     assert!(!fresh.integrations.allow_agent_control, "agents are off until the user turns them on");
     assert_eq!(fresh.integrations.agent_port, 0, "any free port");
 }
+
+#[test]
+fn notifications_have_defaults_and_bounds() {
+    let d = EngineSettings::default();
+    assert_eq!(d.terminal.notify_after_secs, 10);
+    assert!(d.terminal.server_notifications);
+    assert_eq!(with(|s| s.terminal.notify_after_secs = 1_000_000).terminal.notify_after_secs, 86_400);
+    assert_eq!(with(|s| s.terminal.notify_after_secs = 0).terminal.notify_after_secs, 0);
+}

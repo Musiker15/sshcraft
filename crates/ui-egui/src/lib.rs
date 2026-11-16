@@ -17,6 +17,7 @@ pub mod link;
 pub mod lock;
 pub mod log_viewer;
 pub mod menus;
+pub mod notify;
 pub mod pages;
 pub mod palette;
 pub mod panes;

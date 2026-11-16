@@ -214,7 +214,15 @@ pub struct Terminal {
     /// How often a terminal tries to reconnect after its connection dropped, within
     /// [`RECONNECT_ATTEMPTS`]; 0 turns reconnecting off. Port forwarding always tries again.
     pub reconnect_attempts: u32,
+    /// A command that ran at least this many seconds and ended while the window was in the
+    /// background shows a desktop notification, within [`NOTIFY_AFTER_SECS`]; 0 turns it off.
+    pub notify_after_secs: u32,
+    /// Servers may show desktop notifications (OSC 9, OSC 777), always with the host's name.
+    pub server_notifications: bool,
 }
+
+/// The allowed range of `terminal.notify_after_secs`.
+pub const NOTIFY_AFTER_SECS: std::ops::RangeInclusive<u32> = 0..=86_400;
 
 /// The allowed range of `terminal.reconnect_attempts`.
 pub const RECONNECT_ATTEMPTS: std::ops::RangeInclusive<u32> = 0..=100;
@@ -230,6 +238,8 @@ impl Default for Terminal {
             autocomplete: true,
             local_shell: None,
             reconnect_attempts: 10,
+            notify_after_secs: 10,
+            server_notifications: true,
         }
     }
 }
@@ -310,6 +320,7 @@ impl EngineSettings {
         self.general.trash_days = self.general.trash_days.clamp(*TRASH_DAYS.start(), *TRASH_DAYS.end());
         self.general.lock_after_minutes = self.general.lock_after_minutes.clamp(*LOCK_MINUTES.start(), *LOCK_MINUTES.end());
         self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
+        self.terminal.notify_after_secs = self.terminal.notify_after_secs.clamp(*NOTIFY_AFTER_SECS.start(), *NOTIFY_AFTER_SECS.end());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

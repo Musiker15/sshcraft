@@ -260,6 +260,18 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             );
         });
         ui.end_row();
+        ui.label(tr("Notifications"));
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut t.notify_after_secs).range(sshcraft_engine::settings::NOTIFY_AFTER_SECS));
+                ui.label(
+                    egui::RichText::new(tr("seconds a command must run to notify when it ends in the background; 0 turns it off"))
+                        .color(tokens.text_dim),
+                );
+            });
+            ui.checkbox(&mut t.server_notifications, tr("Servers may show desktop notifications, always with the host's name"));
+        });
+        ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));
         ui.end_row();
