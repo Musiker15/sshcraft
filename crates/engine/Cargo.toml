@@ -13,6 +13,7 @@ testing = ["sshcraft-store/testing", "sshcraft-fido/testing", "sshcraft-ssh/test
 
 [dependencies]
 sshcraft-model = { workspace = true }
+regex = { workspace = true }
 sshcraft-store = { workspace = true }
 sshcraft-platform = { workspace = true }
 sshcraft-fido = { workspace = true }

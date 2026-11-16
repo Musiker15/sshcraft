@@ -95,6 +95,7 @@ impl Handler for Guard<'_> {
     }
 
     fn linefeed(&mut self) {
+        self.line_ends();
         Handler::linefeed(self.term);
     }
 
@@ -107,6 +108,7 @@ impl Handler for Guard<'_> {
     }
 
     fn newline(&mut self) {
+        self.line_ends();
         Handler::newline(self.term);
     }
 

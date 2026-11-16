@@ -17,6 +17,7 @@ use crate::terminal::pump::{FrameBudget, Pump};
 use crate::terminal::{TermPalette, TerminalView, install_terminal_font};
 use crate::theme::Tokens;
 use crate::widgets::visible;
+use sshcraft_engine::settings::TriggerAction;
 
 /// Most characters of a title a program sets.
 const MAX_TITLE: usize = 256;
@@ -74,6 +75,11 @@ pub struct SessionTab {
 
 impl SessionTab {
     /// Output arrived: unseen, and waiting if the cursor's line now asks something.
+    /// The bell rang, or a trigger or the cursor's line asks for the user.
+    pub fn waiting(&self) -> bool {
+        self.waiting
+    }
+
     pub fn mark_output(&mut self) {
         self.unseen = true;
         let screen = self.term.screen();
@@ -401,12 +407,16 @@ fn command_finished(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, e
     app.notifier.notify(&title, &body);
 }
 
-/// A message from the server for the desktop: the host's name first, limited per tab, a toast
-/// instead while the user watches the tab.
+/// A message from the server (OSC 9, OSC 777, a program waiting), shown only while servers may.
 pub(crate) fn server_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, title: Option<&str>, body: &str) {
-    if !app.data.settings.terminal.server_notifications {
-        return;
+    if app.data.settings.terminal.server_notifications {
+        desktop_message(app, ctx, id, title, body);
     }
+}
+
+/// A message about tab `id` for the desktop: the host's name first, limited per tab, a toast
+/// instead while the user watches the tab.
+fn desktop_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, title: Option<&str>, body: &str) {
     let allowed = app.terminals.get_mut(&id).is_some_and(|t| t.server_limit.allow(std::time::Instant::now()));
     if !allowed {
         return;
@@ -427,12 +437,17 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     if app.terminals.is_empty() {
         return;
     }
+    let terminal = &app.data.settings.terminal;
+    app.patterns.refresh(&terminal.highlights, &terminal.triggers);
+    let capture = !app.patterns.triggers.is_empty();
     let mut more = false;
     let mut starts = Vec::new();
     let mut ask_recording = Vec::new();
     let ids: Vec<SessionId> = app.terminals.keys().copied().collect();
     for id in ids {
         let Some(tab) = app.terminals.get_mut(&id) else { continue };
+        // Finished lines are kept only while a trigger wants them.
+        tab.term.set_line_capture(capture);
         if let Some(pump) = tab.pump.as_mut() {
             let outcome = pump.frame(&mut tab.term, FrameBudget::DEFAULT);
             if outcome.fed > 0 {
@@ -494,6 +509,19 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                 Notice::CommandFinished { exit } => command_finished(app, ctx, id, exit),
                 Notice::Notification { title, body } => server_message(app, ctx, id, title.as_deref(), &body),
                 Notice::ProgramStatusChanged => {}
+            }
+        }
+        let lines = app.terminals.get_mut(&id).map(|t| t.term.take_completed_lines()).unwrap_or_default();
+        for line in lines {
+            for action in app.patterns.triggers.actions(&line) {
+                match action {
+                    TriggerAction::Notify => desktop_message(app, ctx, id, Some(tr("Trigger")), &line),
+                    TriggerAction::Bell => {
+                        if let Some(tab) = app.terminals.get_mut(&id) {
+                            tab.waiting = true;
+                        }
+                    }
+                }
             }
         }
         // The host's name once the data has it, unless a program named the pane.
@@ -897,6 +925,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let family = app.term_font.as_ref().map_or(egui::FontFamily::Monospace, |(_, f)| f.clone());
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
     let ligatures = appearance.ligatures;
+    let app_highlighter = app.patterns.highlighter.clone();
     let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
     let blocked = modal_open(app, &ctx);
     let Some(tab) = app.terminals.get_mut(&id) else {
@@ -939,7 +968,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     };
     let response = ui
         .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| {
-            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures }.show(ui)
+            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures, highlighter: Some(&app_highlighter) }.show(ui)
         })
         .inner;
     // Only the focused pane takes the keyboard.

@@ -391,6 +391,21 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "It ended with exit code {code}." => "Er endete mit Exit-Code {code}.",
         "It ended." => "Er ist beendet.",
         "Notifications" => "Benachrichtigungen",
+        "Trigger" => "Trigger",
+        "Highlights" => "Hervorhebungen",
+        "Regular expressions coloured wherever they appear in a terminal, case-insensitive" => {
+            "Reguläre Ausdrücke, die überall im Terminal eingefärbt werden, ohne Rücksicht auf Groß- und Kleinschreibung"
+        }
+        "Pattern" => "Muster",
+        "Not a valid pattern" => "Kein gültiges Muster",
+        "Add a highlight" => "Hervorhebung hinzufügen",
+        "Triggers" => "Trigger",
+        "Regular expressions checked once for each finished output line, case-insensitive" => {
+            "Reguläre Ausdrücke, die einmal je fertiger Ausgabezeile geprüft werden, ohne Rücksicht auf Groß- und Kleinschreibung"
+        }
+        "Notify" => "Benachrichtigen",
+        "Mark the tab" => "Tab markieren",
+        "Add a trigger" => "Trigger hinzufügen",
         "seconds a command must run to notify when it ends in the background; 0 turns it off" => {
             "Sekunden, die ein Befehl laufen muss, damit sein Ende im Hintergrund gemeldet wird; 0 schaltet es ab"
         }

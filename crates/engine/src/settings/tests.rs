@@ -368,3 +368,27 @@ fn notifications_have_defaults_and_bounds() {
     assert_eq!(with(|s| s.terminal.notify_after_secs = 1_000_000).terminal.notify_after_secs, 86_400);
     assert_eq!(with(|s| s.terminal.notify_after_secs = 0).terminal.notify_after_secs, 0);
 }
+
+#[test]
+fn bad_highlight_and_trigger_patterns_are_dropped() {
+    use crate::settings::{Highlight, MAX_PATTERNS, Trigger, TriggerAction};
+    let s = with(|s| {
+        s.terminal.highlights = vec![
+            Highlight { pattern: "error".into(), color: [255, 0, 0] },
+            Highlight { pattern: "(unclosed".into(), color: [0, 0, 0] },
+            Highlight { pattern: "x".repeat(300), color: [0, 0, 0] },
+            Highlight { pattern: String::new(), color: [0, 0, 0] },
+        ];
+        s.terminal.triggers = (0..40).map(|i| Trigger { pattern: format!("done{i}"), action: TriggerAction::Notify }).collect();
+    });
+    assert_eq!(s.terminal.highlights.len(), 1);
+    assert_eq!(s.terminal.highlights[0].pattern, "error");
+    assert_eq!(s.terminal.triggers.len(), MAX_PATTERNS);
+}
+
+#[test]
+fn a_pattern_too_large_to_compile_is_refused() {
+    // Repetition multiplies the program size far past the limit.
+    assert!(crate::settings::compile_pattern("(a{1000}){1000}").is_none());
+    assert!(crate::settings::compile_pattern("warn(ing)?").is_some());
+}

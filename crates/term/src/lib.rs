@@ -148,6 +148,11 @@ fn clean_title(title: &str) -> String {
     clean_text(title, MAX_TITLE_CHARS)
 }
 
+/// Finished lines kept for [`Terminal::take_completed_lines`]; older ones are dropped.
+pub const MAX_COMPLETED_LINES: usize = 1000;
+/// The longest finished line kept, in characters.
+pub const MAX_LINE_CHARS: usize = 4096;
+
 /// One terminal.
 pub struct Terminal {
     term: Term<Listener>,
@@ -168,6 +173,8 @@ pub struct Terminal {
     programs: progstatus::Programs,
     /// Whether the program status changed since the notices were last taken.
     programs_changed: bool,
+    /// Finished output lines, kept only while [`Terminal::set_line_capture`] is on.
+    completed: Option<std::collections::VecDeque<String>>,
 }
 
 impl Terminal {
@@ -188,6 +195,7 @@ impl Terminal {
             commands: commands::Commands::default(),
             programs: progstatus::Programs::default(),
             programs_changed: false,
+            completed: None,
         }
     }
 
@@ -225,7 +233,7 @@ impl Terminal {
     /// feed is under way.
     fn advance(&mut self, bytes: &[u8]) {
         for slice in bytes.chunks(64 * 1024) {
-            let mut guard = guard::Guard { term: &mut self.term, extras: &mut self.extras_changes };
+            let mut guard = guard::Guard { term: &mut self.term, extras: &mut self.extras_changes, lines: self.completed.as_mut() };
             self.parser.advance(&mut guard, slice);
             if self.extras_changes >= extras::CHECK_EVERY {
                 self.extras_changes = 0;
@@ -269,6 +277,21 @@ impl Terminal {
     /// The visible rows as text, one line each, for screen readers.
     pub fn visible_text(&self) -> String {
         self.screen().text()
+    }
+
+    /// Keeps finished output lines (for triggers) or stops keeping them.
+    pub fn set_line_capture(&mut self, on: bool) {
+        if on {
+            self.completed.get_or_insert_with(Default::default);
+        } else {
+            self.completed = None;
+        }
+    }
+
+    /// The output lines that ended since the last call, oldest first; full-screen programs are
+    /// left out.
+    pub fn take_completed_lines(&mut self) -> Vec<String> {
+        self.completed.as_mut().map(|lines| lines.drain(..).collect()).unwrap_or_default()
     }
 
     /// What programs reported about themselves (OSC 7501), the one updated longest ago first.

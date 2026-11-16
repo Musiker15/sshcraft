@@ -219,6 +219,53 @@ pub struct Terminal {
     pub notify_after_secs: u32,
     /// Servers may show desktop notifications (OSC 9, OSC 777), always with the host's name.
     pub server_notifications: bool,
+    /// Words or patterns coloured wherever they appear in a terminal, at most [`MAX_PATTERNS`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub highlights: Vec<Highlight>,
+    /// Patterns that act when an output line matches, at most [`MAX_PATTERNS`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<Trigger>,
+}
+
+/// Highlights and triggers each keep at most this many entries.
+pub const MAX_PATTERNS: usize = 32;
+/// The longest pattern of a highlight or trigger, in characters.
+pub const MAX_PATTERN_CHARS: usize = 256;
+/// The most memory one compiled pattern may take.
+pub const PATTERN_SIZE_LIMIT: usize = 1 << 20;
+
+/// A regular expression coloured in the terminal, case-insensitive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Highlight {
+    pub pattern: String,
+    /// The text colour, red, green, blue.
+    pub color: [u8; 3],
+}
+
+/// What a trigger does when a line matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TriggerAction {
+    /// A notification with the host's name, limited like a server's.
+    Notify,
+    /// The tab's dot, as a bell would.
+    Bell,
+}
+
+/// A regular expression that acts once for each output line it matches, case-insensitive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Trigger {
+    pub pattern: String,
+    pub action: TriggerAction,
+}
+
+/// Compiles a highlight or trigger pattern within the limits; `None` when it is empty, too long,
+/// too large or no valid regular expression.
+pub fn compile_pattern(pattern: &str) -> Option<regex::Regex> {
+    if pattern.is_empty() || pattern.chars().count() > MAX_PATTERN_CHARS {
+        return None;
+    }
+    regex::RegexBuilder::new(pattern).case_insensitive(true).size_limit(PATTERN_SIZE_LIMIT).build().ok()
 }
 
 /// The allowed range of `terminal.notify_after_secs`.
@@ -240,6 +287,8 @@ impl Default for Terminal {
             reconnect_attempts: 10,
             notify_after_secs: 10,
             server_notifications: true,
+            highlights: Vec::new(),
+            triggers: Vec::new(),
         }
     }
 }
@@ -321,6 +370,10 @@ impl EngineSettings {
         self.general.lock_after_minutes = self.general.lock_after_minutes.clamp(*LOCK_MINUTES.start(), *LOCK_MINUTES.end());
         self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
         self.terminal.notify_after_secs = self.terminal.notify_after_secs.clamp(*NOTIFY_AFTER_SECS.start(), *NOTIFY_AFTER_SECS.end());
+        self.terminal.highlights.retain(|h| compile_pattern(&h.pattern).is_some());
+        self.terminal.highlights.truncate(MAX_PATTERNS);
+        self.terminal.triggers.retain(|t| compile_pattern(&t.pattern).is_some());
+        self.terminal.triggers.truncate(MAX_PATTERNS);
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

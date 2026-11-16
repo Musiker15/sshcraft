@@ -286,7 +286,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             let height = (size.y - 220.0).max(200.0);
             ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
                 // Read-only: what the view would send goes nowhere.
-                let _ = TerminalView { term: &mut viewer.term, palette: &palette, font: font.clone(), ligatures: true }.show(ui);
+                let _ = TerminalView { term: &mut viewer.term, palette: &palette, font: font.clone(), ligatures: true, highlighter: None }.show(ui);
             });
             // A wider view keeps fewer lines; nothing the log prints is answered.
             viewer.check_missing();

@@ -17,6 +17,8 @@ pub struct TerminalView<'a> {
     pub font: FontId,
     /// Neighbouring characters may join where the font has ligatures (setting `appearance.ligatures`).
     pub ligatures: bool,
+    /// Patterns coloured wherever they appear (setting `terminal.highlights`).
+    pub highlighter: Option<&'a super::highlight::Highlighter>,
 }
 
 /// What happened in one frame.
@@ -237,9 +239,22 @@ fn keyboard(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out:
 
 /// Draws the screen, the IME's text being composed, and tells the IME where the cursor is.
 /// Returns the screen it drew, for the screen reader's text.
-fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Terminal, palette: &TermPalette, font: &FontId) -> Screen {
+#[allow(clippy::too_many_arguments)] // The parts of one frame, all needed to paint it.
+fn draw(
+    ui: &Ui,
+    response: &Response,
+    frame: &Frame,
+    state: &State,
+    term: &Terminal,
+    palette: &TermPalette,
+    font: &FontId,
+    highlighter: Option<&super::highlight::Highlighter>,
+) -> Screen {
     let (rect, metrics, focused) = (frame.rect, frame.metrics, frame.focused);
-    let screen = term.screen();
+    let mut screen = term.screen();
+    if let Some(highlighter) = highlighter {
+        highlighter.apply(&mut screen);
+    }
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette.bg);
     paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused, frame.ligatures));
@@ -265,7 +280,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
 
 impl TerminalView<'_> {
     pub fn show(self, ui: &mut Ui) -> TerminalResponse {
-        let Self { term, palette, font, ligatures } = self;
+        let Self { term, palette, font, ligatures, highlighter } = self;
         // A server may print any character: one no font has is a box, never a panic.
         ui.ctx().set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         let metrics = CellMetrics::measure(ui.ctx(), &font);
@@ -313,7 +328,7 @@ impl TerminalView<'_> {
         if focused {
             keyboard(ui, &frame, &mut state, term, &mut out);
         }
-        let screen = draw(ui, &response, &frame, &state, term, palette, &font);
+        let screen = draw(ui, &response, &frame, &state, term, palette, &font, highlighter);
 
         // Screen readers read the screen as text.
         let text = screen.text();

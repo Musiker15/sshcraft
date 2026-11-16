@@ -3,6 +3,7 @@
 
 pub mod blocks;
 pub mod fonts;
+pub mod highlight;
 mod keys;
 pub mod layout;
 pub mod paint;

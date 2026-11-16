@@ -5,6 +5,7 @@ mod fuzz;
 mod history;
 mod hostile;
 mod input;
+mod lines;
 mod notify;
 mod rules;
 mod screen;

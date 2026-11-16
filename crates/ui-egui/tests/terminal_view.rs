@@ -33,7 +33,7 @@ fn fixture(output: &[u8]) -> Fixture {
     let harness = Harness::builder().with_size(vec2(400.0, 200.0)).build_ui(move |ui| {
         let mut term = t.borrow_mut();
         let TerminalResponse { input, reports, resize, open_link, copy, .. } =
-            TerminalView { term: &mut term, palette: &palette, font: FontId::monospace(14.0), ligatures: true }.show(ui);
+            TerminalView { term: &mut term, palette: &palette, font: FontId::monospace(14.0), ligatures: true, highlighter: None }.show(ui);
         let mut seen = s.borrow_mut();
         // Everything that reaches the terminal's own session: typed input and its reports.
         seen.input.extend(input);
