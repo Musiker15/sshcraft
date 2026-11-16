@@ -243,6 +243,7 @@ fn draw(ui: &Ui, response: &Response, frame: &Frame, state: &State, term: &Termi
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette.bg);
     paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused, frame.ligatures));
+    super::blocks::paint_gutter(&painter, response, rect, &metrics, &screen.commands);
     let cursor = Rect::from_min_size(
         pos2(rect.min.x + f32::from(screen.cursor.col) * metrics.width, rect.min.y + f32::from(screen.cursor.row) * metrics.height),
         vec2(2.0, metrics.height),

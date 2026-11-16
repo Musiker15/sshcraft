@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 23] = [
+static COMMANDS: [UiCommand; 26] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
@@ -71,6 +71,21 @@ static COMMANDS: [UiCommand; 23] = [
         ..cmd("ui.terminal.copy", "copy", "Copy the selection", &["Ctrl+Shift+C"])
     },
     UiCommand { scope: Scope::Terminal, enabled: in_terminal, in_palette: false, ..cmd("ui.terminal.paste", "paste", "Paste", &["Ctrl+Shift+V"]) },
+    UiCommand {
+        scope: Scope::Terminal,
+        enabled: in_terminal,
+        ..cmd("ui.terminal.prev_command", "prevCommand", "Previous command", &["Ctrl+Shift+Up"])
+    },
+    UiCommand {
+        scope: Scope::Terminal,
+        enabled: in_terminal,
+        ..cmd("ui.terminal.next_command", "nextCommand", "Next command", &["Ctrl+Shift+Down"])
+    },
+    UiCommand {
+        scope: Scope::Terminal,
+        enabled: in_terminal,
+        ..cmd("ui.terminal.copy_output", "copyOutput", "Copy the output of the last command", &[])
+    },
     // Asks first while sessions run (crate::quit); macOS gives it ⌘Q in the app menu.
     cmd("ui.app.quit", "quit", "Quit SSHCraft", &[]),
     cmd("ui.help.about", "about", "About SSHCraft", &[]),

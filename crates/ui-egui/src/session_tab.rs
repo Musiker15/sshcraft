@@ -840,6 +840,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         ui.label(tr("This session is gone."));
         return;
     };
+    // Commands get the time they were first shown running or finished.
+    tab.term.stamp_commands(chrono::Utc::now());
     for command in pending {
         match command {
             "ui.terminal.copy" => {
@@ -848,6 +850,17 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
                 }
             }
             "ui.terminal.paste" => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            "ui.terminal.prev_command" => {
+                tab.term.jump_to_prompt(sshcraft_term::Direction::Up);
+            }
+            "ui.terminal.next_command" => {
+                tab.term.jump_to_prompt(sshcraft_term::Direction::Down);
+            }
+            "ui.terminal.copy_output" => {
+                if let Some(text) = tab.term.last_finished_output() {
+                    ctx.copy_text(text);
+                }
+            }
             _ => {}
         }
     }
