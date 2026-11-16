@@ -228,6 +228,8 @@ pub struct Terminal {
     /// Patterns that act when an output line matches, at most [`MAX_PATTERNS`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Trigger>,
+    /// Tabs, port forwards and commands to one host share its SSH connection.
+    pub reuse_connections: bool,
     /// Snippets (by id) shown as buttons above each terminal, in order, at most
     /// [`MAX_SNIPPET_BAR`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -300,6 +302,7 @@ impl Default for Terminal {
             highlights: Vec::new(),
             triggers: Vec::new(),
             snippet_bar: Vec::new(),
+            reuse_connections: true,
         }
     }
 }

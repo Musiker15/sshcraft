@@ -243,6 +243,8 @@ pub struct SessionManager {
 }
 
 pub(crate) struct Context {
+    /// SSH connections in use, shared by users of the same route.
+    pub(crate) pool: crate::pool::Pool,
     pub(crate) store: Arc<Mutex<Store>>,
     vault: Option<Arc<Vault>>,
     prompter: Arc<dyn HostKeyPrompter>,
@@ -417,6 +419,7 @@ impl SessionManager {
                 delay_scale: parts.delay_scale,
                 security: parts.security,
                 log_finished: Mutex::new(None),
+                pool: crate::pool::Pool::default(),
                 settings: Mutex::new(parts.settings),
                 runtime: parts.runtime,
                 wake: tokio::sync::broadcast::channel(16).0,
@@ -430,6 +433,8 @@ impl SessionManager {
     /// The app was locked: keys and passwords need the user's presence again.
     pub async fn relock(&self) {
         self.ctx.gate.relock().await;
+        // A new connection after the lock signs in again: an open one is not handed out.
+        self.ctx.pool.clear();
         // KeePassXC database passwords of this run are asked again too.
         self.ctx.kdbx.lock().unwrap_or_else(PoisonError::into_inner).clear();
     }
@@ -502,12 +507,12 @@ impl SessionManager {
     /// question), runs one command, opens no shell.
     pub async fn install_key(&self, host_id: HostId, key: KeyRef) -> Result<InstallOutcome, (ErrorCode, Option<String>)> {
         let (public, verify_required) = public_half(&self.ctx, &key).await?;
-        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default()).await.map_err(failure_code)?;
+        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default(), true).await.map_err(failure_code)?;
         let output = session
             .exec(&install_command(&public, verify_required), 64 * 1024)
             .await
             .map_err(|e| (ErrorCode::InstallKeyFailed, Some(e.to_string())))?;
-        session.disconnect().await;
+        crate::pool::release(session).await;
         parse_outcome(&output).map_err(|e| match e {
             sshcraft_ssh::authorized_keys::AuthorizedKeysError::Failed => (ErrorCode::InstallKeyFailed, None),
             sshcraft_ssh::authorized_keys::AuthorizedKeysError::Unsupported => (ErrorCode::InstallKeyUnsupported, None),
@@ -752,7 +757,7 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     loop {
         sink.status(SessionStatus::Connecting);
         let reason = match connect_target(&ctx, &target, &shared.size, &opened).await {
-            Ok((writer, mut events, notice, prober)) => {
+            Ok((writer, mut events, notice, prober, _connection)) => {
                 *shared.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(writer.clone());
                 let script_writer = writer.clone();
                 let forwarder = tokio::spawn(forward_input(shared.input.clone(), writer));
@@ -1143,7 +1148,10 @@ pub(crate) async fn wait_or_wake(delay: std::time::Duration, wake: &mut tokio::s
     }
 }
 
-type Connected = (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>, Option<sshcraft_ssh::Prober>);
+/// The shell's writer and events, a notice, a prober, and the SSH connection the shell runs on
+/// (kept while the tab lives, so other users can share it).
+type Connected =
+    (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>, Option<sshcraft_ssh::Prober>, Option<Arc<sshcraft_ssh::Session>>);
 
 async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
     match target {
@@ -1153,43 +1161,51 @@ async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32
             let term = ctx.settings().terminal.terminal_type;
             let (writer, events) = sshcraft_local::pty::spawn(shell, to_u16(cols), to_u16(rows), &term, cwd.as_deref().map(std::path::Path::new))
                 .map_err(|e| end_error(ErrorCode::LocalShellFailed, Some(e.to_string())))?;
-            Ok((Arc::new(writer), events, None, None))
+            Ok((Arc::new(writer), events, None, None, None))
         }
         SessionTarget::Serial { settings } => {
             settings.validate().map_err(|e| end_error(ErrorCode::SerialFailed, Some(e.to_string())))?;
             // A port that is gone may come back (an adapter plugged in again): retried like a
             // lost connection once it was open.
             let (writer, events) = sshcraft_local::serial::open(settings).map_err(|e| Failure::Lost(ErrorCode::SerialFailed, e.to_string()))?;
-            Ok((Arc::new(writer), events, None, None))
+            Ok((Arc::new(writer), events, None, None, None))
         }
     }
 }
 
 async fn connect_once(ctx: &Context, host_id: HostId, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
-    let (session, notice) = connect_session(ctx, host_id, opened).await?;
+    let (session, notice) = connect_session(ctx, host_id, opened, true).await?;
     let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);
     // Read on every connect, so a reconnect uses the type set now.
     let term = ctx.settings().terminal.terminal_type;
     let shell = session.open_shell(cols, rows, &term).await.map_err(|e| Failure::Lost(ErrorCode::Network, e.to_string()))?;
     let prober = Some(session.prober());
     if needs_os(&ctx.store, host_id) {
-        tokio::spawn(detect_os(ctx.store.clone(), host_id, session));
+        tokio::spawn(detect_os(ctx.store.clone(), host_id, session.clone()));
     }
     let (writer, events) = shell.split();
-    Ok((Arc::new(writer), events, notice, prober))
+    Ok((Arc::new(writer), events, notice, prober, Some(session)))
 }
 
 /// Connects to a host along its route and signs in on every hop; no shell yet. The notice is
 /// something to show while connected.
+/// `share`: the connection may be one already open to the same route, and later users may share
+/// it (setting `terminal.reuse_connections`).
 pub(crate) async fn connect_session(
     ctx: &Context,
     host_id: HostId,
     opened: &OpenedKeys,
-) -> Result<(sshcraft_ssh::Session, Option<ErrorCode>), Failure> {
+    share: bool,
+) -> Result<(Arc<sshcraft_ssh::Session>, Option<ErrorCode>), Failure> {
     let route = {
         let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
         lookup(&store, host_id).map_err(|(code, detail)| end_error(code, detail))?
     };
+    let share = share && ctx.settings().terminal.reuse_connections;
+    let pool_key = crate::pool::key(host_id, &route);
+    if share && let Some(session) = ctx.pool.get(pool_key) {
+        return Ok((session, None));
+    }
     let mut hops = Vec::new();
     for resolved in &route.jumps {
         // A jump host that cannot be used is named.
@@ -1247,6 +1263,10 @@ pub(crate) async fn connect_session(
     };
     let session = sshcraft_ssh::connect_route(params, verifier.clone(), auth).await.map_err(|e| failure(e, &verifier))?;
     let notice = notice.or(session.certificate_expired().then_some(ErrorCode::CertificateExpired));
+    let session = Arc::new(session);
+    if share {
+        ctx.pool.put(pool_key, &session);
+    }
     Ok((session, notice))
 }
 
@@ -1354,7 +1374,7 @@ pub(crate) fn needs_os(store: &Mutex<Store>, host_id: HostId) -> bool {
 /// Asks the server once which operating system it runs and stores it on the host (sent like
 /// any change, unless the host came in a share that may only be read). Failures are ignored:
 /// the symbol simply stays neutral.
-async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: sshcraft_ssh::Session) {
+async fn detect_os(store: Arc<Mutex<Store>>, host_id: HostId, session: Arc<sshcraft_ssh::Session>) {
     // Asked once: a server whose system is not recognized (or that runs a forced command for
     // every session) is not asked again on each connection.
     mark_probed(&store.lock().unwrap_or_else(PoisonError::into_inner), host_id);

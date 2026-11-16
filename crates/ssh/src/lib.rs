@@ -620,6 +620,11 @@ impl Session {
     }
 
     /// Completes once the connection to the target or to a jump host is gone.
+    /// Whether the connection ended.
+    pub fn is_closed(&self) -> bool {
+        self.handle.is_closed()
+    }
+
     pub fn closed(&self) -> impl Future<Output = ()> + Send + 'static {
         let handle = self.handle.clone();
         let jumps = self.jumps.clone();

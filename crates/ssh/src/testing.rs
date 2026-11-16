@@ -67,6 +67,8 @@ pub fn user_certificate(key: &PublicKey, ca: &PrivateKey, principal: &str, valid
 /// What clients sent to the test server.
 #[derive(Default)]
 struct Records {
+    /// SSH connections clients opened.
+    connections: std::sync::atomic::AtomicUsize,
     /// Passwords and keyboard-interactive answers, in the order they came.
     passwords: Mutex<Vec<String>>,
     /// Environment variables clients asked for.
@@ -109,6 +111,11 @@ impl TestServer {
             TestServer { port: 0, host_fingerprint: fingerprint(&host_key), auth, records: Arc::new(Records::default()), host_key, running: None };
         server.listen().await;
         server
+    }
+
+    /// How many SSH connections clients opened.
+    pub fn connections(&self) -> usize {
+        self.records.connections.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Passwords and keyboard-interactive answers clients sent, in order.
@@ -241,6 +248,7 @@ impl server::Server for Factory {
     type Handler = Handler;
 
     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Handler {
+        self.records.connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Handler {
             auth: self.auth.clone(),
             records: self.records.clone(),

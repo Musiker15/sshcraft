@@ -2147,3 +2147,59 @@ async fn a_login_script_not_approved_here_never_sends() {
     assert!(!seen(&sink, "pong"), "an unapproved script sent its line");
     assert!(seen(&sink, "not allowed on this device yet"));
 }
+
+async fn connected_tab(f: &Fixture) -> (SessionId, Arc<RecordingSink>) {
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    (id, sink)
+}
+
+#[tokio::test]
+async fn two_tabs_to_one_host_share_a_connection() {
+    let f = fixture(true).await;
+    let (_a, _) = connected_tab(&f).await;
+    let (b, sink_b) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 1, "the second tab signed in again");
+    // The shared connection carries both shells.
+    f.manager.write(b, b"shared\n").unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !sink_b.data.lock().unwrap().windows(6).any(|w| w == b"shared") {
+        assert!(tokio::time::Instant::now() < deadline, "no echo on the shared connection");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_connection_ends_with_its_last_user() {
+    let f = fixture(true).await;
+    let (a, _) = connected_tab(&f).await;
+    f.manager.close(a);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (_b, _) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 2, "a connection nobody uses any more is not handed out");
+}
+
+#[tokio::test]
+async fn reuse_can_be_turned_off() {
+    let mut f = fixture(true).await;
+    f.manager = SessionManager::new(ManagerParts {
+        store: f.store.clone(),
+        vault: Some(f.vault.clone()),
+        prompter: f.prompter.clone(),
+        auth: Arc::new(sshcraft_ssh::NoPrompter),
+        agent: Arc::new(TestAgents { keys: vec![f.key.clone()], reachable: true }),
+        presence: Arc::new(FakePresence::new(&[Presence::Verified])),
+        security: None,
+        settings: Arc::new(|| {
+            let mut settings = crate::settings::EngineSettings::default();
+            settings.terminal.reuse_connections = false;
+            settings
+        }),
+        runtime: tokio::runtime::Handle::current(),
+        delay_scale: 0.01,
+    });
+    let (_a, _) = connected_tab(&f).await;
+    let (_b, _) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 2);
+}

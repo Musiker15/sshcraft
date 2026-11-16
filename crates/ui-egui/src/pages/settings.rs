@@ -278,6 +278,9 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             ui.checkbox(&mut t.server_notifications, tr("Servers may show desktop notifications, always with the host's name"));
         });
         ui.end_row();
+        ui.label(tr("Connections"));
+        ui.checkbox(&mut t.reuse_connections, tr("Tabs, port forwards and commands to one host share its connection"));
+        ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));
         ui.end_row();

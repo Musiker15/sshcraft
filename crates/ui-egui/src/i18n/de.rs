@@ -97,6 +97,9 @@ pub fn translate(text: &str) -> Option<&'static str> {
         }
         "Trash" => "Papierkorb",
         "Connections" => "Verbindungen",
+        "Tabs, port forwards and commands to one host share its connection" => {
+            "Tabs, Portweiterleitungen und Befehle zu einem Host teilen sich seine Verbindung"
+        }
         "Every connection SSHCraft makes by itself is listed under Settings › Connections." => {
             "Jede Verbindung, die SSHCraft selbst aufbaut, steht unter Einstellungen › Verbindungen."
         }

@@ -20,6 +20,7 @@ pub mod listing;
 mod login_approval_tests;
 pub mod login_script;
 pub mod passcli;
+mod pool;
 pub mod prompts;
 pub mod recording;
 pub mod secrets;
