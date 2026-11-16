@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 26] = [
+pub const SHORTCUT_ACTIONS: [&str; 27] = [
     "palette",
     "newTab",
     "closeTab",
@@ -51,6 +51,7 @@ pub const SHORTCUT_ACTIONS: [&str; 26] = [
     "prevCommand",
     "nextCommand",
     "copyOutput",
+    "showHints",
     "snippetsPage",
     "forwardingPage",
     "logsPage",

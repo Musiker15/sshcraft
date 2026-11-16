@@ -71,10 +71,19 @@ pub struct SessionTab {
     command_since: Option<std::time::Instant>,
     /// Server messages of this tab shown on the desktop.
     server_limit: crate::notify::RateLimit,
+    /// The labelled hints while hint mode is on.
+    hints: Option<Vec<(String, crate::terminal::hints::Hint)>>,
+    /// The letters of a label typed so far.
+    hint_typed: String,
 }
 
 impl SessionTab {
     /// Output arrived: unseen, and waiting if the cursor's line now asks something.
+    /// Whether hint mode shows its labels.
+    pub fn hints_shown(&self) -> bool {
+        self.hints.is_some()
+    }
+
     /// The bell rang, or a trigger or the cursor's line asks for the user.
     pub fn waiting(&self) -> bool {
         self.waiting
@@ -293,6 +302,8 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 recording: None,
                 command_since: None,
                 server_limit: crate::notify::RateLimit::default(),
+                hints: None,
+                hint_typed: String::new(),
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -379,6 +390,43 @@ fn ended(status: Option<&SessionStatus>) -> bool {
 }
 
 /// Feeds every session's output into its terminal and acts on what programs asked for.
+/// Takes the keys hint mode needs before the terminal sees them: letters choose a label (in
+/// capitals: to type its text in), Escape leaves. Returns the text chosen and whether to type it.
+fn hint_keys(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) -> Option<(String, bool)> {
+    let tab = app.terminals.get_mut(&id)?;
+    let hints = tab.hints.as_ref()?;
+    let events = ctx.input_mut(|i| {
+        let taken: Vec<egui::Event> = i.events.iter().filter(|e| matches!(e, egui::Event::Text(_) | egui::Event::Key { .. })).cloned().collect();
+        i.events.retain(|e| !matches!(e, egui::Event::Text(_) | egui::Event::Key { .. }));
+        taken
+    });
+    let mut picked = None;
+    let mut close = false;
+    for event in events {
+        match event {
+            egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => close = true,
+            egui::Event::Text(text) => {
+                for c in text.chars().filter(char::is_ascii_alphabetic) {
+                    let paste = c.is_ascii_uppercase();
+                    tab.hint_typed.push(c.to_ascii_lowercase());
+                    if let Some((_, hint)) = hints.iter().find(|(label, _)| *label == tab.hint_typed) {
+                        picked = Some((hint.text.clone(), paste));
+                    } else if !hints.iter().any(|(label, _)| label.starts_with(tab.hint_typed.as_str())) {
+                        // No label goes on like this: start over.
+                        tab.hint_typed.clear();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if picked.is_some() || close {
+        tab.hints = None;
+        tab.hint_typed.clear();
+    }
+    picked
+}
+
 /// The look of `host`'s terminals: its own appearance with what its groups give.
 pub fn host_appearance(app: &SshcraftApp, host: Option<HostId>) -> sshcraft_model::appearance::Appearance {
     let Some(row) = host.and_then(|id| app.data.hosts.iter().find(|r| r.host.id == id)) else { return Default::default() };
@@ -948,6 +996,17 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let theme = look.theme.as_deref().unwrap_or(appearance.terminal_theme.as_str());
     let palette = if theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
     let blocked = modal_open(app, &ctx);
+    if focused
+        && !blocked
+        && let Some((text, paste)) = hint_keys(app, &ctx, id)
+    {
+        if paste {
+            let modes = app.terminals.get(&id).map(|t| t.term.modes()).unwrap_or_default();
+            send(app, id, &sshcraft_term::input::encode_paste(&text, modes));
+        } else {
+            ctx.copy_text(text);
+        }
+    }
     let Some(tab) = app.terminals.get_mut(&id) else {
         ui.label(tr("This session is gone."));
         return;
@@ -967,6 +1026,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             }
             "ui.terminal.next_command" => {
                 tab.term.jump_to_prompt(sshcraft_term::Direction::Down);
+            }
+            "ui.terminal.hints" => {
+                let found = crate::terminal::hints::find_hints(&tab.term.screen());
+                let labels = crate::terminal::hints::labels(found.len());
+                tab.hints = (!found.is_empty()).then(|| labels.into_iter().zip(found).collect());
+                tab.hint_typed.clear();
             }
             "ui.terminal.copy_output" => {
                 if let Some(text) = tab.term.last_finished_output() {
@@ -993,6 +1058,10 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
         .inner;
     if let Some(badge) = &look.badge {
         paint_badge(ui, term_rect, badge, look.color);
+    }
+    if let Some(hints) = &tab.hints {
+        let metrics = crate::terminal::CellMetrics::measure(&ctx, &font);
+        crate::terminal::hints::paint_labels(&ui.painter_at(term_rect), term_rect, &metrics, hints, &tab.hint_typed);
     }
     // Only the focused pane takes the keyboard.
     let first = focused && std::mem::take(&mut tab.focus);

@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 26] = [
+static COMMANDS: [UiCommand; 27] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     UiCommand { enabled: has_tabs, ..cmd("ui.tab.close", "closeTab", "Close the current tab", &["Ctrl+Shift+W"]) },
@@ -85,6 +85,11 @@ static COMMANDS: [UiCommand; 26] = [
         scope: Scope::Terminal,
         enabled: in_terminal,
         ..cmd("ui.terminal.copy_output", "copyOutput", "Copy the output of the last command", &[])
+    },
+    UiCommand {
+        scope: Scope::Terminal,
+        enabled: in_terminal,
+        ..cmd("ui.terminal.hints", "showHints", "Label URLs, paths, addresses and hashes to copy them", &["Ctrl+Shift+H"])
     },
     // Asks first while sessions run (crate::quit); macOS gives it ⌘Q in the app menu.
     cmd("ui.app.quit", "quit", "Quit SSHCraft", &[]),

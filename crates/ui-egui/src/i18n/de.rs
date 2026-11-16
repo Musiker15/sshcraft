@@ -384,6 +384,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Close the focused pane" => "Aktiven Bereich schließen",
         "Next pane" => "Nächster Bereich",
         "Previous pane" => "Vorheriger Bereich",
+        "Label URLs, paths, addresses and hashes to copy them" => "URLs, Pfade, Adressen und Hashes beschriften, um sie zu kopieren",
         "Previous command" => "Vorheriger Befehl",
         "Next command" => "Nächster Befehl",
         "Copy the output of the last command" => "Ausgabe des letzten Befehls kopieren",

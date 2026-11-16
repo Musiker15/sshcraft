@@ -150,7 +150,7 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 26);
+    assert_eq!(SHORTCUT_ACTIONS.len(), 27);
     for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
