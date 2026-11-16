@@ -12,6 +12,8 @@ pub enum Dot {
     Error,
     Waiting,
     Unseen,
+    /// A program in the terminal reports that it works (OSC 7501).
+    Working,
     Connected,
     Connecting,
     Ended,
@@ -27,7 +29,7 @@ impl Dot {
         match self {
             Dot::Error => t.danger,
             Dot::Waiting | Dot::Connecting => t.warning,
-            Dot::Unseen => t.info,
+            Dot::Unseen | Dot::Working => t.info,
             Dot::Connected => t.success,
             Dot::Ended => t.text_dim,
         }
@@ -35,7 +37,7 @@ impl Dot {
 
     pub fn draw(self, painter: &Painter, center: Pos2, tokens: &Tokens) {
         let color = self.color(tokens);
-        if self == Dot::Waiting {
+        if matches!(self, Dot::Waiting | Dot::Working) {
             painter.circle_stroke(center, 3.5, Stroke::new(1.5, color));
         } else {
             painter.circle_filled(center, 3.5, color);

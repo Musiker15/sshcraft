@@ -74,8 +74,12 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                 let (icon_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                 draw(ui.painter(), icon, icon_rect, tokens.text_dim);
                 if let Some(dot) = crate::status::Dot::most_urgent(tab.panes.panes.iter().filter_map(|s| crate::session_tab::slot_dot(app, *s))) {
-                    let (dot_rect, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                    let (dot_rect, dot_response) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
                     dot.draw(ui.painter(), dot_rect.center(), &tokens);
+                    let program = tab.panes.sessions().filter_map(|s| app.terminals.get(&s)).find_map(crate::session_tab::SessionTab::program_text);
+                    if let Some(text) = program {
+                        dot_response.on_hover_text(text);
+                    }
                 }
                 if tab.panes.broadcast {
                     let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());

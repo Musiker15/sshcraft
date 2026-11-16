@@ -3,6 +3,11 @@
 pub fn translate(text: &str) -> Option<&'static str> {
     Some(match text {
         "Close" => "Schließen",
+        "idle" => "untätig",
+        "working" => "arbeitet",
+        "done" => "fertig",
+        "waiting for you" => "wartet auf dich",
+        "A program waits for you" => "Ein Programm wartet auf dich",
         "Hosts" => "Hosts",
         "Keys" => "Schlüssel",
         "Settings" => "Einstellungen",

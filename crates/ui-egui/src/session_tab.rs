@@ -79,6 +79,8 @@ pub struct SessionTab {
     compose: Option<String>,
     /// The list of recent pastes is open.
     paste_picker: bool,
+    /// A program waited for the user at the last status change.
+    program_blocked: bool,
 }
 
 impl SessionTab {
@@ -145,14 +147,43 @@ impl SessionTab {
 
     pub fn dot(&self) -> crate::status::Dot {
         use crate::status::Dot;
+        use sshcraft_term::ProgramState;
+        let program = self.term.status_summary();
         match &self.status {
             Some(SessionStatus::Ended { reason: EndReason::Exited, .. }) => Dot::Ended,
             Some(SessionStatus::Ended { .. }) => Dot::Error,
             None | Some(SessionStatus::Connecting | SessionStatus::Reconnecting { .. }) => Dot::Connecting,
-            Some(SessionStatus::Connected { .. }) if self.waiting => Dot::Waiting,
-            Some(SessionStatus::Connected { .. }) if self.unseen => Dot::Unseen,
+            Some(SessionStatus::Connected { .. }) if program == Some(ProgramState::Error) => Dot::Error,
+            Some(SessionStatus::Connected { .. }) if self.waiting || program == Some(ProgramState::Blocked) => Dot::Waiting,
+            Some(SessionStatus::Connected { .. }) if self.unseen || program == Some(ProgramState::Done) => Dot::Unseen,
+            Some(SessionStatus::Connected { .. }) if program == Some(ProgramState::Working) => Dot::Working,
             Some(SessionStatus::Connected { .. }) => Dot::Connected,
         }
+    }
+
+    /// What the most urgent program in the terminal reports (OSC 7501), for the dot's tooltip.
+    pub fn program_text(&self) -> Option<String> {
+        let summary = self.term.status_summary()?;
+        let record = self.term.program_status().into_iter().rev().find(|r| r.state == summary)?;
+        let state = match summary {
+            sshcraft_term::ProgramState::Idle => tr("idle"),
+            sshcraft_term::ProgramState::Working => tr("working"),
+            sshcraft_term::ProgramState::Done => tr("done"),
+            sshcraft_term::ProgramState::Blocked => tr("waiting for you"),
+            sshcraft_term::ProgramState::Error => tr("failed"),
+        };
+        let mut text = match &record.app {
+            Some(app) => format!("{}: {state}", visible(app)),
+            None => state.to_string(),
+        };
+        for part in [&record.title, &record.msg].into_iter().flatten() {
+            text.push('\n');
+            text.push_str(&visible(part));
+        }
+        if let Some(p) = record.progress {
+            text.push_str(&format!(" ({p} %)"));
+        }
+        Some(text)
     }
 }
 
@@ -319,6 +350,7 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 hint_typed: String::new(),
                 compose: None,
                 paste_picker: false,
+                program_blocked: false,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -551,6 +583,18 @@ fn command_finished(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, e
     app.notifier.notify(&title, &body);
 }
 
+/// A program started waiting for the user (OSC 7501 blocked): one server message, limited like
+/// the others.
+fn program_changed(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) {
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    let blocked = tab.term.status_summary() == Some(sshcraft_term::ProgramState::Blocked);
+    let was = std::mem::replace(&mut tab.program_blocked, blocked);
+    if blocked && !was {
+        let text = tab.program_text().unwrap_or_default();
+        server_message(app, ctx, id, Some(tr("A program waits for you")), &text);
+    }
+}
+
 /// A message from the server (OSC 9, OSC 777, a program waiting), shown only while servers may.
 pub(crate) fn server_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, title: Option<&str>, body: &str) {
     if app.data.settings.terminal.server_notifications {
@@ -652,7 +696,7 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                 }
                 Notice::CommandFinished { exit } => command_finished(app, ctx, id, exit),
                 Notice::Notification { title, body } => server_message(app, ctx, id, title.as_deref(), &body),
-                Notice::ProgramStatusChanged => {}
+                Notice::ProgramStatusChanged => program_changed(app, ctx, id),
             }
         }
         let lines = app.terminals.get_mut(&id).map(|t| t.term.take_completed_lines()).unwrap_or_default();
@@ -1215,6 +1259,10 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let mut typed = taken.unwrap_or_default();
     typed.extend_from_slice(&response.input);
     if !typed.is_empty() && can_send {
+        // Typing means the user saw what finished or failed.
+        if let Some(tab) = app.terminals.get_mut(&id) {
+            tab.term.drop_finished();
+        }
         let targets = broadcast_targets(app, id);
         let broadcast = targets.len() > 1 || targets.first() != Some(&id);
         for target in targets {
