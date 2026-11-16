@@ -68,8 +68,10 @@ pub fn take_link(args: &[String]) -> Result<(Vec<String>, Option<Link>), String>
     let mut link = None;
     for arg in args {
         if arg.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("ssh://")) {
-            if link.is_some() {
-                return Err("only one ssh:// link at a time".into());
+            // The desktop passes the link alone. Anything beside it may have been smuggled in
+            // through the link itself (a quote in `"%1"`), so a link never comes with options.
+            if args.len() != 1 {
+                return Err("an ssh:// link comes alone, without other arguments".into());
             }
             let target = sshcraft_model::ssh_url::parse_url(arg).map_err(|e| format!("ssh:// link: {e}"))?;
             link = Some((arg.clone(), target));
@@ -198,9 +200,11 @@ mod tests {
 
     #[test]
     fn one_valid_link_is_taken_from_the_arguments() {
-        let (rest, link) = take_link(&args(&["--control", "7878", "SSH://root@db:2222"])).unwrap();
-        assert_eq!(rest, args(&["--control", "7878"]));
+        let (rest, link) = take_link(&args(&["SSH://root@db:2222"])).unwrap();
+        assert!(rest.is_empty());
         assert_eq!(link.map(|(_, t)| t.name()), Some("root@db:2222".to_string()));
+        assert!(take_link(&args(&["ssh://db", "--control", "7878"])).is_err(), "no option beside a link");
+        assert!(take_link(&args(&["--control", "7878", "ssh://db"])).is_err());
         assert_eq!(take_link(&args(&[])).unwrap().1, None);
         assert!(take_link(&args(&["ssh://-oProxyCommand=calc@host"])).is_err());
         assert!(take_link(&args(&["ssh://a", "ssh://b"])).is_err());

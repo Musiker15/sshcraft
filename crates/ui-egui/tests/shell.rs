@@ -188,3 +188,34 @@ fn quick_connect_refuses_an_option_as_user_and_saves_nothing() {
     assert!(dialog.error.is_some());
     assert!(h.state().data.hosts.is_empty());
 }
+
+#[test]
+fn quick_connect_matches_what_a_host_inherits() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let group = uuid::Uuid::new_v4();
+    let host = uuid::Uuid::new_v4();
+    let run = |id: &str, params: serde_json::Value| session.runtime().block_on(session.execute(Caller::User, id, params)).unwrap();
+    run("group.save", json!({ "group": { "id": group, "name": "lab", "defaults": { "port": 2222, "username": "ops" } } }));
+    run("host.save", json!({ "host": { "id": host, "name": "db", "group_id": group, "settings": { "address": "db.lab" } } }));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.state().data.hosts.is_empty() || h.state().data.groups.is_empty() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    // Port 22 is not what the saved host uses: a new host.
+    sshcraft_ui_egui::quick_connect::connect(h.state_mut(), "ops@db.lab").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.state().data.hosts.len() < 2 {
+        assert!(Instant::now() < deadline, "a new host for port 22");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    // The inherited port and user: the saved host opens.
+    sshcraft_ui_egui::quick_connect::connect(h.state_mut(), "ops@db.lab:2222").unwrap();
+    assert_eq!(
+        h.state().ui.connect_request.as_ref().map(|r| format!("{r:?}")),
+        Some(format!("{:?}", sshcraft_ui_egui::state::ConnectRequest::Host(sshcraft_model::model::HostId(host))))
+    );
+}

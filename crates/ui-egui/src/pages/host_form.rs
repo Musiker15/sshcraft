@@ -128,6 +128,9 @@ pub struct HostForm {
     pub opened_steps: (Option<Vec<ConnectStep>>, Option<Vec<ConnectStep>>),
     /// Allow the login script on this device with this save.
     pub allow_script: bool,
+    /// X11 forwarding as the form opened, and whether to allow it on this device with this save.
+    pub opened_x11: Option<bool>,
+    pub allow_x11: bool,
 }
 
 impl HostForm {
@@ -140,6 +143,8 @@ impl HostForm {
         let opened_steps = (host.settings.before_connect.clone(), host.settings.after_disconnect.clone());
         Self {
             opened_steps,
+            opened_x11: host.settings.x11,
+            allow_x11: false,
             host,
             editing,
             password: String::new(),
@@ -217,6 +222,8 @@ pub struct GroupForm {
     pub opened_script: Option<Vec<LoginStep>>,
     pub allow_script: bool,
     pub opened_steps: (Option<Vec<ConnectStep>>, Option<Vec<ConnectStep>>),
+    pub opened_x11: Option<bool>,
+    pub allow_x11: bool,
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -291,6 +298,25 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     });
     ui.end_row();
     *value = (!a.is_empty()).then_some(a);
+}
+
+/// X11 forwarding that was already on when the form opened may have come through sync or a
+/// share: it is used only once allowed on this device.
+fn x11_allow(ui: &mut Ui, x11: Option<bool>, opened: Option<bool>, allow: &mut bool) {
+    if x11 == Some(true) && opened == Some(true) {
+        ui.checkbox(allow, tr("Allow X11 forwarding on this device"))
+            .on_hover_text(tr("X11 forwarding that came through sync, a share or an import stays off until allowed here."));
+    }
+}
+
+/// The step programs in `before` and `after` that were not there when the form opened.
+fn entered_programs(
+    opened: &(Option<Vec<ConnectStep>>, Option<Vec<ConnectStep>>),
+    before: &Option<Vec<ConnectStep>>,
+    after: &Option<Vec<ConnectStep>>,
+) -> Vec<Vec<String>> {
+    let was: Vec<&Vec<String>> = [&opened.0, &opened.1].into_iter().flatten().flat_map(|s| sshcraft_model::hooks::commands(s)).collect();
+    [before, after].into_iter().flatten().flat_map(|s| sshcraft_model::hooks::commands(s)).filter(|argv| !was.contains(argv)).cloned().collect()
 }
 
 /// A list of steps before connecting or after the session (`which` names it). Lines are kept
@@ -729,6 +755,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 password_ref_field(ui, &mut form.host.settings.password_ref);
                 totp_field(ui, &mut form.totp, form.has_totp, &mut form.remove_totp);
                 // Rarer settings last.
+                x11_allow(ui, form.host.settings.x11, form.opened_x11, &mut form.allow_x11);
                 login_script_editor(ui, &mut form.host.settings.login_script, &form.opened_script, &mut form.allow_script);
                 steps_editor(ui, tr("Before connecting"), "before", Some(form.host.id), &mut form.host.settings.before_connect);
                 steps_editor(ui, tr("After the session"), "after", Some(form.host.id), &mut form.host.settings.after_disconnect);
@@ -766,8 +793,11 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                     json!({
                         "host": form.host,
                         // A program the user wrote or changed here is allowed with the save.
-                        "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy)
-                            || (form.host.settings.before_connect.clone(), form.host.settings.after_disconnect.clone()) != form.opened_steps,
+                        "approve_command": entered_command(&form.opened_proxy, &form.host.settings.proxy),
+                        // Only the programs typed here, never one the form opened with.
+                        "approve_programs": entered_programs(&form.opened_steps, &form.host.settings.before_connect, &form.host.settings.after_disconnect),
+                        // Switched on here, or allowed with the box below.
+                        "approve_x11": form.host.settings.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
                         "approve_login_script": form.allow_script && form.host.settings.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                         "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
                     }),
@@ -843,6 +873,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 settings_editor(ui, app, &mut form.group.defaults, &mut form.port, &inherited, None);
                 password_field(ui, &mut form.password, form.has_password, &mut form.remove_password);
                 // Rarer settings last.
+                x11_allow(ui, form.group.defaults.x11, form.opened_x11, &mut form.allow_x11);
                 login_script_editor(ui, &mut form.group.defaults.login_script, &form.opened_script, &mut form.allow_script);
                 steps_editor(ui, tr("Before connecting"), "before", None, &mut form.group.defaults.before_connect);
                 steps_editor(ui, tr("After the session"), "after", None, &mut form.group.defaults.after_disconnect);
@@ -877,8 +908,11 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                     "group.save",
                     json!({
                         "group": form.group,
-                        "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy)
-                            || (form.group.defaults.before_connect.clone(), form.group.defaults.after_disconnect.clone()) != form.opened_steps,
+                        "approve_command": entered_command(&form.opened_proxy, &form.group.defaults.proxy),
+                        // Only the programs typed here, never one the form opened with.
+                        "approve_programs": entered_programs(&form.opened_steps, &form.group.defaults.before_connect, &form.group.defaults.after_disconnect),
+                        // Switched on here, or allowed with the box below.
+                        "approve_x11": form.group.defaults.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
                         "approve_login_script": form.allow_script && form.group.defaults.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                     }),
                     Box::new(move |app, result| {
@@ -917,6 +951,8 @@ impl GroupForm {
         let opened_steps = (group.defaults.before_connect.clone(), group.defaults.after_disconnect.clone());
         Self {
             opened_steps,
+            opened_x11: group.defaults.x11,
+            allow_x11: false,
             group,
             editing,
             password: String::new(),

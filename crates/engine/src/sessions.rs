@@ -247,8 +247,6 @@ struct Live {
     task: JoinHandle<()>,
     /// Present while the session is recorded into a session log.
     recorder: Option<Arc<crate::recording::Recorder>>,
-    /// The host, for its steps after the session.
-    host: Option<HostId>,
 }
 
 pub struct SessionManager {
@@ -272,7 +270,7 @@ pub(crate) struct Context {
     log_finished: Mutex<Option<crate::recording::OnFinish>>,
     settings: Mutex<ReadSettings>,
     /// Where sessions run, also when `open` is called from a thread outside the runtime.
-    runtime: tokio::runtime::Handle,
+    pub(crate) runtime: tokio::runtime::Handle,
     /// Tells sessions and forwards that the computer woke up or its network changed.
     pub(crate) wake: tokio::sync::broadcast::Sender<WakeEvent>,
     /// Fetches passwords from password managers.
@@ -558,12 +556,7 @@ impl SessionManager {
             size: Arc::new(Mutex::new((cols, rows))),
             flow: Arc::new(Flow::default()),
         };
-        let host = match &target {
-            SessionTarget::Host { host_id } => Some(*host_id),
-            _ => None,
-        };
         let live = Live {
-            host,
             input,
             writer: shared.writer.clone(),
             size: shared.size.clone(),
@@ -645,13 +638,6 @@ impl SessionManager {
             live.task.abort();
             if let Some(recorder) = live.recorder {
                 recorder.finish();
-            }
-            // The host's steps after the session (a VPN down), whatever ended it.
-            if let Some(host) = live.host {
-                let ctx = self.ctx.clone();
-                self.ctx.runtime.spawn(async move {
-                    let _done = crate::hooks::run(&ctx, host, crate::hooks::When::After).await;
-                });
             }
         }
     }
@@ -1193,7 +1179,7 @@ pub(crate) async fn wait_or_wake(delay: std::time::Duration, wake: &mut tokio::s
 type Connected =
     (Writer, tokio::sync::mpsc::Receiver<ShellEvent>, Option<ErrorCode>, Option<sshcraft_ssh::Prober>, Option<Arc<sshcraft_ssh::Session>>);
 
-async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
+async fn connect_target(ctx: &Arc<Context>, target: &SessionTarget, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
     match target {
         SessionTarget::Host { host_id } => connect_once(ctx, *host_id, size, opened).await,
         SessionTarget::Local { shell, cwd } => {
@@ -1213,7 +1199,7 @@ async fn connect_target(ctx: &Context, target: &SessionTarget, size: &Mutex<(u32
     }
 }
 
-async fn connect_once(ctx: &Context, host_id: HostId, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
+async fn connect_once(ctx: &Arc<Context>, host_id: HostId, size: &Mutex<(u32, u32)>, opened: &OpenedKeys) -> Result<Connected, Failure> {
     let (session, notice) = connect_session(ctx, host_id, opened, true).await?;
     let (cols, rows) = *size.lock().unwrap_or_else(PoisonError::into_inner);
     // Read on every connect, so a reconnect uses the type set now.
@@ -1232,7 +1218,7 @@ async fn connect_once(ctx: &Context, host_id: HostId, size: &Mutex<(u32, u32)>, 
 /// `share`: the connection may be one already open to the same route, and later users may share
 /// it (setting `terminal.reuse_connections`).
 pub(crate) async fn connect_session(
-    ctx: &Context,
+    ctx: &Arc<Context>,
     host_id: HostId,
     opened: &OpenedKeys,
     share: bool,
@@ -1243,11 +1229,19 @@ pub(crate) async fn connect_session(
     };
     let share = share && ctx.settings().terminal.reuse_connections;
     let pool_key = crate::pool::key(host_id, &route);
-    if share && let Some(session) = ctx.pool.get(pool_key) {
+    // Users of one route that start at once wait for the first one's connection.
+    let gate = share.then(|| ctx.pool.gate(&pool_key));
+    let _connecting = match &gate {
+        Some(gate) => Some(gate.lock().await),
+        None => None,
+    };
+    if share && let Some(session) = ctx.pool.get(&pool_key) {
         return Ok((session, None));
     }
     // Wake the computer, knock, start the VPN: before every new connection.
     crate::hooks::run(ctx, host_id, crate::hooks::When::Before).await?;
+    // From here the steps after the session run once this connection, or this try, is over.
+    let after = crate::hooks::AfterGuard::new(ctx.clone(), host_id);
     let mut hops = Vec::new();
     for resolved in &route.jumps {
         // A jump host that cannot be used is named.
@@ -1282,10 +1276,13 @@ pub(crate) async fn connect_session(
         Some(Proxy::Direct) | None => None,
     };
     let opener = if route.target.agent_forwarding { ctx.agent.opener() } else { None };
-    let display = if route.target.x11 { sshcraft_ssh::x11::local_display() } else { None };
+    // X11 hands the server this computer's display: only where it was allowed on this device.
+    let x11_allowed = route.target.x11 && x11_allowed(&ctx.store.lock().unwrap_or_else(PoisonError::into_inner), host_id);
+    let display = if x11_allowed { sshcraft_ssh::x11::local_display() } else { None };
     let notice = (route.target.agent_forwarding && opener.is_none())
         .then_some(ErrorCode::AgentForwardingUnavailable)
-        .or_else(|| (route.target.x11 && display.is_none()).then_some(ErrorCode::X11Unavailable));
+        .or_else(|| (route.target.x11 && !x11_allowed).then_some(ErrorCode::X11NotAllowed))
+        .or_else(|| (x11_allowed && display.is_none()).then_some(ErrorCode::X11Unavailable));
     let x11 = match display {
         Some(display) => {
             let cookie = sshcraft_ssh::x11::real_cookie(&display).await;
@@ -1315,6 +1312,8 @@ pub(crate) async fn connect_session(
     };
     let session = sshcraft_ssh::connect_route(params, verifier.clone(), auth).await.map_err(|e| failure(e, &verifier))?;
     let notice = notice.or(session.certificate_expired().then_some(ErrorCode::CertificateExpired));
+    // The steps after the session run when the last tab, forward or command lets go of it.
+    session.on_last_drop(Box::new(move || drop(after)));
     let session = Arc::new(session);
     if share {
         ctx.pool.put(pool_key, &session);
@@ -1390,6 +1389,37 @@ async fn allow_command(ctx: &Context, host_name: &str, argv: &[String]) -> Resul
 
 /// Lets a local program run once this device allowed `digest_of` (its arguments, maybe with a
 /// prefix saying what it is for); else asks the user with `argv` shown.
+/// What allows X11 forwarding on this device for the host or group `id` that switches it on.
+pub(crate) fn x11_approval(id: &str) -> Vec<String> {
+    vec!["x11".to_string(), id.to_string()]
+}
+
+/// Whether X11 forwarding for `host_id` is allowed on this device: the level that switches it
+/// on (the host, or the nearest group that sets it) was allowed here.
+pub(crate) fn x11_allowed(store: &Store, host_id: HostId) -> bool {
+    let (Ok(hosts), Ok(groups)) = (store.list_hosts(), store.list_groups()) else { return false };
+    let Some(host) = hosts.iter().find(|h| h.id == host_id) else { return false };
+    let source = match host.settings.x11 {
+        Some(true) => Some(host.id.0.to_string()),
+        Some(false) => None,
+        None => host
+            .group_id
+            .map(|g| sshcraft_model::model::group_chain(&groups, g))
+            .unwrap_or_default()
+            .into_iter()
+            .find(|g| g.defaults.x11.is_some())
+            .filter(|g| g.defaults.x11 == Some(true))
+            .map(|g| g.id.0.to_string()),
+    };
+    source.is_some_and(|id| store.command_approved(&sshcraft_store::store::command_digest(&x11_approval(&id))).unwrap_or(false))
+}
+
+/// Whether the program `digest_of` names was allowed on this device; asks nobody.
+pub(crate) fn program_allowed(ctx: &Context, digest_of: &[String]) -> bool {
+    let digest = sshcraft_store::store::command_digest(digest_of);
+    ctx.store.lock().unwrap_or_else(PoisonError::into_inner).command_approved(&digest).unwrap_or(false)
+}
+
 pub(crate) async fn allow_program(ctx: &Context, host_name: &str, digest_of: &[String], argv: &[String]) -> Result<(), Failure> {
     let digest = sshcraft_store::store::command_digest(digest_of);
     let approved = ctx

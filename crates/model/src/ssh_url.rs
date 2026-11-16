@@ -136,19 +136,27 @@ fn host_port(text: &str, escaped: bool) -> Result<(String, Option<u16>), TargetE
     Ok((host, port))
 }
 
+/// Characters that change how text reads without being seen: bidi controls, zero-width
+/// characters, the soft hyphen, the byte order mark.
+fn invisible(c: char) -> bool {
+    matches!(c, '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}')
+}
+
 fn check_user(user: String) -> Result<String, TargetError> {
     let ok = !user.is_empty()
         && user.chars().count() <= MAX_USER
         && !user.starts_with('-')
-        && !user.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '@' | ':' | '/' | '\\'));
+        && !user.chars().any(|c| c.is_control() || c.is_whitespace() || invisible(c) || matches!(c, '@' | ':' | '/' | '\\'));
     if ok { Ok(user) } else { Err(TargetError::User) }
 }
 
+/// Host names in ASCII only (an international name in its `xn--` form): a lookalike letter from
+/// another script cannot pass for a known host.
 fn check_host(host: String) -> Result<String, TargetError> {
     let ok = !host.is_empty()
-        && host.chars().count() <= MAX_HOST
+        && host.len() <= MAX_HOST
         && !host.starts_with('-')
-        && host.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'));
+        && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
     if ok { Ok(host) } else { Err(TargetError::Host) }
 }
 
@@ -205,6 +213,9 @@ mod tests {
         assert_eq!(parse_url("https://host"), Err(TargetError::NotSsh));
         assert_eq!(parse_url("ssh://"), Err(TargetError::Empty));
         assert_eq!(parse_url(&format!("ssh://{}", "a".repeat(2000))), Err(TargetError::TooLong));
+        assert_eq!(parse_url("ssh://\u{0456}.example.org"), Err(TargetError::Host), "a Cyrillic lookalike");
+        assert_eq!(parse_url("ssh://admin%E2%80%AEtoor@host"), Err(TargetError::User), "a bidi control");
+        assert_eq!(parse_url("ssh://xn--bcher-kva.example"), Ok(target(None, "xn--bcher-kva.example", None)));
     }
 
     #[test]

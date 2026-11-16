@@ -3,14 +3,14 @@
 //! once allowed on this device. A failed wake or knock does not stop the connection; a program
 //! that is not allowed does.
 
-use std::sync::PoisonError;
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use sshcraft_model::hooks::{ConnectStep, approval_argv, magic_packet, parse_mac};
 use sshcraft_model::model::{Group, Host, HostId, group_chain};
 
 use crate::error::ErrorCode;
-use crate::sessions::{Context, Failure, allow_program, end_error};
+use crate::sessions::{Context, Failure, allow_program, end_error, program_allowed};
 
 /// How long one knock waits for its connection.
 const KNOCK_TIMEOUT: Duration = Duration::from_millis(300);
@@ -45,6 +45,28 @@ fn load(ctx: &Context, host_id: HostId, when: When) -> Option<(Vec<ConnectStep>,
     Some((steps, host.name, address))
 }
 
+/// Runs the host's steps after the session once dropped: when the last user of a connection let
+/// go of it, or when connecting failed after the steps before had run.
+pub(crate) struct AfterGuard {
+    ctx: Arc<Context>,
+    host: HostId,
+}
+
+impl AfterGuard {
+    pub(crate) fn new(ctx: Arc<Context>, host: HostId) -> Self {
+        Self { ctx, host }
+    }
+}
+
+impl Drop for AfterGuard {
+    fn drop(&mut self) {
+        let (ctx, host) = (self.ctx.clone(), self.host);
+        self.ctx.runtime.spawn(async move {
+            let _done = run(&ctx, host, When::After).await;
+        });
+    }
+}
+
 /// Runs the host's steps `when`.
 pub(crate) async fn run(ctx: &Context, host_id: HostId, when: When) -> Result<(), Failure> {
     let Some((steps, name, address)) = load(ctx, host_id, when) else { return Ok(()) };
@@ -58,14 +80,24 @@ pub(crate) async fn run(ctx: &Context, host_id: HostId, when: When) -> Result<()
                 pause(ctx, Duration::from_secs(u64::from(*wait_secs))).await;
             }
             ConnectStep::Knock { ports, delay_ms } => {
+                // `[::1]` as written in the host, `::1` as the system wants it.
+                let address = address.trim_start_matches('[').trim_end_matches(']');
                 for port in ports {
                     // A knock is only a try: the port is meant to stay closed.
-                    let _knocked = tokio::time::timeout(KNOCK_TIMEOUT, tokio::net::TcpStream::connect((address.as_str(), *port))).await;
+                    let _knocked = tokio::time::timeout(KNOCK_TIMEOUT, tokio::net::TcpStream::connect((address, *port))).await;
                     pause(ctx, Duration::from_millis(u64::from(*delay_ms))).await;
                 }
             }
             ConnectStep::Command { argv, wait_secs } => {
-                allow_program(ctx, &name, &approval_argv(argv), argv).await?;
+                // After the session nobody is asked any more: a program not allowed here is
+                // left out.
+                if when == When::After {
+                    if !program_allowed(ctx, &approval_argv(argv)) {
+                        continue;
+                    }
+                } else {
+                    allow_program(ctx, &name, &approval_argv(argv), argv).await?;
+                }
                 program(argv).await?;
                 pause(ctx, Duration::from_secs(u64::from(*wait_secs))).await;
             }

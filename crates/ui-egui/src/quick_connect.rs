@@ -38,17 +38,20 @@ fn problem(e: &TargetError) -> &'static str {
     }
 }
 
-/// A saved host with exactly this address, port and user.
+/// A saved host that uses exactly this address, port and user, also where its groups give them.
 fn matching(app: &SshcraftApp, target: &Target) -> Option<HostId> {
     let port = target.port.unwrap_or(sshcraft_model::model::DEFAULT_PORT);
+    let groups: Vec<sshcraft_model::model::Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
     app.data
         .hosts
         .iter()
         .find(|row| {
             let s = &row.host.settings;
-            s.address.as_deref() == Some(target.host.as_str())
-                && s.port.unwrap_or(sshcraft_model::model::DEFAULT_PORT) == port
-                && s.username == target.user
+            let chain = crate::pages::host_form::chain(row.host.group_id, &groups);
+            let address = s.address.clone().or_else(|| chain.iter().find_map(|g| g.defaults.address.clone()));
+            let used_port = s.port.or_else(|| chain.iter().find_map(|g| g.defaults.port)).unwrap_or(sshcraft_model::model::DEFAULT_PORT);
+            let user = s.username.clone().or_else(|| chain.iter().find_map(|g| g.defaults.username.clone()));
+            address.as_deref() == Some(target.host.as_str()) && used_port == port && user == target.user
         })
         .map(|row| row.host.id)
 }

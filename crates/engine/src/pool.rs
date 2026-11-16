@@ -7,7 +7,6 @@
 //! the server's channels for them are routed per connection.
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use sshcraft_model::model::{HostId, Route};
@@ -16,32 +15,44 @@ use sshcraft_ssh::Session;
 /// Connections remembered at most; dead ones are dropped first.
 const MAX_ENTRIES: usize = 256;
 
-/// What decides whether two users may share a connection.
-pub(crate) fn key(host: HostId, route: &Route) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    host.hash(&mut hasher);
-    // The resolved route with every option that shapes the connection.
-    format!("{route:?}").hash(&mut hasher);
-    hasher.finish()
+/// What decides whether two users may share a connection: the host and the whole resolved route
+/// with every option that shapes the connection, compared in full (no hash that could collide).
+pub(crate) type Key = (HostId, String);
+
+pub(crate) fn key(host: HostId, route: &Route) -> Key {
+    (host, format!("{route:?}"))
 }
 
 #[derive(Default)]
 pub(crate) struct Pool {
-    entries: Mutex<HashMap<u64, Weak<Session>>>,
+    entries: Mutex<HashMap<Key, Weak<Session>>>,
+    /// One lock per key while a connection for it is being made, so users that start at once
+    /// wait for it instead of each signing in (and waking the computer) on their own.
+    connecting: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Pool {
     /// The live connection for `key`, if one is in use.
-    pub(crate) fn get(&self, key: u64) -> Option<Arc<Session>> {
+    pub(crate) fn get(&self, key: &Key) -> Option<Arc<Session>> {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
-        let session = entries.get(&key).and_then(Weak::upgrade);
+        let session = entries.get(key).and_then(Weak::upgrade);
         match session {
             Some(s) if !s.is_closed() => Some(s),
             _ => {
-                entries.remove(&key);
+                entries.remove(key);
                 None
             }
         }
+    }
+
+    /// The lock to hold while making the connection for `key`.
+    pub(crate) fn gate(&self, key: &Key) -> Arc<tokio::sync::Mutex<()>> {
+        let mut gates = self.connecting.lock().unwrap_or_else(PoisonError::into_inner);
+        // Locks nobody waits on any more go.
+        if gates.len() >= MAX_ENTRIES {
+            gates.retain(|_, g| Arc::strong_count(g) > 1);
+        }
+        gates.entry(key.clone()).or_default().clone()
     }
 
     /// Hands out none of the connections in use any more (after the app lock); their users keep
@@ -51,7 +62,7 @@ impl Pool {
     }
 
     /// Remembers `session` for `key`.
-    pub(crate) fn put(&self, key: u64, session: &Arc<Session>) {
+    pub(crate) fn put(&self, key: Key, session: &Arc<Session>) {
         let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         if entries.len() >= MAX_ENTRIES {
             entries.retain(|_, s| s.upgrade().is_some_and(|s| !s.is_closed()));

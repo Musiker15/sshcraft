@@ -2282,6 +2282,73 @@ mod steps {
         assert!(connected(&open_until_done(&f).await));
     }
 
+    /// A listener that counts the connections it gets (a knock target).
+    async fn knock_counter() -> (u16, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = count.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        (port, count)
+    }
+
+    #[tokio::test]
+    async fn a_knock_reaches_an_ipv6_address_in_brackets() {
+        let f = fixture(true).await;
+        let Ok(listener) = tokio::net::TcpListener::bind("[::1]:0").await else { return };
+        let port = listener.local_addr().unwrap().port();
+        let knocked = Arc::new(AtomicUsize::new(0));
+        let seen = knocked.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.address = Some("[::1]".into());
+            host.settings.before_connect = Some(vec![ConnectStep::Knock { ports: vec![port], delay_ms: 0 }]);
+            store.upsert_host(&host).unwrap();
+        }
+        let _ = open_until_done(&f).await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while knocked.load(Ordering::SeqCst) == 0 {
+            assert!(tokio::time::Instant::now() < deadline, "the knock never reached [::1]");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn the_steps_after_run_once_the_last_tab_lets_go() {
+        let f = fixture(true).await;
+        let (port, knocks) = knock_counter().await;
+        {
+            let store = f.store.lock().unwrap();
+            let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+            host.settings.after_disconnect = Some(vec![ConnectStep::Knock { ports: vec![port], delay_ms: 0 }]);
+            store.upsert_host(&host).unwrap();
+        }
+        let (a, _) = connected_tab(&f).await;
+        let (b, _) = connected_tab(&f).await;
+        assert_eq!(f.server.connections(), 1, "the tabs share one connection");
+        f.manager.close(a);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(knocks.load(Ordering::SeqCst), 0, "the other tab still uses the connection");
+        f.manager.close(b);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while knocks.load(Ordering::SeqCst) == 0 {
+            assert!(tokio::time::Instant::now() < deadline, "the steps after never ran");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(knocks.load(Ordering::SeqCst), 1, "once");
+    }
+
     #[tokio::test]
     async fn a_failing_program_stops_the_connection() {
         let f = fixture(true).await;
@@ -2304,4 +2371,41 @@ async fn the_resource_probe_runs_its_fixed_command_over_the_tab() {
     assert_eq!((r.load, r.memory_percent, r.disk_percent), (Some(0.5), Some(75), None));
     assert!(f.server.received_commands().contains(&sshcraft_model::resources::PROBE.to_owned()));
     assert!(f.manager.resources(uuid::Uuid::new_v4()).await.is_err(), "no such tab");
+}
+
+#[tokio::test]
+async fn tabs_opened_at_once_wait_for_one_connection() {
+    let f = fixture(true).await;
+    let sinks: Vec<Arc<RecordingSink>> = (0..3).map(|_| Arc::new(RecordingSink::default())).collect();
+    for sink in &sinks {
+        f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    }
+    for sink in &sinks {
+        sink.wait_for(connected).await;
+    }
+    assert_eq!(f.server.connections(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_command_never_rides_on_the_users_tab() {
+    let f = fixture(true).await;
+    let (_tab, _) = connected_tab(&f).await;
+    assert_eq!(f.server.connections(), 1);
+    let _ = crate::agent_sessions::AgentSessions::exec(&f.manager, f.host_id, "true", 1024, Duration::from_secs(10)).await;
+    assert_eq!(f.server.connections(), 2, "a connection of its own");
+}
+
+#[tokio::test]
+async fn x11_not_allowed_here_is_never_requested() {
+    let f = fixture(true).await;
+    {
+        let store = f.store.lock().unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.x11 = Some(true);
+        store.upsert_host(&host).unwrap();
+    }
+    let (_tab, sink) = connected_tab(&f).await;
+    assert!(sink.statuses().contains(&SessionStatus::Connected { notice: Some(ErrorCode::X11NotAllowed) }));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(f.server.x11_request(), None, "the server never hears of X11");
 }

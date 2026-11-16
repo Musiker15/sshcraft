@@ -485,6 +485,16 @@ pub struct Session {
     /// Targets of this session's remote forwardings.
     remotes: tunnel::Remotes,
     x11: Option<Arc<x11::Forward>>,
+    /// Runs once the last user let go of the connection (the steps after a session).
+    on_drop: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(f) = self.on_drop.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+            f();
+        }
+    }
 }
 
 pub struct Shell {
@@ -617,6 +627,7 @@ pub async fn connect_route(params: RouteParams, verifier: Arc<dyn HostKeyVerifie
         certificate_expired,
         remotes,
         x11,
+        on_drop: std::sync::Mutex::new(None),
     })
 }
 
@@ -651,12 +662,17 @@ impl Session {
         Prober { handle: self.handle.clone() }
     }
 
-    /// Completes once the connection to the target or to a jump host is gone.
-    /// Whether the connection ended.
+    /// Whether the connection to the target or to a jump host ended.
     pub fn is_closed(&self) -> bool {
-        self.handle.is_closed()
+        self.handle.is_closed() || self.jumps.iter().any(|j| j.is_closed())
     }
 
+    /// Runs `f` once the last user of this connection let go of it.
+    pub fn on_last_drop(&self, f: Box<dyn FnOnce() + Send>) {
+        *self.on_drop.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(f);
+    }
+
+    /// Completes once the connection to the target or to a jump host is gone.
     pub fn closed(&self) -> impl Future<Output = ()> + Send + 'static {
         let handle = self.handle.clone();
         let jumps = self.jumps.clone();

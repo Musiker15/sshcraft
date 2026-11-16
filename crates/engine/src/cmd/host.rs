@@ -166,11 +166,19 @@ struct SaveParams {
     /// changed there); anything else never approves one.
     #[serde(default)]
     approve_login_script: bool,
+    /// Programs of the steps before and after connecting that the user entered in this save;
+    /// only those the host runs are allowed, never one that came another way.
+    #[serde(default)]
+    approve_programs: Vec<Vec<String>>,
+    /// The user switched X11 forwarding on (or allowed it) in this save.
+    #[serde(default)]
+    approve_x11: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script } = parse("host.save", params)?;
+        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script, approve_programs, approve_x11 } =
+            parse("host.save", params)?;
         check_login_script("host.save", &host.settings)?;
         let id = host.id.0.to_string();
         let (orphans, before) = {
@@ -187,6 +195,10 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         }
         if approve_command {
             approve_commands(&ctx, [&host.settings])?;
+        }
+        approve_step_programs(&ctx, &host.settings, &approve_programs)?;
+        if approve_x11 {
+            approve_x11_for(&ctx, &host.settings, &host.id.0.to_string())?;
         }
         if approve_login_script {
             approve_login_scripts(&ctx, [&host.settings])?;
@@ -224,11 +236,29 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
         if let Some(Proxy::Command { argv }) = &s.proxy {
             store.approve_command(&sshcraft_store::store::command_digest(argv))?;
         }
-        // The programs of the steps before and after connecting, entered in the same form.
-        for steps in [&s.before_connect, &s.after_disconnect].into_iter().flatten() {
-            for argv in sshcraft_model::hooks::commands(steps) {
-                store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::hooks::approval_argv(argv)))?;
-            }
+    }
+    Ok(())
+}
+
+/// Allows X11 forwarding on this device for the level `id` when it switches it on; only the
+/// user can.
+pub(crate) fn approve_x11_for(ctx: &Ctx, settings: &ConnectionSettings, id: &str) -> Result<(), CommandError> {
+    if ctx.caller.is_user() && settings.x11 == Some(true) {
+        ctx.session.store().approve_command(&sshcraft_store::store::command_digest(&crate::sessions::x11_approval(id)))?;
+    }
+    Ok(())
+}
+
+/// Allows the step programs the user entered: each of `entered` that `settings` runs before or
+/// after connecting. A program the host or group got another way stays unapproved.
+pub(crate) fn approve_step_programs(ctx: &Ctx, settings: &ConnectionSettings, entered: &[Vec<String>]) -> Result<(), CommandError> {
+    if !ctx.caller.is_user() || entered.is_empty() {
+        return Ok(());
+    }
+    let store = ctx.session.store();
+    for steps in [&settings.before_connect, &settings.after_disconnect].into_iter().flatten() {
+        for argv in sshcraft_model::hooks::commands(steps).filter(|argv| entered.contains(argv)) {
+            store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::hooks::approval_argv(argv)))?;
         }
     }
     Ok(())
@@ -432,6 +462,25 @@ struct Reachable {
     reachable: Option<bool>,
 }
 
+/// Checks still running, a name lookup included: a lookup that hangs keeps its place after the
+/// check gave up, so hanging lookups cannot pile up threads.
+static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(REACHABLE_PARALLEL);
+
+/// Whether `address:port` takes a TCP connection within [`REACHABLE_TIMEOUT`]; `None` when no
+/// check could start because earlier ones still hang.
+async fn probe(address: String, port: u16) -> Option<bool> {
+    let permit = PROBES.try_acquire().ok()?;
+    let address = address.trim_start_matches('[').trim_end_matches(']').to_string();
+    // The lookup keeps its place until it returns, also after this check gave up on it.
+    let lookup = tokio::task::spawn_blocking(move || {
+        let _held = permit;
+        std::net::ToSocketAddrs::to_socket_addrs(&(address.as_str(), port)).map(Iterator::collect::<Vec<_>>)
+    });
+    let Ok(Ok(Ok(addrs))) = tokio::time::timeout(REACHABLE_TIMEOUT, lookup).await else { return Some(false) };
+    let connect = tokio::net::TcpStream::connect(&addrs[..]);
+    Some(matches!(tokio::time::timeout(REACHABLE_TIMEOUT, connect).await, Ok(Ok(_))))
+}
+
 /// Opens a TCP connection to each host's address and port and closes it again; no SSH.
 fn run_reachable(ctx: Ctx, params: Value) -> Out {
     use futures::{FutureExt, StreamExt};
@@ -460,11 +509,7 @@ fn run_reachable(ctx: Ctx, params: Value) -> Out {
         };
         let checks = targets.into_iter().map(|(id, target)| async move {
             let reachable = match target {
-                Some((address, port)) => {
-                    let address = address.trim_start_matches('[').trim_end_matches(']').to_string();
-                    let connect = tokio::net::TcpStream::connect((address.as_str(), port));
-                    Some(matches!(tokio::time::timeout(REACHABLE_TIMEOUT, connect).await, Ok(Ok(_))))
-                }
+                Some((address, port)) => probe(address, port).await,
                 None => None,
             };
             Reachable { id, reachable }

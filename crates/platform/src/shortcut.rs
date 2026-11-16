@@ -71,12 +71,27 @@ pub fn desktop_dir() -> Result<PathBuf, PlatformError> {
     directories::UserDirs::new().and_then(|d| d.desktop_dir().map(Path::to_path_buf)).ok_or(PlatformError::NoHome)
 }
 
-/// Writes the shortcut for `host_id` into `dir`; an existing one of the same name is replaced.
+/// The longest suffix tried for a free file name.
+const MAX_SUFFIX: u32 = 99;
+
+/// `base.ext` in `dir`, or `base (2).ext` and so on: a file that is there is never replaced.
+fn free_path(dir: &Path, base: &str, ext: &str) -> Result<PathBuf, PlatformError> {
+    let first = dir.join(format!("{base}.{ext}"));
+    if !first.exists() {
+        return Ok(first);
+    }
+    (2..=MAX_SUFFIX)
+        .map(|n| dir.join(format!("{base} ({n}).{ext}")))
+        .find(|p| !p.exists())
+        .ok_or_else(|| PlatformError::Io(format!("too many shortcuts named {base}")))
+}
+
+/// Writes the shortcut for `host_id` into `dir`, under a name no file there has yet.
 pub fn create(dir: &Path, name: &str, exe: &Path, host_id: &uuid::Uuid) -> Result<PathBuf, PlatformError> {
     let base = clean_name(name);
     #[cfg(windows)]
     {
-        let path = dir.join(format!("{base}.lnk"));
+        let path = free_path(dir, &base, "lnk")?;
         let mut link = mslnk::ShellLink::new(exe).map_err(|e| PlatformError::Io(e.to_string()))?;
         link.set_arguments(Some(arguments(host_id).join(" ")));
         link.set_name(Some(base.clone()));
@@ -85,7 +100,7 @@ pub fn create(dir: &Path, name: &str, exe: &Path, host_id: &uuid::Uuid) -> Resul
     }
     #[cfg(not(windows))]
     {
-        let path = dir.join(format!("{base}.desktop"));
+        let path = free_path(dir, &base, "desktop")?;
         std::fs::write(&path, desktop_entry(name, exe, host_id)).map_err(|e| PlatformError::Io(e.to_string()))?;
         #[cfg(unix)]
         {
@@ -138,5 +153,17 @@ mod tests {
             bytes.windows(id_text.len()).any(|w| w == id_text.as_bytes())
         };
         assert!(found, "the shortcut carries the host id");
+    }
+
+    #[test]
+    fn a_file_on_the_desktop_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let ext = if cfg!(windows) { "lnk" } else { "desktop" };
+        let theirs = dir.path().join(format!("Firefox.{ext}"));
+        std::fs::write(&theirs, b"the user's own").unwrap();
+        let path = create(dir.path(), "Firefox", &exe, &uuid::Uuid::new_v4()).unwrap();
+        assert_eq!(path, dir.path().join(format!("Firefox (2).{ext}")));
+        assert_eq!(std::fs::read(&theirs).unwrap(), b"the user's own");
     }
 }

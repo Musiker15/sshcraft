@@ -83,6 +83,9 @@ pub enum ErrorCode {
     AgentForwardingUnavailable,
     /// X11 forwarding was asked for, but this computer has no display.
     X11Unavailable,
+    /// X11 forwarding came through sync, a share or an import and was not allowed on this
+    /// device: the session runs without it.
+    X11NotAllowed,
     CertificateMismatch,
     InvalidCertificate,
     /// The certificate had expired: signed in with the key alone.
