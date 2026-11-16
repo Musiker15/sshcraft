@@ -443,3 +443,41 @@ fn the_hex_view_keeps_bytes_only_while_open() {
     let dump = h.state().terminals[&id].hex.as_ref().unwrap().lines().join("\n");
     assert!(!dump.contains("before"), "nothing from before it opened: {dump}");
 }
+
+#[test]
+fn a_macro_waits_for_its_text_and_can_be_stopped() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = sshcraft_ui_egui::testing::app_harness(dir.path());
+    let mut settings = session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", serde_json::json!({}))).unwrap();
+    settings["terminal"]["macros"] = serde_json::json!([
+        { "name": "two", "steps": [{ "expect": "", "send": "echo step-one" }, { "expect": "step-one", "send": "echo step-two" }] },
+        { "name": "waits", "steps": [{ "expect": "never-comes", "send": "echo nope" }] },
+    ]);
+    session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.save", serde_json::json!({ "settings": settings }))).unwrap();
+    let (_server, host) =
+        session.runtime().block_on(sshcraft_engine::testing::test_host(&session, "macro", sshcraft_ssh::testing::TestAuth::default(), true));
+    h.state_mut().ui.connect_request = Some(sshcraft_ui_egui::state::ConnectRequest::Host(host));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !h.state().terminals.values().any(|t| matches!(t.status, Some(sshcraft_engine::SessionStatus::Connected { .. })))
+        || h.state().data.settings.terminal.macros.len() < 2
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    let id = *h.state().terminals.keys().next().unwrap();
+    sshcraft_ui_egui::macros::start(h.state_mut(), id, "two");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !h.state().terminals[&id].term.screen().text().contains("echo step-two") {
+        assert!(std::time::Instant::now() < deadline, "{}", h.state().terminals[&id].term.screen().text());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    assert!(h.state().terminals[&id].macro_run.is_none(), "done after its last step");
+    sshcraft_ui_egui::macros::start(h.state_mut(), id, "waits");
+    h.run_steps(3);
+    assert!(h.state().terminals[&id].macro_run.is_some(), "waiting for its text");
+    sshcraft_ui_egui::macros::stop(h.state_mut(), id);
+    assert!(h.state().terminals[&id].macro_run.is_none());
+    assert!(!h.state().terminals[&id].term.screen().text().contains("echo nope"));
+}

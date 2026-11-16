@@ -27,6 +27,37 @@ const MAX_FONT_FAMILY: usize = 200;
 /// Terminal types a session may ask for (`TERM`); the first is the default.
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
+/// Macros kept at most.
+pub const MAX_MACROS: usize = 64;
+/// The longest macro name.
+pub const MAX_MACRO_NAME: usize = 64;
+
+/// A named sequence of steps, like a login script, run on demand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Macro {
+    pub name: String,
+    pub steps: Vec<sshcraft_model::login_script::LoginStep>,
+}
+
+impl Macro {
+    /// A name of 1 to 64 characters without control characters, and steps within the limits of
+    /// a login script.
+    pub fn valid(&self) -> bool {
+        !self.name.trim().is_empty()
+            && self.name.chars().count() <= MAX_MACRO_NAME
+            && !self.name.chars().any(char::is_control)
+            && !self.steps.is_empty()
+            && self.steps.len() <= sshcraft_model::login_script::MAX_STEPS
+            // Unlike a login script, a step may wait for nothing: it sends at once.
+            && self.steps.iter().all(|s| {
+                s.expect.chars().count() <= 256
+                    && s.send.chars().count() <= 1024
+                    && !s.expect.chars().any(char::is_control)
+                    && !s.send.chars().any(char::is_control)
+            })
+    }
+}
+
 /// Actions a shortcut can trigger.
 pub const SHORTCUT_ACTIONS: [&str; 31] = [
     "palette",
@@ -242,6 +273,10 @@ pub struct Terminal {
     pub triggers: Vec<Trigger>,
     /// Tabs, port forwards and commands to one host share its SSH connection.
     pub reuse_connections: bool,
+    /// Named sequences of steps (wait for a text, then send a line), run on a terminal from the
+    /// command palette. Kept on this device.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub macros: Vec<Macro>,
     /// A bar under SSH terminals with the server's load, memory and disk, read every ten
     /// seconds while the tab is shown. Off by default: it runs a command on the server.
     pub resource_bar: bool,
@@ -318,6 +353,7 @@ impl Default for Terminal {
             triggers: Vec::new(),
             snippet_bar: Vec::new(),
             reuse_connections: true,
+            macros: Vec::new(),
             resource_bar: false,
         }
     }
@@ -382,6 +418,10 @@ impl EngineSettings {
     /// Keeps values in their allowed ranges.
     pub fn sanitized(mut self) -> Self {
         let defaults = Appearance::default();
+        // Macros SSHCraft cannot run are dropped, the rest kept up to the limit, names unique.
+        let mut seen = std::collections::HashSet::new();
+        self.terminal.macros.retain(|m| m.valid() && seen.insert(m.name.trim().to_lowercase()));
+        self.terminal.macros.truncate(MAX_MACROS);
         let a = &mut self.appearance;
         // A shortcut SSHCraft cannot read is dropped, not guessed at.
         a.dropdown_shortcut = a.dropdown_shortcut.take().filter(|c| valid_combo(c));

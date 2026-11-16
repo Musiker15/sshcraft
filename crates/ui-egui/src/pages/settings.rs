@@ -65,6 +65,9 @@ pub struct SettingsView {
     /// The dropdown shortcut being typed, taken when the field is left and only when valid.
     #[serde(skip)]
     pub dropdown_shortcut: Option<String>,
+    /// The macro being edited: its place in the list (`None` for a new one), name and steps.
+    #[serde(skip)]
+    pub macro_draft: Option<(Option<usize>, String, String)>,
     /// The shells this device offers, fetched when the terminal section is first shown.
     #[serde(skip)]
     pub shells: Option<Vec<Value>>,
@@ -361,6 +364,72 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         s.terminal = t;
         s.logs = logs;
     });
+    macros(app, ui);
+}
+
+/// The macros: run from the command palette on the focused terminal.
+fn macros(app: &mut SshcraftApp, ui: &mut Ui) {
+    use sshcraft_engine::settings::{MAX_MACROS, Macro};
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("Macros")).strong());
+    ui.label(egui::RichText::new(tr("Run from the command palette on the focused terminal. One step per line: text to wait for => line to send, or just the line to send at once.")).small());
+    let list = app.data.settings.terminal.macros.clone();
+    let mut remove = None;
+    for (i, m) in list.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(crate::widgets::visible(&m.name));
+            ui.label(egui::RichText::new(trf("{count} steps", &[("count", &m.steps.len().to_string())])).small());
+            if ui.small_button(tr("Edit")).clicked() {
+                app.ui.settings.macro_draft = Some((Some(i), m.name.clone(), crate::macros::steps_text(&m.steps)));
+            }
+            if ui.small_button(tr("Delete")).clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        save(app, |s| {
+            if i < s.terminal.macros.len() {
+                s.terminal.macros.remove(i);
+            }
+        });
+    }
+    if app.ui.settings.macro_draft.is_none() && list.len() < MAX_MACROS && ui.button(tr("New macro")).clicked() {
+        app.ui.settings.macro_draft = Some((None, String::new(), String::new()));
+    }
+    let Some((place, mut name, mut text)) = app.ui.settings.macro_draft.take() else { return };
+    ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(240.0));
+    ui.add(
+        egui::TextEdit::multiline(&mut text)
+            .hint_text("cd /srv/app\n$ => make deploy")
+            .desired_rows(4)
+            .desired_width(420.0)
+            .font(egui::TextStyle::Monospace),
+    );
+    let draft = Macro { name: name.trim().to_string(), steps: crate::macros::parse_steps(&text) };
+    let clash = list.iter().enumerate().any(|(i, m)| Some(i) != place && m.name.trim().eq_ignore_ascii_case(&draft.name));
+    let ok = draft.valid() && !clash;
+    let (mut keep, mut store) = (true, false);
+    ui.horizontal(|ui| {
+        store = ui.add_enabled(ok, egui::Button::new(tr("Save"))).clicked();
+        if ui.button(tr("Cancel")).clicked() {
+            keep = false;
+        }
+        if !ok && !draft.name.is_empty() {
+            let why = if clash { tr("A macro has that name already.") } else { tr("1 to 16 steps, lines without control characters.") };
+            ui.label(egui::RichText::new(why).color(crate::theme::Tokens::get(ui.ctx()).danger));
+        }
+    });
+    if store {
+        save(app, |s| match place {
+            Some(i) if i < s.terminal.macros.len() => s.terminal.macros[i] = draft,
+            _ => s.terminal.macros.push(draft),
+        });
+        keep = false;
+    }
+    if keep {
+        app.ui.settings.macro_draft = Some((place, name, text));
+    }
 }
 
 /// The editors of highlights and triggers. Rows are edited in a draft; the settings get the valid

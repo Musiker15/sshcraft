@@ -89,6 +89,22 @@ pub fn entries(app: &SshcraftApp) -> Vec<Entry> {
                 enabled: true,
             })
         }))
+        .chain(app.data.settings.terminal.macros.iter().map(|m| Entry {
+            id: RUN_MACRO,
+            arg: Some(m.name.clone()),
+            local: crate::macros::label(&m.name),
+            english: "Macro",
+            shortcut: None,
+            enabled: crate::macros::focused_session(app).is_some(),
+        }))
+        .chain(crate::macros::focused_session(app).filter(|id| app.terminals.get(id).is_some_and(|t| t.macro_run.is_some())).map(|_| Entry {
+            id: STOP_MACRO,
+            arg: None,
+            local: crate::macros::stop_label().to_string(),
+            english: "Stop the macro",
+            shortcut: None,
+            enabled: true,
+        }))
         .chain(app.data.snippets.iter().map(|s| Entry {
             id: RUN_SNIPPET,
             arg: Some(s.id.clone()),
@@ -99,6 +115,11 @@ pub fn entries(app: &SshcraftApp) -> Vec<Entry> {
         }))
         .collect()
 }
+
+/// The palette entry that runs a macro on the focused terminal (its name in `Entry::arg`).
+pub const RUN_MACRO: &str = "ui.macro.run";
+/// The palette entry that stops the macro on the focused terminal.
+pub const STOP_MACRO: &str = "ui.macro.stop";
 
 /// The palette entry that opens the run dialog of a snippet (its id in `Entry::arg`).
 pub const RUN_SNIPPET: &str = "ui.snippet.run";

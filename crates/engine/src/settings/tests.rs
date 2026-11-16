@@ -415,3 +415,20 @@ fn a_dropdown_shortcut_sshcraft_cannot_read_is_dropped() {
         assert_eq!(s.clone().sanitized().appearance.dropdown_shortcut, None, "{bad}");
     }
 }
+
+#[test]
+fn macros_sshcraft_cannot_run_are_dropped() {
+    use sshcraft_model::login_script::LoginStep;
+    let step = |expect: &str, send: &str| LoginStep { expect: expect.into(), send: send.into() };
+    let mut s = EngineSettings::default();
+    s.terminal.macros = vec![
+        Macro { name: "deploy".into(), steps: vec![step("", "make deploy"), step("done", "exit")] },
+        Macro { name: "Deploy".into(), steps: vec![step("", "twice")] },
+        Macro { name: "".into(), steps: vec![step("", "x")] },
+        Macro { name: "empty".into(), steps: vec![] },
+        Macro { name: "bad\n".into(), steps: vec![step("", "x")] },
+        Macro { name: "control".into(), steps: vec![step("", "a\u{7}b")] },
+    ];
+    let kept: Vec<String> = s.sanitized().terminal.macros.into_iter().map(|m| m.name).collect();
+    assert_eq!(kept, vec!["deploy".to_string()]);
+}

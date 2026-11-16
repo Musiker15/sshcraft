@@ -34,6 +34,20 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Macros" => "Makros",
+        "Run from the command palette on the focused terminal. One step per line: text to wait for => line to send, or just the line to send at once." => {
+            "Laufen über die Befehlspalette im fokussierten Terminal. Ein Schritt pro Zeile: Text, auf den gewartet wird => Zeile, die gesendet wird, oder nur die Zeile, die sofort gesendet wird."
+        }
+        "{count} steps" => "{count} Schritte",
+        "New macro" => "Neues Makro",
+        "A macro has that name already." => "Ein Makro mit diesem Namen gibt es schon.",
+        "1 to 16 steps, lines without control characters." => "1 bis 16 Schritte, Zeilen ohne Steuerzeichen.",
+        "Macro {name} stopped." => "Makro {name} angehalten.",
+        "Macro {name} stopped: a step did not see its text within 15 seconds." => {
+            "Makro {name} angehalten: Ein Schritt hat seinen Text nicht innerhalb von 15 Sekunden gesehen."
+        }
+        "Macro: {name}" => "Makro: {name}",
+        "Stop the macro" => "Makro anhalten",
         "Launch actions" => "Startaktionen",
         "Snippets typed once when a session starts, not again after a reconnect." => {
             "Snippets, die beim Start einer Sitzung einmal getippt werden, nach einem Wiederverbinden nicht noch einmal."
