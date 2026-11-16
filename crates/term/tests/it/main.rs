@@ -1,5 +1,6 @@
 //! Integration tests of the terminal: what a server sends and what the terminal shows.
 
+mod commands;
 mod fuzz;
 mod history;
 mod hostile;

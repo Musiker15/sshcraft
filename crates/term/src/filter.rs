@@ -27,6 +27,22 @@ enum State {
     DiscardEscape,
 }
 
+/// What OSC 133 (shell integration) says about the shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShellMark {
+    /// `A`: a prompt starts.
+    PromptStart,
+    /// `B`: the prompt ends, the user types the command.
+    CommandStart,
+    /// `C`: the command runs, its output starts.
+    OutputStart,
+    /// `D`: the command ended, with its exit code when one was given and is a number.
+    CommandEnd(Option<i32>),
+}
+
+/// Shell marks kept for one feed; more are dropped (each takes at least eight bytes of input).
+const MAX_SHELL_MARKS: usize = 1 << 16;
+
 #[derive(Debug, Default)]
 pub(crate) struct Prefilter {
     state: State,
@@ -34,6 +50,9 @@ pub(crate) struct Prefilter {
     osc: Vec<u8>,
     /// The working directory the last OSC 7 named.
     pub(crate) cwd: Option<String>,
+    /// Shell marks of this feed, each with the length of the filtered output when it came: the
+    /// parser has to reach that point before the mark applies to the cursor line.
+    pub(crate) shell_marks: Vec<(usize, ShellMark)>,
 }
 
 impl Prefilter {
@@ -114,10 +133,17 @@ impl Prefilter {
     /// Passes the held-back OSC string on and goes back to ground, keeping `ESC` pending when the
     /// string was ended by one.
     fn release(&mut self, out: &mut Vec<u8>) -> State {
-        if let Some(dir) = working_directory(&self.osc) {
-            self.cwd = Some(dir);
+        if let Some(mark) = shell_mark(&self.osc) {
+            // The parser does not know OSC 133, so it is not passed on.
+            if self.shell_marks.len() < MAX_SHELL_MARKS {
+                self.shell_marks.push((out.len(), mark));
+            }
+        } else {
+            if let Some(dir) = working_directory(&self.osc) {
+                self.cwd = Some(dir);
+            }
+            out.extend_from_slice(&self.osc);
         }
-        out.extend_from_slice(&self.osc);
         if self.osc.capacity() > 1 << 16 {
             self.osc = Vec::new();
         } else {
@@ -136,14 +162,35 @@ impl Prefilter {
     }
 }
 
+/// The body of a complete OSC string after `prefix`, without its terminator.
+fn osc_body<'a>(osc: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+    let body = osc.strip_prefix(prefix)?;
+    body.strip_suffix(b"\x1b\\").or_else(|| body.strip_suffix(&[BEL]))
+}
+
+/// The mark of a complete `ESC ] 133 ; <kind> [; ...]` string; `None` for anything else.
+fn shell_mark(osc: &[u8]) -> Option<ShellMark> {
+    let body = osc_body(osc, b"\x1b]133;")?;
+    let mut parts = body.split(|b| *b == b';');
+    match parts.next()? {
+        b"A" => Some(ShellMark::PromptStart),
+        b"B" => Some(ShellMark::CommandStart),
+        b"C" => Some(ShellMark::OutputStart),
+        b"D" => {
+            let code = parts.next().and_then(|c| std::str::from_utf8(c).ok()).and_then(|c| c.parse::<i32>().ok());
+            Some(ShellMark::CommandEnd(code))
+        }
+        _ => None,
+    }
+}
+
 /// The longest working directory OSC 7 may name, in characters.
 const MAX_CWD_CHARS: usize = 1000;
 
 /// The path of a complete `ESC ] 7 ; file://host/path` string: percent-decoded, one plain line,
 /// at most [`MAX_CWD_CHARS`]; `None` for anything else.
 fn working_directory(osc: &[u8]) -> Option<String> {
-    let body = osc.strip_prefix(b"\x1b]7;")?;
-    let body = body.strip_suffix(b"\x1b\\").or_else(|| body.strip_suffix(&[BEL]))?;
+    let body = osc_body(osc, b"\x1b]7;")?;
     let rest = body.strip_prefix(b"file://")?;
     let path = rest.get(rest.iter().position(|b| *b == b'/')?..)?;
     let mut bytes = Vec::with_capacity(path.len());
@@ -197,6 +244,15 @@ mod tests {
     #[test]
     fn a_split_osc_passes_whole() {
         assert_eq!(run(&[b"x\x1b", b"]0;ti", b"tle\x1b", b"\\y"]), b"x\x1b]0;title\x1b\\y");
+    }
+
+    #[test]
+    fn shell_marks_are_held_back_with_their_offset() {
+        let mut filter = Prefilter::default();
+        let mut out = Vec::new();
+        filter.filter(b"ab\x1b]133;A\x07cd\x1b]133;D;7\x1b\\e\x1b]133;D;x\x07", &mut out);
+        assert_eq!(out, b"abcde");
+        assert_eq!(filter.shell_marks, vec![(2, ShellMark::PromptStart), (4, ShellMark::CommandEnd(Some(7))), (5, ShellMark::CommandEnd(None))]);
     }
 
     #[test]

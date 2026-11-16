@@ -6,6 +6,7 @@
 //! passed to [`Terminal::feed`] is hostile: a size is clamped, the scrollback is bounded by
 //! [`limits::MAX_CELLS`], and the queue of answers and notices has a limit.
 
+mod commands;
 mod extras;
 mod filter;
 mod guard;
@@ -22,6 +23,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::{Config, Osc52, Term};
 use alacritty_terminal::vte::ansi::Processor;
 
+pub use commands::{CommandRecord, CommandRow, CommandState, MAX_COMMANDS, MAX_OUTPUT_BYTES};
 pub use screen::{CellFlags, CellView, CursorShape, CursorView, Screen, SelectionView, TermColor, TermModes};
 pub use search::{SearchError, SearchMatch, SearchQuery};
 pub use selection::{GridPoint, SelectionKind};
@@ -93,6 +95,12 @@ pub enum Notice {
     ClipboardWrite(String),
     /// The shell's working directory (OSC 7), a plain absolute path.
     WorkingDirectory(String),
+    /// A command started running (OSC 133 C).
+    CommandStarted,
+    /// A command ended (OSC 133 D), with its exit code when the shell gave one.
+    CommandFinished {
+        exit: Option<i32>,
+    },
 }
 
 /// The size in bytes of one grid cell of the emulator, for memory budgets.
@@ -137,6 +145,8 @@ pub struct Terminal {
     last_match: Option<(u64, SearchMatch)>,
     /// Changes that may have added per-cell extras since the budget was last checked.
     extras_changes: usize,
+    /// What the shell reported about its commands (OSC 133).
+    commands: commands::Commands,
 }
 
 impl Terminal {
@@ -154,6 +164,7 @@ impl Terminal {
             config: config.clone(),
             last_match: None,
             extras_changes: 0,
+            commands: commands::Commands::default(),
         }
     }
 
@@ -162,18 +173,31 @@ impl Terminal {
         let mut filtered = std::mem::take(&mut self.filtered);
         filtered.clear();
         self.prefilter.filter(bytes, &mut filtered);
-        // In slices, so the extras budget is checked while a large feed is under way.
-        for slice in filtered.chunks(64 * 1024) {
+        // A shell mark applies to the line the cursor is on when the parser reaches it.
+        let marks = std::mem::take(&mut self.prefilter.shell_marks);
+        let mut done = 0;
+        for (offset, mark) in marks {
+            self.advance(filtered.get(done..offset).unwrap_or_default());
+            done = offset.max(done);
+            self.apply_shell_mark(mark);
+        }
+        self.advance(filtered.get(done..).unwrap_or_default());
+        // A large feed must not keep its buffer for the life of the terminal.
+        if filtered.capacity() <= 1 << 20 {
+            self.filtered = filtered;
+        }
+    }
+
+    /// Runs `bytes` through the parser, in slices, so the extras budget is checked while a large
+    /// feed is under way.
+    fn advance(&mut self, bytes: &[u8]) {
+        for slice in bytes.chunks(64 * 1024) {
             let mut guard = guard::Guard { term: &mut self.term, extras: &mut self.extras_changes };
             self.parser.advance(&mut guard, slice);
             if self.extras_changes >= extras::CHECK_EVERY {
                 self.extras_changes = 0;
                 self.enforce_extras_budget();
             }
-        }
-        // A large feed must not keep its buffer for the life of the terminal.
-        if filtered.capacity() <= 1 << 20 {
-            self.filtered = filtered;
         }
     }
 
@@ -204,7 +228,9 @@ impl Terminal {
     }
 
     pub fn screen(&self) -> Screen {
-        screen::screen(&self.term)
+        let mut screen = screen::screen(&self.term);
+        screen.commands = self.command_rows(screen.display_offset, usize::from(screen.rows));
+        screen
     }
 
     /// The visible rows as text, one line each, for screen readers.
@@ -215,6 +241,7 @@ impl Terminal {
     /// Answers and notices since the last call.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         let cwd = self.prefilter.cwd.take().map(Notice::WorkingDirectory);
+        let commands = self.take_command_notices();
         self.listener
             .take()
             .into_iter()
@@ -229,6 +256,7 @@ impl Terminal {
                 _ => None,
             })
             .chain(cwd)
+            .chain(commands)
             .collect()
     }
 }

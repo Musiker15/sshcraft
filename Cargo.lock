@@ -5990,6 +5990,7 @@ version = "0.1.1"
 dependencies = [
  "alacritty_terminal",
  "bitflags 2.13.2",
+ "chrono",
  "cursor-icon",
  "memory-stats",
  "unicode-width",

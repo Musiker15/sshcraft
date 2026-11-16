@@ -12,6 +12,7 @@ alacritty_terminal = { workspace = true }
 bitflags = { workspace = true }
 unicode-width = { workspace = true }
 cursor-icon = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 memory-stats = { workspace = true }
