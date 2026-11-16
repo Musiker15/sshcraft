@@ -89,6 +89,12 @@ struct Records {
     terms: Mutex<Vec<String>>,
     /// What clients sent on the standard input of `exec` channels.
     exec_input: Mutex<Vec<u8>>,
+    /// The protocol and cookie of the last `x11-req`.
+    x11_request: Mutex<Option<(String, String)>>,
+    /// Sent in X11 setups instead of the requested cookie.
+    x11_cookie: Mutex<Option<Vec<u8>>>,
+    /// Whether the client took an X11 channel opened right after sign-in, before any request.
+    x11_unasked: Mutex<Option<bool>>,
 }
 
 pub struct TestServer {
@@ -157,6 +163,21 @@ impl TestServer {
 
     pub fn received_env(&self) -> Vec<(String, String)> {
         self.records.env.lock().unwrap().clone()
+    }
+
+    /// The protocol and cookie of the last X11 request.
+    pub fn x11_request(&self) -> Option<(String, String)> {
+        self.records.x11_request.lock().unwrap().clone()
+    }
+
+    /// Makes the server send `cookie` in its X11 setups instead of the one it was given.
+    pub fn set_x11_cookie(&self, cookie: Vec<u8>) {
+        *self.records.x11_cookie.lock().unwrap() = Some(cookie);
+    }
+
+    /// `None` until the server tried an X11 channel after sign-in; then whether it was taken.
+    pub fn x11_unasked(&self) -> Option<bool> {
+        *self.records.x11_unasked.lock().unwrap()
     }
 
     /// `None` while the server has not tried the agent yet; then whether it got one (and how
@@ -386,7 +407,43 @@ impl server::Handler for Handler {
                 *slot = Some(result);
             }
         });
+        // And an X11 channel nobody asked for.
+        let handle = session.handle();
+        let records = self.records.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let taken = handle.channel_open_x11("127.0.0.1", 0).await.is_ok();
+            records.x11_unasked.lock().unwrap().get_or_insert(taken);
+        });
         Ok(())
+    }
+
+    /// Notes the request, then opens one X11 channel and sends a connection setup with the
+    /// cookie it got (or the one set with [`TestServer::set_x11_cookie`]), then `hello`.
+    async fn x11_request(
+        &mut self,
+        channel: ChannelId,
+        _single: bool,
+        protocol: &str,
+        cookie: &str,
+        _screen: u32,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        *self.records.x11_request.lock().unwrap() = Some((protocol.to_owned(), cookie.to_owned()));
+        let sent =
+            self.records.x11_cookie.lock().unwrap().clone().unwrap_or_else(|| data_encoding::HEXLOWER_PERMISSIVE.decode(cookie.as_bytes()).unwrap());
+        let mut setup = x11_setup(protocol.as_bytes(), &sent);
+        setup.extend_from_slice(b"hello");
+        let handle = session.handle();
+        tokio::spawn(async move {
+            if let Ok(channel) = handle.channel_open_x11("127.0.0.1", 0).await {
+                let mut stream = channel.into_stream();
+                let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, &setup).await;
+                let mut sink = Vec::new();
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut sink)).await;
+            }
+        });
+        session.channel_success(channel)
     }
 
     async fn env_request(&mut self, _channel: ChannelId, name: &str, value: &str, _session: &mut Session) -> Result<(), Self::Error> {
@@ -568,6 +625,19 @@ impl server::Handler for Handler {
         }
         Ok(())
     }
+}
+
+/// An X11 connection setup (little-endian, protocol 11.0) with this protocol name and cookie.
+pub fn x11_setup(name: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut out = vec![b'l', 0, 11, 0, 0, 0];
+    out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    for part in [name, data] {
+        out.extend_from_slice(part);
+        out.resize(out.len() + part.len().div_ceil(4) * 4 - part.len(), 0);
+    }
+    out
 }
 
 /// An in-memory SSH agent holding `keys`. With `confirm == false` it refuses every signature.

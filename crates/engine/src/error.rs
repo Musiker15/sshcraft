@@ -81,6 +81,8 @@ pub enum ErrorCode {
     SerialFailed,
     JumpIncomplete,
     AgentForwardingUnavailable,
+    /// X11 forwarding was asked for, but this computer has no display.
+    X11Unavailable,
     CertificateMismatch,
     InvalidCertificate,
     /// The certificate had expired: signed in with the key alone.

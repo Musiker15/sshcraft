@@ -27,6 +27,7 @@ pub struct Inherited {
     pub username: From<String>,
     pub key: From<KeyRef>,
     pub agent_forwarding: From<bool>,
+    pub x11: From<bool>,
 }
 
 /// The groups from `group` upwards, nearest first.
@@ -74,6 +75,11 @@ pub fn inherited(group: Option<GroupId>, groups: &[Group]) -> Inherited {
             && let Some(f) = d.agent_forwarding
         {
             out.agent_forwarding = Some((f, name()));
+        }
+        if out.x11.is_none()
+            && let Some(f) = d.x11
+        {
+            out.x11 = Some((f, name()));
         }
     }
     out
@@ -544,6 +550,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
         ui.end_row();
 
         tri_state(ui, tr("Agent forwarding"), &mut s.agent_forwarding, &inherited.agent_forwarding);
+        tri_state(ui, tr("X11 forwarding"), &mut s.x11, &inherited.x11);
         tri_state(ui, tr("Record sessions"), &mut s.session_log, &None);
         appearance(ui, &mut s.appearance);
 

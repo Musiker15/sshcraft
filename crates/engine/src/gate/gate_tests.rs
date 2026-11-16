@@ -1122,3 +1122,15 @@ async fn agents_cannot_aim_a_program_before_connecting() {
     let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gw.id.0, "address": "evil.example" } })).await;
     assert!(is_denied(&r), "{r:?}");
 }
+
+#[tokio::test]
+async fn agents_cannot_aim_x11_forwarding() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let mut gx = group("x11", None);
+    gx.defaults.x11 = Some(true);
+    w.add_group(&gx);
+    let conn = w.conn();
+    let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gx.id.0, "address": "evil.example" } })).await;
+    assert!(is_denied(&r), "{r:?}");
+}

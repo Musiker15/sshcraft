@@ -33,6 +33,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Add variable" => "Variable hinzufügen",
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
+        "X11 forwarding" => "X11-Weiterleitung",
         "Agent key {fingerprint}" => "Agent-Schlüssel {fingerprint}",
         "All hosts" => "Alle Hosts",
         "Cancel" => "Abbrechen",

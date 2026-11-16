@@ -1256,8 +1256,18 @@ pub(crate) async fn connect_session(
         Some(Proxy::Direct) | None => None,
     };
     let opener = if route.target.agent_forwarding { ctx.agent.opener() } else { None };
-    let notice = (route.target.agent_forwarding && opener.is_none()).then_some(ErrorCode::AgentForwardingUnavailable);
-    let options = SessionOptions { agent_forwarding: opener, env: route.target.env.iter().map(|v| (v.name.clone(), v.value.clone())).collect() };
+    let display = if route.target.x11 { sshcraft_ssh::x11::local_display() } else { None };
+    let notice = (route.target.agent_forwarding && opener.is_none())
+        .then_some(ErrorCode::AgentForwardingUnavailable)
+        .or_else(|| (route.target.x11 && display.is_none()).then_some(ErrorCode::X11Unavailable));
+    let x11 = match display {
+        Some(display) => {
+            let cookie = sshcraft_ssh::x11::real_cookie(&display).await;
+            Some(sshcraft_ssh::x11::X11Options { display, cookie })
+        }
+        None => None,
+    };
+    let options = SessionOptions { agent_forwarding: opener, env: route.target.env.iter().map(|v| (v.name.clone(), v.value.clone())).collect(), x11 };
     // The host key question runs in russh's own task. When this connect is given up (its tab
     // closed, its rule stopped), `alive` drops and the question is withdrawn.
     let (_alive, abandoned) = tokio::sync::watch::channel(());

@@ -9,7 +9,7 @@ publish = false
 
 [features]
 # In-process SSH test server, used by this crate's tests and by the app's tests.
-testing = ["dep:rand", "dep:futures"]
+testing = ["dep:futures"]
 
 [dependencies]
 sshcraft-model = { workspace = true }
@@ -21,7 +21,7 @@ serde = { workspace = true }
 zeroize = { workspace = true }
 tokio-socks = "0.5.3"
 data-encoding = { workspace = true }
-rand = { workspace = true, optional = true }
+rand = { workspace = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
