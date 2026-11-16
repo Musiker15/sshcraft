@@ -220,6 +220,7 @@ async fn open(session: &sshcraft_ssh::Session, rule: &ForwardRule) -> Result<Tun
         ForwardKind::Local => session.forward_local(&rule.bind_address, rule.bind_port, &rule.target_host, rule.target_port).await,
         ForwardKind::Remote => session.forward_remote(&rule.bind_address, rule.bind_port, &rule.target_host, rule.target_port).await,
         ForwardKind::Dynamic => session.forward_dynamic(&rule.bind_address, rule.bind_port).await,
+        ForwardKind::Socket => session.forward_socket(&rule.bind_address, rule.bind_port, &rule.target_host).await,
     }
 }
 

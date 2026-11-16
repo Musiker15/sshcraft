@@ -456,6 +456,28 @@ impl server::Handler for Handler {
     }
 
     /// Jump host: connects to the wanted port on this machine and passes the bytes through.
+    /// A Unix socket on the "server": answers with the path, then echoes.
+    async fn channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
+        reply: server::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        if self.auth.refuse_forwarding {
+            return Ok(());
+        }
+        reply.accept().await;
+        let path = socket_path.as_bytes().to_vec();
+        tokio::spawn(async move {
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, &path).await;
+            let (mut read, mut write) = tokio::io::split(stream);
+            let _ = tokio::io::copy(&mut read, &mut write).await;
+        });
+        Ok(())
+    }
+
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,

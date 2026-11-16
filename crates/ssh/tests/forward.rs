@@ -161,3 +161,19 @@ async fn an_x11_channel_before_the_request_is_refused() {
     }
     assert_eq!(s.x11_unasked(), Some(false));
 }
+
+#[tokio::test]
+async fn a_local_port_reaches_a_unix_socket_on_the_server() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let s = server().await;
+    let session = open(vec![hop("t", s.port)], SessionOptions::default()).await;
+    let tunnel = session.forward_socket("127.0.0.1", 0, "/run/app.sock").await.unwrap();
+    let mut client = tokio::net::TcpStream::connect(("127.0.0.1", tunnel.bound_port())).await.unwrap();
+    let mut path = [0u8; 13];
+    client.read_exact(&mut path).await.unwrap();
+    assert_eq!(&path, b"/run/app.sock");
+    client.write_all(b"ping").await.unwrap();
+    let mut echo = [0u8; 4];
+    client.read_exact(&mut echo).await.unwrap();
+    assert_eq!(&echo, b"ping");
+}

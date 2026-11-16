@@ -624,14 +624,20 @@ impl Session {
     /// Listens on `bind_address:bind_port` here; connections reach `target_host:target_port`
     /// as seen from the server (`ssh -L`).
     pub async fn forward_local(&self, bind_address: &str, bind_port: u16, target_host: &str, target_port: u16) -> Result<Tunnel, SshError> {
-        let target = Some((target_host.to_owned(), target_port));
+        let target = tunnel::Dest::Tcp(target_host.to_owned(), target_port);
         tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, target).await
+    }
+
+    /// Listens on `bind_address:bind_port` here; connections reach the Unix socket `path` on
+    /// the server (`ssh -L port:/path`).
+    pub async fn forward_socket(&self, bind_address: &str, bind_port: u16, path: &str) -> Result<Tunnel, SshError> {
+        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, tunnel::Dest::Socket(path.to_owned())).await
     }
 
     /// A SOCKS5 proxy on `bind_address:bind_port` here; each connection asks for its own target
     /// (`ssh -D`).
     pub async fn forward_dynamic(&self, bind_address: &str, bind_port: u16) -> Result<Tunnel, SshError> {
-        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, None).await
+        tunnel::listen(self.handle.clone(), self.jumps.clone(), bind_address, bind_port, tunnel::Dest::Socks).await
     }
 
     /// The server listens on `bind_address:bind_port`; connections reach
