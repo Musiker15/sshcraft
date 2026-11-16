@@ -82,6 +82,14 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                     draw(ui.painter(), Icon::Broadcast, rect, tokens.danger);
                     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr("Broadcast on")));
                 }
+                let look =
+                    crate::session_tab::host_appearance(app, tab.panes.sessions().next().and_then(|s| app.terminals.get(&s)).and_then(|t| t.host));
+                if let Some(badge) = &look.badge {
+                    let [r, g, b] = look.color.unwrap_or([0x55, 0x5a, 0x66]);
+                    egui::Frame::new().fill(egui::Color32::from_rgb(r, g, b)).corner_radius(3.0).inner_margin(vec2(4.0, 0.0)).show(ui, |ui| {
+                        ui.label(egui::RichText::new(badge).size(11.0).color(egui::Color32::WHITE));
+                    });
+                }
                 let color = if selected { tokens.text_strong } else { tokens.text };
                 if elided_label(ui, &tab.title, MAX_TAB_WIDTH - 50.0, color, FontId::proportional(13.0)).clicked() {
                     select = Some(i);
@@ -95,6 +103,15 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                     close = Some(i);
                 }
             });
+            // The host's colour as a line under its tab.
+            let accent = tab.panes.sessions().next().and_then(|s| app.terminals.get(&s)).and_then(|t| t.host);
+            if let Some([r, g, b]) = crate::session_tab::host_appearance(app, accent).color {
+                let rect = shown.response.rect;
+                ui.painter().line_segment(
+                    [rect.left_bottom() + vec2(4.0, -1.0), rect.right_bottom() + vec2(-4.0, -1.0)],
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(r, g, b)),
+                );
+            }
             // Dragging a tab onto another merges its panes into that one.
             rects.push(shown.response.rect);
         }

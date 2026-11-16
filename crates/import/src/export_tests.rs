@@ -146,3 +146,17 @@ fn export_json_has_no_password_ids() {
     assert!(!json.contains(&own.0.to_string()), "{json}");
     assert!(!json.contains(&proxy.0.to_string()), "{json}");
 }
+
+#[test]
+fn json_export_keeps_the_appearance_and_leaves_it_out_when_unset() {
+    let (store, _vault, kunden, _) = sample();
+    let mut g = kunden.clone();
+    g.defaults.appearance =
+        Some(sshcraft_model::appearance::Appearance { color: Some([200, 30, 30]), badge: Some("PROD".into()), theme: Some("sshcraft-light".into()) });
+    store.upsert_group(&g).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&export_json(&store, &ExportFilter::default()).unwrap()).unwrap();
+    let text = json.to_string();
+    assert!(text.contains("\"badge\":\"PROD\""), "{text}");
+    assert!(text.contains("\"theme\":\"sshcraft-light\""), "{text}");
+    assert_eq!(text.matches("\"appearance\"").count(), 1, "only the group sets one: {text}");
+}

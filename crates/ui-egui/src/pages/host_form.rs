@@ -231,6 +231,46 @@ fn from_hint<T: std::fmt::Display>(value: &From<T>) -> Option<String> {
     value.as_ref().map(|(v, group)| trf("{value} (from {group})", &[("value", &visible(&v.to_string())), ("group", &visible(group))]))
 }
 
+/// Tab colour, badge and terminal theme of a host or group; each unset field is inherited.
+fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appearance>) {
+    use sshcraft_model::appearance::{MAX_BADGE_CHARS, THEMES};
+    let mut a = value.clone().unwrap_or_default();
+    ui.label(tr("Tab colour"));
+    ui.horizontal(|ui| {
+        let mut own = a.color.is_some();
+        if ui.checkbox(&mut own, tr("Own colour")).changed() {
+            a.color = own.then_some([0x3f, 0x8f, 0xd2]);
+        }
+        if let Some(color) = &mut a.color {
+            let mut picked = egui::Color32::from_rgb(color[0], color[1], color[2]);
+            if ui.color_edit_button_srgba(&mut picked).changed() {
+                *color = [picked.r(), picked.g(), picked.b()];
+            }
+        }
+    });
+    ui.end_row();
+    ui.label(tr("Badge"));
+    let mut badge = a.badge.clone().unwrap_or_default();
+    if ui.add(egui::TextEdit::singleline(&mut badge).char_limit(MAX_BADGE_CHARS).hint_text(tr("e.g. PROD")).desired_width(120.0)).changed() {
+        a.badge = (!badge.is_empty()).then_some(badge);
+    }
+    ui.end_row();
+    ui.label(tr("Terminal theme"));
+    let name = |theme: Option<&str>| match theme {
+        Some("sshcraft-light") => tr("Light"),
+        Some(_) => tr("Dark"),
+        None => tr("Inherit"),
+    };
+    egui::ComboBox::from_id_salt("sshcraft-host-theme").selected_text(name(a.theme.as_deref())).show_ui(ui, |ui| {
+        ui.selectable_value(&mut a.theme, None, tr("Inherit"));
+        for theme in THEMES {
+            ui.selectable_value(&mut a.theme, Some(theme.to_string()), name(Some(theme)));
+        }
+    });
+    ui.end_row();
+    *value = (!a.is_empty()).then_some(a);
+}
+
 fn tri_state(ui: &mut Ui, label: &str, value: &mut Option<bool>, inherited: &From<bool>) {
     ui.label(label);
     let inherit = match inherited {
@@ -364,6 +404,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
 
         tri_state(ui, tr("Agent forwarding"), &mut s.agent_forwarding, &inherited.agent_forwarding);
         tri_state(ui, tr("Record sessions"), &mut s.session_log, &None);
+        appearance(ui, &mut s.appearance);
 
         ui.label(tr("Environment"));
         ui.vertical(|ui| {

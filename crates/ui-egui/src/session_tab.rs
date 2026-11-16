@@ -379,6 +379,24 @@ fn ended(status: Option<&SessionStatus>) -> bool {
 }
 
 /// Feeds every session's output into its terminal and acts on what programs asked for.
+/// The look of `host`'s terminals: its own appearance with what its groups give.
+pub fn host_appearance(app: &SshcraftApp, host: Option<HostId>) -> sshcraft_model::appearance::Appearance {
+    let Some(row) = host.and_then(|id| app.data.hosts.iter().find(|r| r.host.id == id)) else { return Default::default() };
+    let groups: Vec<sshcraft_model::model::Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
+    sshcraft_model::appearance::appearance_for(&row.host, &groups)
+}
+
+/// The badge in the terminal's top right corner, on the host's colour.
+fn paint_badge(ui: &Ui, rect: Rect, badge: &str, color: Option<[u8; 3]>) {
+    let painter = ui.painter_at(rect);
+    let galley = painter.layout_no_wrap(badge.to_string(), egui::FontId::proportional(12.0), egui::Color32::WHITE);
+    let size = galley.size() + egui::vec2(12.0, 6.0);
+    let area = Rect::from_min_size(pos2(rect.max.x - size.x - 10.0, rect.min.y + 8.0), size);
+    let [r, g, b] = color.unwrap_or([0x55, 0x5a, 0x66]);
+    painter.rect_filled(area, 4.0, egui::Color32::from_rgba_unmultiplied(r, g, b, 210));
+    painter.galley(area.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
+}
+
 /// Whether the user looks at tab `id`: the window has the focus and the tab is the one shown.
 fn watched(app: &SshcraftApp, ctx: &egui::Context, id: SessionId) -> bool {
     let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
@@ -926,7 +944,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
     let ligatures = appearance.ligatures;
     let app_highlighter = app.patterns.highlighter.clone();
-    let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
+    let look = host_appearance(app, app.terminals.get(&id).and_then(|t| t.host));
+    let theme = look.theme.as_deref().unwrap_or(appearance.terminal_theme.as_str());
+    let palette = if theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
     let blocked = modal_open(app, &ctx);
     let Some(tab) = app.terminals.get_mut(&id) else {
         ui.label(tr("This session is gone."));
@@ -971,6 +991,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures, highlighter: Some(&app_highlighter) }.show(ui)
         })
         .inner;
+    if let Some(badge) = &look.badge {
+        paint_badge(ui, term_rect, badge, look.color);
+    }
     // Only the focused pane takes the keyboard.
     let first = focused && std::mem::take(&mut tab.focus);
     let switched = focused && app_shown_changed(&mut app.ui.shown_terminal, id);
