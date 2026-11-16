@@ -1134,3 +1134,15 @@ async fn agents_cannot_aim_x11_forwarding() {
     let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gx.id.0, "address": "evil.example" } })).await;
     assert!(is_denied(&r), "{r:?}");
 }
+
+#[tokio::test]
+async fn agents_cannot_aim_launch_actions() {
+    let w = world(None).await;
+    w.set(AgentCategory::Edit, AgentLevel::Allow);
+    let mut gl = group("launch", None);
+    gl.defaults.launch = Some(vec![sshcraft_model::model::SnippetId::new()]);
+    w.add_group(&gl);
+    let conn = w.conn();
+    let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gl.id.0, "address": "evil.example" } })).await;
+    assert!(is_denied(&r), "{r:?}");
+}

@@ -34,6 +34,14 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Address" => "Adresse",
         "Agent forwarding" => "Agent-Weiterleitung",
         "X11 forwarding" => "X11-Weiterleitung",
+        "Launch actions" => "Startaktionen",
+        "Snippets typed once when a session starts, not again after a reconnect." => {
+            "Snippets, die beim Start einer Sitzung einmal getippt werden, nach einem Wiederverbinden nicht noch einmal."
+        }
+        "Allow the launch actions on this device" => "Die Startaktionen auf diesem Gerät erlauben",
+        "Launch actions that came through sync, a share or an import are not typed until allowed here." => {
+            "Startaktionen, die über Sync, eine Freigabe oder einen Import kamen, werden erst getippt, wenn sie hier erlaubt sind."
+        }
         "Container" => "Container",
         "name" => "Name",
         "Ask the host which containers run there" => "Den Host fragen, welche Container dort laufen",

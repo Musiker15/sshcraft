@@ -182,12 +182,23 @@ struct SaveParams {
     /// The user chose Telnet (or allowed it) in this save.
     #[serde(default)]
     approve_telnet: bool,
+    /// The user picked the launch actions (or allowed them) in this save.
+    #[serde(default)]
+    approve_launch: bool,
 }
 
 fn run_save(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let SaveParams { mut host, approve_command, approve_secret_ref, approve_login_script, approve_programs, approve_x11, approve_telnet } =
-            parse("host.save", params)?;
+        let SaveParams {
+            mut host,
+            approve_command,
+            approve_secret_ref,
+            approve_login_script,
+            approve_programs,
+            approve_x11,
+            approve_telnet,
+            approve_launch,
+        } = parse("host.save", params)?;
         check_login_script("host.save", &host.settings)?;
         let id = host.id.0.to_string();
         let (orphans, before) = {
@@ -211,6 +222,9 @@ fn run_save(ctx: Ctx, params: Value) -> Out {
         }
         if approve_telnet {
             approve_telnet_for(&ctx, &host.settings, &host.id.0.to_string())?;
+        }
+        if approve_launch {
+            approve_launch_for(&ctx, &host.settings)?;
         }
         if approve_login_script {
             approve_login_scripts(&ctx, [&host.settings])?;
@@ -248,6 +262,28 @@ pub(crate) fn approve_commands<'a>(ctx: &Ctx, settings: impl IntoIterator<Item =
         if let Some(Proxy::Command { argv }) = &s.proxy {
             store.approve_command(&sshcraft_store::store::command_digest(argv))?;
         }
+    }
+    Ok(())
+}
+
+/// Allows the launch actions `settings` name, for the snippets' current texts; only the user can.
+pub(crate) fn approve_launch_for(ctx: &Ctx, settings: &ConnectionSettings) -> Result<(), CommandError> {
+    let Some(ids) = settings.launch.as_ref().filter(|ids| !ids.is_empty()) else { return Ok(()) };
+    if !ctx.caller.is_user() {
+        return Ok(());
+    }
+    let vault = ctx.session.vault()?;
+    let store = ctx.session.store();
+    let snippets = sshcraft_store::snippets::list(&vault, &store)?;
+    let texts: Vec<String> = ids
+        .iter()
+        .take(sshcraft_model::launch::MAX_LAUNCH)
+        .filter_map(|id| snippets.iter().find(|s| s.id == *id))
+        .map(|s| s.content.clone())
+        .filter(|t| sshcraft_model::placeholders::find(t).is_empty())
+        .collect();
+    if !texts.is_empty() {
+        store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(&texts)))?;
     }
     Ok(())
 }
@@ -294,6 +330,9 @@ pub(crate) fn check_login_script(command: &'static str, settings: &ConnectionSet
     }
     if let Some(p) = &settings.persistence {
         sshcraft_model::persist::check(&p.name).map_err(|e| CommandError::bad_params(command, e.to_string()))?;
+    }
+    if settings.launch.as_ref().is_some_and(|l| l.len() > sshcraft_model::launch::MAX_LAUNCH) {
+        return Err(CommandError::bad_params(command, "at most 8 launch actions"));
     }
     if let Some(c) = &settings.container {
         sshcraft_model::container::check(c).map_err(|e| CommandError::bad_params(command, e.to_string()))?;

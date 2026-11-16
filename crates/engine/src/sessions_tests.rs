@@ -2539,3 +2539,68 @@ async fn listed_containers_are_checked() {
     assert_eq!(names, vec!["web".to_string(), "db_1".to_string()]);
     assert!(f.server.received_commands().contains(&"docker ps --format '{{.Names}}'".to_owned()));
 }
+
+mod launch {
+    use super::*;
+    use sshcraft_model::model::SnippetId;
+    use sshcraft_store::snippets::Snippet;
+
+    /// A snippet with `content` and the host launching it; returns the snippet's text.
+    fn launching(f: &Fixture, content: &str) -> String {
+        let snippet =
+            Snippet { id: SnippetId::new(), name: "start".into(), package: String::new(), content: content.into(), default_targets: Vec::new() };
+        let store = f.store.lock().unwrap();
+        sshcraft_store::snippets::save(&f.vault, &store, &snippet).unwrap();
+        let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+        host.settings.launch = Some(vec![snippet.id]);
+        store.upsert_host(&host).unwrap();
+        content.to_owned()
+    }
+
+    fn allow(f: &Fixture, texts: &[String]) {
+        let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(texts));
+        f.store.lock().unwrap().approve_command(&digest).unwrap();
+    }
+
+    async fn output_after(sink: &RecordingSink, wait: Duration) -> String {
+        tokio::time::sleep(wait).await;
+        sink.data_text()
+    }
+
+    #[tokio::test]
+    async fn an_allowed_launch_action_is_typed_once_on_connect() {
+        let f = fixture(true).await;
+        let text = launching(&f, "echo launched-ok");
+        allow(&f, &[text]);
+        let (_tab, sink) = connected_tab(&f).await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !sink.data_text().contains("echo launched-ok") {
+            assert!(tokio::time::Instant::now() < deadline, "not typed: {}", sink.data_text());
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let out = output_after(&sink, Duration::from_millis(300)).await;
+        assert_eq!(out.matches("echo launched-ok").count(), 1, "once: {out}");
+    }
+
+    #[tokio::test]
+    async fn a_launch_action_from_elsewhere_is_not_typed() {
+        let f = fixture(true).await;
+        launching(&f, "echo not-allowed-here");
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo not-allowed-here"), "{out}");
+        assert!(out.contains("launch actions that are not allowed"), "the terminal says why: {out}");
+    }
+
+    #[tokio::test]
+    async fn a_changed_snippet_needs_a_new_approval() {
+        let f = fixture(true).await;
+        let old = launching(&f, "echo old-text");
+        allow(&f, &[old]);
+        // The snippet changes (through sync, say): its new text was never allowed.
+        launching(&f, "echo new-text");
+        let (_tab, sink) = connected_tab(&f).await;
+        let out = output_after(&sink, Duration::from_millis(400)).await;
+        assert!(!out.contains("echo new-text") && !out.contains("echo old-text"), "{out}");
+    }
+}

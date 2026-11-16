@@ -788,6 +788,37 @@ fn login_script(ctx: &Context, host_id: HostId, shared: &Shared) -> Option<crate
     Some(crate::login_script::LoginScript::new(steps, std::time::Instant::now()))
 }
 
+/// The texts of the host's launch actions, each followed by Enter; `None` without any, or when
+/// they are not allowed on this device (the terminal says so), or the vault is locked.
+fn launch_actions(ctx: &Context, host_id: HostId, shared: &Shared) -> Option<Vec<u8>> {
+    let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
+    let host = store.list_hosts().ok()?.into_iter().find(|h| h.id == host_id)?;
+    let groups = store.list_groups().ok()?;
+    let ids = sshcraft_model::launch::launch_for(&host, &groups).filter(|ids| !ids.is_empty())?;
+    let snippets = sshcraft_store::snippets::list(ctx.vault.as_ref()?, &store).ok()?;
+    let texts: Vec<String> = ids
+        .iter()
+        .take(sshcraft_model::launch::MAX_LAUNCH)
+        .filter_map(|id| snippets.iter().find(|s| s.id == *id))
+        .map(|s| s.content.clone())
+        .collect();
+    // A snippet with blanks to fill needs the user: it is not typed by itself.
+    let texts: Vec<String> = texts.into_iter().filter(|t| sshcraft_model::placeholders::find(t).is_empty()).collect();
+    if texts.is_empty() {
+        return None;
+    }
+    let digest = sshcraft_store::store::command_digest(&sshcraft_model::launch::approval_argv(&texts));
+    if !store.command_approved(&digest).unwrap_or(false) {
+        drop(store);
+        local_note(
+            shared,
+            "This host has launch actions that are not allowed on this device yet. Open the host, tick Allow the launch actions on this device, and save.",
+        );
+        return None;
+    }
+    Some(texts.iter().flat_map(|t| t.trim_end_matches(['\r', '\n']).bytes().chain(std::iter::once(b'\r'))).collect())
+}
+
 async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
     let sink = shared.sink.clone();
     let mut attempt = 0u32;
@@ -811,6 +842,16 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                     SessionTarget::Host { host_id } => login_script(&ctx, *host_id, &shared),
                     _ => None,
                 };
+                // Launch actions on the first connect only, after the login script.
+                let mut launch = match &target {
+                    SessionTarget::Host { host_id } if !ever_connected => launch_actions(&ctx, *host_id, &shared),
+                    _ => None,
+                };
+                if script.is_none()
+                    && let Some(bytes) = launch.take()
+                {
+                    let _sent = script_writer.write(&bytes).await;
+                }
                 ever_connected = true;
                 attempt = 0;
                 let mut reason = Disconnect::Lost("connection closed".into());
@@ -844,6 +885,11 @@ async fn run(ctx: Arc<Context>, target: SessionTarget, shared: Shared) {
                                     local_note(&shared, "The login script stopped: a step did not see its text within 15 seconds.");
                                 }
                                 Some(crate::login_script::Feed::Nothing) | None => {}
+                            }
+                            if script.as_ref().is_some_and(crate::login_script::LoginScript::finished)
+                                && let Some(bytes) = launch.take()
+                            {
+                                let _sent = script_writer.write(&bytes).await;
                             }
                         }
                         Some(ShellEvent::Ended(r)) => {

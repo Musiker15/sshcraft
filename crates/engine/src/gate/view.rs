@@ -207,6 +207,7 @@ pub fn signs_in_with_stored(settings: &ConnectionSettings) -> bool {
         || matches!(settings.proxy, Some(sshcraft_model::model::Proxy::Command { .. }))
         || settings.password_ref.is_some()
         || settings.login_script.as_ref().is_some_and(|s| !s.is_empty())
+        || settings.launch.as_ref().is_some_and(|l| !l.is_empty())
         || [&settings.before_connect, &settings.after_disconnect].into_iter().flatten().any(|s| sshcraft_model::hooks::commands(s).next().is_some())
 }
 

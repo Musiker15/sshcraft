@@ -135,6 +135,9 @@ pub struct HostForm {
     /// The protocol as the form opened, and whether to allow Telnet on this device with this save.
     pub opened_protocol: Option<sshcraft_model::model::Protocol>,
     pub allow_telnet: bool,
+    /// The launch actions as the form opened, and whether to allow them on this device.
+    pub opened_launch: Option<Vec<sshcraft_model::model::SnippetId>>,
+    pub allow_launch: bool,
 }
 
 impl HostForm {
@@ -151,6 +154,8 @@ impl HostForm {
             allow_x11: false,
             opened_protocol: host.settings.protocol,
             allow_telnet: false,
+            opened_launch: host.settings.launch.clone(),
+            allow_launch: false,
             host,
             editing,
             password: String::new(),
@@ -233,6 +238,9 @@ pub struct GroupForm {
     /// The protocol as the form opened, and whether to allow Telnet on this device with this save.
     pub opened_protocol: Option<sshcraft_model::model::Protocol>,
     pub allow_telnet: bool,
+    /// The launch actions as the form opened, and whether to allow them on this device.
+    pub opened_launch: Option<Vec<sshcraft_model::model::SnippetId>>,
+    pub allow_launch: bool,
 }
 
 fn split_tags(text: &str) -> Vec<String> {
@@ -317,6 +325,42 @@ fn session_rows(app: &mut SshcraftApp, ui: &mut Ui, s: &mut ConnectionSettings, 
         persistence_row(ui, &mut s.persistence);
         protocol_row(ui, &mut s.protocol);
     });
+}
+
+/// Snippets typed once when a session first connects, at most 8; launch actions that were there
+/// when the form opened may have come from elsewhere and need the box to run here.
+fn launch_rows(
+    app: &SshcraftApp,
+    ui: &mut Ui,
+    value: &mut Option<Vec<sshcraft_model::model::SnippetId>>,
+    opened: &Option<Vec<sshcraft_model::model::SnippetId>>,
+    allow: &mut bool,
+) {
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new(tr("Launch actions")).strong());
+    ui.label(egui::RichText::new(tr("Snippets typed once when a session starts, not again after a reconnect.")).small());
+    let chosen = value.get_or_insert_with(Vec::new);
+    egui::ScrollArea::vertical().id_salt("sshcraft-launch").max_height(120.0).show(ui, |ui| {
+        for row in &app.data.snippets {
+            let Ok(uuid) = uuid::Uuid::parse_str(&row.id) else { continue };
+            let id = sshcraft_model::model::SnippetId(uuid);
+            let mut on = chosen.contains(&id);
+            let full = chosen.len() >= sshcraft_model::launch::MAX_LAUNCH;
+            if ui.add_enabled(on || !full, egui::Checkbox::new(&mut on, crate::widgets::visible(&row.name))).changed() {
+                if on {
+                    chosen.push(id);
+                } else {
+                    chosen.retain(|c| *c != id);
+                }
+            }
+        }
+    });
+    if chosen.is_empty() {
+        *value = None;
+    } else if value == opened {
+        ui.checkbox(allow, tr("Allow the launch actions on this device"))
+            .on_hover_text(tr("Launch actions that came through sync, a share or an import are not typed until allowed here."));
+    }
 }
 
 /// A container on the host to open instead of its shell: runtime, name (picked from the host's
@@ -909,6 +953,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 steps_editor(ui, tr("Before connecting"), "before", Some(form.host.id), &mut form.host.settings.before_connect);
                 steps_editor(ui, tr("After the session"), "after", Some(form.host.id), &mut form.host.settings.after_disconnect);
                 session_rows(app, ui, &mut form.host.settings, form.editing.then_some(form.host.id));
+                launch_rows(app, ui, &mut form.host.settings.launch, &form.opened_launch, &mut form.allow_launch);
                 if form.host.settings.protocol == Some(Telnet) && form.opened_protocol == Some(Telnet) {
                     ui.checkbox(&mut form.allow_telnet, tr("Allow Telnet on this device"))
                         .on_hover_text(tr("Telnet that came through sync, a share or an import is not used until allowed here."));
@@ -953,6 +998,8 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                         // Switched on here, or allowed with the box below.
                         "approve_x11": form.host.settings.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
                         "approve_telnet": form.host.settings.protocol == Some(Telnet) && (form.opened_protocol != Some(Telnet) || form.allow_telnet),
+                        // Picked here, or allowed with the box below.
+                        "approve_launch": form.host.settings.launch.as_ref().is_some_and(|l| !l.is_empty()) && (form.host.settings.launch != form.opened_launch || form.allow_launch),
                         "approve_login_script": form.allow_script && form.host.settings.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                         "approve_secret_ref": form.host.settings.password_ref.is_some() && form.host.settings.password_ref != form.opened_ref,
                     }),
@@ -1033,6 +1080,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 steps_editor(ui, tr("Before connecting"), "before", None, &mut form.group.defaults.before_connect);
                 steps_editor(ui, tr("After the session"), "after", None, &mut form.group.defaults.after_disconnect);
                 session_rows(app, ui, &mut form.group.defaults, None);
+                launch_rows(app, ui, &mut form.group.defaults.launch, &form.opened_launch, &mut form.allow_launch);
                 if form.group.defaults.protocol == Some(Telnet) && form.opened_protocol == Some(Telnet) {
                     ui.checkbox(&mut form.allow_telnet, tr("Allow Telnet on this device"))
                         .on_hover_text(tr("Telnet that came through sync, a share or an import is not used until allowed here."));
@@ -1074,6 +1122,8 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                         // Switched on here, or allowed with the box below.
                         "approve_x11": form.group.defaults.x11 == Some(true) && (form.opened_x11 != Some(true) || form.allow_x11),
                         "approve_telnet": form.group.defaults.protocol == Some(Telnet) && (form.opened_protocol != Some(Telnet) || form.allow_telnet),
+                        // Picked here, or allowed with the box below.
+                        "approve_launch": form.group.defaults.launch.as_ref().is_some_and(|l| !l.is_empty()) && (form.group.defaults.launch != form.opened_launch || form.allow_launch),
                         "approve_login_script": form.allow_script && form.group.defaults.login_script.as_ref().is_some_and(|s| !s.is_empty()),
                     }),
                     Box::new(move |app, result| {
@@ -1116,6 +1166,8 @@ impl GroupForm {
             allow_x11: false,
             opened_protocol: group.defaults.protocol,
             allow_telnet: false,
+            opened_launch: group.defaults.launch.clone(),
+            allow_launch: false,
             group,
             editing,
             password: String::new(),

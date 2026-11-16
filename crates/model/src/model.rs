@@ -81,6 +81,9 @@ pub struct ConnectionSettings {
     /// Forward X11 to this computer's display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x11: Option<bool>,
+    /// Snippets typed once when a session first connects; only once allowed on this device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<Vec<SnippetId>>,
     /// A container on the host to open instead of the host's shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<crate::container::Container>,
@@ -478,6 +481,7 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         x11: levels.iter().find_map(|l| l.settings.x11),
         persistence: levels.iter().find_map(|l| l.settings.persistence.clone()),
         container: levels.iter().find_map(|l| l.settings.container.clone()),
+        launch: levels.iter().find_map(|l| l.settings.launch.clone()),
         protocol: levels.iter().find_map(|l| l.settings.protocol),
         // Worked out for each copy, never inherited.
         credentials_from_member: None,

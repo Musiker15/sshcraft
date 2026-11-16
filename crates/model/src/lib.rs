@@ -8,6 +8,7 @@ pub mod container;
 pub mod forward;
 pub mod hooks;
 pub mod keytypes;
+pub mod launch;
 pub mod login_script;
 pub mod logtext;
 pub mod model;
