@@ -102,3 +102,11 @@ amber when a program waits for you, red when one failed, blue when one finished,
 while one works. Hover the dot for the program's own message. A program that starts waiting
 for you also sends one notification. Typing in the terminal clears finished and failed
 programs; a new prompt clears the others.
+
+## Hex view
+
+*Hex view of what the session received* (command palette, or a shortcut of your own) opens a
+panel over the lower half of the terminal. It lists every byte that arrived since it opened as
+offset, hex and printable text, which helps when a program draws odd characters or a device
+sends something unexpected. Bytes that are not printable ASCII show as `.`. The panel keeps at
+most the last 64 KiB and nothing while it is closed; closing it drops what it held.

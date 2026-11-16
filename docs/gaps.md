@@ -11,6 +11,7 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 2a | A second start of the app hands over only an `ssh://` link or `--open-host`; started plainly, it says SSHCraft is already open instead of bringing the window forward | later |
 | 2b | `ssh://` links do not reach SSHCraft on macOS: macOS hands links over as Apple Events, which winit does not pass on, so no handler is registered there | later, needs a Mac to try |
 | 2c | No portable mode: the vault's master key lives in the system keyring, so a copy on a USB stick needs a passphrase unlock before the engine starts | later |
+| 2f | No images in the terminal (Sixel, Kitty, iTerm2) and no file transfer through the terminal (ZMODEM, trzsz); files go over SFTP once S1 is there | not planned for now |
 | 2e | No Mosh and no Eternal Terminal: both would need their own UDP or TCP protocol beside SSH and a server program; tmux sessions that stay cover a dropped connection | not planned for now |
 | 2d | No secure keyboard entry on macOS: it needs `EnableSecureEventInput`, reachable only through `unsafe` outside `crates/fido`, and a Mac to try | later |
 | 3 | The Windows x64 MSI is tried by hand (installs and runs); the Linux packages, the Flatpak sandbox and the CLI on `PATH` are not yet | later |

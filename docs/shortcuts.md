@@ -29,6 +29,19 @@ Ctrl+R, Ctrl+C, Alt+..., AltGr) reaches the server unchanged.
 | Ctrl+Shift+H | Hint mode: label URLs, paths, addresses and hashes to copy them |
 | Ctrl+Shift+Y | Paste again from the recent pastes |
 | Ctrl+Shift+E | Compose field under the terminal |
+| Ctrl+Shift+O | Quick connect (`user@host:port`) |
+
+*Hex view of what the session received* has no shortcut of its own; give it one below or open it
+from the command palette.
+
+## Dropdown window
+
+*Settings › Appearance › Dropdown window* takes a shortcut that works from any program: it shows
+SSHCraft at the top of the screen and focuses it, and when SSHCraft is already in front it hides
+the window again. It is off until you set one, for example ``Ctrl+` `` or `Ctrl+Alt+T`. The
+shortcut only shows and hides the window, it never types into a session. If another program
+already holds the combination, or the desktop does not allow global shortcuts (Wayland), SSHCraft
+says so and goes on without it.
 
 Panes and broadcast are described in [workspaces.md](workspaces.md), the sidebar and the keys of the
 completion list in [snippets.md](snippets.md), bookmarks in [session-logs.md](session-logs.md),
