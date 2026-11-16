@@ -15,4 +15,6 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 6 | The app lock needs Windows Hello: Touch ID on macOS (through a safe wrapper such as `robius-authentication`) and a way on Linux and FreeBSD are not there yet | later, needs a Mac to try |
 | 7 | No SFTP | S1 |
 | 7a | Releases are unsigned on Windows and have no macOS packages: there is no certificate or Apple account, and the shared release workflow cannot leave a platform out or unsigned, so a release is assembled by hand from a dry run ([releasing.md](releasing.md#unsigned-releases)) | needs the shared workflow |
+| 9 | The output of a command cannot be folded: the emulator's grid cannot hide lines; jumping, the gutter and copying the output are there | later |
+| 10 | Shell integration is not set up on connect: every way found either leaves files on the server or replaces how the login shell starts; [terminal.md](terminal.md#shell-integration) has the lines to add by hand | later |
 | 8 | No server image in a registry: the shared release workflow pushes none, so the image is built from `packaging/docker/Dockerfile` | needs the shared workflow |

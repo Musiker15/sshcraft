@@ -47,6 +47,14 @@ it was allowed on this device. Saving it in the window or importing it from the 
 `~/.ssh/config` allows it; one from sync, a share or an agent is shown in full and asked about
 first, and a changed command line asks again. Agents cannot set one at all.
 
+## Login scripts
+
+A login script types lines into a session with the user's credentials, so it runs only once the
+user allowed exactly its steps on this device (the digest of the steps in `approved_commands`,
+like a proxy command). Saving it in the window with a change, or ticking the box in the form,
+allows it; a script from sync, a share or an agent does not run until then, and agents can never
+allow one. Its texts are bounded and may hold no control characters.
+
 ## Passwords from password managers, one-time codes, the lock
 
 A password reference names an item in the user's password manager; it is fetched by that
@@ -107,6 +115,17 @@ What a server prints may not reach beyond the terminal on its own:
   bracketed paste early nor type an escape sequence of its own.
 - **Broadcast:** answers the terminal gives to the server by itself (cursor position, device
   attributes, focus) go only to their own session, never to the other panes.
+- **Shell integration (OSC 133):** the terminal remembers at most 1000 commands and copies at
+  most 1 MiB of output; the searches for prompt lines are bounded, so many marks or a long
+  history cannot make a frame slow.
+- **Desktop notifications (OSC 9, OSC 777):** title and body lose control and bidi characters
+  and are cut to 128 and 1024 characters. The title always starts with the host's name, each
+  tab shows at most one every 5 seconds, and the setting turns them off.
+- **Program status (OSC 7501):** a report that breaks any rule of the protocol is dropped whole;
+  at most 256 records per terminal. The only answer is the fixed capability reply, with the
+  terminator the question used.
+- **Triggers and highlights:** patterns are compiled with a memory limit and run only on the
+  visible rows (highlights) or once per finished line (triggers).
 
 ## Questions in the window
 

@@ -33,6 +33,20 @@ where and how:
   completion.
 - A default host that was deleted is named in the dialog and left out.
 
+### Placeholders
+
+`{{name}}` in a snippet asks for a value when it runs; `{{name:default}}` offers one, which you
+may change or clear. The run dialog lists each name once; **Run** stays off until every
+placeholder without a default has a value. Values are typed exactly as you enter them, nothing
+interprets them on your computer. Write `{{{{` for a literal `{{`. A snippet has at most 16
+different placeholders; names use letters, digits, `-` and `_`.
+
+### The snippet bar
+
+Tick **On the bar** next to a snippet to get a button for it above every terminal (up to 12).
+A click runs it in that pane at once, or opens the run dialog for that pane when the snippet has
+placeholders.
+
 ## Terminal sidebar
 
 Ctrl+Shift+S (or the panel button at the right of the tab strip) shows snippets and the history

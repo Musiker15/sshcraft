@@ -1,6 +1,6 @@
 # Target app parity: Termius
 
-> **Last updated:** 2026-11-15 · **Target:** Termius (desktop)
+> **Last updated:** 2026-11-16 · **Target:** Termius (desktop)
 
 Where SSHCraft stands against Termius, area by area, after the rebuild (R1 to R7). The full comparison
 with other clients, with sources, is the German
@@ -20,11 +20,13 @@ with other clients, with sources, is the German
 | Hosts and groups: nesting, tags, icons, import, export | yes | yes |
 | Keys: generate, import, passphrase, authorized_keys, certificates, FIDO2, device-bound keys | yes | yes (FIDO2 and device-bound keys on Windows) |
 | Port forwarding: local, remote, dynamic | yes | yes |
-| Snippets, history, completion | yes | yes |
+| Snippets, history, completion | yes | yes, with placeholders and a snippet bar |
+| Shell integration (command marks and exit codes), notification when a command ends, triggers and highlights, hint mode, compose field, login scripts, program status of agents | not compared yet | yes (F3); login scripts only after they were allowed on the device |
+| Colour, badge and theme per host or group | not compared yet | yes |
 | Session logs | yes | yes |
 | Sync | Termius cloud, subscription | own server, end-to-end encrypted, free |
 | Sharing | team plans | free on the own server |
 | AI agents | AI features in the app | MCP and command line with rights per action |
-| Platforms | Windows, macOS, Linux | Windows, macOS, Linux, FreeBSD; packages, no release yet |
+| Platforms | Windows, macOS, Linux | Windows, Linux, FreeBSD since v0.1.0 (unsigned); macOS builds, not released yet |
 | SFTP | yes | S1, after the first release |
 | Mobile | yes | M1 to M3, after the first release |

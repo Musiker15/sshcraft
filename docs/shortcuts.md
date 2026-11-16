@@ -25,9 +25,14 @@ Ctrl+R, Ctrl+C, Alt+..., AltGr) reaches the server unchanged.
 | Ctrl+Shift+B | Broadcast on or off |
 | Ctrl+Shift+S | Snippets and history beside the terminal |
 | Ctrl+Shift+L | Bookmark in the session log of the focused pane (if it records) |
+| Ctrl+Shift+Up, Ctrl+Shift+Down | Previous and next command (with shell integration) |
+| Ctrl+Shift+H | Hint mode: label URLs, paths, addresses and hashes to copy them |
+| Ctrl+Shift+Y | Paste again from the recent pastes |
+| Ctrl+Shift+E | Compose field under the terminal |
 
 Panes and broadcast are described in [workspaces.md](workspaces.md), the sidebar and the keys of the
-completion list in [snippets.md](snippets.md), bookmarks in [session-logs.md](session-logs.md).
+completion list in [snippets.md](snippets.md), bookmarks in [session-logs.md](session-logs.md),
+commands, hint mode and the compose field in [terminal.md](terminal.md).
 
 ## Your own shortcuts
 
