@@ -43,7 +43,12 @@ fn inputs() -> Vec<(&'static str, Vec<u8>)> {
     while cjk.len() < 4 << 20 {
         cjk.extend_from_slice("日本語のテキスト 👩‍💻 e\u{301} 한국어 中文 ✓\n".as_bytes());
     }
-    vec![("ascii", ascii), ("sgr", sgr), ("cjk", cjk)]
+    // A server that floods shell marks after a long history: each mark must cost little.
+    let mut marks: Vec<u8> = b"x\n".repeat(3000);
+    while marks.len() < 4 << 20 {
+        marks.extend_from_slice(b"\x1b]133;C\x07");
+    }
+    vec![("ascii", ascii), ("sgr", sgr), ("cjk", cjk), ("osc133", marks)]
 }
 
 #[test]

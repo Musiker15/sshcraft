@@ -60,6 +60,18 @@ Limits on purpose:
 - Files over 10 MiB are refused; broken lines are skipped and listed, never the whole import.
 - Key files named in a session (PuTTY, SecureCRT) are pointed out; import them under *Keys*.
 
+## Colour, badge and theme
+
+A host or group can give its terminals a look of their own, so a production server is hard to
+mistake:
+
+- **Tab colour:** a line under the tab.
+- **Badge:** up to 16 characters, like `PROD`, on the tab and in the terminal's top right corner.
+- **Terminal theme:** dark or light, in place of the app's terminal theme.
+
+Each of the three is inherited on its own from the nearest group that sets it. The JSON export
+keeps them.
+
 ## Trash and earlier versions
 
 A deleted host, group (with its subgroups and their hosts), key or snippet goes to *Settings ›

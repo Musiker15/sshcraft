@@ -48,6 +48,8 @@ pub fn app_on_with(dir: &Path, configure: impl FnOnce(&mut SessionConfig)) -> (S
     let mut app = SshcraftApp::new(session.clone(), &ctx);
     // Never the real settings folder: the agent link of a test lives in its own.
     app.link.dir = Some(dir.join("link"));
+    // Never a real notification on the desktop of whoever runs the tests.
+    app.notifier = Box::new(crate::notify::Recording::default());
     app.keep_runtime(runtime);
     (app, session, ctx)
 }

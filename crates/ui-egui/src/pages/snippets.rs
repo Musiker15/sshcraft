@@ -81,6 +81,8 @@ pub struct SnippetRun {
     pub paste_only: bool,
     /// Default hosts that were deleted, by count (named in the dialog).
     pub missing: usize,
+    /// Values for the snippet's placeholders, by name.
+    pub values: BTreeMap<String, String>,
 }
 
 /// The sidebar beside the terminal: its search and the history of the focused pane.
@@ -117,7 +119,27 @@ pub fn open_run(app: &mut SshcraftApp, snippet: &str) {
             picks.push(pick);
         }
     }
-    app.ui.snippet_run = Some(SnippetRun { snippet: row.id, picks, paste_only: false, missing });
+    let values = sshcraft_model::placeholders::find(&row.content).into_iter().map(|p| (p.name, p.default.unwrap_or_default())).collect();
+    app.ui.snippet_run = Some(SnippetRun { snippet: row.id, picks, paste_only: false, missing, values });
+}
+
+/// Runs `snippet` in session `id` from the bar above its terminal: at once, or through the run
+/// dialog with this pane chosen when the snippet has placeholders to fill.
+pub fn run_from_bar(app: &mut SshcraftApp, snippet: &str, id: SessionId) {
+    let Some(row) = app.data.snippets.iter().find(|s| s.id == snippet).cloned() else { return };
+    if sshcraft_model::placeholders::find(&row.content).is_empty() {
+        type_into(app, id, &row.content, true);
+        return;
+    }
+    open_run(app, snippet);
+    if let Some(job) = app.ui.snippet_run.as_mut() {
+        job.picks = vec![Pick::Open(id)];
+    }
+}
+
+/// Whether `snippet` is on the bar above the terminals.
+pub fn pinned(app: &SshcraftApp, snippet: &str) -> bool {
+    app.data.settings.terminal.snippet_bar.iter().any(|s| s == snippet)
 }
 
 /// Types `content` into session `id` (in a bracketed paste if that terminal asked for one).
@@ -127,7 +149,10 @@ pub fn type_into(app: &SshcraftApp, id: SessionId, content: &str, run: bool) {
 }
 
 fn run(app: &mut SshcraftApp, job: &SnippetRun) {
-    let Some(row) = app.data.snippets.iter().find(|s| s.id == job.snippet).cloned() else { return };
+    let Some(mut row) = app.data.snippets.iter().find(|s| s.id == job.snippet).cloned() else { return };
+    // The run button stays off until every placeholder has a value.
+    let Ok(filled) = sshcraft_model::placeholders::fill(&row.content, &job.values) else { return };
+    row.content = filled;
     let new: Vec<HostId> = job.picks.iter().filter_map(|p| if let Pick::New(h) = p { Some(*h) } else { None }).collect();
     for pick in &job.picks {
         if let Pick::Open(session) = pick {
@@ -157,6 +182,7 @@ enum RowAction {
     Run,
     Edit,
     Delete,
+    Pin,
 }
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
@@ -203,6 +229,10 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
                     if ui.button(tr("Delete")).clicked() {
                         action = Some((row.clone(), RowAction::Delete));
                     }
+                    let mut on_bar = pinned(app, &row.id);
+                    if ui.checkbox(&mut on_bar, tr("On the bar")).changed() {
+                        action = Some((row.clone(), RowAction::Pin));
+                    }
                 });
             }
             ui.add_space(8.0);
@@ -210,6 +240,16 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     });
     match action {
         Some((row, RowAction::Run)) => open_run(app, &row.id),
+        Some((row, RowAction::Pin)) => {
+            let on = pinned(app, &row.id);
+            crate::pages::settings::save(app, |s| {
+                if on {
+                    s.terminal.snippet_bar.retain(|id| *id != row.id);
+                } else if s.terminal.snippet_bar.len() < sshcraft_engine::settings::MAX_SNIPPET_BAR {
+                    s.terminal.snippet_bar.push(row.id.clone());
+                }
+            });
+        }
         Some((row, RowAction::Edit)) => {
             app.ui.snippet_form =
                 Some(SnippetForm { id: Some(row.id), name: row.name, package: row.package, content: row.content, targets: row.default_targets });
@@ -354,10 +394,26 @@ fn run_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 toggle(ui, &mut job.picks, Pick::New(*host), &visible(name));
             }
         });
+        if !job.values.is_empty() {
+            ui.label(egui::RichText::new(tr("Values")).strong());
+            egui::Grid::new("sshcraft-snippet-values").num_columns(2).show(ui, |ui| {
+                for (name, value) in &mut job.values {
+                    ui.label(visible(name));
+                    ui.add(egui::TextEdit::singleline(value).desired_width(320.0));
+                    ui.end_row();
+                }
+            });
+        }
         ui.checkbox(&mut job.paste_only, tr("Paste only"));
+        let content = app.data.snippets.iter().find(|s| s.id == job.snippet).map(|s| s.content.clone()).unwrap_or_default();
+        // A placeholder without a default needs a value; one with a default may be left empty.
+        let filled = sshcraft_model::placeholders::find(&content)
+            .iter()
+            .filter(|p| p.default.is_none())
+            .all(|p| job.values.get(&p.name).is_some_and(|v| !v.is_empty()));
         ui.horizontal(|ui| {
             let count = job.picks.len().to_string();
-            go = ui.add_enabled(!job.picks.is_empty(), egui::Button::new(trf("Run on {count}", &[("count", &count)]))).clicked();
+            go = ui.add_enabled(!job.picks.is_empty() && filled, egui::Button::new(trf("Run on {count}", &[("count", &count)]))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }

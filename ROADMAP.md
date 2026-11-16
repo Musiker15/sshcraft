@@ -21,7 +21,8 @@ detail is in [docs/roadmap.md](docs/roadmap.md), the open work in [docs/gaps.md]
 | V1 | First release v0.1.0: packages for Windows, Linux and FreeBSD, server program, SBOM; unsigned and without macOS for now | done |
 | M1 to M3 | Android, iOS and iPadOS | later |
 | S1 | SFTP | after V1 |
-| F3 to F7 | Terminal comfort, connections, persistent sessions, terminal extras, targets and automation | after V1 |
+| F3 | Terminal comfort: shell integration, notifications, triggers, hints, compose, snippet placeholders, login scripts, program status | done |
+| F4 to F7 | Connections, persistent sessions, terminal extras, targets and automation | open |
 
 A database client is planned as a separate sister app after V1; it reaches server databases
 through a tunnel that SSHCraft opens for it.

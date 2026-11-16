@@ -28,7 +28,7 @@ const MAX_FONT_FAMILY: usize = 200;
 pub const TERMINAL_TYPES: [&str; 7] = ["xterm-256color", "xterm", "screen-256color", "tmux-256color", "linux", "vt220", "vt100"];
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 23] = [
+pub const SHORTCUT_ACTIONS: [&str; 29] = [
     "palette",
     "newTab",
     "closeTab",
@@ -48,6 +48,12 @@ pub const SHORTCUT_ACTIONS: [&str; 23] = [
     "settingsPage",
     "copy",
     "paste",
+    "prevCommand",
+    "nextCommand",
+    "copyOutput",
+    "showHints",
+    "pasteHistory",
+    "compose",
     "snippetsPage",
     "forwardingPage",
     "logsPage",
@@ -211,7 +217,69 @@ pub struct Terminal {
     /// How often a terminal tries to reconnect after its connection dropped, within
     /// [`RECONNECT_ATTEMPTS`]; 0 turns reconnecting off. Port forwarding always tries again.
     pub reconnect_attempts: u32,
+    /// A command that ran at least this many seconds and ended while the window was in the
+    /// background shows a desktop notification, within [`NOTIFY_AFTER_SECS`]; 0 turns it off.
+    pub notify_after_secs: u32,
+    /// Servers may show desktop notifications (OSC 9, OSC 777), always with the host's name.
+    pub server_notifications: bool,
+    /// Words or patterns coloured wherever they appear in a terminal, at most [`MAX_PATTERNS`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub highlights: Vec<Highlight>,
+    /// Patterns that act when an output line matches, at most [`MAX_PATTERNS`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<Trigger>,
+    /// Snippets (by id) shown as buttons above each terminal, in order, at most
+    /// [`MAX_SNIPPET_BAR`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub snippet_bar: Vec<String>,
 }
+
+/// The most snippets on the bar above a terminal.
+pub const MAX_SNIPPET_BAR: usize = 12;
+
+/// Highlights and triggers each keep at most this many entries.
+pub const MAX_PATTERNS: usize = 32;
+/// The longest pattern of a highlight or trigger, in characters.
+pub const MAX_PATTERN_CHARS: usize = 256;
+/// The most memory one compiled pattern may take.
+pub const PATTERN_SIZE_LIMIT: usize = 1 << 20;
+
+/// A regular expression coloured in the terminal, case-insensitive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Highlight {
+    pub pattern: String,
+    /// The text colour, red, green, blue.
+    pub color: [u8; 3],
+}
+
+/// What a trigger does when a line matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TriggerAction {
+    /// A notification with the host's name, limited like a server's.
+    Notify,
+    /// The tab's dot, as a bell would.
+    Bell,
+}
+
+/// A regular expression that acts once for each output line it matches, case-insensitive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Trigger {
+    pub pattern: String,
+    pub action: TriggerAction,
+}
+
+/// Compiles a highlight or trigger pattern within the limits; `None` when it is empty, too long,
+/// too large or no valid regular expression.
+pub fn compile_pattern(pattern: &str) -> Option<regex::Regex> {
+    if pattern.is_empty() || pattern.chars().count() > MAX_PATTERN_CHARS {
+        return None;
+    }
+    regex::RegexBuilder::new(pattern).case_insensitive(true).size_limit(PATTERN_SIZE_LIMIT).build().ok()
+}
+
+/// The allowed range of `terminal.notify_after_secs`.
+pub const NOTIFY_AFTER_SECS: std::ops::RangeInclusive<u32> = 0..=86_400;
 
 /// The allowed range of `terminal.reconnect_attempts`.
 pub const RECONNECT_ATTEMPTS: std::ops::RangeInclusive<u32> = 0..=100;
@@ -227,6 +295,11 @@ impl Default for Terminal {
             autocomplete: true,
             local_shell: None,
             reconnect_attempts: 10,
+            notify_after_secs: 10,
+            server_notifications: true,
+            highlights: Vec::new(),
+            triggers: Vec::new(),
+            snippet_bar: Vec::new(),
         }
     }
 }
@@ -307,6 +380,14 @@ impl EngineSettings {
         self.general.trash_days = self.general.trash_days.clamp(*TRASH_DAYS.start(), *TRASH_DAYS.end());
         self.general.lock_after_minutes = self.general.lock_after_minutes.clamp(*LOCK_MINUTES.start(), *LOCK_MINUTES.end());
         self.terminal.reconnect_attempts = self.terminal.reconnect_attempts.clamp(*RECONNECT_ATTEMPTS.start(), *RECONNECT_ATTEMPTS.end());
+        self.terminal.notify_after_secs = self.terminal.notify_after_secs.clamp(*NOTIFY_AFTER_SECS.start(), *NOTIFY_AFTER_SECS.end());
+        self.terminal.highlights.retain(|h| compile_pattern(&h.pattern).is_some());
+        self.terminal.highlights.truncate(MAX_PATTERNS);
+        self.terminal.triggers.retain(|t| compile_pattern(&t.pattern).is_some());
+        self.terminal.triggers.truncate(MAX_PATTERNS);
+        let mut seen = std::collections::BTreeSet::new();
+        self.terminal.snippet_bar.retain(|id| !id.is_empty() && id.len() <= 64 && seen.insert(id.clone()));
+        self.terminal.snippet_bar.truncate(MAX_SNIPPET_BAR);
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

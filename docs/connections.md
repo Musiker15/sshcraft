@@ -135,6 +135,22 @@ names; only when the key of this connection is among them. *Settings › General
 switches it off. Keys known only by their fingerprint (from before this version) gain their key
 on the next connection.
 
+## Login scripts
+
+Some servers want input before the shell: a menu on a jump server, a question after login. A
+login script answers them. Each step waits for a text in the output (colours are ignored) and
+then sends a line and Enter, once. A step that does not see its text within 15 seconds stops
+the script, and the terminal says so.
+
+A login script runs commands with your credentials, so it is treated like a proxy command: it
+runs only once you allowed exactly these steps on this device. Writing or changing it in the
+host or group form allows it when you save. A script that came another way (sync, a share, an
+agent) does not run; the terminal says so until you tick **Allow this login script on this
+device** in the form and save. Agents can never allow one.
+
+Never put a password in a login script: it is stored as plain settings, not in the vault. Limits:
+16 steps, 256 characters to wait for, 1024 to send, no control characters.
+
 ## Agent forwarding
 
 Off unless switched on for a host or group. When on, the target (never a jump host) may use the

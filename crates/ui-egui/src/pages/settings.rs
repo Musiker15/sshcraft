@@ -65,6 +65,12 @@ pub struct SettingsView {
     /// The shells this device offers, fetched when the terminal section is first shown.
     #[serde(skip)]
     pub shells: Option<Vec<Value>>,
+    /// Highlights being edited, valid or not; only valid ones are saved.
+    #[serde(skip)]
+    pub highlights: Option<Vec<sshcraft_engine::settings::Highlight>>,
+    /// Triggers being edited, valid or not; only valid ones are saved.
+    #[serde(skip)]
+    pub triggers: Option<Vec<sshcraft_engine::settings::Trigger>>,
 }
 
 /// Saves `change` applied to the current settings; the page shows it at once.
@@ -260,6 +266,18 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             );
         });
         ui.end_row();
+        ui.label(tr("Notifications"));
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut t.notify_after_secs).range(sshcraft_engine::settings::NOTIFY_AFTER_SECS));
+                ui.label(
+                    egui::RichText::new(tr("seconds a command must run to notify when it ends in the background; 0 turns it off"))
+                        .color(tokens.text_dim),
+                );
+            });
+            ui.checkbox(&mut t.server_notifications, tr("Servers may show desktop notifications, always with the host's name"));
+        });
+        ui.end_row();
         ui.label(tr("History"));
         ui.checkbox(&mut t.history, tr("Keep the commands typed in terminals"));
         ui.end_row();
@@ -299,6 +317,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     if let Some(i) = remove {
         t.clipboard_hosts.remove(i);
     }
+    patterns(app, ui, &mut t);
     // The shell is kept as the engine has it; only a choice in the list changes it.
     let chosen = local_shell.and_then(|v| serde_json::from_value(v).ok());
     if chosen != t.local_shell {
@@ -313,6 +332,73 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         s.terminal = t;
         s.logs = logs;
     });
+}
+
+/// The editors of highlights and triggers. Rows are edited in a draft; the settings get the valid
+/// ones, so a pattern half typed does not vanish.
+fn patterns(app: &mut SshcraftApp, ui: &mut Ui, t: &mut sshcraft_engine::settings::Terminal) {
+    use sshcraft_engine::settings::{Highlight, MAX_PATTERNS, Trigger, TriggerAction, compile_pattern};
+    let tokens = Tokens::get(ui.ctx());
+    let highlights = app.ui.settings.highlights.get_or_insert_with(|| t.highlights.clone());
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("Highlights")).strong());
+    ui.label(egui::RichText::new(tr("Regular expressions coloured wherever they appear in a terminal, case-insensitive")).color(tokens.text_dim));
+    let mut remove = None;
+    for (i, h) in highlights.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut h.pattern).desired_width(260.0).hint_text(tr("Pattern")));
+            let mut color = crate::terminal::highlight::swatch(h.color);
+            if ui.color_edit_button_srgba(&mut color).changed() {
+                h.color = [color.r(), color.g(), color.b()];
+            }
+            if ui.button(tr("Remove")).clicked() {
+                remove = Some(i);
+            }
+            if compile_pattern(&h.pattern).is_none() {
+                ui.label(egui::RichText::new(tr("Not a valid pattern")).color(tokens.danger));
+            }
+        });
+    }
+    if let Some(i) = remove {
+        highlights.remove(i);
+    }
+    if highlights.len() < MAX_PATTERNS && ui.button(tr("Add a highlight")).clicked() {
+        highlights.push(Highlight { pattern: String::new(), color: [0xe5, 0xc0, 0x7b] });
+    }
+    t.highlights = highlights.iter().filter(|h| compile_pattern(&h.pattern).is_some()).cloned().collect();
+
+    let triggers = app.ui.settings.triggers.get_or_insert_with(|| t.triggers.clone());
+    ui.add_space(12.0);
+    ui.label(egui::RichText::new(tr("Triggers")).strong());
+    ui.label(egui::RichText::new(tr("Regular expressions checked once for each finished output line, case-insensitive")).color(tokens.text_dim));
+    let mut remove = None;
+    for (i, trigger) in triggers.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut trigger.pattern).desired_width(260.0).hint_text(tr("Pattern")));
+            let label = |a: TriggerAction| match a {
+                TriggerAction::Notify => tr("Notify"),
+                TriggerAction::Bell => tr("Mark the tab"),
+            };
+            egui::ComboBox::from_id_salt(("sshcraft-trigger-action", i)).selected_text(label(trigger.action)).show_ui(ui, |ui| {
+                for action in [TriggerAction::Notify, TriggerAction::Bell] {
+                    ui.selectable_value(&mut trigger.action, action, label(action));
+                }
+            });
+            if ui.button(tr("Remove")).clicked() {
+                remove = Some(i);
+            }
+            if compile_pattern(&trigger.pattern).is_none() {
+                ui.label(egui::RichText::new(tr("Not a valid pattern")).color(tokens.danger));
+            }
+        });
+    }
+    if let Some(i) = remove {
+        triggers.remove(i);
+    }
+    if triggers.len() < MAX_PATTERNS && ui.button(tr("Add a trigger")).clicked() {
+        triggers.push(Trigger { pattern: String::new(), action: TriggerAction::Notify });
+    }
+    t.triggers = triggers.iter().filter(|t| compile_pattern(&t.pattern).is_some()).cloned().collect();
 }
 
 /// How long finished logs are kept, in words.

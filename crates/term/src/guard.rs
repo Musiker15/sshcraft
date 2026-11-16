@@ -18,9 +18,34 @@ pub(crate) struct Guard<'a> {
     pub(crate) term: &'a mut Term<Listener>,
     /// Changes that may have added extras since the budget was last checked.
     pub(crate) extras: &'a mut usize,
+    /// Where finished lines go, when the terminal keeps them (for triggers).
+    pub(crate) lines: Option<&'a mut std::collections::VecDeque<String>>,
 }
 
 impl Guard<'_> {
+    /// Keeps the cursor's line before a line feed ends it, outside full-screen programs.
+    pub(crate) fn line_ends(&mut self) {
+        let alt = self.term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+        let Some(lines) = self.lines.as_deref_mut() else { return };
+        if alt {
+            return;
+        }
+        let grid = self.term.grid();
+        let row = &grid[grid.cursor.point.line];
+        let mut text = String::new();
+        for col in 0..alacritty_terminal::grid::Dimensions::columns(grid) {
+            let cell = &row[Column(col)];
+            if !cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                text.push(cell.c);
+            }
+        }
+        let text: String = text.trim_end().chars().take(crate::MAX_LINE_CHARS).collect();
+        if lines.len() >= crate::MAX_COMPLETED_LINES {
+            lines.pop_front();
+        }
+        lines.push_back(text);
+    }
+
     /// The cell a joining character would go on, the way the emulator picks it.
     fn joins_full(&self) -> bool {
         let grid = self.term.grid();

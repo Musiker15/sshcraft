@@ -11,7 +11,7 @@ use crate::{Direction, Terminal};
 
 /// The flag bit `alacritty_terminal` 0.26 leaves unused; it survives scrolling and reflow and is
 /// cleared with the cell.
-const MARK: Flags = Flags::from_bits_retain(0x8000);
+pub(crate) const MARK: Flags = Flags::from_bits_retain(0x8000);
 
 impl Terminal {
     fn set_mark(&mut self, line: Line, on: bool) {
@@ -24,11 +24,13 @@ impl Terminal {
 
     /// Marks the line of the cursor.
     pub fn add_mark(&mut self) {
+        self.changed();
         let line = self.term.grid().cursor.point.line;
         self.set_mark(line, true);
     }
 
     pub fn remove_mark(&mut self, at: GridPoint) {
+        self.changed();
         let line = self.clamp(at).line;
         self.set_mark(line, false);
     }

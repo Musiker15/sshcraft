@@ -22,6 +22,12 @@ pub struct SshcraftApp {
     pub bindings: Bindings,
     /// File dialogs: asked in a frame, shown after it, answered on a later frame.
     pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
+    /// Shows desktop notifications.
+    pub notifier: Box<dyn crate::notify::Notifier>,
+    /// The last pastes, in memory only.
+    pub pastes: crate::terminal::compose::PasteHistory,
+    /// The compiled highlights and triggers of the settings.
+    pub patterns: crate::terminal::highlight::Patterns,
     /// The terminals of the open session tabs.
     pub terminals: std::collections::HashMap<sshcraft_engine::SessionId, crate::session_tab::SessionTab>,
     /// The engine's open questions.
@@ -74,6 +80,9 @@ impl SshcraftApp {
             lock: crate::lock::LockState::default(),
             bindings: Bindings::default(),
             dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
+            notifier: Box::new(crate::notify::Desktop),
+            patterns: crate::terminal::highlight::Patterns::default(),
+            pastes: crate::terminal::compose::PasteHistory::default(),
             terminals: std::collections::HashMap::new(),
             // Questions asked before the window subscribed are fetched once.
             prompts: crate::prompts::Prompts::fetch_first(),

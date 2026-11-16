@@ -213,3 +213,35 @@ fn the_sidebar_pastes_into_all_panes_when_broadcast_is_on() {
     h.get_by_label("greet").click();
     until(&mut h, "both panes", |app| screen(app, first).contains("side-run") && screen(app, second).contains("side-run"));
 }
+
+#[test]
+fn the_bar_runs_a_pinned_snippet_in_its_pane() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, host) = host(&session, "bar");
+    let id = connect_here(&mut h, host);
+    let snippet = save_snippet(&session, "uptime", "", "echo bar-ran", &[]);
+    refresh(&mut h);
+    until(&mut h, "the snippet", |app| app.data.snippets.iter().any(|s| s.id == snippet));
+    h.state_mut().data.settings.terminal.snippet_bar = vec![snippet.clone()];
+    h.run_steps(2);
+    sshcraft_ui_egui::pages::snippets::run_from_bar(h.state_mut(), &snippet, id);
+    until(&mut h, "the echo", |app| screen(app, id).contains("echo bar-ran"));
+}
+
+#[test]
+fn a_snippet_with_placeholders_asks_for_values_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, host) = host(&session, "values");
+    let id = connect_here(&mut h, host);
+    let snippet = save_snippet(&session, "logs", "", "journalctl -u {{unit}} -n {{lines:50}}", &[]);
+    refresh(&mut h);
+    until(&mut h, "the snippet", |app| app.data.snippets.iter().any(|s| s.id == snippet));
+    sshcraft_ui_egui::pages::snippets::run_from_bar(h.state_mut(), &snippet, id);
+    let job = h.state().ui.snippet_run.clone().expect("the run dialog");
+    assert_eq!(job.picks, vec![Pick::Open(id)]);
+    assert_eq!(job.values.get("lines").map(String::as_str), Some("50"));
+    assert_eq!(job.values.get("unit").map(String::as_str), Some(""));
+    assert!(!screen(h.state(), id).contains("journalctl"), "nothing is typed before the values");
+}

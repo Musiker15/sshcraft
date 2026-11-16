@@ -3,6 +3,11 @@
 pub fn translate(text: &str) -> Option<&'static str> {
     Some(match text {
         "Close" => "Schließen",
+        "idle" => "untätig",
+        "working" => "arbeitet",
+        "done" => "fertig",
+        "waiting for you" => "wartet auf dich",
+        "A program waits for you" => "Ein Programm wartet auf dich",
         "Hosts" => "Hosts",
         "Keys" => "Schlüssel",
         "Settings" => "Einstellungen",
@@ -307,6 +312,19 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Theme" => "Farbschema",
         "Dark" => "Dunkel",
         "Light" => "Hell",
+        "Tab colour" => "Tab-Farbe",
+        "Login script" => "Anmeldeskript",
+        "After connecting: wait for a text, then send a line. Never put a password here." => {
+            "Nach dem Verbinden: auf einen Text warten, dann eine Zeile senden. Niemals ein Passwort hier eintragen."
+        }
+        "Wait for" => "Warten auf",
+        "send" => "senden",
+        "Add a step" => "Schritt hinzufügen",
+        "Allow this login script on this device" => "Dieses Anmeldeskript auf diesem Gerät erlauben",
+        "Own colour" => "Eigene Farbe",
+        "Badge" => "Abzeichen",
+        "e.g. PROD" => "z. B. PROD",
+        "Terminal theme" => "Terminal-Farbschema",
         "Terminal colours" => "Terminalfarben",
         "Terminal font" => "Terminalschrift",
         "Font size" => "Schriftgröße",
@@ -379,6 +397,47 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Close the focused pane" => "Aktiven Bereich schließen",
         "Next pane" => "Nächster Bereich",
         "Previous pane" => "Vorheriger Bereich",
+        "Label URLs, paths, addresses and hashes to copy them" => "URLs, Pfade, Adressen und Hashes beschriften, um sie zu kopieren",
+        "Paste again from the recent pastes" => "Aus den letzten Einfügungen erneut einfügen",
+        "Compose field under the terminal" => "Eingabefeld unter dem Terminal",
+        "Write here; Ctrl+Enter sends it, Esc closes" => "Hier schreiben; Strg+Enter sendet, Esc schließt",
+        "Recent pastes" => "Letzte Einfügungen",
+        "On the bar" => "In der Leiste",
+        "Values" => "Werte",
+        "Nothing pasted yet." => "Noch nichts eingefügt.",
+        "Previous command" => "Vorheriger Befehl",
+        "Next command" => "Nächster Befehl",
+        "Copy the output of the last command" => "Ausgabe des letzten Befehls kopieren",
+        "Running since {time}" => "Läuft seit {time}",
+        "Exit code {code}, {took}, started {time}" => "Exit-Code {code}, {took}, gestartet {time}",
+        "Finished, {took}, started {time}" => "Beendet, {took}, gestartet {time}",
+        "Waiting for a command" => "Wartet auf einen Befehl",
+        "Command finished on {host}" => "Befehl beendet auf {host}",
+        "It succeeded." => "Er war erfolgreich.",
+        "It ended with exit code {code}." => "Er endete mit Exit-Code {code}.",
+        "It ended." => "Er ist beendet.",
+        "Notifications" => "Benachrichtigungen",
+        "Trigger" => "Trigger",
+        "Highlights" => "Hervorhebungen",
+        "Regular expressions coloured wherever they appear in a terminal, case-insensitive" => {
+            "Reguläre Ausdrücke, die überall im Terminal eingefärbt werden, ohne Rücksicht auf Groß- und Kleinschreibung"
+        }
+        "Pattern" => "Muster",
+        "Not a valid pattern" => "Kein gültiges Muster",
+        "Add a highlight" => "Hervorhebung hinzufügen",
+        "Triggers" => "Trigger",
+        "Regular expressions checked once for each finished output line, case-insensitive" => {
+            "Reguläre Ausdrücke, die einmal je fertiger Ausgabezeile geprüft werden, ohne Rücksicht auf Groß- und Kleinschreibung"
+        }
+        "Notify" => "Benachrichtigen",
+        "Mark the tab" => "Tab markieren",
+        "Add a trigger" => "Trigger hinzufügen",
+        "seconds a command must run to notify when it ends in the background; 0 turns it off" => {
+            "Sekunden, die ein Befehl laufen muss, damit sein Ende im Hintergrund gemeldet wird; 0 schaltet es ab"
+        }
+        "Servers may show desktop notifications, always with the host's name" => {
+            "Server dürfen Desktop-Benachrichtigungen zeigen, immer mit dem Namen des Hosts"
+        }
         "Switch between grid and one large pane" => "Zwischen Raster und einem großen Bereich wechseln",
         "Broadcast on" => "Rundsenden an",
         "Broadcast on or off" => "Rundsenden an oder aus",

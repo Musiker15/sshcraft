@@ -1,9 +1,12 @@
 //! Integration tests of the terminal: what a server sends and what the terminal shows.
 
+mod commands;
 mod fuzz;
 mod history;
 mod hostile;
 mod input;
+mod lines;
+mod notify;
 mod rules;
 mod screen;
 mod search;

@@ -35,9 +35,10 @@ submissions follow. Next is S1 (SFTP).
 | F1 | ProxyCommand; reconnect with backoff and rebuilt tunnels; `~/.ssh/config` read live and written on request, with `Include`; host key management with `UpdateHostKeys`; a strict-kex test |
 | F2 | Passwords as references to a password manager; TOTP; desktop app lock; trash and versions; encrypted backup file; the list of connections SSHCraft makes |
 | V1 | Signed packages for every desktop target, checksums, SBOM, winget, Homebrew, Flathub, server program, Docker image |
+| F3 | Shell integration (OSC 133) with gutter, jumps and output copy; desktop notifications; highlights and triggers; colour, badge and theme per host; hint mode; paste history and compose field; snippet placeholders and bar; login scripts with per-device approval; program status (OSC 7501) |
 
 ## After the first release
 
-M1 to M3 (Android, iOS and iPadOS), S1 (SFTP), F3 (terminal comfort), F4 (connections and
+M1 to M3 (Android, iOS and iPadOS), S1 (SFTP), F4 (connections and
 organisation), F5 (persistent sessions, tmux, Mosh, Eternal Terminal, Telnet), F6 (terminal
 extras), F7 (targets and automation). A database client follows as a separate sister app.

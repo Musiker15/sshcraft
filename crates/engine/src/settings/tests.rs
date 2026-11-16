@@ -150,7 +150,7 @@ fn combos_are_checked() {
 
 #[test]
 fn every_action_is_known() {
-    assert_eq!(SHORTCUT_ACTIONS.len(), 23);
+    assert_eq!(SHORTCUT_ACTIONS.len(), 29);
     for added in ["hostsPage", "keysPage", "settingsPage", "copy", "paste", "quit", "about"] {
         assert!(SHORTCUT_ACTIONS.contains(&added), "{added}");
     }
@@ -358,4 +358,45 @@ fn integrations_default_off() {
     let fresh = EngineSettings::default();
     assert!(!fresh.integrations.allow_agent_control, "agents are off until the user turns them on");
     assert_eq!(fresh.integrations.agent_port, 0, "any free port");
+}
+
+#[test]
+fn notifications_have_defaults_and_bounds() {
+    let d = EngineSettings::default();
+    assert_eq!(d.terminal.notify_after_secs, 10);
+    assert!(d.terminal.server_notifications);
+    assert_eq!(with(|s| s.terminal.notify_after_secs = 1_000_000).terminal.notify_after_secs, 86_400);
+    assert_eq!(with(|s| s.terminal.notify_after_secs = 0).terminal.notify_after_secs, 0);
+}
+
+#[test]
+fn bad_highlight_and_trigger_patterns_are_dropped() {
+    use crate::settings::{Highlight, MAX_PATTERNS, Trigger, TriggerAction};
+    let s = with(|s| {
+        s.terminal.highlights = vec![
+            Highlight { pattern: "error".into(), color: [255, 0, 0] },
+            Highlight { pattern: "(unclosed".into(), color: [0, 0, 0] },
+            Highlight { pattern: "x".repeat(300), color: [0, 0, 0] },
+            Highlight { pattern: String::new(), color: [0, 0, 0] },
+        ];
+        s.terminal.triggers = (0..40).map(|i| Trigger { pattern: format!("done{i}"), action: TriggerAction::Notify }).collect();
+    });
+    assert_eq!(s.terminal.highlights.len(), 1);
+    assert_eq!(s.terminal.highlights[0].pattern, "error");
+    assert_eq!(s.terminal.triggers.len(), MAX_PATTERNS);
+}
+
+#[test]
+fn a_pattern_too_large_to_compile_is_refused() {
+    // Repetition multiplies the program size far past the limit.
+    assert!(crate::settings::compile_pattern("(a{1000}){1000}").is_none());
+    assert!(crate::settings::compile_pattern("warn(ing)?").is_some());
+}
+
+#[test]
+fn the_snippet_bar_is_unique_and_bounded() {
+    let s = with(|s| s.terminal.snippet_bar = (0..20).map(|i| format!("s{}", i % 15)).chain([String::new()]).collect());
+    assert_eq!(s.terminal.snippet_bar.len(), crate::settings::MAX_SNIPPET_BAR);
+    assert_eq!(s.terminal.snippet_bar[0], "s0");
+    assert!(!s.terminal.snippet_bar.iter().any(String::is_empty));
 }

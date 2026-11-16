@@ -23,6 +23,8 @@ pub struct Screen {
     pub modes: TermModes,
     /// Link targets; [`CellView::link`] indexes into this list.
     pub links: Vec<String>,
+    /// Visible prompt lines and their commands (shell integration), top to bottom.
+    pub commands: Vec<crate::CommandRow>,
 }
 
 impl Screen {
@@ -277,5 +279,6 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
         selection,
         modes: modes(content.mode),
         links: links.list,
+        commands: Vec::new(),
     }
 }

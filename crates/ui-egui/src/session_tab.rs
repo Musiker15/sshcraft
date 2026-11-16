@@ -17,6 +17,7 @@ use crate::terminal::pump::{FrameBudget, Pump};
 use crate::terminal::{TermPalette, TerminalView, install_terminal_font};
 use crate::theme::Tokens;
 use crate::widgets::visible;
+use sshcraft_engine::settings::TriggerAction;
 
 /// Most characters of a title a program sets.
 const MAX_TITLE: usize = 256;
@@ -66,10 +67,43 @@ pub struct SessionTab {
     waiting: bool,
     /// The terminal view's widget, to know whether it has the keyboard.
     view: Option<egui::Id>,
+    /// When the running command started (shell integration), for the notification when it ends.
+    command_since: Option<std::time::Instant>,
+    /// Server messages of this tab shown on the desktop.
+    server_limit: crate::notify::RateLimit,
+    /// The labelled hints while hint mode is on.
+    hints: Option<Vec<(String, crate::terminal::hints::Hint)>>,
+    /// The letters of a label typed so far.
+    hint_typed: String,
+    /// The compose field's text while it is open.
+    compose: Option<String>,
+    /// The list of recent pastes is open.
+    paste_picker: bool,
+    /// A program waited for the user at the last status change.
+    program_blocked: bool,
 }
 
 impl SessionTab {
     /// Output arrived: unseen, and waiting if the cursor's line now asks something.
+    /// The compose field's text while it is open.
+    pub fn compose_text(&self) -> Option<&String> {
+        self.compose.as_ref()
+    }
+
+    pub fn compose_text_mut(&mut self) -> Option<&mut String> {
+        self.compose.as_mut()
+    }
+
+    /// Whether hint mode shows its labels.
+    pub fn hints_shown(&self) -> bool {
+        self.hints.is_some()
+    }
+
+    /// The bell rang, or a trigger or the cursor's line asks for the user.
+    pub fn waiting(&self) -> bool {
+        self.waiting
+    }
+
     pub fn mark_output(&mut self) {
         self.unseen = true;
         let screen = self.term.screen();
@@ -113,14 +147,43 @@ impl SessionTab {
 
     pub fn dot(&self) -> crate::status::Dot {
         use crate::status::Dot;
+        use sshcraft_term::ProgramState;
+        let program = self.term.status_summary();
         match &self.status {
             Some(SessionStatus::Ended { reason: EndReason::Exited, .. }) => Dot::Ended,
             Some(SessionStatus::Ended { .. }) => Dot::Error,
             None | Some(SessionStatus::Connecting | SessionStatus::Reconnecting { .. }) => Dot::Connecting,
-            Some(SessionStatus::Connected { .. }) if self.waiting => Dot::Waiting,
-            Some(SessionStatus::Connected { .. }) if self.unseen => Dot::Unseen,
+            Some(SessionStatus::Connected { .. }) if program == Some(ProgramState::Error) => Dot::Error,
+            Some(SessionStatus::Connected { .. }) if self.waiting || program == Some(ProgramState::Blocked) => Dot::Waiting,
+            Some(SessionStatus::Connected { .. }) if self.unseen || program == Some(ProgramState::Done) => Dot::Unseen,
+            Some(SessionStatus::Connected { .. }) if program == Some(ProgramState::Working) => Dot::Working,
             Some(SessionStatus::Connected { .. }) => Dot::Connected,
         }
+    }
+
+    /// What the most urgent program in the terminal reports (OSC 7501), for the dot's tooltip.
+    pub fn program_text(&self) -> Option<String> {
+        let summary = self.term.status_summary()?;
+        let record = self.term.program_status().into_iter().rev().find(|r| r.state == summary)?;
+        let state = match summary {
+            sshcraft_term::ProgramState::Idle => tr("idle"),
+            sshcraft_term::ProgramState::Working => tr("working"),
+            sshcraft_term::ProgramState::Done => tr("done"),
+            sshcraft_term::ProgramState::Blocked => tr("waiting for you"),
+            sshcraft_term::ProgramState::Error => tr("failed"),
+        };
+        let mut text = match &record.app {
+            Some(app) => format!("{}: {state}", visible(app)),
+            None => state.to_string(),
+        };
+        for part in [&record.title, &record.msg].into_iter().flatten() {
+            text.push('\n');
+            text.push_str(&visible(part));
+        }
+        if let Some(p) = record.progress {
+            text.push_str(&format!(" ({p} %)"));
+        }
+        Some(text)
     }
 }
 
@@ -281,6 +344,13 @@ pub fn open_with(app: &mut SshcraftApp, target: Value, name: String, host: Optio
                 paths: crate::completion::PathCache::default(),
                 path_pending: None,
                 recording: None,
+                command_since: None,
+                server_limit: crate::notify::RateLimit::default(),
+                hints: None,
+                hint_typed: String::new(),
+                compose: None,
+                paste_picker: false,
+                program_blocked: false,
             };
             app.terminals.insert(id, session_tab);
         }),
@@ -367,20 +437,224 @@ fn ended(status: Option<&SessionStatus>) -> bool {
 }
 
 /// Feeds every session's output into its terminal and acts on what programs asked for.
+/// The texts pasted in this frame.
+fn ctx_pastes(ctx: &egui::Context) -> Vec<String> {
+    ctx.input(|i| i.events.iter().filter_map(|e| if let egui::Event::Paste(text) = e { Some(text.clone()) } else { None }).collect())
+}
+
+/// The compose field in `rect` and the list of recent pastes over the terminal; returns the bytes
+/// one of them sends.
+fn compose_and_pastes(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, term_rect: Rect, active: bool, send: bool) -> Option<Vec<u8>> {
+    let pastes: Vec<String> = app.pastes.entries().iter().cloned().collect();
+    let tab = app.terminals.get_mut(&id)?;
+    let modes = tab.term.modes();
+    let mut out = None;
+    if let Some(text) = tab.compose.as_mut() {
+        let edit_id = egui::Id::unique(("sshcraft-compose", id));
+        // In the frame it opens the field has no room yet; egui must never get a negative size.
+        let area = rect.shrink(4.0);
+        if area.width() > 0.0 && area.height() > 0.0 {
+            ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
+                let edit = egui::TextEdit::multiline(text)
+                    .id(edit_id)
+                    .hint_text(tr("Write here; Ctrl+Enter sends it, Esc closes"))
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(3)
+                    .font(egui::TextStyle::Monospace);
+                ui.add_sized(area.size(), edit);
+            });
+        }
+        let send = active && send;
+        let close = active && ui.input(|i| i.key_pressed(egui::Key::Escape)) && ui.memory(|m| m.has_focus(edit_id));
+        if send && !text.trim().is_empty() {
+            out = Some(crate::terminal::compose::compose_bytes(text, modes));
+            text.clear();
+        }
+        if close {
+            tab.compose = None;
+        }
+    }
+    if tab.paste_picker {
+        let mut open = true;
+        egui::Window::new(tr("Recent pastes"))
+            .id(egui::Id::unique(("sshcraft-pastes", id)))
+            .fixed_pos(term_rect.min + egui::vec2(24.0, 24.0))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                if pastes.is_empty() {
+                    ui.label(tr("Nothing pasted yet."));
+                }
+                for text in &pastes {
+                    if ui.button(crate::terminal::compose::preview(text)).clicked() {
+                        out = Some(sshcraft_term::input::encode_paste(text, modes));
+                        tab.paste_picker = false;
+                    }
+                }
+            });
+        if !open || (active && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+            tab.paste_picker = false;
+        }
+    }
+    out
+}
+
+/// Takes the keys hint mode needs before the terminal sees them: letters choose a label (in
+/// capitals: to type its text in), Escape leaves. Returns the text chosen and whether to type it.
+fn hint_keys(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) -> Option<(String, bool)> {
+    let tab = app.terminals.get_mut(&id)?;
+    let hints = tab.hints.as_ref()?;
+    let events = ctx.input_mut(|i| {
+        let taken: Vec<egui::Event> = i.events.iter().filter(|e| matches!(e, egui::Event::Text(_) | egui::Event::Key { .. })).cloned().collect();
+        i.events.retain(|e| !matches!(e, egui::Event::Text(_) | egui::Event::Key { .. }));
+        taken
+    });
+    let mut picked = None;
+    let mut close = false;
+    for event in events {
+        match event {
+            egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => close = true,
+            egui::Event::Text(text) => {
+                for c in text.chars().filter(char::is_ascii_alphabetic) {
+                    let paste = c.is_ascii_uppercase();
+                    tab.hint_typed.push(c.to_ascii_lowercase());
+                    if let Some((_, hint)) = hints.iter().find(|(label, _)| *label == tab.hint_typed) {
+                        picked = Some((hint.text.clone(), paste));
+                    } else if !hints.iter().any(|(label, _)| label.starts_with(tab.hint_typed.as_str())) {
+                        // No label goes on like this: start over.
+                        tab.hint_typed.clear();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if picked.is_some() || close {
+        tab.hints = None;
+        tab.hint_typed.clear();
+    }
+    picked
+}
+
+/// The look of `host`'s terminals: its own appearance with what its groups give.
+pub fn host_appearance(app: &SshcraftApp, host: Option<HostId>) -> sshcraft_model::appearance::Appearance {
+    let Some(row) = host.and_then(|id| app.data.hosts.iter().find(|r| r.host.id == id)) else { return Default::default() };
+    // The groups above the host, nearest first, without copying them; a cycle or a deep chain
+    // stops like `group_chain`.
+    let mut levels = vec![row.host.settings.appearance.as_ref()];
+    let mut seen: Vec<sshcraft_model::model::GroupId> = Vec::new();
+    let mut next = row.host.group_id;
+    while let Some(id) = next {
+        if seen.contains(&id) || seen.len() >= sshcraft_model::model::MAX_GROUP_DEPTH {
+            break;
+        }
+        let Some(g) = app.data.groups.iter().find(|g| g.group.id == id) else { break };
+        seen.push(id);
+        levels.push(g.group.defaults.appearance.as_ref());
+        next = g.group.parent_id;
+    }
+    sshcraft_model::appearance::merge(levels)
+}
+
+/// The badge in the terminal's top right corner, on the host's colour.
+fn paint_badge(ui: &Ui, rect: Rect, badge: &str, color: Option<[u8; 3]>) {
+    let painter = ui.painter_at(rect);
+    let galley = painter.layout_no_wrap(badge.to_string(), egui::FontId::proportional(12.0), egui::Color32::WHITE);
+    let size = galley.size() + egui::vec2(12.0, 6.0);
+    let area = Rect::from_min_size(pos2(rect.max.x - size.x - 10.0, rect.min.y + 8.0), size);
+    let [r, g, b] = color.unwrap_or([0x55, 0x5a, 0x66]);
+    painter.rect_filled(area, 4.0, egui::Color32::from_rgba_unmultiplied(r, g, b, 210));
+    painter.galley(area.min + egui::vec2(6.0, 3.0), galley, egui::Color32::WHITE);
+}
+
+/// Whether the user looks at tab `id`: the window has the focus and the tab is the one shown.
+fn watched(app: &SshcraftApp, ctx: &egui::Context, id: SessionId) -> bool {
+    let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+    focused && app.ui.shown_terminal == Some(id)
+}
+
+/// The name a notification of tab `id` starts with.
+fn tab_label(app: &SshcraftApp, id: SessionId) -> String {
+    app.terminals.get(&id).map(|t| visible(&t.host.and_then(|h| host_name(app, h)).unwrap_or_else(|| t.name.clone()))).unwrap_or_default()
+}
+
+/// A command ended: a notification when it ran long and nobody watched.
+fn command_finished(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, exit: Option<i32>) {
+    let since = app.terminals.get_mut(&id).and_then(|t| t.command_since.take());
+    let Some(since) = since else { return };
+    let after = app.data.settings.terminal.notify_after_secs;
+    if !crate::notify::command_worth_it(after, since.elapsed(), watched(app, ctx, id)) {
+        return;
+    }
+    let title = trf("Command finished on {host}", &[("host", &tab_label(app, id))]);
+    let body = match exit {
+        Some(0) => tr("It succeeded.").to_string(),
+        Some(code) => trf("It ended with exit code {code}.", &[("code", &code.to_string())]),
+        None => tr("It ended.").to_string(),
+    };
+    app.notifier.notify(&title, &body);
+}
+
+/// A program started waiting for the user (OSC 7501 blocked): one server message, limited like
+/// the others.
+fn program_changed(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId) {
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
+    let blocked = tab.term.status_summary() == Some(sshcraft_term::ProgramState::Blocked);
+    let was = std::mem::replace(&mut tab.program_blocked, blocked);
+    if blocked && !was {
+        let text = tab.program_text().unwrap_or_default();
+        server_message(app, ctx, id, Some(tr("A program waits for you")), &text);
+    }
+}
+
+/// A message from the server (OSC 9, OSC 777, a program waiting), shown only while servers may.
+pub(crate) fn server_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, title: Option<&str>, body: &str) {
+    if app.data.settings.terminal.server_notifications {
+        desktop_message(app, ctx, id, title, body);
+    }
+}
+
+/// A message about tab `id` for the desktop: the host's name first, limited per tab, a toast
+/// instead while the user watches the tab.
+fn desktop_message(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, title: Option<&str>, body: &str) {
+    let allowed = app.terminals.get_mut(&id).is_some_and(|t| t.server_limit.allow(std::time::Instant::now()));
+    if !allowed {
+        return;
+    }
+    let host = tab_label(app, id);
+    let title = match title.filter(|t| !t.is_empty()) {
+        Some(title) => format!("{host}: {title}"),
+        None => host,
+    };
+    if watched(app, ctx, id) {
+        app.toasts.info(&format!("{title}: {body}"));
+    } else {
+        app.notifier.notify(&title, body);
+    }
+}
+
 pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
     if app.terminals.is_empty() {
         return;
     }
+    let terminal = &app.data.settings.terminal;
+    app.patterns.refresh(&terminal.highlights, &terminal.triggers);
+    let capture = !app.patterns.triggers.is_empty();
     let mut more = false;
     let mut starts = Vec::new();
     let mut ask_recording = Vec::new();
     let ids: Vec<SessionId> = app.terminals.keys().copied().collect();
     for id in ids {
         let Some(tab) = app.terminals.get_mut(&id) else { continue };
+        // Finished lines are kept only while a trigger wants them.
+        tab.term.set_line_capture(capture);
         if let Some(pump) = tab.pump.as_mut() {
             let outcome = pump.frame(&mut tab.term, FrameBudget::DEFAULT);
             if outcome.fed > 0 {
                 tab.mark_output();
+                // Commands get the time their start or end arrived, shown or not.
+                tab.term.stamp_commands(chrono::Utc::now());
             }
             if let Some(status) = outcome.status {
                 // The template's line goes out once, when the session first connects.
@@ -401,6 +675,9 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         }
         let notices = tab.term.take_notices();
+        if notices.iter().any(|n| matches!(n, Notice::CommandStarted | Notice::CommandFinished { .. })) {
+            tab.term.stamp_commands(chrono::Utc::now());
+        }
         let host = tab.host;
         let can_send = !ended(tab.status.as_ref());
         for notice in notices {
@@ -428,6 +705,27 @@ pub fn pump_all(app: &mut SshcraftApp, ctx: &egui::Context) {
                 Notice::WorkingDirectory(dir) => {
                     if let Some(tab) = app.terminals.get_mut(&id) {
                         tab.cwd = Some(dir);
+                    }
+                }
+                Notice::CommandStarted => {
+                    if let Some(tab) = app.terminals.get_mut(&id) {
+                        tab.command_since = Some(std::time::Instant::now());
+                    }
+                }
+                Notice::CommandFinished { exit } => command_finished(app, ctx, id, exit),
+                Notice::Notification { title, body } => server_message(app, ctx, id, title.as_deref(), &body),
+                Notice::ProgramStatusChanged => program_changed(app, ctx, id),
+            }
+        }
+        let lines = app.terminals.get_mut(&id).map(|t| t.term.take_completed_lines()).unwrap_or_default();
+        for line in lines {
+            for action in app.patterns.triggers.actions(&line) {
+                match action {
+                    TriggerAction::Notify => desktop_message(app, ctx, id, Some(tr("Trigger")), &line),
+                    TriggerAction::Bell => {
+                        if let Some(tab) = app.terminals.get_mut(&id) {
+                            tab.waiting = true;
+                        }
                     }
                 }
             }
@@ -817,12 +1115,60 @@ fn draw_suggestions(app: &SshcraftApp, ui: &Ui, id: SessionId, rect: Rect, font:
     });
 }
 
+/// The snippet bar above the terminal, when snippets are pinned to it; returns the room left
+/// below it.
+fn snippet_bar(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, mut full: Rect) -> Rect {
+    // The snippet bar above the terminal, when snippets are pinned to it.
+    let bar: Vec<(String, String)> = app
+        .data
+        .settings
+        .terminal
+        .snippet_bar
+        .iter()
+        .filter_map(|sid| app.data.snippets.iter().find(|s| s.id == *sid).map(|s| (s.id.clone(), s.name.clone())))
+        .collect();
+    if !bar.is_empty() {
+        let bar_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.min.y + SNIPPET_BAR_HEIGHT).min(full.max.y)));
+        full.min.y = bar_rect.max.y;
+        let mut clicked = None;
+        ui.scope_builder(UiBuilder::new().max_rect(bar_rect.shrink2(egui::vec2(4.0, 2.0))), |ui| {
+            ui.horizontal(|ui| {
+                for (sid, name) in &bar {
+                    let label: String = visible(name).chars().take(24).collect();
+                    if ui.small_button(label).on_hover_text(visible(name)).clicked() {
+                        clicked = Some(sid.clone());
+                    }
+                }
+            });
+        });
+        if let Some(sid) = clicked {
+            crate::pages::snippets::run_from_bar(app, &sid, id);
+        }
+    }
+    full
+}
+
+/// The height of the snippet bar above a terminal, in points.
+const SNIPPET_BAR_HEIGHT: f32 = 26.0;
+
 /// The terminal of session `id` and its status line in the rest of `ui`; `focused` is the pane
 /// the keyboard and the terminal commands go to.
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
-    let full = ui.available_rect_before_wrap();
-    let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT).max(full.min.y)));
-    let status_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), full.max);
+    let full = snippet_bar(app, ui, id, ui.available_rect_before_wrap());
+    let composing = app.terminals.get(&id).is_some_and(|t| t.compose.is_some());
+    let compose_height = if composing { crate::terminal::compose::COMPOSE_HEIGHT } else { 0.0 };
+    let term_rect = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
+    let compose_rect = Rect::from_min_max(pos2(full.min.x, term_rect.max.y), pos2(full.max.x, (term_rect.max.y + compose_height).min(full.max.y)));
+    let status_rect = Rect::from_min_max(pos2(full.min.x, compose_rect.max.y), full.max);
+    // Ctrl+Enter sends the compose field, before the terminal or the field itself sees the key.
+    let compose_send = focused && composing && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+    if focused {
+        // Every paste goes into the history (in memory only).
+        let pasted: Vec<String> = ctx_pastes(ui.ctx());
+        for text in pasted {
+            app.pastes.push(&text);
+        }
+    }
     let ctx = ui.ctx().clone();
     let pending = if focused { std::mem::take(&mut app.ui.pending) } else { Vec::new() };
     let appearance = &app.data.settings.appearance;
@@ -833,8 +1179,22 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let family = app.term_font.as_ref().map_or(egui::FontFamily::Monospace, |(_, f)| f.clone());
     let font = egui::FontId::new(f32::from(appearance.font_size), family);
     let ligatures = appearance.ligatures;
-    let palette = if appearance.terminal_theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
+    let app_highlighter = app.patterns.highlighter.clone();
+    let look = host_appearance(app, app.terminals.get(&id).and_then(|t| t.host));
+    let theme = look.theme.as_deref().unwrap_or(appearance.terminal_theme.as_str());
+    let palette = if theme == "sshcraft-light" { TermPalette::light() } else { TermPalette::dark() };
     let blocked = modal_open(app, &ctx);
+    if focused
+        && !blocked
+        && let Some((text, paste)) = hint_keys(app, &ctx, id)
+    {
+        if paste {
+            let modes = app.terminals.get(&id).map(|t| t.term.modes()).unwrap_or_default();
+            send(app, id, &sshcraft_term::input::encode_paste(&text, modes));
+        } else {
+            ctx.copy_text(text);
+        }
+    }
     let Some(tab) = app.terminals.get_mut(&id) else {
         ui.label(tr("This session is gone."));
         return;
@@ -847,6 +1207,30 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
                 }
             }
             "ui.terminal.paste" => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            "ui.terminal.prev_command" => {
+                tab.term.jump_to_prompt(sshcraft_term::Direction::Up);
+            }
+            "ui.terminal.next_command" => {
+                tab.term.jump_to_prompt(sshcraft_term::Direction::Down);
+            }
+            "ui.terminal.compose" => {
+                tab.compose = if tab.compose.is_some() { None } else { Some(String::new()) };
+                if tab.compose.is_some() {
+                    ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("sshcraft-compose", id))));
+                }
+            }
+            "ui.terminal.paste_history" => tab.paste_picker = !tab.paste_picker,
+            "ui.terminal.hints" => {
+                let found = crate::terminal::hints::find_hints(&tab.term.screen());
+                let labels = crate::terminal::hints::labels(found.len());
+                tab.hints = (!found.is_empty()).then(|| labels.into_iter().zip(found).collect());
+                tab.hint_typed.clear();
+            }
+            "ui.terminal.copy_output" => {
+                if let Some(text) = tab.term.last_finished_output() {
+                    ctx.copy_text(text);
+                }
+            }
             _ => {}
         }
     }
@@ -862,9 +1246,16 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     };
     let response = ui
         .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| {
-            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures }.show(ui)
+            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures, highlighter: Some(&app_highlighter) }.show(ui)
         })
         .inner;
+    if let Some(badge) = &look.badge {
+        paint_badge(ui, term_rect, badge, look.color);
+    }
+    if let Some(hints) = &tab.hints {
+        let metrics = crate::terminal::CellMetrics::measure(&ctx, &font);
+        crate::terminal::hints::paint_labels(&ui.painter_at(term_rect), term_rect, &metrics, hints, &tab.hint_typed);
+    }
     // Only the focused pane takes the keyboard.
     let first = focused && std::mem::take(&mut tab.focus);
     let switched = focused && app_shown_changed(&mut app.ui.shown_terminal, id);
@@ -884,12 +1275,23 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let mut typed = taken.unwrap_or_default();
     typed.extend_from_slice(&response.input);
     if !typed.is_empty() && can_send {
+        // Typing means the user saw what finished or failed.
+        if let Some(tab) = app.terminals.get_mut(&id) {
+            tab.term.drop_finished();
+        }
         let targets = broadcast_targets(app, id);
         let broadcast = targets.len() > 1 || targets.first() != Some(&id);
         for target in targets {
             send(app, target, &typed);
         }
         track_line(app, id, &typed, crate::history::LineContext { broadcast, ..line_context });
+    }
+    if let Some(bytes) = compose_and_pastes(app, ui, id, compose_rect, term_rect, focused && can_send, compose_send)
+        && can_send
+    {
+        for target in broadcast_targets(app, id) {
+            send(app, target, &bytes);
+        }
     }
     if focused {
         update_suggestions(app, id);

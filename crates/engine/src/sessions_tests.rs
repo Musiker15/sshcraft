@@ -2098,3 +2098,52 @@ fn base32(bytes: &[u8]) -> String {
     }
     out
 }
+
+/// A login script that answers "pong" when the echo shows "ping".
+fn ping_pong(f: &Fixture, approve: bool) {
+    let steps = vec![sshcraft_model::login_script::LoginStep { expect: "ping".into(), send: "pong".into() }];
+    let store = f.store.lock().unwrap();
+    let mut host = store.list_hosts().unwrap().into_iter().find(|h| h.id == f.host_id).unwrap();
+    host.settings.login_script = Some(steps.clone());
+    store.upsert_host(&host).unwrap();
+    if approve {
+        store.approve_command(&sshcraft_store::store::command_digest(&sshcraft_model::login_script::approval_argv(&steps))).unwrap();
+    }
+}
+
+fn seen(sink: &RecordingSink, text: &str) -> bool {
+    sink.data.lock().unwrap().windows(text.len()).any(|w| w == text.as_bytes())
+}
+
+#[tokio::test]
+async fn an_approved_login_script_answers_its_text() {
+    let f = fixture(true).await;
+    ping_pong(&f, true);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.manager.write(id, b"ping\n").unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !seen(&sink, "pong") {
+        assert!(tokio::time::Instant::now() < deadline, "the script did not answer");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_login_script_not_approved_here_never_sends() {
+    let f = fixture(true).await;
+    ping_pong(&f, false);
+    let sink = Arc::new(RecordingSink::default());
+    let id = f.manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1).await;
+    f.manager.write(id, b"ping\n").unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !seen(&sink, "ping") {
+        assert!(tokio::time::Instant::now() < deadline, "no echo");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!seen(&sink, "pong"), "an unapproved script sent its line");
+    assert!(seen(&sink, "not allowed on this device yet"));
+}

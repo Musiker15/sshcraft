@@ -66,6 +66,8 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
         }
         for (i, tab) in app.ui.tabs.iter().enumerate() {
             let selected = app.ui.page == Page::Tab(i);
+            // The look of the tab's first host, worked out once per tab and frame.
+            let look = crate::session_tab::host_appearance(app, tab.panes.sessions().next().and_then(|s| app.terminals.get(&s)).and_then(|t| t.host));
             let frame =
                 egui::Frame::new().fill(if selected { tokens.panel } else { tokens.bg }).corner_radius(tokens.radius).inner_margin(vec2(8.0, 4.0));
             let shown = frame.show(ui, |ui| {
@@ -74,13 +76,23 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                 let (icon_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                 draw(ui.painter(), icon, icon_rect, tokens.text_dim);
                 if let Some(dot) = crate::status::Dot::most_urgent(tab.panes.panes.iter().filter_map(|s| crate::session_tab::slot_dot(app, *s))) {
-                    let (dot_rect, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                    let (dot_rect, dot_response) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
                     dot.draw(ui.painter(), dot_rect.center(), &tokens);
+                    let program = tab.panes.sessions().filter_map(|s| app.terminals.get(&s)).find_map(crate::session_tab::SessionTab::program_text);
+                    if let Some(text) = program {
+                        dot_response.on_hover_text(text);
+                    }
                 }
                 if tab.panes.broadcast {
                     let (rect, response) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                     draw(ui.painter(), Icon::Broadcast, rect, tokens.danger);
                     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr("Broadcast on")));
+                }
+                if let Some(badge) = &look.badge {
+                    let [r, g, b] = look.color.unwrap_or([0x55, 0x5a, 0x66]);
+                    egui::Frame::new().fill(egui::Color32::from_rgb(r, g, b)).corner_radius(3.0).inner_margin(vec2(4.0, 0.0)).show(ui, |ui| {
+                        ui.label(egui::RichText::new(badge).size(11.0).color(egui::Color32::WHITE));
+                    });
                 }
                 let color = if selected { tokens.text_strong } else { tokens.text };
                 if elided_label(ui, &tab.title, MAX_TAB_WIDTH - 50.0, color, FontId::proportional(13.0)).clicked() {
@@ -95,6 +107,14 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                     close = Some(i);
                 }
             });
+            // The host's colour as a line under its tab.
+            if let Some([r, g, b]) = look.color {
+                let rect = shown.response.rect;
+                ui.painter().line_segment(
+                    [rect.left_bottom() + vec2(4.0, -1.0), rect.right_bottom() + vec2(-4.0, -1.0)],
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(r, g, b)),
+                );
+            }
             // Dragging a tab onto another merges its panes into that one.
             rects.push(shown.response.rect);
         }

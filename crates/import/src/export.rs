@@ -52,6 +52,8 @@ struct SettingsOut {
     proxy: Option<ProxyOut>,
     agent_forwarding: Option<bool>,
     env: Vec<sshcraft_model::model::EnvVar>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    appearance: Option<sshcraft_model::appearance::Appearance>,
 }
 
 #[derive(Serialize)]
@@ -168,6 +170,7 @@ fn settings_out(store: &Store, s: &ConnectionSettings) -> Result<SettingsOut, St
         proxy: proxy_out(&s.proxy),
         agent_forwarding: s.agent_forwarding,
         env: s.env.clone(),
+        appearance: s.appearance.clone(),
     })
 }
 

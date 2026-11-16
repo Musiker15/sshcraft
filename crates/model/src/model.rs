@@ -74,6 +74,13 @@ pub struct ConnectionSettings {
     /// Record sessions to this host; `None` up to the top means the app setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_log: Option<bool>,
+    /// The look of the terminals: tab colour, badge, theme; each field inherited on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<crate::appearance::Appearance>,
+    /// Wait-and-send steps after connecting; runs only once approved on this device.
+    /// `Some(vec![])` means "none", not "inherit".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_script: Option<Vec<crate::login_script::LoginStep>>,
 }
 
 impl ConnectionSettings {
@@ -426,6 +433,8 @@ pub fn flatten(levels: &[&ConnectionSettings], identities: &[Identity]) -> Conne
         agent_forwarding: levels.iter().find_map(|l| l.settings.agent_forwarding),
         env: normalize_env(&env),
         session_log: levels.iter().find_map(|l| l.settings.session_log),
+        appearance: Some(crate::appearance::merge(levels.iter().map(|l| l.settings.appearance.as_ref()))).filter(|a| !a.is_empty()),
+        login_script: levels.iter().find_map(|l| l.settings.login_script.clone()),
     }
 }
 

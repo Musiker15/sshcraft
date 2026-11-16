@@ -1,7 +1,11 @@
 //! The terminal in egui. [`layout`] turns a screen into primitives without touching egui's
 //! painter, so it is tested on its own; [`paint`] draws them.
 
+pub mod blocks;
+pub mod compose;
 pub mod fonts;
+pub mod highlight;
+pub mod hints;
 mod keys;
 pub mod layout;
 pub mod paint;
