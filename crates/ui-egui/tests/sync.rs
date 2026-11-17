@@ -2,16 +2,19 @@
 //! once, a second device joining with it, devices revoked (never the recovery one), items moved,
 //! the server's state, and the list of connections SSHCraft makes by itself.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use sshcraft_engine::{Caller, Session};
+use sshcraft_store::vault::{MasterKeyProvider, MemoryMasterKey, VaultError};
 use sshcraft_ui_egui::SshcraftApp;
 use sshcraft_ui_egui::pages::sync::{CreateForm, JoinForm};
 use sshcraft_ui_egui::state::Page;
-use sshcraft_ui_egui::testing::app_harness;
+use sshcraft_ui_egui::testing::{app_harness, app_harness_with};
+use zeroize::Zeroizing;
 
 type H = Harness<'static, SshcraftApp>;
 
@@ -199,4 +202,73 @@ fn a_group_moves_with_its_hosts() {
     h.run_steps(1);
     h.get_by_label("Move").click();
     until(&mut h, "the moved group", |app| app.data.hosts.first().and_then(|r| r.host.location.map(|l| l.0.to_string())) == Some(server.clone()));
+}
+
+/// Sync runs again after a restart, without touching its switch: the app starts it when it
+/// opens (it ran only in the session that set the server up, and every restart showed
+/// "Sync off" until the switch was flipped).
+#[test]
+fn sync_runs_again_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    // The server lives on its own runtime, so it outlives the first app.
+    let server_runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+    // One master key for both apps, as the OS keyring keeps it across restarts.
+    let key = Arc::new(MemoryMasterKey::default());
+    let (origin, api_key, _stop) = {
+        let (mut h, session) = app_harness_with(dir.path(), shared_key(&key));
+        let _ = &mut h;
+        let started = server_runtime.block_on(async {
+            let database_url = format!("sqlite://{}", server_dir.path().join("server.db").display());
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let origin = format!("http://127.0.0.1:{}", addr.port());
+            let config = sshcraft_server_lib::config::ServeConfig {
+                listen: addr,
+                database_url: database_url.clone(),
+                public_origin: origin.clone(),
+                ws_recheck: Duration::from_millis(200),
+            };
+            let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+            tokio::spawn(async move {
+                let _ = sshcraft_server_lib::serve_on(listener, config, async {
+                    let _ = stopped.await;
+                })
+                .await;
+            });
+            for _ in 0..100 {
+                if sshcraft_server_lib::health(addr).await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let api_key = sshcraft_server_lib::store::open(&database_url).await.unwrap().api_key().await.unwrap().0;
+            (origin, api_key, stop)
+        });
+        create(&mut h, &started.0, &started.1);
+        drop(session);
+        started
+    };
+    let _ = (&origin, &api_key);
+    // The restart: a new app on the same data.
+    let (mut h, _session) = app_harness_with(dir.path(), shared_key(&key));
+    sync_page(&mut h);
+    until(&mut h, "sync to run after the restart", |app| app.data.sync_status.values().any(|s| s["state"] == "idle"));
+}
+/// A master key two sessions share.
+struct SharedKey(Arc<MemoryMasterKey>);
+
+impl MasterKeyProvider for SharedKey {
+    fn load(&self) -> Result<Option<Zeroizing<[u8; 32]>>, VaultError> {
+        self.0.load()
+    }
+
+    fn save(&self, key: &[u8; 32]) -> Result<(), VaultError> {
+        self.0.save(key)
+    }
+}
+
+fn shared_key(key: &Arc<MemoryMasterKey>) -> impl FnOnce(&mut sshcraft_engine::SessionConfig) {
+    let key = Arc::clone(key);
+    move |config| config.master_key = Box::new(SharedKey(key))
 }
