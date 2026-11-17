@@ -228,7 +228,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-log-viewer")).show(ctx, |ui| {
         ui.set_width((size.x - 120.0).max(400.0));
         ui.horizontal(|ui| {
-            ui.heading(tr("Session log"));
+            crate::widgets::buttons::title(ui, tr("Session log"));
             ui.add_space(12.0);
             let marks_on = !viewer.beginning_missing;
             if ui.add_enabled(marks_on, egui::Button::new(tr("Bookmark"))).clicked() {

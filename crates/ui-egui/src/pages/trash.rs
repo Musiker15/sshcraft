@@ -65,7 +65,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         ))
         .color(tokens.text_dim),
     );
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tr("Keep for"));
         let mut d = days;
         if ui.add(egui::DragValue::new(&mut d).range(sshcraft_engine::settings::TRASH_DAYS).suffix(tr(" days"))).changed() {
@@ -84,7 +84,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             ui.label(kind_label(&row.kind));
             ui.label(visible(&row.name));
             ui.label(egui::RichText::new(when(row.deleted_at)).color(tokens.text_dim));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.small_button(tr("Restore")).clicked() {
                     action = Some(("trash.restore", json!({ "kind": row.kind, "id": row.id })));
                 }
@@ -126,7 +126,7 @@ pub fn versions_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut restore = None;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-versions")).show(ctx, |ui| {
         ui.set_max_width(460.0);
-        ui.heading(trf("Earlier versions of {name}", &[("name", &visible(&dialog.name))]));
+        crate::widgets::buttons::title(ui, trf("Earlier versions of {name}", &[("name", &visible(&dialog.name))]));
         ui.add_space(6.0);
         match &dialog.versions {
             None => {

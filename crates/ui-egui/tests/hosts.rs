@@ -90,7 +90,8 @@ fn groups_open_by_double_click_and_the_path_leads_back() {
     let prod = add_group(&session, "prod", None, json!({}));
     add_host(&session, "db", Some(prod), &[]);
     until(&mut h, "the data", |app| !app.data.groups.is_empty() && !app.data.hosts.is_empty());
-    assert!(h.query_by_label("db").is_none(), "hosts in a group are inside it");
+    // At the root the group's card lists its hosts (design E).
+    assert!(h.query_by_label("db").is_some(), "the group card lists its hosts");
     double_click(&mut h, "prod");
     h.run_steps(2);
     assert_eq!(h.state().ui.hosts.group, Some(prod));
@@ -266,7 +267,21 @@ fn the_host_form_takes_a_password_reference() {
     h.run_steps(3);
     hosts::edit_host(h.state_mut(), id);
     h.run_steps(2);
+    // The form is taller than the window: scroll it down to the password part.
+    // The wheel over the middle of the form, which is centred in the window.
+    let at = h.ctx.content_rect().center();
+    h.event(egui::Event::PointerMoved(at));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -600.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    });
+    h.run_steps(10);
     h.get_by_label("From a password manager").click();
+    h.run_steps(2);
+    h.get_by_label("Reference").scroll_to_me();
     h.run_steps(2);
     h.get_by_label("Reference").click();
     h.run_steps(1);
@@ -293,6 +308,46 @@ fn reachability_is_checked_only_when_switched_on() {
     settings["appearance"]["show_reachability"] = json!(true);
     run(&session, "settings.save", json!({ "settings": settings }));
     until(&mut h, "the check", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
+}
+
+/// The overview shows hosts in group cards and under "Recently connected", not only those
+/// without a group; their dots must be checked too.
+#[test]
+fn reachability_covers_the_hosts_in_group_cards() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "servers", "defaults": {} } }));
+    let id = HostId(uuid::Uuid::new_v4());
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": id, "name": "in-group", "group_id": group, "settings": { "address": "127.0.0.1", "port": port } } }),
+    );
+    let mut settings = run(&session, "settings.get", json!({}));
+    settings["appearance"]["show_reachability"] = json!(true);
+    run(&session, "settings.save", json!({ "settings": settings }));
+    until(&mut h, "the check of the host in a group", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
+}
+
+/// Right after the start the hosts are not loaded yet; that empty moment must not hold the first
+/// check back for a minute.
+#[test]
+fn reachability_checks_hosts_that_arrive_after_the_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let mut settings = run(&session, "settings.get", json!({}));
+    settings["appearance"]["show_reachability"] = json!(true);
+    run(&session, "settings.save", json!({ "settings": settings }));
+    until(&mut h, "the setting", |app| app.data.settings.appearance.show_reachability);
+    h.run_steps(5);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let id = HostId(uuid::Uuid::new_v4());
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "late", "settings": { "address": "127.0.0.1", "port": port } } }));
+    until(&mut h, "the check of the late host", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
 }
 
 #[test]
@@ -350,7 +405,6 @@ fn a_dynamic_group_finds_tagged_hosts_in_every_group() {
     add_host(&session, "gamma", None, &["db"]);
     save_dynamic_groups(&session, json!([{ "name": "Web servers", "tags": ["web"] }]));
     until(&mut h, "the data", |app| app.data.hosts.len() == 3 && !app.data.settings.appearance.smart_groups.is_empty());
-    assert!(h.query_by_label("alpha").is_none(), "alpha is in a group below");
     h.get_by_label("Web servers").click();
     h.run_steps(2);
     assert!(h.query_by_label("alpha").is_some(), "found in its group");
@@ -360,7 +414,7 @@ fn a_dynamic_group_finds_tagged_hosts_in_every_group() {
     h.get_by_label("Web servers").click();
     h.run_steps(2);
     assert!(h.state().ui.hosts.smart.is_none() && h.state().ui.hosts.tags.is_empty());
-    assert!(h.query_by_label("alpha").is_none());
+    // Back at the overview: every host again, alpha in its group's card.
     assert!(h.query_by_label("gamma").is_some());
 }
 

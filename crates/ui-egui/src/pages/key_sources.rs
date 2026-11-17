@@ -94,7 +94,7 @@ pub fn agent_section(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     let tokens = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.heading(tr("In the SSH agent"));
+        crate::widgets::buttons::title(ui, tr("In the SSH agent"));
         ui.add_space(16.0);
         if ui.add_enabled(!app.ui.agent_keys.loading, egui::Button::new(tr("Refresh"))).clicked() {
             load_agent_keys(app);
@@ -184,7 +184,7 @@ pub fn passcli_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut import) = (true, None);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-passcli")).show(ctx, |ui| {
         ui.set_width(480.0);
-        ui.heading(tr("Import from Proton Pass"));
+        crate::widgets::buttons::title(ui, tr("Import from Proton Pass"));
         ui.add_space(8.0);
         egui::ScrollArea::vertical().max_height(300.0).min_scrolled_height(300.0).auto_shrink([false, false]).show(ui, |ui| match &view {
             PassCliView::Loading => {

@@ -173,3 +173,8 @@ pub fn known_host(session: &crate::Session, address: &str, port: u16) -> Option<
 pub fn set_known_host(session: &crate::Session, address: &str, port: u16, fingerprint: &str) {
     session.store().set_known_host(address, port, fingerprint).unwrap();
 }
+
+/// Marks `host` as connected at `at_ms`, as opening a session does, for "Recently connected".
+pub fn touch_recent(session: &crate::Session, host: sshcraft_model::model::HostId, at_ms: i64) {
+    session.store().touch_recent(host, at_ms).unwrap();
+}

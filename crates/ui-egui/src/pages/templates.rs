@@ -121,7 +121,7 @@ pub fn show_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut submit) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-template")).show(ctx, |ui| {
         ui.set_width(620.0);
-        ui.heading(tr("Save as workspace"));
+        crate::widgets::buttons::title(ui, tr("Save as workspace"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(tr("Name"));
@@ -148,7 +148,7 @@ pub fn show_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         );
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            submit = ui.add_enabled(!busy && !form.name.trim().is_empty(), egui::Button::new(tr("Save"))).clicked();
+            submit = ui.add_enabled(!busy && !form.name.trim().is_empty(), crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }

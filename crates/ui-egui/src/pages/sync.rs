@@ -143,7 +143,7 @@ fn text(v: &Value, key: &str) -> String {
 }
 
 /// A server's state, in words.
-fn status_text(status: Option<&Value>) -> String {
+pub(crate) fn status_text(status: Option<&Value>) -> String {
     let Some(s) = status else { return tr("Sync off").to_string() };
     match s.get("state").and_then(Value::as_str).unwrap_or_default() {
         "idle" => tr("Up to date").to_string(),
@@ -164,12 +164,12 @@ fn servers(app: &mut SshcraftApp, ui: &mut Ui) {
     for server in app.data.servers.clone() {
         let id = text(&server, "id");
         ui.group(|ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(visible(&text(&server, "name"))).strong());
                 ui.label(egui::RichText::new(visible(&text(&server, "origin"))).color(tokens.text_dim));
                 ui.label(status_text(app.data.sync_status.get(&id).or_else(|| server.get("status"))));
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let mut on = server.get("sync_enabled").and_then(Value::as_bool).unwrap_or(false);
                 let mut keys = server.get("sync_keys").and_then(Value::as_bool).unwrap_or(false);
                 let mut logs = server.get("sync_logs").and_then(Value::as_bool).unwrap_or(false);
@@ -232,7 +232,7 @@ fn load_devices(app: &mut SshcraftApp, server: &str) {
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui.button(tr("Create account")).clicked() {
             app.ui.sync.create = Some({
                 let mut form = CreateForm::default();
@@ -282,7 +282,7 @@ fn create_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut go) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-create-account")).show(ctx, |ui| {
         ui.set_width(520.0);
-        ui.heading(tr("Create account"));
+        crate::widgets::buttons::title(ui, tr("Create account"));
         egui::Grid::new("sshcraft-create").num_columns(2).min_col_width(130.0).show(ui, |ui| {
             field(ui, tr("Server name"), &mut form.server_name);
             field(ui, tr("Server address"), &mut form.origin);
@@ -293,10 +293,10 @@ fn create_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             field(ui, tr("Email"), &mut form.email);
             field(ui, tr("This device's name"), &mut form.device_name);
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let ready =
                 [&form.server_name, &form.origin, &form.api_key, &form.name, &form.email, &form.device_name].iter().all(|s| !s.trim().is_empty());
-            go = ui.add_enabled(ready && !busy, egui::Button::new(tr("Create"))).clicked();
+            go = ui.add_enabled(ready && !busy, crate::widgets::buttons::main_action(tr("Create"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }
@@ -342,7 +342,7 @@ fn join_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut go) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-join-account")).show(ctx, |ui| {
         ui.set_width(520.0);
-        ui.heading(tr("Join an account"));
+        crate::widgets::buttons::title(ui, tr("Join an account"));
         egui::Grid::new("sshcraft-join").num_columns(2).min_col_width(130.0).show(ui, |ui| {
             field(ui, tr("Server name"), &mut form.server_name);
             field(ui, tr("Server address"), &mut form.origin);
@@ -354,7 +354,7 @@ fn join_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.end_row();
             field(ui, tr("This device's name"), &mut form.device_name);
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let ready = [&form.server_name, &form.origin, &form.api_key, &form.account_key, &form.device_name].iter().all(|s| !s.trim().is_empty());
             go = ui.add_enabled(ready && !busy, egui::Button::new(tr("Join"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
@@ -397,7 +397,7 @@ fn key_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut close = false;
     egui::Modal::new(egui::Id::unique("sshcraft-account-key-shown")).show(ctx, |ui| {
         ui.set_width(520.0);
-        ui.heading(tr("Your account key"));
+        crate::widgets::buttons::title(ui, tr("Your account key"));
         ui.label(tr("Keep it in your password manager now. SSHCraft does not store it and shows it only this once. Every new device needs it."));
         ui.add_space(6.0);
         ui.label(egui::RichText::new(key).monospace().color(tokens.text_strong));
@@ -419,7 +419,7 @@ fn devices_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut close, mut revoke) = (false, None);
     egui::Modal::new(egui::Id::unique("sshcraft-devices")).show(ctx, |ui| {
         ui.set_width(560.0);
-        ui.heading(tr("Devices"));
+        crate::widgets::buttons::title(ui, tr("Devices"));
         egui::Grid::new("sshcraft-device-list").num_columns(4).spacing([12.0, 6.0]).show(ui, |ui| {
             for d in &devices {
                 let mut name = visible(&text(d, "name"));
@@ -488,7 +488,7 @@ fn move_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut go) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-move")).show(ctx, |ui| {
         ui.set_width(420.0);
-        ui.heading(trf("Move {name}", &[("name", &visible(&form.name))]));
+        crate::widgets::buttons::title(ui, trf("Move {name}", &[("name", &visible(&form.name))]));
         if let Some(note) = &form.note {
             ui.label(note);
         }
@@ -496,7 +496,7 @@ fn move_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         for (id, name) in &servers {
             ui.radio_value(&mut form.location, Some(id.clone()), visible(name));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             go = ui.button(tr("Move")).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;

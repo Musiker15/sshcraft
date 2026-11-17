@@ -137,7 +137,8 @@ fn an_account_is_created_and_its_key_shown_once() {
     until(&mut h, "the server's state", |app| app.data.sync_status.values().any(|s| s["state"] == "idle"));
     // The state may change again (a sync runs at once): the label follows it.
     let deadline = Instant::now() + Duration::from_secs(10);
-    while h.query_by_label_contains("Up to date").is_none() {
+    // The page and the sidebar both say it.
+    while h.query_all_by_label_contains("Up to date").next().is_none() {
         assert!(Instant::now() < deadline, "the page says it is up to date");
         std::thread::sleep(Duration::from_millis(20));
         h.run_steps(1);

@@ -171,7 +171,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     };
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-key-dialog")).show(ctx, |ui| {
         ui.set_width(480.0);
-        ui.heading(title);
+        crate::widgets::buttons::title(ui, title);
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-key-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| match &mut dialog {
             KeyDialog::Generate(form) => {
@@ -220,13 +220,13 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0));
                 ui.end_row();
                 ui.label(tr("Where"));
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.radio_value(&mut form.hello, false, tr("Security key (FIDO2)"));
                     ui.radio_value(&mut form.hello, true, tr("Windows Hello"));
                 });
                 ui.end_row();
                 ui.label(tr("Type"));
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.radio_value(&mut form.ed25519, false, "ECDSA P-256");
                     ui.radio_value(&mut form.ed25519, true, "Ed25519");
                 });
@@ -249,7 +249,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         });
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let action = match &dialog {
                 KeyDialog::Generate(_) => tr("Generate"),
                 KeyDialog::Import(_) => tr("Import"),
@@ -303,7 +303,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut submit = false;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-identity-dialog")).show(ctx, |ui| {
         ui.set_width(480.0);
-        ui.heading(if form.id.is_some() { tr("Edit identity") } else { tr("New identity") });
+        crate::widgets::buttons::title(ui, if form.id.is_some() { tr("Edit identity") } else { tr("New identity") });
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-identity-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| {
             ui.label(tr("Name"));
@@ -326,7 +326,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             });
             ui.end_row();
             ui.label(tr("Password"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let hint = if form.has_password { tr("Stored; type to replace") } else { tr("None stored") };
                 crate::widgets::secret_field(ui, &mut form.password, egui::Id::unique("sshcraft-identity-password"), true, hint, 200.0);
                 if form.has_password {
@@ -338,8 +338,8 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         if let Some(error) = &form.error {
             ui.colored_label(Tokens::get(ui.ctx()).danger, error);
         }
-        ui.horizontal(|ui| {
-            submit = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
+        ui.horizontal_wrapped(|ui| {
+            submit = ui.add_enabled(!busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }
@@ -393,7 +393,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 fn key_row(app: &mut SshcraftApp, ui: &mut Ui, key: &KeyRow) {
     let tokens = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
         draw(ui.painter(), Icon::Key, icon, tokens.accent);
         let response = elided_label(ui, &key.name, 220.0, tokens.text, FontId::proportional(14.0));
@@ -452,7 +452,7 @@ fn confirm_delete(app: &mut SshcraftApp, ctx: &egui::Context) {
     egui::Modal::new(egui::Id::unique("sshcraft-key-confirm")).show(ctx, |ui| {
         ui.set_max_width(420.0);
         ui.label(trf("Delete the key {name}? Hosts that use it can no longer sign in with it.", &[("name", &visible(&name))]));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button(tr("Delete")).clicked() {
                 app.run_reported("key.delete", json!({ "id": id }));
                 app.ui.key_confirm = None;
@@ -477,8 +477,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             }),
         );
     }
-    ui.horizontal(|ui| {
-        ui.heading(tr("Keys"));
+    ui.horizontal_wrapped(|ui| {
+        crate::widgets::buttons::page_title(ui, tr("Keys"));
         ui.add_space(16.0);
         if ui.button(tr("Generate key")).clicked() {
             app.ui.key_dialog = Some(KeyDialog::Generate(GenerateForm { name: String::new(), kind: KeyType::Ed25519, passphrase: String::new() }));
@@ -510,8 +510,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(20.0);
     crate::pages::key_sources::agent_section(app, ui);
     ui.add_space(20.0);
-    ui.horizontal(|ui| {
-        ui.heading(tr("Identities"));
+    ui.horizontal_wrapped(|ui| {
+        crate::widgets::buttons::title(ui, tr("Identities"));
         ui.add_space(16.0);
         if ui.button(tr("New identity")).clicked() {
             app.ui.identity_form = Some(IdentityForm::default());
@@ -520,7 +520,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(8.0);
     let identities = app.data.identities.clone();
     for identity in &identities {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
             draw(ui.painter(), Icon::Identity, icon, tokens.text_dim);
             let response = elided_label(ui, &identity.name, 220.0, tokens.text, FontId::proportional(14.0));

@@ -224,7 +224,7 @@ pub fn about(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut close = false;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-about")).show(ctx, |ui| {
         ui.set_width(360.0);
-        ui.heading(APP_NAME);
+        crate::widgets::buttons::title(ui, APP_NAME);
         ui.label(crate::i18n::trf("Version {version}", &[("version", env!("CARGO_PKG_VERSION"))]));
         ui.add_space(6.0);
         ui.label(tr("An SSH client with end-to-end encrypted, self-hosted sync."));

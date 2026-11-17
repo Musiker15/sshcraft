@@ -162,7 +162,7 @@ If the log cannot be written, or the agent settings cannot be read, agents get n
 An agent with a shell of its own runs as the same Windows user as SSHCraft. It could start
 `pass-cli` or read files of that user without going through SSHCraft. SSHCraft makes its own
 store harder to reach: keys from the vault are unlocked with Windows Hello on first use after
-start. Give agents a shell only where you would let them act as you.
+start (unless you switched that off in the general settings, which no agent can do). Give agents a shell only where you would let them act as you.
 
 ## The connection
 

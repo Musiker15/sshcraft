@@ -34,7 +34,9 @@ the tab without retrying.
 Passwords are sealed in the vault like keys (see [security.md](security.md)). The forms show only
 whether one is stored, with *Change* and *Remove*; no part of the app ever shows a stored
 password again. Before the first key or password from the vault is used, Windows Hello asks once
-per run.
+per run. *Settings › General › Ask Windows Hello before the first stored key or password* switches
+that off; then anything running as your Windows user can use the stored secrets through SSHCraft
+without a question. Agents cannot change the setting.
 
 ### Passwords from a password manager
 

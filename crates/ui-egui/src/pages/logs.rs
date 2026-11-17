@@ -163,11 +163,11 @@ fn confirm_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut confirmed = false;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-logs-confirm")).show(ctx, |ui| {
         ui.set_width(420.0);
-        ui.heading(trf("Delete {count} session logs?", &[("count", &ids.len().to_string())]));
+        crate::widgets::buttons::title(ui, trf("Delete {count} session logs?", &[("count", &ids.len().to_string())]));
         ui.add_space(6.0);
         ui.label(tr("They are deleted for good, on the sync server and your other devices too."));
         ui.add_space(10.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button(tr("Cancel")).clicked() {
                 close = true;
             }
@@ -204,8 +204,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let list = shown(app);
     let mut action = None;
     let mut delete_ids = None;
-    ui.horizontal(|ui| {
-        ui.heading(tr("Logs"));
+    ui.horizontal_wrapped(|ui| {
+        crate::widgets::buttons::page_title(ui, tr("Logs"));
         ui.add_space(16.0);
         ui.add(egui::TextEdit::singleline(&mut app.ui.logs.search).hint_text(tr("Search in all logs")).desired_width(240.0));
         filter_box(app, ui);
@@ -251,7 +251,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
                 ui.label(duration(log));
                 ui.label(size(log.get("size").and_then(Value::as_u64).unwrap_or(0)));
                 ui.label(if log.get("location").is_none_or(Value::is_null) { tr("This device") } else { tr("Sync server") });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button(tr("Open")).clicked() {
                         action = Some(LogAction::Open(id.clone()));
                     }

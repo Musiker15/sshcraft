@@ -1146,3 +1146,17 @@ async fn agents_cannot_aim_launch_actions() {
     let r = call(&w, &conn, "host.save", json!({ "host": { "name": "aimed", "group": gl.id.0, "address": "evil.example" } })).await;
     assert!(is_denied(&r), "{r:?}");
 }
+
+/// An agent cannot switch off Windows Hello before secrets (or change any other setting):
+/// `settings.save` has no agent access.
+#[tokio::test]
+async fn an_agent_cannot_switch_off_hello_before_secrets() {
+    let w = world(Some(true)).await;
+    let conn = w.conn();
+    let mut settings = w.session.execute(Caller::User, "settings.get", json!({})).await.unwrap();
+    settings["general"]["hello_before_secrets"] = json!(false);
+    let r = call(&w, &conn, "settings.save", json!({ "settings": settings })).await;
+    assert!(is_denied(&r), "an agent may not save settings: {r:?}");
+    let after = w.session.execute(Caller::User, "settings.get", json!({})).await.unwrap();
+    assert_eq!(after["general"]["hello_before_secrets"], json!(true));
+}

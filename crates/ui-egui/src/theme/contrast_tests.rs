@@ -37,3 +37,13 @@ fn every_theme_reads() {
     check("dark", &Tokens::dark());
     check("light", &Tokens::light());
 }
+
+#[test]
+fn the_accent_is_the_same_blue_in_both_themes() {
+    for t in [Tokens::dark(), Tokens::light()] {
+        assert_eq!(t.accent, egui::Color32::from_rgb(0x00, 0x71, 0xFF));
+        assert_eq!((t.radius, t.radius_card), (10, 16));
+    }
+    assert_eq!(Tokens::dark().bg, egui::Color32::from_rgb(0x18, 0x19, 0x1E));
+    assert_eq!(Tokens::light().sidebar, egui::Color32::from_rgb(0xEF, 0xEF, 0xF2));
+}

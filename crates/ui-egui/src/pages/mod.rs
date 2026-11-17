@@ -5,6 +5,7 @@ pub mod backup;
 pub mod connections;
 pub mod forwarding;
 pub mod host_form;
+pub mod host_items;
 pub mod hosts;
 pub mod import_export;
 pub mod key_sources;

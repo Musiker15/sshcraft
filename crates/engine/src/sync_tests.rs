@@ -364,3 +364,45 @@ fn syncing_everything_moves_what_is_here() {
     let stored = store.list_hosts().unwrap().into_iter().find(|h| h.id == after.id).unwrap();
     assert_eq!(stored.location, None, "afterwards new hosts stay here again");
 }
+
+/// With "Sync everything" on, a key made or imported afterwards goes to the server and is queued
+/// for it, like a new host; before, it got the server as its place but was never sent until it
+/// was moved by hand.
+#[tokio::test]
+async fn new_keys_are_queued_for_the_server_that_syncs_everything() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, _) = crate::Session::open(crate::SessionConfig::for_tests(dir.path())).unwrap();
+    let server = ServerId::new();
+    {
+        let store = session.store();
+        store
+            .add_server(&ServerRow {
+                id: server,
+                name: "home".into(),
+                origin: "https://sync.example.org".into(),
+                account: [1; 32],
+                device_id: Uuid::new_v4(),
+                sealed_device: vec![0],
+                sync_enabled: false,
+                sync_keys: false,
+                revoked: false,
+                log_head: None,
+                tracker: None,
+                created_at: 1,
+            })
+            .unwrap();
+        sync_everything(&store, server, true, 5).unwrap();
+    }
+    let generated = session
+        .execute(crate::Caller::User, "key.generate", serde_json::json!({ "name": "made", "spec": { "type": "ed25519" }, "passphrase": null }))
+        .await
+        .unwrap();
+    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap();
+    let text = key.to_openssh(russh::keys::ssh_key::LineEnding::LF).unwrap().to_string();
+    let imported = session.execute(crate::Caller::User, "key.import", serde_json::json!({ "name": "brought", "text": text })).await.unwrap();
+    let queued = session.store().outbox(server).unwrap();
+    for info in [generated, imported] {
+        let id = info["id"].as_str().unwrap().to_string();
+        assert!(queued.iter().any(|(_, q)| q == &id), "the new key {id} is queued for the server");
+    }
+}

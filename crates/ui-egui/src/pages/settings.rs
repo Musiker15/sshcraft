@@ -91,9 +91,9 @@ pub(crate) fn save(app: &mut SshcraftApp, change: impl FnOnce(&mut EngineSetting
 }
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
-    ui.heading(tr("Settings"));
+    crate::widgets::buttons::page_title(ui, tr("Settings"));
     ui.add_space(8.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         // No agents on a tablet: no control channel, no MCP, no CLI.
         for section in Section::ALL.into_iter().filter(|s| *s != Section::Agents || app.form == crate::app::Form::Desktop) {
             if ui.selectable_label(app.ui.settings.section == section, section.label()).clicked() {
@@ -123,7 +123,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
 fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     let mut language = app.data.settings.general.language;
     ui.label(egui::RichText::new(tr("Language")).strong());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.radio_value(&mut language, LanguageSetting::Auto, tr("System"));
         // Each language in its own name, whatever the current one is.
         ui.radio_value(&mut language, LanguageSetting::En, "English");
@@ -152,7 +152,7 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.label(egui::RichText::new(tr("App lock")).strong());
     let mut minutes = app.data.settings.general.lock_after_minutes;
     ui.add_enabled_ui(crate::lock::supported(), |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(tr("Lock after"));
             ui.add(egui::DragValue::new(&mut minutes).range(sshcraft_engine::settings::LOCK_MINUTES).suffix(tr(" minutes without input")));
         });
@@ -166,6 +166,16 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
         .weak(),
     );
     save(app, |s| s.general.lock_after_minutes = minutes);
+    // Agents cannot change this one: settings.save has no agent access.
+    let mut hello = app.data.settings.general.hello_before_secrets;
+    ui.checkbox(&mut hello, tr("Ask Windows Hello before the first stored key or password"));
+    ui.label(
+        egui::RichText::new(tr(
+            "Once per start. Off, anything running as your Windows user can use the stored keys and passwords through SSHCraft without a question.",
+        ))
+        .weak(),
+    );
+    save(app, |s| s.general.hello_before_secrets = hello);
     ui.add_space(12.0);
     crate::pages::backup::section(app, ui);
     let ctx = ui.ctx().clone();
@@ -185,14 +195,14 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
     let mut a = app.data.settings.appearance.clone();
     egui::Grid::new("sshcraft-appearance").num_columns(2).min_col_width(160.0).spacing([16.0, 10.0]).show(ui, |ui| {
         ui.label(tr("Theme"));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.radio_value(&mut a.app_theme, AppTheme::System, tr("System"));
             ui.radio_value(&mut a.app_theme, AppTheme::Dark, tr("Dark"));
             ui.radio_value(&mut a.app_theme, AppTheme::Light, tr("Light"));
         });
         ui.end_row();
         ui.label(tr("Terminal colours"));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (id, label) in TERMINAL_THEMES {
                 ui.radio_value(&mut a.terminal_theme, id.to_string(), tr(label));
             }
@@ -215,7 +225,7 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         // A system-wide shortcut is a desktop thing.
         if app.form == crate::app::Form::Desktop {
             ui.label(tr("Dropdown window"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 // Typed as a draft: half a combination is never saved or registered system-wide.
                 let typed = app.ui.settings.dropdown_shortcut.get_or_insert_with(|| a.dropdown_shortcut.clone().unwrap_or_default());
                 let response = ui
@@ -236,7 +246,7 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.checkbox(&mut a.show_reachability, tr("Show in the host list whether each host answers (connects to them every minute)"));
         ui.end_row();
         ui.label(tr("Hosts as"));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.radio_value(&mut a.host_view, HostView::Grid, tr("Grid"));
             ui.radio_value(&mut a.host_view, HostView::List, tr("List"));
         });
@@ -289,13 +299,13 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         });
         ui.end_row();
         ui.label(tr("Scrollback"));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::DragValue::new(&mut t.scrollback).range(sshcraft_engine::settings::SCROLLBACK).speed(100.0));
             ui.label(egui::RichText::new(tr("lines, for new tabs")).color(tokens.text_dim));
         });
         ui.end_row();
         ui.label(tr("Reconnect"));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::DragValue::new(&mut t.reconnect_attempts).range(sshcraft_engine::settings::RECONNECT_ATTEMPTS));
             ui.label(
                 egui::RichText::new(tr("attempts after a dropped connection, waiting up to a minute between them; 0 turns it off"))
@@ -305,7 +315,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.end_row();
         ui.label(tr("Notifications"));
         ui.vertical(|ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.add(egui::DragValue::new(&mut t.notify_after_secs).range(sshcraft_engine::settings::NOTIFY_AFTER_SECS));
                 ui.label(
                     egui::RichText::new(tr("seconds a command must run to notify when it ends in the background; 0 turns it off"))
@@ -350,7 +360,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     let mut remove = None;
     for (i, host) in t.clipboard_hosts.iter().enumerate() {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(host_label(app, *host));
             if ui.button(tr("Remove")).clicked() {
                 remove = Some(i);
@@ -387,7 +397,7 @@ fn macros(app: &mut SshcraftApp, ui: &mut Ui) {
     let list = app.data.settings.terminal.macros.clone();
     let mut remove = None;
     for (i, m) in list.iter().enumerate() {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(crate::widgets::visible(&m.name));
             ui.label(egui::RichText::new(trf("{count} steps", &[("count", &m.steps.len().to_string())])).small());
             if ui.small_button(tr("Edit")).clicked() {
@@ -421,8 +431,8 @@ fn macros(app: &mut SshcraftApp, ui: &mut Ui) {
     let clash = list.iter().enumerate().any(|(i, m)| Some(i) != place && sshcraft_engine::settings::same_name(&m.name, &draft.name));
     let ok = draft.valid() && !clash;
     let (mut keep, mut store) = (true, false);
-    ui.horizontal(|ui| {
-        store = ui.add_enabled(ok, egui::Button::new(tr("Save"))).clicked();
+    ui.horizontal_wrapped(|ui| {
+        store = ui.add_enabled(ok, crate::widgets::buttons::main_action(tr("Save"))).clicked();
         if ui.button(tr("Cancel")).clicked() {
             keep = false;
         }
@@ -454,7 +464,7 @@ fn patterns(app: &mut SshcraftApp, ui: &mut Ui, t: &mut sshcraft_engine::setting
     ui.label(egui::RichText::new(tr("Regular expressions coloured wherever they appear in a terminal, case-insensitive")).color(tokens.text_dim));
     let mut remove = None;
     for (i, h) in highlights.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut h.pattern).desired_width(260.0).hint_text(tr("Pattern")));
             let mut color = crate::terminal::highlight::swatch(h.color);
             if ui.color_edit_button_srgba(&mut color).changed() {
@@ -482,7 +492,7 @@ fn patterns(app: &mut SshcraftApp, ui: &mut Ui, t: &mut sshcraft_engine::setting
     ui.label(egui::RichText::new(tr("Regular expressions checked once for each finished output line, case-insensitive")).color(tokens.text_dim));
     let mut remove = None;
     for (i, trigger) in triggers.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut trigger.pattern).desired_width(260.0).hint_text(tr("Pattern")));
             let label = |a: TriggerAction| match a {
                 TriggerAction::Notify => tr("Notify"),
@@ -567,9 +577,12 @@ fn shortcuts(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     ui.add_space(6.0);
     let mut action: Option<(usize, &'static str)> = None;
-    egui::Grid::new("sshcraft-shortcuts").num_columns(3).min_col_width(120.0).spacing([16.0, 8.0]).show(ui, |ui| {
-        for (i, command) in ui_commands().iter().enumerate() {
-            ui.label(tr(command.label));
+    // One row per command that wraps when the window is narrow: the name and the shortcut keep
+    // their columns while there is room and are cut (full text on hover), the buttons move to the
+    // next line instead of leaving the window.
+    for (i, command) in ui_commands().iter().enumerate() {
+        ui.horizontal_wrapped(|ui| {
+            ui.add_sized(egui::vec2(240.0, 22.0), egui::Label::new(tr(command.label)).truncate());
             let chords = app.bindings.chords(command.id);
             let text = if app.ui.settings.recording == Some(i) {
                 tr("Press a key combination (Escape cancels)").to_string()
@@ -588,21 +601,19 @@ fn shortcuts(app: &mut SshcraftApp, ui: &mut Ui) {
                     .collect::<Vec<_>>()
                     .join(", ")
             };
-            ui.label(egui::RichText::new(text).monospace());
-            ui.horizontal(|ui| {
-                if ui.button(tr("Change")).clicked() {
-                    action = Some((i, "change"));
-                }
-                if ui.add_enabled(!chords.is_empty(), egui::Button::new(tr("Remove"))).clicked() {
-                    action = Some((i, "remove"));
-                }
-                if ui.button(tr("Default")).clicked() {
-                    action = Some((i, "default"));
-                }
-            });
-            ui.end_row();
-        }
-    });
+            ui.add_sized(egui::vec2(260.0, 22.0), egui::Label::new(egui::RichText::new(text).monospace()).truncate());
+            if ui.button(tr("Change")).clicked() {
+                action = Some((i, "change"));
+            }
+            if ui.add_enabled(!chords.is_empty(), egui::Button::new(tr("Remove"))).clicked() {
+                action = Some((i, "remove"));
+            }
+            if ui.button(tr("Default")).clicked() {
+                action = Some((i, "default"));
+            }
+        });
+        ui.add_space(4.0);
+    }
     let Some((i, what)) = action else { return };
     let Some(command) = ui_commands().get(i) else { return };
     app.ui.settings.error = None;

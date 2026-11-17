@@ -958,7 +958,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
     let field_scroll = app.field_paste.scroll;
     let modal = egui::Modal::new(egui::Id::unique(title)).show(ctx, |ui| {
         ui.set_width(540.0);
-        ui.heading(title);
+        crate::widgets::buttons::title(ui, title);
         egui::ScrollArea::vertical().max_height(form_height(ui.ctx())).min_scrolled_height(form_height(ui.ctx())).auto_shrink([false, false]).show(
             ui,
             |ui| {
@@ -1020,7 +1020,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
         }
         ui.horizontal(|ui| {
-            save = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
+            save = ui.add_enabled(!busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if busy {
                 ui.spinner();
             }
@@ -1106,7 +1106,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
     let field_scroll = app.field_paste.scroll;
     let modal = egui::Modal::new(egui::Id::unique(title)).show(ctx, |ui| {
         ui.set_width(540.0);
-        ui.heading(title);
+        crate::widgets::buttons::title(ui, title);
         egui::ScrollArea::vertical().max_height(form_height(ui.ctx())).min_scrolled_height(form_height(ui.ctx())).auto_shrink([false, false]).show(
             ui,
             |ui| {
@@ -1149,7 +1149,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
         }
         ui.horizontal(|ui| {
-            save = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
+            save = ui.add_enabled(!busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if busy {
                 ui.spinner();
             }

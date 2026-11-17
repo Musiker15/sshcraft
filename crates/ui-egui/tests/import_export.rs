@@ -33,6 +33,8 @@ fn preview_csv(h: &mut Harness<'static, SshcraftApp>, csv: &str, dir: &std::path
     let file = dir.join("hosts.csv");
     std::fs::write(&file, csv).unwrap();
     answer_with(h, file);
+    h.get_by_label("More").click();
+    h.run_steps(2);
     h.get_by_label("Import").click();
     h.run_steps(3);
     h.state_mut().ui.import.as_mut().expect("the import opened").source = ImportSourceKind::Csv;
@@ -89,6 +91,8 @@ fn an_export_writes_no_secret() {
     until(&mut h, "the host", |app| !app.data.hosts.is_empty());
     let out = files.path().join("hosts.json");
     answer_with(&mut h, out.clone());
+    h.get_by_label("More").click();
+    h.run_steps(2);
     h.get_by_label("Export").click();
     h.run_steps(3);
     h.state_mut().ui.export.as_mut().expect("the export opened").json = true;
@@ -116,6 +120,8 @@ fn a_dialog_answered_later_still_reaches_its_page() {
     let file = files.path().join("hosts.csv");
     std::fs::write(&file, "name,address\nweb,192.0.2.1\n").unwrap();
     answer_with(&mut h, file.clone());
+    h.get_by_label("More").click();
+    h.run_steps(2);
     h.get_by_label("Import").click();
     h.run_steps(3);
     h.state_mut().ui.import.as_mut().unwrap().source = ImportSourceKind::Csv;

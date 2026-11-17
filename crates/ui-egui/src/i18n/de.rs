@@ -276,6 +276,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SSHCraft does not check for updates and sends no telemetry" => "SSHCraft sucht nicht nach Updates und sendet keine Telemetrie",
         "App lock" => "App-Sperre",
         "Lock after" => "Sperren nach",
+        "Ask Windows Hello before the first stored key or password" => {
+            "Vor dem ersten gespeicherten Schlüssel oder Passwort nach Windows Hello fragen"
+        }
+        "Once per start. Off, anything running as your Windows user can use the stored keys and passwords through SSHCraft without a question." => {
+            "Einmal pro Start. Ausgeschaltet kann alles, was unter deinem Windows-Benutzer läuft, die gespeicherten Schlüssel und Passwörter ohne Rückfrage über SSHCraft nutzen."
+        }
         " minutes without input" => " Minuten ohne Eingabe",
         "0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again." => {
             "0 sperrt nie. Zum Entsperren fragt Windows Hello, und Schlüssel und Passwörter fragen es erneut."
@@ -900,6 +906,18 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "An SSH client with end-to-end encrypted, self-hosted sync." => "Ein SSH-Client mit Ende-zu-Ende-verschlüsseltem, selbst gehostetem Sync.",
         "Licence: {licence}" => "Lizenz: {licence}",
         "Menu" => "Menü",
+        "Close the menu" => "Menü schließen",
+        "SSH" => "SSH",
+        "SFTP" => "SFTP",
+        "SFTP comes with S1" => "SFTP kommt mit S1",
+        "More" => "Mehr",
+        "Where do you want to connect?" => "Wohin möchtest du dich verbinden?",
+        "Recently connected" => "Zuletzt verbunden",
+        "Without a group" => "Ohne Gruppe",
+        "Groups" => "Gruppen",
+        "Show all {count}" => "Alle {count} anzeigen",
+        "{count} subgroups" => "{count} Untergruppen",
+        "1 host" => "1 Host",
         "Scroll menu up" => "Menü nach oben scrollen",
         "Scroll menu down" => "Menü nach unten scrollen",
         "Show All" => "Alle einblenden",

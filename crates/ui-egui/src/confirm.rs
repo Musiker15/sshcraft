@@ -35,7 +35,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut close, mut go) = (false, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-confirm")).show(ctx, |ui| {
         ui.set_width(440.0);
-        ui.heading(&confirm.title);
+        crate::widgets::buttons::title(ui, &confirm.title);
         ui.add_space(6.0);
         ui.label(&confirm.body);
         ui.add_space(10.0);

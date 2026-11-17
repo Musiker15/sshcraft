@@ -103,6 +103,12 @@ reads `config.toml`.
   stale; applies tokens, theme and language; runs the shortcuts; draws the shell (sidebar, tabs,
   page), the palette, the questions and the messages. File dialogs show after the frame
   (`show_dialogs`).
+- **Layout.** `shell.rs` picks one of three layouts from the window's width (`layout_for`):
+  below 700 points a top bar whose menu button slides the pages out, from 700 a rail of symbols
+  76 points wide, from 1000 a sidebar of 236 points with the logo, the page names and the sync
+  state. Header rows wrap instead of running off the edge; `tests/layout.rs` checks every page at
+  390 points. Colours, radii and spacing are the tokens in `theme/tokens.rs` (dark and light,
+  one blue accent), and `contrast_tests.rs` holds them to readable contrast.
 - **Window frame and menus.** craft-window decides who draws the title bar
   (`policy::decide_for` with the prefix `SSHCRAFT`): the app's own bar by default, the system's
   with Settings, General, Use system title bar (read at start) and on tiling window managers.

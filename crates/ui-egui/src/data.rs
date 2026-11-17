@@ -95,6 +95,9 @@ pub struct SnippetRow {
 #[derive(Default)]
 pub struct Data {
     pub hosts: Vec<HostRow>,
+    /// The hosts connected to last, newest first, as `host.recent` names them (deleted ones may
+    /// still be in it; the Hosts page skips them).
+    pub recent: Vec<sshcraft_model::model::HostId>,
     pub groups: Vec<GroupRow>,
     pub keys: Vec<KeyRow>,
     pub identities: Vec<IdentityRow>,
@@ -166,6 +169,17 @@ pub fn refresh(app: &mut SshcraftApp) {
     };
     if due.contains(Refresh::HOSTS) {
         fetch(app, Refresh::HOSTS, "host.list", |d, v| d.hosts = rows(v));
+        // "Recently connected" on the Hosts page; a failure leaves the section out.
+        app.runner.run(
+            "host.recent",
+            json!({ "limit": 8 }),
+            Box::new(|app, result| {
+                if let Ok(value) = result {
+                    app.data.recent = serde_json::from_value(value).unwrap_or_default();
+                    app.data.version = app.data.version.wrapping_add(1);
+                }
+            }),
+        );
     }
     if due.contains(Refresh::GROUPS) {
         fetch(app, Refresh::GROUPS, "group.list", |d, v| d.groups = rows(v));

@@ -88,7 +88,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut cancel, mut quit) = (false, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-quit")).show(ctx, |ui| {
         ui.set_width(420.0);
-        ui.heading(tr("Quit SSHCraft?"));
+        crate::widgets::buttons::title(ui, tr("Quit SSHCraft?"));
         ui.add_space(6.0);
         let body = trf("Still running: {what}. Quitting ends it.", &[("what", &running_text(sessions(app), forwards(app)))]);
         ui.label(body);

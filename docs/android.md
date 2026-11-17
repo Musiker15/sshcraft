@@ -1,6 +1,6 @@
 # Android
 
-SSHCraft runs on Android tablets with Android 13 or newer (arm64). It is the same app as on the
+SSHCraft runs on Android tablets and phones with Android 13 or newer (arm64). It is the same app as on the
 desktop, in a form made for a touch screen. There is no Play Store listing: the APK is attached to
 the GitHub releases and installed by hand.
 
@@ -55,6 +55,9 @@ the bar puts the selection on Android's clipboard.
 
 ## What is different from the desktop
 
+- On a narrow screen (a phone, or a tablet held upright) the pages sit under a top bar, and its
+  menu button opens the list of pages. Wider screens show a rail of symbols on the left, and from
+  1000 points the sidebar with the page names.
 - The vault's master key is kept in Android's credential store, encrypted with a key in the
   Android Keystore that never leaves the device. The app's data is excluded from Android's
   backup and from the transfer to a new device, so a new device starts empty and gets its data

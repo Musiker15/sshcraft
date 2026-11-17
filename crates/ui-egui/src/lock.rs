@@ -66,7 +66,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut egui::Ui) {
         let _ = craft_window::title_bar::empty_area(ui, top);
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() / 3.0);
-            ui.heading(tr("SSHCraft is locked"));
+            crate::widgets::buttons::title(ui, tr("SSHCraft is locked"));
             ui.add_space(8.0);
             ui.label(egui::RichText::new(tr("Sessions keep running. Unlock with Windows Hello to see them.")).color(tokens.text_dim));
             ui.add_space(12.0);
