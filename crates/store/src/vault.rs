@@ -70,13 +70,37 @@ impl MasterKeyProvider for MemoryMasterKey {
     }
 }
 
-/// Keeps the master key in the OS credential store (Windows Credential Manager).
+// keyring's v1 API has no Android store; there the same calls go to keyring-core directly.
+#[cfg(not(target_os = "android"))]
+use keyring as keyring_api;
+#[cfg(target_os = "android")]
+use keyring_core as keyring_api;
+
+/// Keeps the master key in the OS credential store: Windows Credential Manager, the macOS
+/// keychain, the Secret Service, and on Android shared preferences encrypted with a key in the
+/// Android Keystore.
 pub struct KeyringMasterKey;
 
 impl KeyringMasterKey {
-    fn entry() -> Result<keyring::Entry, VaultError> {
-        keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|e| VaultError::Keyring(e.to_string()))
+    fn entry() -> Result<keyring_api::Entry, VaultError> {
+        #[cfg(target_os = "android")]
+        android_store()?;
+        keyring_api::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|e| VaultError::Keyring(e.to_string()))
     }
+}
+
+/// Makes the Android Keystore store keyring-core's default, once per process.
+#[cfg(target_os = "android")]
+fn android_store() -> Result<(), VaultError> {
+    static STORE: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    STORE
+        .get_or_init(|| {
+            let store = android_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
+            keyring_core::set_default_store(store);
+            Ok(())
+        })
+        .clone()
+        .map_err(VaultError::Keyring)
 }
 
 impl MasterKeyProvider for KeyringMasterKey {
@@ -87,7 +111,7 @@ impl MasterKeyProvider for KeyringMasterKey {
                 let key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| VaultError::Keyring("stored master key has wrong length".into()))?;
                 Ok(Some(Zeroizing::new(key)))
             }
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_api::Error::NoEntry) => Ok(None),
             Err(e) => Err(VaultError::Keyring(e.to_string())),
         }
     }
