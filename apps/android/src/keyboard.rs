@@ -50,6 +50,15 @@ pub fn take_text() -> Vec<String> {
     .unwrap_or_default()
 }
 
+/// What the system covers of the window, packed as `MainActivity.covered` packs it.
+pub fn covered() -> u64 {
+    with_activity(|env, activity| {
+        let class = env.get_object_class(activity)?;
+        env.call_static_method(&class, jni_str!("covered"), jni_sig!("()J"), &[])?.j()
+    })
+    .map_or(0, |packed| packed as u64)
+}
+
 /// Shows the keyboard for the text connection, or hides it.
 pub fn show(visible: bool) {
     // A keyboard that cannot be shown leaves the hardware keyboard and the key bar.

@@ -25,6 +25,26 @@ pub fn covered(window: egui::Rect, content: (i32, i32, i32, i32), ppp: f32) -> e
     }
 }
 
+/// `MainActivity.covered()` as `(left, top, right, bottom)` in pixels: four 16-bit values.
+pub fn unpack_covered(packed: u64) -> (i32, i32, i32, i32) {
+    let part = |shift: u32| ((packed >> shift) & 0xFFFF) as i32;
+    (part(0), part(16), part(32), part(48))
+}
+
+/// The larger of two margins, side by side: what the system covers by either report.
+pub fn widest(a: egui::epaint::MarginF32, b: egui::epaint::MarginF32) -> egui::epaint::MarginF32 {
+    egui::epaint::MarginF32 { left: a.left.max(b.left), top: a.top.max(b.top), right: a.right.max(b.right), bottom: a.bottom.max(b.bottom) }
+}
+
+/// Pixels the system covers, from the window's edges, as points: never negative.
+pub fn covered_edges((left, top, right, bottom): (i32, i32, i32, i32), ppp: f32) -> egui::epaint::MarginF32 {
+    if !(ppp.is_finite() && ppp > 0.0) {
+        return egui::epaint::MarginF32::ZERO;
+    }
+    let points = |v: i32| (v.max(0) as f32) / ppp;
+    egui::epaint::MarginF32 { left: points(left), top: points(top), right: points(right), bottom: points(bottom) }
+}
+
 /// When to draw the next frame without input: at once after the visible area changed (the
 /// on-screen keyboard opened or closed, the tablet turned), often for a while after input (the
 /// keyboard animates after a tap), and once a second otherwise, since Android tells the app
@@ -130,6 +150,26 @@ mod tests {
         let covered = covered(window(), (-10, -10, 4000, 4000), 2.0);
         assert_eq!(covered, egui::epaint::MarginF32::ZERO);
         assert_eq!(super::covered(window(), (0, 0, 10, 10), 0.0), egui::epaint::MarginF32::ZERO, "no scale yet");
+    }
+
+    #[test]
+    fn the_keyboard_and_the_bars_are_kept_free() {
+        // As MainActivity packs them: 0 left, 96 px status bar, 0 right, 1200 px keyboard.
+        let packed = 96u64 << 16 | 1200u64 << 48;
+        assert_eq!(unpack_covered(packed), (0, 96, 0, 1200));
+        let edges = covered_edges(unpack_covered(packed), 2.0);
+        assert_eq!((edges.top, edges.bottom), (48.0, 600.0));
+        assert_eq!(covered_edges((0, 0, 0, 10), 0.0), egui::epaint::MarginF32::ZERO, "no scale yet");
+        let content = covered(window(), (0, 0, 2560, 1600), 2.0);
+        assert_eq!(widest(edges, content).bottom, 600.0, "the window inset wins where the content rect sees nothing");
+    }
+
+    /// The packing in Rust is the one in Java.
+    #[test]
+    fn the_packing_matches_the_java_class() {
+        let java = include_str!("../java/de/musiker15/sshcraft/MainActivity.java");
+        assert!(java.contains("pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48"));
+        assert!(java.contains("Math.min(pixels, 0xFFFF)"));
     }
 
     #[test]

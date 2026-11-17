@@ -50,10 +50,11 @@ pub fn after(app: &mut SshcraftApp, ctx: &egui::Context, restore: Option<egui::S
         return;
     }
     let Some(field) = focused_field(app, ctx) else { return };
-    let corner = ctx.content_rect().right_bottom() - egui::vec2(12.0, 12.0);
+    // Above the keyboard and the navigation bar, which the content rect leaves out.
+    let corner = ctx.content_rect().right_bottom() - egui::vec2(16.0, 16.0);
     let area =
         egui::Area::new(egui::Id::unique("sshcraft-field-paste")).order(egui::Order::Foreground).pivot(egui::Align2::RIGHT_BOTTOM).fixed_pos(corner);
-    let shown = area.show(ctx, |ui| ui.add(egui::Button::new(tr("Paste")).sense(egui::Sense::CLICK).min_size(egui::vec2(72.0, 32.0))));
+    let shown = area.show(ctx, |ui| ui.add(egui::Button::new(tr("Paste")).sense(egui::Sense::CLICK).min_size(egui::vec2(96.0, 44.0))));
     app.field_paste.rect = Some(shown.response.rect);
     if shown.inner.clicked()
         && let Some(text) = app.paste_source.as_ref().and_then(|source| source())

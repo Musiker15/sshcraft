@@ -30,6 +30,8 @@ struct Tablet {
     android: AndroidApp,
     /// The content rect seen last, to notice the keyboard or a rotation.
     content: (i32, i32, i32, i32),
+    /// What the system covered last (keyboard, bars), from MainActivity.
+    edges: (i32, i32, i32, i32),
     content_changed: bool,
     last_input: std::time::Instant,
     /// Whether the on-screen keyboard was asked for last.
@@ -75,15 +77,20 @@ impl eframe::App for Tablet {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let rect = self.android.content_rect();
         let content = (rect.left, rect.top, rect.right, rect.bottom);
-        if content != self.content {
+        let edges = crate::unpack_covered(crate::keyboard::covered());
+        if (content, edges) != (self.content, self.edges) {
             self.content = content;
+            self.edges = edges;
             self.content_changed = true;
         }
         if !raw_input.events.is_empty() {
             self.last_input = std::time::Instant::now();
         }
         if let Some(window) = raw_input.screen_rect {
-            let covered = crate::covered(window, content, ctx.pixels_per_point());
+            let ppp = ctx.pixels_per_point();
+            // The window's insets (Android 15 and later draw edge to edge and no longer shrink
+            // the window for the keyboard), and the content rect where an older one still does.
+            let covered = crate::widest(crate::covered_edges(edges, ppp), crate::covered(window, content, ppp));
             raw_input.safe_area_insets = Some(egui::SafeAreaInsets(covered));
         }
         crate::clipboard_keys(&mut raw_input.events, clipboard_text);
@@ -152,6 +159,7 @@ fn run(android: AndroidApp) {
                 app,
                 android: handle,
                 content: (0, 0, 0, 0),
+                edges: (0, 0, 0, 0),
                 content_changed: true,
                 last_input: std::time::Instant::now(),
                 keyboard: false,

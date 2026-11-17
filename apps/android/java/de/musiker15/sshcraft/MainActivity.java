@@ -3,10 +3,12 @@ package de.musiker15.sshcraft;
 import android.app.NativeActivity;
 import android.content.Context;
 import android.os.Bundle;
+import android.graphics.Insets;
 import android.text.InputType;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -28,6 +30,14 @@ public class MainActivity extends NativeActivity {
     /** At most this many characters wait; a keyboard cannot flood the app. */
     private static final int MAX_WAITING = 1 << 20;
 
+    /**
+     * What the system covers of the window, in pixels (keyboard, status and navigation bars,
+     * camera cutout), packed as four 16-bit values: left, top, right, bottom. Android 15 draws
+     * apps edge to edge and no longer shrinks the window for the keyboard, so the app keeps
+     * these parts free itself.
+     */
+    private static volatile long covered;
+
     private InputView input;
 
     @Override
@@ -48,6 +58,20 @@ public class MainActivity extends NativeActivity {
             }
         }
         input.requestFocus();
+        getWindow().getDecorView().setOnApplyWindowInsetsListener((view, insets) -> {
+            Insets used = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime() | WindowInsets.Type.displayCutout());
+            covered = pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48;
+            return view.onApplyWindowInsets(insets);
+        });
+    }
+
+    private static long pack(int pixels) {
+        return Math.max(0, Math.min(pixels, 0xFFFF));
+    }
+
+    /** {@link #covered}: left, top, right and bottom in pixels, 16 bits each. */
+    public static long covered() {
+        return covered;
     }
 
     /** The oldest text the keyboard committed, or null when there is none. */
