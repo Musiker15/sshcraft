@@ -187,7 +187,7 @@ enum RowAction {
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.heading(tr("Snippets"));
         ui.add_space(16.0);
         if ui.button(tr("New snippet")).clicked() {
@@ -218,7 +218,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             let mut rows = packages.remove(&package).unwrap_or_default();
             rows.sort_by_key(|s| s.name.to_lowercase());
             for row in rows {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     elided_label(ui, &row.name, 220.0, tokens.text, FontId::proportional(14.0));
                     let first = row.content.lines().next().unwrap_or_default();
                     elided_label(ui, first, 320.0, tokens.text_dim, FontId::monospace(12.0));
@@ -333,7 +333,7 @@ fn form_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         if let Some(problem) = problem {
             ui.label(egui::RichText::new(problem).color(tokens.danger));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             save = ui.add_enabled(problem.is_none() && !busy, egui::Button::new(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
@@ -413,7 +413,7 @@ fn run_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             .iter()
             .filter(|p| p.default.is_none())
             .all(|p| job.values.get(&p.name).is_some_and(|v| !v.is_empty()));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let count = job.picks.len().to_string();
             go = ui.add_enabled(!job.picks.is_empty() && filled, egui::Button::new(trf("Run on {count}", &[("count", &count)]))).clicked();
             if ui.button(tr("Cancel")).clicked() {
@@ -510,7 +510,7 @@ pub fn sidebar(app: &mut SshcraftApp, ui: &mut Ui, focused: Option<SessionId>) {
             .iter()
             .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query) || s.content.to_lowercase().contains(&query))
         {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if crate::widgets::icons::icon_button(ui, crate::widgets::icons::Icon::Terminal, tr("Run snippet")) {
                     paste = Some((s.content.clone(), true));
                 }
@@ -520,7 +520,7 @@ pub fn sidebar(app: &mut SshcraftApp, ui: &mut Ui, focused: Option<SessionId>) {
             });
         }
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(tr("History")).strong());
             clear = want.is_some() && ui.small_button(tr("Clear")).clicked();
         });

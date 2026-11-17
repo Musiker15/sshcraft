@@ -65,7 +65,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         ))
         .color(tokens.text_dim),
     );
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tr("Keep for"));
         let mut d = days;
         if ui.add(egui::DragValue::new(&mut d).range(sshcraft_engine::settings::TRASH_DAYS).suffix(tr(" days"))).changed() {
@@ -84,7 +84,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             ui.label(kind_label(&row.kind));
             ui.label(visible(&row.name));
             ui.label(egui::RichText::new(when(row.deleted_at)).color(tokens.text_dim));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.small_button(tr("Restore")).clicked() {
                     action = Some(("trash.restore", json!({ "kind": row.kind, "id": row.id })));
                 }

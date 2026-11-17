@@ -157,7 +157,7 @@ enum RuleAction {
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     load_states(app);
     let tokens = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.heading(tr("Port forwarding"));
         ui.add_space(16.0);
         if ui.button(tr("New rule")).clicked() {
@@ -188,7 +188,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
                         }
                     });
                     ui.label(state_text(state(app, rule.id)));
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let on = running(app, rule.id);
                         if ui.button(if on { tr("Stop") } else { tr("Start") }).clicked() {
                             action = Some((host.id, rule.clone(), RuleAction::Toggle));
@@ -238,7 +238,7 @@ fn orphans(app: &mut SshcraftApp, ui: &mut Ui, hosts: &[Host]) {
     ui.add_space(12.0);
     ui.label(egui::RichText::new(tr("Without a rule")).strong());
     for (id, host) in found {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(state_text(state(app, id)));
             if ui.button(tr("Stop")).clicked() {
                 app.run_reported("forward.stop", json!({ "host_id": host, "rule_id": id }));
@@ -273,7 +273,7 @@ fn problem(app: &SshcraftApp, form: &ForwardForm) -> Option<String> {
 fn form_grid(ui: &mut Ui, form: &mut ForwardForm, hosts: &[(HostId, String)]) {
     egui::Grid::new("sshcraft-forward-form").num_columns(2).min_col_width(130.0).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label(tr("Kind"));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.radio_value(&mut form.rule.kind, ForwardKind::Local, tr("Local (-L)"));
             ui.radio_value(&mut form.rule.kind, ForwardKind::Remote, tr("Remote (-R)"));
             ui.radio_value(&mut form.rule.kind, ForwardKind::Dynamic, tr("Dynamic, SOCKS (-D)"));
@@ -295,7 +295,7 @@ fn form_grid(ui: &mut Ui, form: &mut ForwardForm, hosts: &[(HostId, String)]) {
         ui.add(egui::TextEdit::singleline(&mut form.rule.name).hint_text(tr("optional")).char_limit(100));
         ui.end_row();
         ui.label(if form.rule.kind == ForwardKind::Remote { tr("Address on the server") } else { tr("Address here") });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut form.rule.bind_address).desired_width(200.0).char_limit(253));
             ui.label(tr("Port"));
             ui.add(egui::DragValue::new(&mut form.rule.bind_port).range(1..=65535));
@@ -307,7 +307,7 @@ fn form_grid(ui: &mut Ui, form: &mut ForwardForm, hosts: &[(HostId, String)]) {
             ui.end_row();
         } else if form.rule.kind != ForwardKind::Dynamic {
             ui.label(if form.rule.kind == ForwardKind::Remote { tr("Target here") } else { tr("Target from the server") });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut form.rule.target_host).desired_width(200.0).char_limit(253));
                 ui.label(tr("Port"));
                 ui.add(egui::DragValue::new(&mut form.rule.target_port).range(1..=65535));
@@ -359,7 +359,7 @@ fn wizard(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.label(egui::RichText::new(problem).color(tokens.danger));
         }
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             save = ui.add_enabled(problem.is_none() && !busy, egui::Button::new(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;

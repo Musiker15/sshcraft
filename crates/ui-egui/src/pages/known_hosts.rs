@@ -41,7 +41,7 @@ fn load(app: &mut SshcraftApp) {
 pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     load(app);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.heading(tr("Known hosts"));
         ui.add_space(16.0);
         let files = app.form == crate::app::Form::Desktop;

@@ -3,7 +3,7 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use sshcraft_ui_egui::SshcraftApp;
 use sshcraft_ui_egui::shell::{Layout, layout_for};
 use sshcraft_ui_egui::state::Page;
@@ -89,4 +89,19 @@ fn widening_closes_the_menu() {
     h.run_steps(3);
     assert!(!h.state().ui.nav_open, "the menu closes when the rail shows");
     assert!(h.query_by_label("Close the menu").is_none(), "nothing is left over the page");
+}
+
+#[test]
+fn every_header_fits_a_phone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = sized(dir.path(), 390.0);
+    for page in [Page::Keys, Page::Snippets, Page::Forwarding, Page::Logs, Page::Settings] {
+        h.state_mut().ui.page = page;
+        h.run_steps(3);
+        for button in h.query_all_by_role(egui::accesskit::Role::Button) {
+            let rect = button.rect();
+            let name = button.accesskit_node().label().unwrap_or_default();
+            assert!(rect.max.x <= 390.5, "{page:?}: {name:?} ends at {}, outside a 390 pt window", rect.max.x);
+        }
+    }
 }

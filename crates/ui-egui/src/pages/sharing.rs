@@ -142,7 +142,7 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         ui.set_width(540.0);
         ui.heading(trf("Share {name}", &[("name", &visible(&form.title))]));
         ui.label(egui::RichText::new(tr("Only with accounts on the same server.")).color(tokens.text_dim));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(tr("Email"));
             ui.add(egui::TextEdit::singleline(&mut form.email).desired_width(260.0).char_limit(320));
             do_find = ui.add_enabled(!form.email.trim().is_empty(), egui::Button::new(tr("Find"))).clicked();
@@ -173,13 +173,13 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                     ui.checkbox(&mut form.ticked, trf("I compared the safety number with {name}", &[("name", &name)]));
                 }
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.radio_value(&mut form.write, false, tr("Read"));
                 ui.radio_value(&mut form.write, true, tr("Read and change"));
             });
             ui.checkbox(&mut form.with_keys, tr("Share the keys too (never keys in the SSH agent)"));
             let ready = form.ticked || state == "confirmed";
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 do_share = ui.add_enabled(ready && !busy, egui::Button::new(tr("Share"))).clicked();
                 if ui.button(tr("Cancel")).clicked() {
                     keep = false;
@@ -253,7 +253,7 @@ pub fn list(app: &mut SshcraftApp, ui: &mut Ui) {
         let what = group
             .unwrap_or_else(|| trf("{count} hosts", &[("count", &share.get("hosts").and_then(Value::as_array).map_or(0, Vec::len).to_string())]));
         ui.group(|ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(visible(&what)).strong());
                 ui.label(if owned { tr("shared by you") } else { tr("shared with you") });
                 if owned && ui.button(tr("End share")).clicked() {
@@ -261,7 +261,7 @@ pub fn list(app: &mut SshcraftApp, ui: &mut Ui) {
                 }
             });
             for grant in share.get("grants").and_then(Value::as_array).cloned().unwrap_or_default() {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let who = grant.get("email").and_then(Value::as_str).map_or_else(|| tr("Unknown account").to_string(), visible);
                     let role = if text(&grant, "role") == "write" { tr("read and change") } else { tr("read") };
                     ui.label(format!("{who} ({role})"));
@@ -316,7 +316,7 @@ pub fn remove_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                     .color(tokens.warning),
             );
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             go = ui.button(tr("Remove")).clicked();
             close = ui.button(tr("Cancel")).clicked();
         });
