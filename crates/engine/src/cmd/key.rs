@@ -113,7 +113,7 @@ fn run_import(ctx: Ctx, params: Value) -> Out {
                 _ => vault.store_key(&store, &name, &key)?,
             }
         };
-        ctx.session.announce(&[]);
+        announce_new_key(&ctx.session, info.id)?;
         to_value(&info)
     })
 }
@@ -131,7 +131,7 @@ fn run_generate(ctx: Ctx, params: Value) -> Out {
         let GenerateParams { name, spec, passphrase } = parse("key.generate", params)?;
         let vault = ctx.session.vault()?;
         let info = vault.generate(&ctx.session.store(), &name, &spec, passphrase.as_deref().map(String::as_str))?;
-        ctx.session.announce(&[]);
+        announce_new_key(&ctx.session, info.id)?;
         to_value(&info)
     })
 }
@@ -193,13 +193,23 @@ fn run_create_security(ctx: Ctx, params: Value) -> Out {
                 SecurityKeyKind::Hello => vault.store_device_key(&store, &name, &key)?,
             }
         };
-        ctx.session.announce(&[]);
+        announce_new_key(&ctx.session, info.id)?;
         to_value(&info)
     }
     .boxed()
 }
 
 /// A key changed: queue it for its server, if it has one.
+/// Queues a key that was just made or imported for the server it went to (a server that syncs
+/// everything takes new keys), wakes that sync and tells the app. A key that stays here queues
+/// nothing.
+fn announce_new_key(session: &Session, id: KeyId) -> CommandResult<()> {
+    let servers = key_changed(&session.store(), id)?;
+    session.sync().nudge(&servers);
+    session.announce(&servers);
+    Ok(())
+}
+
 pub(crate) fn key_changed(store: &Store, id: KeyId) -> CommandResult<Vec<ServerId>> {
     let key = id.0.to_string();
     let location = store.location_of(ItemKind::Key, &key)?;
@@ -341,7 +351,7 @@ fn run_passcli_import(ctx: Ctx, params: Value) -> Out {
         let vault = ctx.session.vault()?;
         let cli = ctx.session.pass_cli().ok_or(PassCliError::NotInstalled)?;
         let info = passcli::import_from_pass_cli(cli.as_ref(), &vault, &ctx.session.shared_store(), &share_id, &item_id, &name)?;
-        ctx.session.announce(&[]);
+        announce_new_key(&ctx.session, info.id)?;
         to_value(&info)
     })
 }
