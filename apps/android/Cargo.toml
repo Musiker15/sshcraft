@@ -1,0 +1,43 @@
+[package]
+name = "sshcraft-android"
+description = "SSHCraft on Android: the egui interface in a NativeActivity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# libsshcraft_android.so for the APK; the rlib lets the helpers below be tested on the desktop.
+# Not `sshcraft`: on Windows a cdylib of that name would share sshcraft.pdb with the desktop app.
+[lib]
+name = "sshcraft_android"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+egui = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+sshcraft-engine = { workspace = true }
+sshcraft-fido = { workspace = true }
+sshcraft-ui-egui = { workspace = true }
+# Not the workspace's eframe: its accesskit feature needs GameActivity (eframe refuses it with
+# NativeActivity), so screen readers on Android wait for the GameActivity build (docs/gaps.md).
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "android-native-activity"] }
+# The version eframe uses (the storytold fork through [patch]); its AndroidApp type must match.
+winit = { version = "0.30.13", features = ["android-native-activity"] }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+android_clipboard = "0.1.0"
+
+# android-activity calls the exported `android_main`, and exporting a symbol counts as unsafe
+# code. The workspace forbids unsafe, so this crate states its own lints like `crates/fido`:
+# denied crate-wide and allowed on that one function only. The clippy entries match the workspace.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"

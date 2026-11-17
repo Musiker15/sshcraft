@@ -100,11 +100,14 @@ crash on hostile input is a security bug. **This outranks feature work.**
 - **`panic = "unwind"` stays** (the default) so the engine's last-resort guard around command
   dispatch, from R2 on, can turn an escaped panic into an error.
 - **Every crash fix lands with a test that panicked before the fix.**
-- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`. The one exception is
+- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`. There are two exceptions.
   `crates/fido`: FIDO2 security keys and Windows Hello are only reachable through the Windows API
   (`webauthn.dll`, WinRT). That crate states its own lints with `unsafe_code = "deny"`; only
-  `webauthn.rs` and `presence.rs` allow it, and every block has a `// SAFETY:` comment. Do not
-  add `unsafe` anywhere else; if a platform API needs it, use a maintained safe wrapper crate.
+  `webauthn.rs` and `presence.rs` allow it, and every block has a `// SAFETY:` comment.
+  `apps/android`: android-activity calls the exported `android_main`, and `#[unsafe(no_mangle)]`
+  counts as unsafe code. That crate states its own lints the same way and allows it on that one
+  function, which has no `unsafe` block. Do not add `unsafe` anywhere else; if a platform API
+  needs it, use a maintained safe wrapper crate.
 
 ## Non-negotiables
 
