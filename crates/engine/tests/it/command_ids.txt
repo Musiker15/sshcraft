@@ -111,6 +111,7 @@ sync.remove_server
 sync.server_logs
 sync.servers
 sync.set_server
+sync.sync_all
 trash.list
 trash.purge
 trash.restore

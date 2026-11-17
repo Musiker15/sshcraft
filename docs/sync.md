@@ -51,9 +51,17 @@ the account key uses it to read the area keys.
 ## What syncs
 
 Per server you can switch **Sync** on or off and choose whether **keys and passwords** sync too.
+**Sync everything** (off at first) moves everything that lives only on this device to that
+server: groups with their subgroups, hosts and passwords, hosts outside groups, identities and
+keys. New items go there too from then on, and keys and passwords sync with it. Windows Hello
+keys stay on the device. Only one server syncs everything at a time; switching it off moves
+nothing back, and new items stay on the device again. With it off, an item stays on the device
+until you move it with **Move to server…** (a host in a group moves with its top group).
 With that off, keys and stored passwords stay on the device; a synced host that uses a key shows
 *Key missing on this device* on the other devices until you assign one there, and asks for its
-password when connecting. Keys from the Proton Pass agent never sync, only the reference to them.
+password when connecting. Keys from the Proton Pass agent never sync, only the reference to them. On a device without the
+agent (Android), import the same key there: SSHCraft signs with a stored key whose fingerprint
+matches, and the host stays set to the agent for the devices that have it.
 A key syncs as it is stored: with a passphrase that is not saved it stays encrypted with it, and
 its certificate goes along. Windows Hello keys never sync and never go into a share, see
 [keys.md](keys.md). Versions of SSHCraft before keys with an asked passphrase (Teilplan 10) cannot

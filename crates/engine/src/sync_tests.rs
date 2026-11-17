@@ -325,3 +325,42 @@ impl SyncObserver for NoObserver {
     fn data_changed(&self, _: ServerId) {}
     fn warning(&self, _: ServerId, _: String) {}
 }
+
+/// "Sync everything" moves what lives only here to the server, groups with all they hold, and
+/// what is made afterwards goes there too. Switched off, items stay where they are.
+#[test]
+fn syncing_everything_moves_what_is_here() {
+    let (store, server) = store_with_server();
+    let top =
+        Group { id: GroupId::new(), name: "srv".into(), defaults: ConnectionSettings::default(), location: None, parent_id: None, tags: Vec::new() };
+    let sub = Group { id: GroupId::new(), name: "web".into(), parent_id: Some(top.id), ..top.clone() };
+    store.upsert_group(&top).unwrap();
+    store.upsert_group(&sub).unwrap();
+    let inner = host(Some(sub.id));
+    let loose = host(None);
+    store.upsert_host(&inner).unwrap();
+    store.upsert_host(&loose).unwrap();
+
+    let nudge = sync_everything(&store, server, true, 5).unwrap();
+    assert_eq!(nudge, vec![server]);
+    assert!(store.sync_all(server).unwrap());
+    assert!(store.list_hosts().unwrap().iter().all(|h| h.location == Some(server)), "every host moved");
+    assert!(store.list_groups().unwrap().iter().all(|g| g.location == Some(server)), "every group moved");
+    let queued = store.outbox(server).unwrap();
+    for id in [top.id.0, sub.id.0, inner.id.0, loose.id.0] {
+        assert!(queued.iter().any(|(_, q)| q == &id.to_string()), "{id} is queued");
+    }
+
+    let later = host(None);
+    store.upsert_host(&later).unwrap();
+    let stored = store.list_hosts().unwrap().into_iter().find(|h| h.id == later.id).unwrap();
+    assert_eq!(stored.location, Some(server), "a new host goes to the server too");
+
+    sync_everything(&store, server, false, 6).unwrap();
+    assert!(!store.sync_all(server).unwrap());
+    assert!(store.list_hosts().unwrap().iter().all(|h| h.location == Some(server)), "switching off moves nothing back");
+    let after = host(None);
+    store.upsert_host(&after).unwrap();
+    let stored = store.list_hosts().unwrap().into_iter().find(|h| h.id == after.id).unwrap();
+    assert_eq!(stored.location, None, "afterwards new hosts stay here again");
+}

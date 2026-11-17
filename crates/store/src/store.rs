@@ -356,7 +356,8 @@ impl Store {
         if version < 14 {
             let tx = conn.unchecked_transaction()?;
             // Only when missing: a database rebuilt from older steps may have it already.
-            let has: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('sync_servers') WHERE name = 'sync_all')", [], |r| r.get(0))?;
+            let has: bool =
+                tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('sync_servers') WHERE name = 'sync_all')", [], |r| r.get(0))?;
             if !has {
                 tx.execute_batch(sync_store::SCHEMA_V14)?;
             }

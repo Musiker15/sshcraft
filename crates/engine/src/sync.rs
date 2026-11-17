@@ -198,6 +198,23 @@ pub fn note_change(store: &Store, kind: ItemKind, id: &str, before: Option<Serve
     Ok(servers)
 }
 
+/// Switches "sync everything" for `server`. On, what lives only on this device moves there,
+/// groups with everything they hold, and what is made afterwards goes there too (the store's
+/// inserts); key sync goes on with it, device keys stay. Off, items stay where they are and new
+/// ones stay on this device again. The servers to nudge.
+pub fn sync_everything(store: &Store, server: ServerId, on: bool, now: i64) -> Result<Vec<ServerId>, CommandError> {
+    store.set_sync_all(server, on)?;
+    if !on {
+        return Ok(Vec::new());
+    }
+    for (kind, id) in store.local_roots()? {
+        let before = store.location_of(kind, &id)?;
+        store.set_location(kind, &id, Some(server))?;
+        note_change(store, kind, &id, before, now)?;
+    }
+    Ok(vec![server])
+}
+
 /// A change the window wants to make, checked against shares this account received.
 pub enum Change<'a> {
     SaveHost(&'a sshcraft_model::model::Host),

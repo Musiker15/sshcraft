@@ -146,6 +146,7 @@ const NEW: &[&str] = &[
     "app.lock",
     "app.unlock",
     "app.connections",
+    "sync.sync_all",
 ];
 
 #[test]

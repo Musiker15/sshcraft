@@ -708,6 +708,10 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Rec" => "Rec",
         "Bookmark added." => "Lesezeichen gesetzt.",
         "Bookmark in the session log" => "Lesezeichen im Sitzungsprotokoll",
+        "Sync everything" => "Alles synchronisieren",
+        "Everything on this device syncs here, and new items go here too. Keys bound to this device stay here." => {
+            "Alles auf diesem Gerät wird hierher synchronisiert, neue Einträge auch. An das Gerät gebundene Schlüssel bleiben hier."
+        }
         "Session logs" => "Sitzungsprotokolle",
         "Record sessions unless a host or group says otherwise" => "Sitzungen aufzeichnen, wenn Host oder Gruppe nichts anderes sagen",
         "Keep logs until deleted" => "Protokolle behalten, bis sie gelöscht werden",
