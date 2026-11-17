@@ -11,7 +11,18 @@ use crate::runner::Runner;
 use crate::state::{Page, PaneSlot, Panes, TabState, UiState};
 use crate::toasts::Toasts;
 
+/// What the window runs on. A tablet (the Android app) has no local shell, no file dialogs and no
+/// agents, and gets a bar of special keys under the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Form {
+    #[default]
+    Desktop,
+    Tablet,
+}
+
 pub struct SshcraftApp {
+    /// Desktop unless the app sets otherwise; never changes while the window is open.
+    pub form: Form,
     pub session: Session,
     pub runner: Runner,
     pub data: Data,
@@ -99,6 +110,7 @@ impl SshcraftApp {
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
             dropdown_hidden: false,
+            form: Form::Desktop,
             handoff_dir: None,
             handoff_next: 0.0,
             control: None,

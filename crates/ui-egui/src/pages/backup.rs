@@ -38,6 +38,10 @@ impl std::fmt::Debug for HeldPassphrase {
 const MIN: usize = 12;
 
 pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
+    // A backup is a file, and a tablet cannot pick one.
+    if app.form == crate::app::Form::Tablet {
+        return;
+    }
     ui.label(egui::RichText::new(tr("Backup")).strong());
     ui.label(
         egui::RichText::new(tr("One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here."))

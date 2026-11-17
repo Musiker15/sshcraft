@@ -232,6 +232,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     if list.is_empty() {
         ui.label(egui::RichText::new(tr("No session logs. Recording is off unless a host or the settings turn it on.")).color(tokens.text_dim));
     }
+    // Exporting writes a file, which a tablet cannot pick.
+    let tablet = app.form == crate::app::Form::Tablet;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         egui::Grid::new("sshcraft-logs").num_columns(7).min_col_width(60.0).spacing([12.0, 6.0]).show(ui, |ui| {
             for log in &list {
@@ -253,7 +255,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
                     if ui.button(tr("Open")).clicked() {
                         action = Some(LogAction::Open(id.clone()));
                     }
-                    if ui.button(tr("Export")).clicked() {
+                    if !tablet && ui.button(tr("Export")).clicked() {
                         action = Some(LogAction::Export(id.clone()));
                     }
                 });

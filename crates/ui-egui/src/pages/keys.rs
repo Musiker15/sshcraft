@@ -487,7 +487,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             app.ui.key_dialog =
                 Some(KeyDialog::Import(ImportForm { name: String::new(), text: String::new(), passphrase: String::new(), save_passphrase: true }));
         }
-        if ui.button(tr("Import from Proton Pass")).clicked() {
+        // pass-cli is a desktop program.
+        if app.form == crate::app::Form::Desktop && ui.button(tr("Import from Proton Pass")).clicked() {
             crate::pages::key_sources::open_passcli(app);
         }
         if let Some(support) = app.data.security

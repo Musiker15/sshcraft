@@ -568,7 +568,7 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all
                     }
                 }
             });
-            if ui.button(tr("Desktop shortcut")).clicked() {
+            if app.form == crate::app::Form::Desktop && ui.button(tr("Desktop shortcut")).clicked() {
                 app.runner.run(
                     "host.shortcut",
                     json!({ "host_id": id }),
@@ -657,10 +657,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         if ui.button(tr("New group")).clicked() {
             new_group(app);
         }
-        if ui.button(tr("Import")).clicked() {
+        // Both read or write files, which a tablet cannot pick.
+        let files = app.form == crate::app::Form::Desktop;
+        if files && ui.button(tr("Import")).clicked() {
             app.ui.import = Some(crate::pages::import_export::ImportState::default());
         }
-        if ui.button(tr("Export")).clicked() {
+        if files && ui.button(tr("Export")).clicked() {
             app.ui.export = Some(crate::pages::import_export::ExportState { group: app.ui.hosts.group, ..Default::default() });
         }
         ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.search).hint_text(tr("Search")).desired_width(220.0));
