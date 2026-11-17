@@ -276,7 +276,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         Some(LogAction::Export(id)) => {
             let name = app.data.logs.iter().find(|l| text(l, "id") == id).map(|l| text(l, "title")).unwrap_or_default();
             let file: String = name.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').take(60).collect();
-            let dialog = craft_dialogs::FileDialog::save()
+            let dialog = crate::file_dialogs::FileDialog::save()
                 .title(tr("Export the log"))
                 .file_name(format!("{}.txt", if file.is_empty() { "session-log" } else { &file }))
                 .filter(tr("Text"), &["txt"])

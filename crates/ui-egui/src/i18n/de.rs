@@ -295,6 +295,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Restore from backup" => "Aus Sicherung wiederherstellen",
         "Create backup" => "Sicherung erstellen",
         "Passphrase again" => "Passphrase wiederholen",
+        "Files cannot be picked on this device." => "Auf diesem Gerät lassen sich keine Dateien auswählen.",
         "Keep it in your password manager: without it the file cannot be opened." => {
             "Bewahre sie im Passwortmanager auf: ohne sie lässt sich die Datei nicht öffnen."
         }

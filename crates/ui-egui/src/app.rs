@@ -21,7 +21,7 @@ pub struct SshcraftApp {
     pub lock: crate::lock::LockState,
     pub bindings: Bindings,
     /// File dialogs: asked in a frame, shown after it, answered on a later frame.
-    pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
+    pub dialogs: crate::file_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
     /// Shows desktop notifications.
     pub notifier: Box<dyn crate::notify::Notifier>,
     /// The last pastes, in memory only.
@@ -85,7 +85,7 @@ impl SshcraftApp {
             toasts: Toasts::default(),
             lock: crate::lock::LockState::default(),
             bindings: Bindings::default(),
-            dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
+            dialogs: crate::file_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
             notifier: Box::new(crate::notify::Desktop),
             patterns: crate::terminal::highlight::Patterns::default(),
             pastes: crate::terminal::compose::PasteHistory::default(),

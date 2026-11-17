@@ -91,9 +91,9 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             form.error = Some(tr("The two passphrases differ.").to_owned());
         } else {
             let dialog = if form.restore {
-                craft_dialogs::FileDialog::open().title(tr("Restore from backup"))
+                crate::file_dialogs::FileDialog::open().title(tr("Restore from backup"))
             } else {
-                craft_dialogs::FileDialog::save().title(tr("Create backup")).file_name("sshcraft.backup")
+                crate::file_dialogs::FileDialog::save().title(tr("Create backup")).file_name("sshcraft.backup")
             };
             app.dialogs.ask(dialog, DialogFor::Backup { restore: form.restore });
             app.ui.backup_passphrase = Some(HeldPassphrase(std::mem::take(&mut form.passphrase)));
