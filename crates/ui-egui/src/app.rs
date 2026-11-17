@@ -443,7 +443,7 @@ impl SshcraftApp {
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
-        let keep_field = crate::field_paste::before(self, &ctx);
+        let keep_field = crate::field_paste::before(self, ui);
         ui.scope_builder(visible(ui), |ui| crate::shell::show(self, ui));
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);

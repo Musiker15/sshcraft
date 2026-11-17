@@ -45,6 +45,10 @@ pub fn covered_edges((left, top, right, bottom): (i32, i32, i32, i32), ppp: f32)
     egui::epaint::MarginF32 { left: points(left), top: points(top), right: points(right), bottom: points(bottom) }
 }
 
+/// How long after another field took the keyboard it is shown again: after egui-winit's reset of
+/// the text input, which hides it, went through.
+pub const RESHOW_AFTER: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// How long the keyboard stays asked for after the last frame that wanted it.
 pub const KEEP_KEYBOARD: std::time::Duration = std::time::Duration::from_millis(400);
 

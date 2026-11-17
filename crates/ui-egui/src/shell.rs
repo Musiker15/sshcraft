@@ -194,7 +194,9 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
         })
         .collect();
     hosts.sort_by_key(|row| row.host.name.to_lowercase());
+    let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
         for row in hosts {
             ui.horizontal(|ui| {
                 let (icon, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());

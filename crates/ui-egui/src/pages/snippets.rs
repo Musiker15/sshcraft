@@ -209,7 +209,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         order.push(String::new());
     }
     let mut action: Option<(SnippetRow, RowAction)> = None;
+    let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
         for package in order {
             let title = if package.is_empty() { tr("Without package").to_string() } else { visible(&package) };
             ui.label(egui::RichText::new(title).strong());
@@ -498,7 +500,9 @@ pub fn sidebar(app: &mut SshcraftApp, ui: &mut Ui, focused: Option<SessionId>) {
     let query = app.ui.sidebar.search.to_lowercase();
     let mut paste: Option<(String, bool)> = None;
     let mut clear = false;
+    let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
         ui.label(egui::RichText::new(tr("Snippets")).strong());
         for s in app
             .data

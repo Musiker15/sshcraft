@@ -13,6 +13,11 @@ publish = false
 name = "sshcraft_android"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# OpenGL ES instead of Vulkan: the emulator's Vulkan driver (gfxstream) crashes under wgpu.
+# `cargo xtask android --emulator` sets it; the APK for tablets never does.
+gl = []
+
 [dependencies]
 egui = { workspace = true }
 
@@ -31,6 +36,9 @@ android_clipboard = "0.1.0"
 # The keyboard's text connection (src/keyboard.rs): the VM and the activity from android-activity.
 jni = "0.22.4"
 ndk-context = "0.1.1"
+# Rust's log to logcat: without it a failure on Android leaves no trace.
+android_logger = "0.15.1"
+log = "0.4.35"
 
 # android-activity calls the exported `android_main`, and exporting a symbol counts as unsafe
 # code; the keyboard's text connection needs the raw JavaVM and activity. The workspace forbids

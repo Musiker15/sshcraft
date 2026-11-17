@@ -170,7 +170,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(egui::RichText::new(tr("No forwarding rules yet. A rule belongs to a host and starts here.")).color(tokens.text_dim));
     }
     let mut action: Option<(HostId, ForwardRule, RuleAction)> = None;
+    let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
         egui::Grid::new("sshcraft-forwards").num_columns(5).min_col_width(80.0).spacing([14.0, 8.0]).show(ui, |ui| {
             for host in &hosts {
                 for rule in &host.forwards {

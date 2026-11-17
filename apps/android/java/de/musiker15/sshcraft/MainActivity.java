@@ -9,6 +9,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -49,7 +50,9 @@ public class MainActivity extends NativeActivity {
                 }
             }
         }
-        input.requestFocus();
+        // NativeActivity sets its own keyboard mode in onCreate, which opens the keyboard for a
+        // focused editor at start. It opens when the app asks for it (keyboard()), not before.
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
     }
 
     private static long pack(int pixels) {

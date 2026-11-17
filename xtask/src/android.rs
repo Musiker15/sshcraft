@@ -19,8 +19,18 @@ use std::process::Command;
 pub const PACKAGE: &str = "de.musiker15.sshcraft";
 /// The library android-activity loads: `lib<LIB>.so`.
 const LIB: &str = "sshcraft_android";
-const TRIPLE: &str = "aarch64-linux-android";
-const ABI: &str = "arm64-v8a";
+/// A CPU the APK is built for: the Rust target, Android's ABI name and the APK's suffix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Target {
+    pub triple: &'static str,
+    pub abi: &'static str,
+    pub suffix: &'static str,
+}
+
+/// Tablets: the release APK.
+pub const ARM64: Target = Target { triple: "aarch64-linux-android", abi: "arm64-v8a", suffix: "arm64" };
+/// The x86_64 emulator on a desktop, for trying a build there (`--emulator`); never released.
+pub const X86_64: Target = Target { triple: "x86_64-linux-android", abi: "x86_64", suffix: "x86_64" };
 /// Android 13, decided for M1 (docs/android.md).
 pub const MIN_SDK: u32 = 33;
 pub const TARGET_SDK: u32 = 36;
@@ -28,14 +38,16 @@ const KEY_ALIAS: &str = "sshcraft";
 /// Launcher icons from `assets/app-icon/hicolor`, one per density bucket.
 const ICONS: [(&str, &str); 5] = [("mdpi", "48x48"), ("hdpi", "64x64"), ("xhdpi", "128x128"), ("xxhdpi", "256x256"), ("xxxhdpi", "512x512")];
 
-const USAGE: &str = "usage: cargo xtask android [--check] [--debug] [--install]";
+const USAGE: &str = "usage: cargo xtask android [--check] [--debug] [--emulator] [--install]";
 
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     let (mut check, mut debug, mut install) = (false, false, false);
+    let mut target = ARM64;
     for arg in args {
         match *arg {
             "--check" => check = true,
             "--debug" => debug = true,
+            "--emulator" => target = X86_64,
             "--install" => install = true,
             other => return Err(format!("android: unknown option `{other}`\n{USAGE}")),
         }
@@ -45,20 +57,38 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         return cargo(
             root,
             &sdk,
-            &["clippy", "--target", TRIPLE, "-p", "sshcraft-android", "-p", "sshcraft-ui-egui", "-p", "sshcraft-store", "--", "-D", "warnings"],
+            target,
+            &[
+                "clippy",
+                "--target",
+                target.triple,
+                "-p",
+                "sshcraft-android",
+                "-p",
+                "sshcraft-ui-egui",
+                "-p",
+                "sshcraft-store",
+                "--",
+                "-D",
+                "warnings",
+            ],
         );
     }
-    let mut build = vec!["build", "--target", TRIPLE, "-p", "sshcraft-android"];
+    let mut build = vec!["build", "--target", target.triple, "-p", "sshcraft-android"];
+    // The emulator's Vulkan driver crashes under wgpu; it draws with OpenGL ES.
+    if target == X86_64 {
+        build.extend(["--features", "sshcraft-android/gl"]);
+    }
     if !debug {
         build.push("--release");
     }
-    cargo(root, &sdk, &build)?;
+    cargo(root, &sdk, target, &build)?;
     let manifest = std::fs::read_to_string(root.join("Cargo.toml")).map_err(|e| format!("Cargo.toml: {e}"))?;
     let version = crate::version::read(&manifest)?;
     let target_dir = std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
-    let library = target_dir.join(TRIPLE).join(if debug { "debug" } else { "release" }).join(format!("lib{LIB}.so"));
+    let library = target_dir.join(target.triple).join(if debug { "debug" } else { "release" }).join(format!("lib{LIB}.so"));
     let work = target_dir.join("android");
-    let apk = package(root, &sdk, &work, &library, &version)?;
+    let apk = package(root, &sdk, target, &work, &library, &version)?;
     eprintln!("android: {}", apk.display());
     if install {
         let mut adb = Command::new(sdk.home.join("platform-tools").join(exe("adb")));
@@ -101,7 +131,7 @@ impl Sdk {
     }
 
     /// The NDK's clang for the minimum API level, the linker and C compiler of the target.
-    fn clang(&self) -> Result<PathBuf, String> {
+    fn clang(&self, target: Target) -> Result<PathBuf, String> {
         let host = if cfg!(windows) {
             "windows-x86_64"
         } else if cfg!(target_os = "macos") {
@@ -109,7 +139,7 @@ impl Sdk {
         } else {
             "linux-x86_64"
         };
-        let name = format!("{TRIPLE}{MIN_SDK}-clang{}", if cfg!(windows) { ".cmd" } else { "" });
+        let name = format!("{}{MIN_SDK}-clang{}", target.triple, if cfg!(windows) { ".cmd" } else { "" });
         let clang = self.ndk.join("toolchains").join("llvm").join("prebuilt").join(host).join("bin").join(name);
         if clang.is_file() { Ok(clang) } else { Err(format!("android: {} is missing", clang.display())) }
     }
@@ -221,15 +251,15 @@ pub const DATA_EXTRACTION_RULES: &str = r#"<?xml version="1.0" encoding="utf-8"?
 "#;
 
 /// The path of the native library inside the APK.
-pub fn library_entry() -> String {
-    format!("lib/{ABI}/lib{LIB}.so")
+pub fn library_entry(target: Target) -> String {
+    format!("lib/{}/lib{LIB}.so", target.abi)
 }
 
 /// `cargo <args>` with the NDK as C compiler, archiver and linker of the target.
-fn cargo(root: &Path, sdk: &Sdk, args: &[&str]) -> Result<(), String> {
-    let clang = sdk.clang()?;
+fn cargo(root: &Path, sdk: &Sdk, target: Target, args: &[&str]) -> Result<(), String> {
+    let clang = sdk.clang(target)?;
     let ar = clang.with_file_name(exe("llvm-ar"));
-    let key = TRIPLE.replace('-', "_");
+    let key = target.triple.replace('-', "_");
     let mut cmd = crate::cargo();
     cmd.current_dir(root)
         .args(args)
@@ -240,7 +270,7 @@ fn cargo(root: &Path, sdk: &Sdk, args: &[&str]) -> Result<(), String> {
 }
 
 /// Links the resources, adds the library, aligns and signs; returns the APK in `dist/android`.
-fn package(root: &Path, sdk: &Sdk, work: &Path, library: &Path, version: &str) -> Result<PathBuf, String> {
+fn package(root: &Path, sdk: &Sdk, target: Target, work: &Path, library: &Path, version: &str) -> Result<PathBuf, String> {
     let io = |what: &str, e: std::io::Error| format!("android: {what}: {e}");
     if !library.is_file() {
         return Err(format!("android: {} was not built", library.display()));
@@ -273,7 +303,7 @@ fn package(root: &Path, sdk: &Sdk, work: &Path, library: &Path, version: &str) -
     crate::run(link, "aapt2 link")?;
     let dex = java(root, sdk, work)?;
     let unaligned = work.join("unaligned.apk");
-    add_files(&linked, &[(library_entry(), library.to_path_buf()), ("classes.dex".to_string(), dex)], &unaligned)?;
+    add_files(&linked, &[(library_entry(target), library.to_path_buf()), ("classes.dex".to_string(), dex)], &unaligned)?;
     let aligned = work.join("aligned.apk");
     let mut align = Command::new(sdk.tool("zipalign"));
     // 16 KiB pages for the uncompressed library (Android 15 devices may use them).
@@ -281,7 +311,7 @@ fn package(root: &Path, sdk: &Sdk, work: &Path, library: &Path, version: &str) -
     crate::run(align, "zipalign")?;
     let out_dir = root.join("dist").join("android");
     std::fs::create_dir_all(&out_dir).map_err(|e| io("dist/android", e))?;
-    let apk = out_dir.join(format!("sshcraft-{version}-android-arm64.apk"));
+    let apk = out_dir.join(format!("sshcraft-{version}-android-{}.apk", target.suffix));
     let mut sign = sdk.apksigner();
     sign.arg("sign");
     signing_key(work, &mut sign)?;
@@ -456,7 +486,8 @@ mod tests {
         ] {
             assert!(m.contains(wanted), "the manifest lacks {wanted}");
         }
-        assert_eq!(library_entry(), "lib/arm64-v8a/libsshcraft_android.so");
+        assert_eq!(library_entry(ARM64), "lib/arm64-v8a/libsshcraft_android.so");
+        assert_eq!(library_entry(X86_64), "lib/x86_64/libsshcraft_android.so");
     }
 
     #[test]

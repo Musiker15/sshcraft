@@ -38,6 +38,10 @@ struct Tablet {
     keyboard: bool,
     /// The last request for text and when it was made (see crate::keep_keyboard).
     last_ime: Option<(egui::output::IMEOutput, std::time::Instant)>,
+    /// The field (and its input context) that had the keyboard last.
+    owner: Option<(egui::Id, u64)>,
+    /// When to show the keyboard again after another field took it.
+    reshow: Option<std::time::Instant>,
     /// Calls into MainActivity that failed, each said once.
     reported: Vec<String>,
 }
@@ -83,16 +87,16 @@ impl eframe::App for Tablet {
         let tapped = ui.input(|i| i.pointer.any_pressed());
         match ime {
             Some(ime) => self.last_ime = Some((ime, std::time::Instant::now())),
-            // The user tapped elsewhere: the field is left and the keyboard goes.
-            None if tapped => self.last_ime = None,
             None => {
-                // Opening the keyboard moves the interface up, and the field may lose its focus
-                // in the frame in between: the request of a moment ago stands, for egui-winit
-                // too, which would close the keyboard at once, and the field gets its focus back.
+                // A frame without a request does not close the keyboard at once: opening it moves
+                // the interface up and the field may lose its focus for a frame, and a tap from one
+                // field to the next has a frame in between. Closing and opening again at once is
+                // what Android drops. The request of a moment ago stands, for egui-winit too, and
+                // a field that lost its focus without a tap gets it back.
                 match &self.last_ime {
                     Some((ime, at)) if crate::keep_keyboard(at.elapsed()) => {
                         let ime = ime.clone();
-                        if ui.ctx().memory(|m| m.focused().is_none()) {
+                        if !tapped && ui.ctx().memory(|m| m.focused().is_none()) {
                             ui.ctx().memory_mut(|m| m.request_focus(ime.owner));
                         }
                         ui.ctx().output_mut(|o| o.ime = Some(ime));
@@ -102,11 +106,28 @@ impl eframe::App for Tablet {
                 }
             }
         }
+        // Another field took the keyboard: egui-winit resets the text input for it, which hides
+        // the keyboard through NativeActivity's own view. It is shown again a moment later, after
+        // that reset went through.
+        let owner = self.last_ime.as_ref().map(|(ime, _)| (ime.owner, ime.context_generation));
+        if owner.is_some() && owner != self.owner {
+            if self.owner.is_some() {
+                self.reshow = Some(std::time::Instant::now() + crate::RESHOW_AFTER);
+                ui.ctx().request_repaint_after(crate::RESHOW_AFTER);
+            }
+            self.owner = owner;
+        }
         let wanted = self.last_ime.is_some();
-        if wanted != self.keyboard {
+        let reshow = wanted && self.reshow.is_some_and(|at| std::time::Instant::now() >= at);
+        if wanted != self.keyboard || reshow {
             let shown = crate::keyboard::show(wanted);
             self.report(shown);
             self.keyboard = wanted;
+            self.reshow = None;
+        }
+        if !wanted {
+            self.owner = None;
+            self.reshow = None;
         }
     }
 
@@ -160,11 +181,34 @@ impl eframe::App for Problem {
 fn options(android: &AndroidApp) -> eframe::NativeOptions {
     // egui-winit's clipboard keys use its own clipboard, which on Android reaches no other app;
     // clipboard_keys handles them with Android's instead.
-    eframe::NativeOptions { android_app: Some(android.clone()), clipboard_shortcuts: false, ..Default::default() }
+    let mut options = eframe::NativeOptions { android_app: Some(android.clone()), clipboard_shortcuts: false, ..Default::default() };
+    // Ask the GPU for what it has, not for wgpu's desktop defaults: weaker mobile GPUs (and the
+    // emulator's) have smaller limits, and asking for more ends the app before its first frame.
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+        // No debug labels or validation: some mobile Vulkan drivers (the emulator's among them)
+        // crash naming GPU objects, and nobody reads the names on a tablet.
+        setup.instance_descriptor.flags = eframe::wgpu::InstanceFlags::empty();
+        #[cfg(feature = "gl")]
+        {
+            setup.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+        }
+        setup.device_descriptor = Arc::new(|adapter| {
+            let limits = adapter.limits();
+            eframe::wgpu::DeviceDescriptor {
+                label: Some("sshcraft"),
+                required_limits: eframe::wgpu::Limits { max_texture_dimension_2d: limits.max_texture_dimension_2d.min(8192), ..limits },
+                ..Default::default()
+            }
+        });
+    }
+    options
 }
 
 fn show_problem(android: &AndroidApp, text: String) {
-    let _ = eframe::run_native("SSHCraft", options(android), Box::new(move |_| Ok(Box::new(Problem(text)))));
+    log::error!("{text}");
+    if let Err(e) = eframe::run_native("SSHCraft", options(android), Box::new(move |_| Ok(Box::new(Problem(text))))) {
+        log::error!("the window could not open: {e}");
+    }
 }
 
 /// Called by android-activity on its own thread once the activity exists. The process ends with
@@ -173,7 +217,12 @@ fn show_problem(android: &AndroidApp, text: String) {
 #[allow(unsafe_code)] // Exporting the symbol android-activity looks up; nothing else is unsafe.
 #[unsafe(no_mangle)]
 fn android_main(android: AndroidApp) {
+    // Rust's log (the app's, eframe's, wgpu's) goes to logcat under the tag "sshcraft"; without it
+    // a failure on Android leaves no trace (`adb logcat -s sshcraft`).
+    android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("sshcraft"));
+    log::info!("SSHCraft {} starts", env!("CARGO_PKG_VERSION"));
     run(android);
+    log::info!("SSHCraft ends");
     std::process::exit(0);
 }
 
@@ -195,7 +244,7 @@ fn run(android: AndroidApp) {
         }
     };
     let handle = android.clone();
-    let _ = eframe::run_native(
+    let shown = eframe::run_native(
         "SSHCraft",
         options(&android),
         Box::new(move |cc| {
@@ -212,10 +261,15 @@ fn run(android: AndroidApp) {
                 last_input: std::time::Instant::now(),
                 keyboard: false,
                 last_ime: None,
+                owner: None,
+                reshow: None,
                 reported: Vec::new(),
             }))
         }),
     );
+    if let Err(e) = shown {
+        log::error!("the window could not open: {e}");
+    }
     // The activity is gone; the engine's tasks end with the runtime.
     runtime.shutdown_timeout(std::time::Duration::from_secs(2));
 }

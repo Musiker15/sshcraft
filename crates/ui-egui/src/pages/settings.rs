@@ -104,15 +104,19 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         }
     });
     ui.separator();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match app.ui.settings.section {
-        Section::General => general(app, ui),
-        Section::Appearance => appearance(app, ui),
-        Section::Terminal => terminal(app, ui),
-        Section::Shortcuts => shortcuts(app, ui),
-        Section::Sync => crate::pages::sync::show(app, ui),
-        Section::Agents => crate::pages::agents::show(app, ui),
-        Section::Connections => crate::pages::connections::show(app, ui),
-        Section::Trash => crate::pages::trash::show(app, ui),
+    let field_scroll = app.field_paste.scroll;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
+        match app.ui.settings.section {
+            Section::General => general(app, ui),
+            Section::Appearance => appearance(app, ui),
+            Section::Terminal => terminal(app, ui),
+            Section::Shortcuts => shortcuts(app, ui),
+            Section::Sync => crate::pages::sync::show(app, ui),
+            Section::Agents => crate::pages::agents::show(app, ui),
+            Section::Connections => crate::pages::connections::show(app, ui),
+            Section::Trash => crate::pages::trash::show(app, ui),
+        }
     });
 }
 
@@ -127,12 +131,15 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     });
     save(app, |s| s.general.language = language);
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(tr("Window")).strong());
-    let mut system = app.data.settings.general.system_title_bar;
-    ui.checkbox(&mut system, tr("Use system title bar"));
-    ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
-    save(app, |s| s.general.system_title_bar = system);
-    ui.add_space(12.0);
+    // A tablet has no title bar to choose.
+    if app.form == crate::app::Form::Desktop {
+        ui.label(egui::RichText::new(tr("Window")).strong());
+        let mut system = app.data.settings.general.system_title_bar;
+        ui.checkbox(&mut system, tr("Use system title bar"));
+        ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
+        save(app, |s| s.general.system_title_bar = system);
+        ui.add_space(12.0);
+    }
     ui.label(egui::RichText::new(tr("Host keys")).strong());
     let mut update = app.data.settings.general.update_host_keys;
     ui.checkbox(&mut update, tr("Take new host keys a server announces"));

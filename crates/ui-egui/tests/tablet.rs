@@ -50,6 +50,7 @@ fn a_tablet_offers_no_files_and_no_agents() {
     settings(&mut h, Section::General);
     assert!(h.query_by_label("Create backup…").is_none());
     assert!(h.query_by_label("AI agents").is_none(), "no agents on a tablet");
+    assert!(h.query_by_label("Use system title bar").is_none(), "no title bar on a tablet");
     settings(&mut h, Section::Appearance);
     assert!(h.query_by_label("Dropdown window").is_none());
     h.state_mut().ui.page = Page::Hosts;
@@ -303,4 +304,31 @@ fn a_tablet_never_starts_the_agent_link() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(ConnectionFile::read(&link_dir).is_none(), "the agent link started on a tablet");
+}
+
+/// A field low on a long page scrolls into the part the on-screen keyboard leaves free.
+#[test]
+fn a_field_under_the_keyboard_scrolls_into_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(dir.path(), Form::Tablet);
+    settings(&mut h, Section::Appearance);
+    let lowest = h.get_all_by_role(egui::accesskit::Role::TextInput).map(|n| n.rect()).max_by(|a, b| a.bottom().total_cmp(&b.bottom())).unwrap();
+    let window = h.ctx.input(|i| i.viewport_rect());
+    // A keyboard that covers the lower part of the field.
+    let keyboard = window.bottom() - lowest.bottom() + 8.0;
+    assert!(keyboard < window.height() - 100.0, "the field is low enough for the test: {lowest:?}");
+    let at = lowest.center();
+    h.event(egui::Event::PointerMoved(at));
+    h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.event(egui::Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    h.input_mut().safe_area_insets = Some(egui::SafeAreaInsets(egui::epaint::MarginF32 { bottom: keyboard, ..Default::default() }));
+    h.run_steps(10);
+    let field = h.get_all_by_role(egui::accesskit::Role::TextInput).find(|n| n.is_focused()).map(|n| n.rect()).expect("the field keeps the focus");
+    assert!(
+        field.bottom() <= window.bottom() - keyboard,
+        "the field ends at {} under the keyboard at {}",
+        field.bottom(),
+        window.bottom() - keyboard
+    );
 }
