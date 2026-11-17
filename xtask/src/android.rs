@@ -1,0 +1,369 @@
+//! `cargo xtask android [--check] [--debug] [--install]`: the APK for Android tablets, built from
+//! `apps/android` with the NDK and put together with the SDK's own tools (aapt2, zipalign,
+//! apksigner), no Gradle. `docs/android.md` says what to install.
+//!
+//! - `--check`: only clippy for the Android target on the crates that differ there
+//! - `--debug`: a debug build (faster to build, slower to run)
+//! - `--install`: `adb install -r` on the connected device afterwards
+//!
+//! Signing: `SSHCRAFT_ANDROID_KEYSTORE` names the release keystore (key alias `sshcraft`) and
+//! `SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE` a file holding its password. Without them the APK is
+//! signed with a debug key made under `target/android/`, which says so; Android then refuses to
+//! update an installed release with it.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// The app id on every platform (keyring service, data folder, desktop entry).
+pub const PACKAGE: &str = "de.musiker15.sshcraft";
+/// The library android-activity loads: `lib<LIB>.so`.
+const LIB: &str = "sshcraft_android";
+const TRIPLE: &str = "aarch64-linux-android";
+const ABI: &str = "arm64-v8a";
+/// Android 13, decided for M1 (docs/android.md).
+pub const MIN_SDK: u32 = 33;
+pub const TARGET_SDK: u32 = 36;
+const KEY_ALIAS: &str = "sshcraft";
+/// Launcher icons from `assets/app-icon/hicolor`, one per density bucket.
+const ICONS: [(&str, &str); 5] = [("mdpi", "48x48"), ("hdpi", "64x64"), ("xhdpi", "128x128"), ("xxhdpi", "256x256"), ("xxxhdpi", "512x512")];
+
+const USAGE: &str = "usage: cargo xtask android [--check] [--debug] [--install]";
+
+pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
+    let (mut check, mut debug, mut install) = (false, false, false);
+    for arg in args {
+        match *arg {
+            "--check" => check = true,
+            "--debug" => debug = true,
+            "--install" => install = true,
+            other => return Err(format!("android: unknown option `{other}`\n{USAGE}")),
+        }
+    }
+    let sdk = Sdk::find()?;
+    if check {
+        return cargo(
+            root,
+            &sdk,
+            &["clippy", "--target", TRIPLE, "-p", "sshcraft-android", "-p", "sshcraft-ui-egui", "-p", "sshcraft-store", "--", "-D", "warnings"],
+        );
+    }
+    let mut build = vec!["build", "--target", TRIPLE, "-p", "sshcraft-android"];
+    if !debug {
+        build.push("--release");
+    }
+    cargo(root, &sdk, &build)?;
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).map_err(|e| format!("Cargo.toml: {e}"))?;
+    let version = crate::version::read(&manifest)?;
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
+    let library = target_dir.join(TRIPLE).join(if debug { "debug" } else { "release" }).join(format!("lib{LIB}.so"));
+    let work = target_dir.join("android");
+    let apk = package(root, &sdk, &work, &library, &version)?;
+    eprintln!("android: {}", apk.display());
+    if install {
+        let mut adb = Command::new(sdk.home.join("platform-tools").join(exe("adb")));
+        adb.arg("install").arg("-r").arg(&apk);
+        crate::run(adb, "adb install")?;
+    }
+    Ok(())
+}
+
+/// `.exe` on Windows.
+fn exe(name: &str) -> String {
+    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
+}
+
+/// The SDK and NDK found on this machine.
+struct Sdk {
+    home: PathBuf,
+    ndk: PathBuf,
+    build_tools: PathBuf,
+    platform_jar: PathBuf,
+}
+
+impl Sdk {
+    fn find() -> Result<Self, String> {
+        let home = std::env::var_os("ANDROID_HOME")
+            .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
+            .map(PathBuf::from)
+            .ok_or("android: set ANDROID_HOME to the Android SDK (docs/android.md)")?;
+        let ndk = match std::env::var_os("NDK_HOME").or_else(|| std::env::var_os("ANDROID_NDK_HOME")) {
+            Some(ndk) => PathBuf::from(ndk),
+            None => home.join("ndk").join(newest(&dir_names(&home.join("ndk")), 0).ok_or("android: no NDK under ANDROID_HOME/ndk")?),
+        };
+        let build_tools =
+            home.join("build-tools").join(newest(&dir_names(&home.join("build-tools")), 0).ok_or("android: no build-tools in the SDK")?);
+        let platforms = dir_names(&home.join("platforms"));
+        let numbers: Vec<String> = platforms.iter().filter_map(|p| p.strip_prefix("android-")).map(str::to_string).collect();
+        let platform = newest(&numbers, TARGET_SDK).ok_or(format!("android: no platform android-{TARGET_SDK} or newer in the SDK"))?;
+        let platform_jar = home.join("platforms").join(format!("android-{platform}")).join("android.jar");
+        Ok(Self { home, ndk, build_tools, platform_jar })
+    }
+
+    /// The NDK's clang for the minimum API level, the linker and C compiler of the target.
+    fn clang(&self) -> Result<PathBuf, String> {
+        let host = if cfg!(windows) {
+            "windows-x86_64"
+        } else if cfg!(target_os = "macos") {
+            "darwin-x86_64"
+        } else {
+            "linux-x86_64"
+        };
+        let name = format!("{TRIPLE}{MIN_SDK}-clang{}", if cfg!(windows) { ".cmd" } else { "" });
+        let clang = self.ndk.join("toolchains").join("llvm").join("prebuilt").join(host).join("bin").join(name);
+        if clang.is_file() { Ok(clang) } else { Err(format!("android: {} is missing", clang.display())) }
+    }
+
+    fn tool(&self, name: &str) -> PathBuf {
+        self.build_tools.join(exe(name))
+    }
+
+    /// `java -jar <build-tools>/lib/apksigner.jar`: the jar, not the shell script, so no shell
+    /// reads its arguments.
+    fn apksigner(&self) -> Command {
+        let java = std::env::var_os("JAVA_HOME").map_or_else(|| PathBuf::from("java"), |home| PathBuf::from(home).join("bin").join(exe("java")));
+        let mut cmd = Command::new(java);
+        cmd.arg("-jar").arg(self.build_tools.join("lib").join("apksigner.jar"));
+        cmd
+    }
+}
+
+/// The names of the folders in `dir`; none when it cannot be read.
+fn dir_names(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .map(|entries| entries.filter_map(Result::ok).filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok()).collect())
+        .unwrap_or_default()
+}
+
+/// The highest version among `names` (dotted numbers, compared number by number) whose first
+/// number is at least `at_least`. Names that are not versions are left out.
+pub fn newest(names: &[String], at_least: u32) -> Option<String> {
+    let parse = |name: &str| -> Option<Vec<u32>> { name.split('.').map(|part| part.parse().ok()).collect() };
+    names
+        .iter()
+        .filter_map(|name| parse(name).map(|v| (v, name)))
+        .filter(|(v, _)| v.first().is_some_and(|first| *first >= at_least))
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+        .map(|(_, name)| name.clone())
+}
+
+/// Android's versionCode for `version`: major * 10000 + minor * 100 + patch, so every release
+/// is higher than the one before. A pre-release suffix (`-rc.1`) counts as the release.
+pub fn version_code(version: &str) -> Result<u32, String> {
+    let core = version.split(['-', '+']).next().unwrap_or(version);
+    let parts: Vec<u32> =
+        core.split('.').map(|p| p.parse().map_err(|_| format!("android: `{version}` is not a version"))).collect::<Result<_, _>>()?;
+    let [major, minor, patch] = parts[..] else { return Err(format!("android: `{version}` is not major.minor.patch")) };
+    if minor > 99 || patch > 99 || major > 20_000 {
+        return Err(format!("android: `{version}` does not fit a versionCode"));
+    }
+    Ok(major * 10_000 + minor * 100 + patch)
+}
+
+/// The manifest: a NativeActivity that loads `lib<LIB>.so`, kept alive across rotation and the
+/// keyboard, the window resized for the on-screen keyboard, network access, and no backup of
+/// the app's data (the vault's key stays in this device's Keystore and cannot be restored).
+pub fn manifest(version: &str, code: u32) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="{PACKAGE}"
+    android:versionCode="{code}"
+    android:versionName="{version}">
+    <uses-sdk android:minSdkVersion="{MIN_SDK}" android:targetSdkVersion="{TARGET_SDK}" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <application
+        android:label="SSHCraft"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:extractNativeLibs="false">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data android:name="android.app.lib_name" android:value="{LIB}" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"#
+    )
+}
+
+/// The path of the native library inside the APK.
+pub fn library_entry() -> String {
+    format!("lib/{ABI}/lib{LIB}.so")
+}
+
+/// `cargo <args>` with the NDK as C compiler, archiver and linker of the target.
+fn cargo(root: &Path, sdk: &Sdk, args: &[&str]) -> Result<(), String> {
+    let clang = sdk.clang()?;
+    let ar = clang.with_file_name(exe("llvm-ar"));
+    let key = TRIPLE.replace('-', "_");
+    let mut cmd = crate::cargo();
+    cmd.current_dir(root)
+        .args(args)
+        .env(format!("CC_{key}"), &clang)
+        .env(format!("AR_{key}"), ar)
+        .env(format!("CARGO_TARGET_{}_LINKER", key.to_uppercase()), &clang);
+    crate::run(cmd, &format!("cargo {}", args.first().copied().unwrap_or_default()))
+}
+
+/// Links the resources, adds the library, aligns and signs; returns the APK in `dist/android`.
+fn package(root: &Path, sdk: &Sdk, work: &Path, library: &Path, version: &str) -> Result<PathBuf, String> {
+    let io = |what: &str, e: std::io::Error| format!("android: {what}: {e}");
+    if !library.is_file() {
+        return Err(format!("android: {} was not built", library.display()));
+    }
+    let _ = std::fs::remove_dir_all(work);
+    std::fs::create_dir_all(work).map_err(|e| io("target/android", e))?;
+    std::fs::write(work.join("AndroidManifest.xml"), manifest(version, version_code(version)?)).map_err(|e| io("the manifest", e))?;
+    for (density, size) in ICONS {
+        let from = root.join("assets/app-icon/hicolor").join(size).join("apps").join(format!("{PACKAGE}.png"));
+        let dir = work.join("res").join(format!("mipmap-{density}"));
+        std::fs::create_dir_all(&dir).map_err(|e| io("res", e))?;
+        std::fs::copy(&from, dir.join("ic_launcher.png")).map_err(|e| io(&from.display().to_string(), e))?;
+    }
+    let mut compile = Command::new(sdk.tool("aapt2"));
+    compile.arg("compile").arg("--dir").arg(work.join("res")).arg("-o").arg(work.join("res.zip"));
+    crate::run(compile, "aapt2 compile")?;
+    let linked = work.join("linked.apk");
+    let mut link = Command::new(sdk.tool("aapt2"));
+    link.arg("link")
+        .arg("-o")
+        .arg(&linked)
+        .arg("-I")
+        .arg(&sdk.platform_jar)
+        .arg("--manifest")
+        .arg(work.join("AndroidManifest.xml"))
+        .arg(work.join("res.zip"));
+    crate::run(link, "aapt2 link")?;
+    let unaligned = work.join("unaligned.apk");
+    add_library(&linked, library, &unaligned)?;
+    let aligned = work.join("aligned.apk");
+    let mut align = Command::new(sdk.tool("zipalign"));
+    // 16 KiB pages for the uncompressed library (Android 15 devices may use them).
+    align.args(["-P", "16", "-f", "4"]).arg(&unaligned).arg(&aligned);
+    crate::run(align, "zipalign")?;
+    let out_dir = root.join("dist").join("android");
+    std::fs::create_dir_all(&out_dir).map_err(|e| io("dist/android", e))?;
+    let apk = out_dir.join(format!("sshcraft-{version}-android-arm64.apk"));
+    let mut sign = sdk.apksigner();
+    sign.arg("sign");
+    signing_key(work, &mut sign)?;
+    sign.arg("--out").arg(&apk).arg(&aligned);
+    crate::run(sign, "apksigner sign")?;
+    let mut verify = sdk.apksigner();
+    verify.arg("verify").arg(&apk);
+    crate::run(verify, "apksigner verify")?;
+    Ok(apk)
+}
+
+/// The keystore arguments for apksigner: the release key from the environment, or a debug key.
+fn signing_key(work: &Path, sign: &mut Command) -> Result<(), String> {
+    if let (Some(store), Some(pass)) = (std::env::var_os("SSHCRAFT_ANDROID_KEYSTORE"), std::env::var_os("SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE")) {
+        // apksigner reads the password from the file itself; it never shows up in a command line.
+        let mut pass_arg = std::ffi::OsString::from("file:");
+        pass_arg.push(pass);
+        sign.arg("--ks").arg(store).arg("--ks-key-alias").arg(KEY_ALIAS).arg("--ks-pass").arg(pass_arg);
+        return Ok(());
+    }
+    eprintln!("android: SSHCRAFT_ANDROID_KEYSTORE is not set; signing with a debug key (docs/android.md)");
+    let store = work.parent().unwrap_or(work).join("debug.keystore");
+    if !store.is_file() {
+        let keytool =
+            std::env::var_os("JAVA_HOME").map_or_else(|| PathBuf::from("keytool"), |home| PathBuf::from(home).join("bin").join(exe("keytool")));
+        let mut make = Command::new(keytool);
+        make.args(["-genkeypair", "-keystore"])
+            .arg(&store)
+            .args([
+                "-storepass",
+                "android",
+                "-keypass",
+                "android",
+                "-alias",
+                "androiddebugkey",
+                "-keyalg",
+                "RSA",
+                "-keysize",
+                "2048",
+                "-validity",
+                "10000",
+            ])
+            .args(["-dname", "CN=SSHCraft Debug,O=SSHCraft,C=DE"]);
+        crate::run(make, "keytool")?;
+    }
+    sign.arg("--ks").arg(&store).args(["--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android"]);
+    Ok(())
+}
+
+/// Copies `linked` to `out` and adds the library uncompressed (Android maps it from the APK).
+fn add_library(linked: &Path, library: &Path, out: &Path) -> Result<(), String> {
+    let zip_err = |e: zip::result::ZipError| format!("android: the APK: {e}");
+    let io_err = |e: std::io::Error| format!("android: the APK: {e}");
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(linked).map_err(io_err)?).map_err(zip_err)?;
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(out).map_err(io_err)?);
+    for i in 0..archive.len() {
+        let entry = archive.by_index_raw(i).map_err(zip_err)?;
+        writer.raw_copy_file(entry).map_err(zip_err)?;
+    }
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    writer.start_file(library_entry(), options).map_err(zip_err)?;
+    let bytes = std::fs::read(library).map_err(io_err)?;
+    writer.write_all(&bytes).map_err(io_err)?;
+    writer.finish().map_err(zip_err)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_version_code_orders_releases() {
+        assert_eq!(version_code("0.2.0"), Ok(200));
+        assert_eq!(version_code("1.2.3"), Ok(10203));
+        assert_eq!(version_code("0.3.0-rc.1"), Ok(300));
+        assert!(version_code("0.3.0").unwrap() > version_code("0.2.99").unwrap());
+        assert!(version_code("1.2").is_err());
+        assert!(version_code("0.100.0").is_err(), "minor 100 would collide with major 1");
+    }
+
+    #[test]
+    fn the_manifest_names_the_native_activity() {
+        let m = manifest("0.3.0", 300);
+        for wanted in [
+            r#"package="de.musiker15.sshcraft""#,
+            r#"android:versionCode="300""#,
+            r#"android:versionName="0.3.0""#,
+            r#"android:minSdkVersion="33""#,
+            r#"android:targetSdkVersion="36""#,
+            "android.permission.INTERNET",
+            r#"android:name="android.app.NativeActivity""#,
+            r#"android:value="sshcraft_android""#,
+            r#"android:windowSoftInputMode="adjustResize""#,
+            r#"android:extractNativeLibs="false""#,
+            r#"android:allowBackup="false""#,
+            "keyboardHidden",
+        ] {
+            assert!(m.contains(wanted), "the manifest lacks {wanted}");
+        }
+        assert_eq!(library_entry(), "lib/arm64-v8a/libsshcraft_android.so");
+    }
+
+    #[test]
+    fn the_newest_build_tools_are_picked() {
+        let names: Vec<String> = ["36.0.0", "37.0.0", "9.0.0", "37.0.0-rc1", "notes"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(newest(&names, 0).as_deref(), Some("37.0.0"));
+        let platforms: Vec<String> = ["30", "36", "35"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(newest(&platforms, 36).as_deref(), Some("36"));
+        assert_eq!(newest(&platforms, 37), None);
+    }
+}
