@@ -113,7 +113,7 @@ fn selection_bar(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
     }
     ui.horizontal_wrapped(|ui| {
         ui.label(trf("{count} hosts chosen", &[("count", &count.to_string())]));
-        ui.menu_button(tr("Move to"), |ui| {
+        ui.menu_button(tr("Move to group"), |ui| {
             for (target, path) in host_form::group_targets(all_groups, None) {
                 if ui.button(path).clicked() {
                     let patch = match target {
@@ -474,7 +474,7 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
             if ui.button(tr("Edit")).clicked() {
                 edit_group(app, id);
             }
-            if ui.button(tr("Move to…")).clicked() {
+            if ui.button(tr("Move to server…")).clicked() {
                 crate::pages::sync::ask_move(app, "group", &id.0.to_string(), &group.name);
             }
             if ui.button(tr("Share…")).clicked() {
@@ -540,7 +540,7 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all
             if ui.button(tr("Connect")).clicked() {
                 app.ui.connect_request = Some(ConnectRequest::Host(id));
             }
-            if ui.button(tr("Move to…")).clicked() {
+            if ui.button(tr("Move to server…")).clicked() {
                 crate::pages::sync::ask_move(app, "host", &id.0.to_string(), &row.host.name);
             }
             if ui.button(tr("Share…")).clicked() {
@@ -559,7 +559,7 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all
             if ui.button(tr("Earlier versions…")).clicked() {
                 crate::pages::trash::open_versions(app, "host", &id.0.to_string(), &row.host.name);
             }
-            ui.menu_button(tr("Move to"), |ui| {
+            ui.menu_button(tr("Move to group"), |ui| {
                 for (target, path) in host_form::group_targets(all_groups, None) {
                     if ui.button(path).clicked() {
                         let mut host = row.host.clone();

@@ -413,7 +413,7 @@ fn key_row(app: &mut SshcraftApp, ui: &mut Ui, key: &KeyRow) {
             if ui.button(tr("Copy public key")).clicked() {
                 copy_public_key(app, &id, ctx.clone());
             }
-            if ui.button(tr("Move to…")).clicked() {
+            if ui.button(tr("Move to server…")).clicked() {
                 crate::pages::sync::ask_move(app, "key", &id, &key.name);
             }
             ui.menu_button(tr("Install on host"), |ui| {

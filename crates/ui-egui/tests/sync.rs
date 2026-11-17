@@ -272,3 +272,30 @@ fn shared_key(key: &Arc<MemoryMasterKey>) -> impl FnOnce(&mut sshcraft_engine::S
     let key = Arc::clone(key);
     move |config| config.master_key = Box::new(SharedKey(key))
 }
+
+/// A host in a group cannot move on its own: asking to move it moves its top group, and the
+/// dialog says so (the move used to fail without a word, and the host stayed on the device).
+#[test]
+fn moving_a_host_in_a_group_moves_its_top_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (origin, api_key, _stop) = sync_server(&session, server_dir.path());
+    create(&mut h, &origin, &api_key);
+    h.get_by_label("I have kept the key").click();
+    let (top, sub, host) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let run = |id: &str, params| session.runtime().block_on(session.execute(Caller::User, id, params)).unwrap();
+    run("group.save", json!({ "group": { "id": top, "name": "web", "defaults": {} } }));
+    run("group.save", json!({ "group": { "id": sub, "name": "frontend", "parent_id": top, "defaults": {} } }));
+    run("host.save", json!({ "host": { "id": host, "name": "web-01", "group_id": sub, "settings": { "address": "192.0.2.1" } } }));
+    until(&mut h, "the server and the groups", |app| !app.data.servers.is_empty() && app.data.groups.len() == 2 && !app.data.hosts.is_empty());
+    let server = h.state().data.servers[0]["id"].as_str().unwrap().to_string();
+    sshcraft_ui_egui::pages::sync::ask_move(h.state_mut(), "host", &host.to_string(), "web-01");
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("the whole group web").is_some(), "the dialog says the group moves");
+    h.get_by_role_and_label(egui::accesskit::Role::RadioButton, "home").click();
+    h.run_steps(1);
+    h.get_by_label("Move").click();
+    until(&mut h, "the moved host", |app| app.data.hosts.first().and_then(|r| r.host.location.map(|l| l.0.to_string())) == Some(server.clone()));
+    assert!(h.state().data.groups.iter().all(|g| g.group.location.map(|l| l.0.to_string()) == Some(server.clone())), "both groups moved with it");
+}

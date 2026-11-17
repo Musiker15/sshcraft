@@ -79,6 +79,8 @@ pub struct MoveForm {
     name: String,
     /// The server, or `None` for this device only.
     location: Option<String>,
+    /// Why something else moves than what was asked for (a host or subgroup moves its top group).
+    note: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -107,8 +109,33 @@ impl SyncView {
 }
 
 /// Opens the dialog that moves `kind` (`host`, `group`, `key`) `id` named `name`.
+///
+/// A host in a group and a subgroup follow their group, so they cannot move on their own:
+/// asking to move one moves its top group, with everything in it, and the dialog says so.
 pub fn ask_move(app: &mut SshcraftApp, kind: &str, id: &str, name: &str) {
-    app.ui.sync.moving = Some(MoveForm { kind: kind.into(), id: id.into(), name: name.into(), location: None });
+    let parent = match kind {
+        "host" => app.data.hosts.iter().find(|r| r.host.id.0.to_string() == id).and_then(|r| r.host.group_id),
+        "group" => app.data.groups.iter().find(|g| g.group.id.0.to_string() == id).and_then(|g| g.group.parent_id),
+        _ => None,
+    };
+    let Some(parent) = parent else {
+        app.ui.sync.moving = Some(MoveForm { kind: kind.into(), id: id.into(), name: name.into(), location: None, note: None });
+        return;
+    };
+    // Walk up to the top group; the bound stops a cycle in damaged data.
+    let mut top = parent;
+    for _ in 0..app.data.groups.len() {
+        match app.data.groups.iter().find(|g| g.group.id == top).and_then(|g| g.group.parent_id) {
+            Some(up) => top = up,
+            None => break,
+        }
+    }
+    let top_name = app.data.groups.iter().find(|g| g.group.id == top).map(|g| g.group.name.clone()).unwrap_or_default();
+    let note = trf(
+        "{name} is in a group, so the whole group {group} moves, with everything in it.",
+        &[("name", &visible(name)), ("group", &visible(&top_name))],
+    );
+    app.ui.sync.moving = Some(MoveForm { kind: "group".into(), id: top.0.to_string(), name: top_name, location: None, note: Some(note) });
 }
 
 fn text(v: &Value, key: &str) -> String {
@@ -451,6 +478,9 @@ fn move_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-move")).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.heading(trf("Move {name}", &[("name", &visible(&form.name))]));
+        if let Some(note) = &form.note {
+            ui.label(note);
+        }
         ui.radio_value(&mut form.location, None, tr("This device only"));
         for (id, name) in &servers {
             ui.radio_value(&mut form.location, Some(id.clone()), visible(name));
