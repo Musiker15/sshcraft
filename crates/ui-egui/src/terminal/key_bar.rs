@@ -72,10 +72,10 @@ fn with_ctrl(c: char) -> char {
     }
 }
 
-/// Keys that type a character: their own text event follows them.
+/// Keys that type a character rather than have a meaning of their own (Enter, an arrow, F1):
+/// letters, digits and symbols, whose text event follows them.
 fn types_text(key: egui::Key) -> bool {
-    let name = key.name();
-    name.chars().count() == 1 || matches!(key, egui::Key::Space)
+    super::keys::map_key(key, egui::Modifiers::NONE).is_none()
 }
 
 impl KeyBar {
@@ -105,18 +105,19 @@ impl KeyBar {
     /// Applies held Ctrl and Alt to the next key or character among this frame's `events`, from
     /// the keyboard, and lets go of them after it. A character key's own text event is folded
     /// into one text event; a key without text (Enter, an arrow) gets the modifiers.
-    pub fn apply(&mut self, events: &mut Vec<Event>) {
+    pub fn apply(&mut self, target: &mut Vec<Event>) {
         if !self.active() {
             return;
         }
-        let mut out = Vec::with_capacity(events.len());
+        let mut out = Vec::with_capacity(target.len());
         let mut held: Option<Event> = None;
-        for event in events.drain(..) {
+        for event in std::mem::take(target) {
             if !self.active() {
                 out.push(event);
                 continue;
             }
             match event {
+                // Its text comes next and carries the held keys; the key itself sends nothing.
                 Event::Key { key, pressed: true, .. } if types_text(key) => held = Some(event),
                 Event::Text(s) => {
                     held = None;
@@ -141,7 +142,7 @@ impl KeyBar {
             out.push(Event::Key { key, physical_key, pressed: true, repeat, modifiers });
             self.release();
         }
-        *events = out;
+        *target = out;
     }
 
     /// The bytes a tap on `key` sends, in the terminal's `modes`; `paste` is the clipboard's
@@ -203,6 +204,23 @@ mod tests {
         assert_eq!(events, vec![Event::Text("\u{3}".into())]);
         let mut bar = ctrl();
         assert_eq!(bar.press(BarKey::Char('_'), TermModes::empty(), None), vec![0x1f]);
+    }
+
+    /// A symbol key comes as a key egui names by word ("OpenBracket", "Minus") and then its text:
+    /// Ctrl applies to the text, and the key itself sends nothing of its own.
+    #[test]
+    fn ctrl_then_a_symbol_key_is_one_control_character() {
+        for (k, text, want) in [(Key::OpenBracket, "[", "\u{1b}"), (Key::Backslash, "\\", "\u{1c}"), (Key::Minus, "_", "\u{1f}")] {
+            let mut bar = ctrl();
+            let mut events = vec![key(k), Event::Text(text.into())];
+            bar.apply(&mut events);
+            assert_eq!(events, vec![Event::Text(want.into())], "Ctrl+{text}");
+        }
+        // A key without text right after it keeps its own meaning, with Ctrl.
+        let mut bar = ctrl();
+        let mut events = vec![key(Key::ArrowRight), Event::Text("a".into())];
+        bar.apply(&mut events);
+        assert!(matches!(&events[..], [Event::Key { key: Key::ArrowRight, modifiers, .. }, Event::Text(t)] if modifiers.ctrl && t == "a"));
     }
 
     #[test]

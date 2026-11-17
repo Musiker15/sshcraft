@@ -28,6 +28,10 @@ fn clipboard_text() -> Option<String> {
 struct Tablet {
     app: SshcraftApp,
     android: AndroidApp,
+    /// The content rect seen last, to notice the keyboard or a rotation.
+    content: (i32, i32, i32, i32),
+    content_changed: bool,
+    last_input: std::time::Instant,
 }
 
 impl eframe::App for Tablet {
@@ -52,14 +56,25 @@ impl eframe::App for Tablet {
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.app.logic(ctx);
+        // winit tells nothing when the on-screen keyboard opens or closes, so the frame looks
+        // for it itself (crate::repaint_after).
+        ctx.request_repaint_after(crate::repaint_after(std::mem::take(&mut self.content_changed), self.last_input.elapsed()));
     }
 
     /// The parts the system covers (status bar, navigation bar, on-screen keyboard) stay free,
     /// and a hardware keyboard's clipboard keys use the system clipboard.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        let content = self.android.content_rect();
+        let rect = self.android.content_rect();
+        let content = (rect.left, rect.top, rect.right, rect.bottom);
+        if content != self.content {
+            self.content = content;
+            self.content_changed = true;
+        }
+        if !raw_input.events.is_empty() {
+            self.last_input = std::time::Instant::now();
+        }
         if let Some(window) = raw_input.screen_rect {
-            let covered = crate::covered(window, (content.left, content.top, content.right, content.bottom), ctx.pixels_per_point());
+            let covered = crate::covered(window, content, ctx.pixels_per_point());
             raw_input.safe_area_insets = Some(egui::SafeAreaInsets(covered));
         }
         crate::clipboard_keys(&mut raw_input.events, clipboard_text);
@@ -86,10 +101,17 @@ fn show_problem(android: &AndroidApp, text: String) {
     let _ = eframe::run_native("SSHCraft", options(android), Box::new(move |_| Ok(Box::new(Problem(text)))));
 }
 
-/// Called by android-activity on its own thread once the activity exists.
+/// Called by android-activity on its own thread once the activity exists. The process ends with
+/// the activity: winit cannot make a second event loop in a process, so an activity started
+/// again in a process Android kept (after Back) would otherwise stay blank.
 #[allow(unsafe_code)] // Exporting the symbol android-activity looks up; nothing else is unsafe.
 #[unsafe(no_mangle)]
 fn android_main(android: AndroidApp) {
+    run(android);
+    std::process::exit(0);
+}
+
+fn run(android: AndroidApp) {
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(e) => return show_problem(&android, format!("{}\n\n{e}", tr("SSHCraft could not start."))),
@@ -114,7 +136,7 @@ fn android_main(android: AndroidApp) {
             app.form = Form::Tablet;
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);
-            Ok(Box::new(Tablet { app, android: handle }))
+            Ok(Box::new(Tablet { app, android: handle, content: (0, 0, 0, 0), content_changed: true, last_input: std::time::Instant::now() }))
         }),
     );
     // The activity is gone; the engine's tasks end with the runtime.

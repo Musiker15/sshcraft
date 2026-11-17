@@ -66,7 +66,7 @@ pub struct SessionTab {
     /// The bell rang, or the cursor's line asks for a secret or a yes/no.
     waiting: bool,
     /// The terminal view's widget, to know whether it has the keyboard.
-    view: Option<egui::Id>,
+    pub(crate) view: Option<egui::Id>,
     /// When the running command started (shell integration), for the notification when it ends.
     command_since: Option<std::time::Instant>,
     /// Server messages of this tab shown on the desktop.
@@ -1466,14 +1466,25 @@ fn keep_focus_for_bar(ctx: &egui::Context, shown: bool, bar: Rect) -> Option<egu
     })
 }
 
+/// The key bar's held Ctrl and Alt for the focused session `id`: they belong to the session they
+/// were held for (another one starts with none) and apply to what the keyboard types next while
+/// the terminal `has_keys`.
+fn held_keys(app: &mut SshcraftApp, ctx: &egui::Context, id: SessionId, has_keys: bool) {
+    if app.key_bar_session != Some(id) {
+        app.key_bar = crate::terminal::key_bar::KeyBar::default();
+        app.key_bar_session = Some(id);
+    }
+    if has_keys {
+        let bar = &mut app.key_bar;
+        ctx.input_mut(|i| bar.apply(&mut i.events));
+    }
+}
+
 /// The bar of special keys in `rect` under the terminal `view` of session `id` (tablet only).
 /// Its buttons never take the keyboard focus, so the on-screen keyboard stays open; what a tap
 /// sends goes to the session (and the panes it broadcasts to) when `can_send`.
 fn key_bar(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, view: egui::Id, can_send: bool) {
-    let Some(bytes) = key_bar_tap(app, ui, id, rect, view) else { return };
-    if !can_send {
-        return;
-    }
+    let Some(bytes) = key_bar_tap(app, ui, id, rect, view, can_send) else { return };
     if let Some(tab) = app.terminals.get_mut(&id) {
         tab.term.scroll_to_bottom();
     }
@@ -1483,7 +1494,7 @@ fn key_bar(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, view: 
 }
 
 /// Draws the bar and returns the bytes of the button tapped.
-fn key_bar_tap(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, view: egui::Id) -> Option<Vec<u8>> {
+fn key_bar_tap(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, view: egui::Id, can_send: bool) -> Option<Vec<u8>> {
     use crate::terminal::key_bar::{BarKey, KEYS};
     let modes = app.terminals.get(&id).map(|t| t.term.modes()).unwrap_or_default();
     let selection = app.terminals.get(&id).and_then(|t| t.term.selection_text());
@@ -1497,7 +1508,9 @@ fn key_bar_tap(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, vi
                     let label = if key == BarKey::Paste { tr("Paste") } else { label };
                     let held = (key == BarKey::Ctrl && ctrl) || (key == BarKey::Alt && alt);
                     // Click only, not focusable: the terminal keeps the keyboard.
-                    if ui.add(egui::Button::new(label).selected(held).sense(egui::Sense::CLICK).min_size(egui::vec2(36.0, 26.0))).clicked() {
+                    // Nothing to send to (a question is open, the session ended): the keys rest.
+                    let button = egui::Button::new(label).selected(held).sense(egui::Sense::CLICK).min_size(egui::vec2(36.0, 26.0));
+                    if ui.add_enabled(can_send, button).clicked() {
                         tapped = Some(key);
                     }
                 }
@@ -1587,10 +1600,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     // terminal has the keyboard (not a search field or a dialog).
     let has_keys = tab.view.is_some_and(|v| ctx.memory(|m| m.has_focus(v)));
     let taken = if focused && !blocked && has_keys { completion_keys(&ctx, tab) } else { None };
-    // Ctrl and Alt held on the bar apply to what the keyboard types next.
-    if tablet && focused && !blocked && has_keys {
-        let bar = &mut app.key_bar;
-        ctx.input_mut(|i| bar.apply(&mut i.events));
+    if tablet && focused {
+        held_keys(app, &ctx, id, !blocked && has_keys);
     }
     let Some(tab) = app.terminals.get_mut(&id) else { return };
     let line_context = crate::history::LineContext {

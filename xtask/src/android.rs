@@ -8,7 +8,7 @@
 //!
 //! Signing: `SSHCRAFT_ANDROID_KEYSTORE` names the release keystore (key alias `sshcraft`) and
 //! `SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE` a file holding its password. Without them the APK is
-//! signed with a debug key made under `target/android/`, which says so; Android then refuses to
+//! signed with a debug key made in `target/debug.keystore`, which says so; Android then refuses to
 //! update an installed release with it.
 
 use std::io::Write;
@@ -160,9 +160,10 @@ pub fn version_code(version: &str) -> Result<u32, String> {
     Ok(major * 10_000 + minor * 100 + patch)
 }
 
-/// The manifest: a NativeActivity that loads `lib<LIB>.so`, kept alive across rotation and the
-/// keyboard, the window resized for the on-screen keyboard, network access, and no backup of
-/// the app's data (the vault's key stays in this device's Keystore and cannot be restored).
+/// The manifest: a NativeActivity that loads `lib<LIB>.so`, kept alive across every change it
+/// can follow (a restart would end the process, see `apps/android`), the window resized for the
+/// on-screen keyboard, network access, and no backup or device transfer of the app's data: the
+/// vault's key stays in this device's Keystore, so copied data could not be opened.
 pub fn manifest(version: &str, code: u32) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
@@ -178,12 +179,13 @@ pub fn manifest(version: &str, code: u32) -> String {
         android:icon="@mipmap/ic_launcher"
         android:hasCode="false"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:extractNativeLibs="false">
         <activity
             android:name="android.app.NativeActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|locale|layoutDirection|fontScale|colorMode|touchscreen|mcc|mnc"
             android:windowSoftInputMode="adjustResize">
             <meta-data android:name="android.app.lib_name" android:value="{LIB}" />
             <intent-filter>
@@ -196,6 +198,26 @@ pub fn manifest(version: &str, code: u32) -> String {
 "#
     )
 }
+
+/// Android 12 and later: nothing goes into a cloud backup or a transfer to a new device.
+pub const DATA_EXTRACTION_RULES: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>
+"#;
 
 /// The path of the native library inside the APK.
 pub fn library_entry() -> String {
@@ -231,6 +253,9 @@ fn package(root: &Path, sdk: &Sdk, work: &Path, library: &Path, version: &str) -
         std::fs::create_dir_all(&dir).map_err(|e| io("res", e))?;
         std::fs::copy(&from, dir.join("ic_launcher.png")).map_err(|e| io(&from.display().to_string(), e))?;
     }
+    let xml = work.join("res").join("xml");
+    std::fs::create_dir_all(&xml).map_err(|e| io("res/xml", e))?;
+    std::fs::write(xml.join("data_extraction_rules.xml"), DATA_EXTRACTION_RULES).map_err(|e| io("the data extraction rules", e))?;
     let mut compile = Command::new(sdk.tool("aapt2"));
     compile.arg("compile").arg("--dir").arg(work.join("res")).arg("-o").arg(work.join("res.zip"));
     crate::run(compile, "aapt2 compile")?;
@@ -352,10 +377,24 @@ mod tests {
             r#"android:extractNativeLibs="false""#,
             r#"android:allowBackup="false""#,
             "keyboardHidden",
+            "fontScale",
+            "locale",
+            r#"android:dataExtractionRules="@xml/data_extraction_rules""#,
         ] {
             assert!(m.contains(wanted), "the manifest lacks {wanted}");
         }
         assert_eq!(library_entry(), "lib/arm64-v8a/libsshcraft_android.so");
+    }
+
+    #[test]
+    fn no_data_leaves_the_device() {
+        for part in ["<cloud-backup>", "<device-transfer>"] {
+            let start = DATA_EXTRACTION_RULES.find(part).unwrap();
+            let section = &DATA_EXTRACTION_RULES[start..];
+            for domain in ["root", "file", "database", "sharedpref", "external"] {
+                assert!(section.contains(&format!(r#"<exclude domain="{domain}" path="." />"#)), "{part} keeps {domain}");
+            }
+        }
     }
 
     #[test]

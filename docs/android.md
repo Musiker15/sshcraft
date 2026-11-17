@@ -25,7 +25,8 @@ an update signed with another key; an APK with a different fingerprint is not fr
 ## Getting your hosts onto the tablet
 
 Under **Settings > Sync**, add your sync server and choose **Join with account key**, then paste
-the account key (from your password manager) with Ctrl+V or the **Paste** key. Hosts, groups,
+the account key (from your password manager): with Ctrl+V on a hardware keyboard, or with the
+**Paste** button that shows in the lower right corner while a text field has the keyboard. Hosts, groups,
 keys and snippets arrive as on any other device ([sync.md](sync.md)). Hosts can also be added by
 hand, and a key can be imported by pasting it.
 
@@ -53,12 +54,16 @@ the bar puts the selection on Android's clipboard.
 
 - The vault's master key is kept in Android's credential store, encrypted with a key in the
   Android Keystore that never leaves the device. The app's data is excluded from Android's
-  backup, so a new device starts empty and gets its data through sync.
+  backup and from the transfer to a new device, so a new device starts empty and gets its data
+  through sync.
 - No local terminal or serial port, and no file dialogs: importing hosts from a file, exporting,
   backups to a file, saving a session log and `known_hosts` files are desktop only.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
 - No desktop notifications, no dropdown window, no desktop shortcuts, no X11 forwarding, no
   FIDO keys and no screen reader support yet.
+- The sync server's certificate is checked against Mozilla's list of public authorities, not
+  Android's own store, so a server with a certificate from a private or user-installed authority
+  is not trusted on Android.
 - When Android sends SSHCraft to the background it may cut the network. Sessions reconnect
   when you come back ([connections.md](connections.md)).
 

@@ -361,7 +361,10 @@ impl TerminalView<'_> {
             state.focused = focused;
         }
 
-        if !(touch_screen && touch(&response, &frame, &mut state, term, &mut out.reports)) {
+        // A finger, not a mouse or trackpad on the same tablet: those select as on the desktop.
+        let finger =
+            touch_screen && (state.touch_select || ui.input(|i| i.any_touches() || i.events.iter().any(|e| matches!(e, Event::Touch { .. }))));
+        if !(finger && touch(&response, &frame, &mut state, term, &mut out.reports)) {
             mouse(ui, &response, &frame, term, &mut out);
         }
         if response.hovered() {

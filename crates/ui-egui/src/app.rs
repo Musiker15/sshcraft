@@ -37,6 +37,10 @@ pub struct SshcraftApp {
     pub key_bar: crate::terminal::key_bar::KeyBar,
     /// Where the key bar's Paste reads from; nothing is pasted without one.
     pub paste_source: Option<PasteSource>,
+    /// The session the key bar's held keys belong to; they let go when another one has the bar.
+    pub key_bar_session: Option<sshcraft_engine::SessionId>,
+    /// The Paste button for text fields on a tablet.
+    pub field_paste: crate::field_paste::FieldPaste,
     pub session: Session,
     pub runner: Runner,
     pub data: Data,
@@ -127,6 +131,8 @@ impl SshcraftApp {
             form: Form::Desktop,
             key_bar: crate::terminal::key_bar::KeyBar::default(),
             paste_source: None,
+            key_bar_session: None,
+            field_paste: crate::field_paste::FieldPaste::default(),
             handoff_dir: None,
             handoff_next: 0.0,
             control: None,
@@ -386,7 +392,10 @@ impl SshcraftApp {
         for (then, result) in self.runner.take_done() {
             then(self, result);
         }
-        crate::link::tick(self, ctx);
+        // No agents on a tablet, whatever the settings say.
+        if self.form == Form::Desktop {
+            crate::link::tick(self, ctx);
+        }
         crate::lock::tick(self, ctx);
         crate::control::process(self, ctx);
         crate::quit::logic(self, ctx);
@@ -434,6 +443,7 @@ impl SshcraftApp {
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
+        let keep_field = crate::field_paste::before(self, &ctx);
         ui.scope_builder(visible(ui), |ui| crate::shell::show(self, ui));
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
@@ -484,6 +494,7 @@ impl SshcraftApp {
             }
         }
         self.toasts.show(&ctx);
+        crate::field_paste::after(self, &ctx, keep_field);
         crate::window::resize_edges(self, &ctx);
         self.forms.observe(crate::forms::shape(&self.ui));
     }

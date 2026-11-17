@@ -25,6 +25,20 @@ pub fn covered(window: egui::Rect, content: (i32, i32, i32, i32), ppp: f32) -> e
     }
 }
 
+/// When to draw the next frame without input: at once after the visible area changed (the
+/// on-screen keyboard opened or closed, the tablet turned), often for a while after input (the
+/// keyboard animates after a tap), and once a second otherwise, since Android tells the app
+/// nothing about the keyboard.
+pub fn repaint_after(content_changed: bool, since_input: std::time::Duration) -> std::time::Duration {
+    if content_changed {
+        std::time::Duration::ZERO
+    } else if since_input < std::time::Duration::from_secs(2) {
+        std::time::Duration::from_millis(100)
+    } else {
+        std::time::Duration::from_secs(1)
+    }
+}
+
 /// What a hardware keyboard's clipboard key does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClipboardKey {
@@ -103,6 +117,14 @@ mod tests {
         let covered = covered(window(), (-10, -10, 4000, 4000), 2.0);
         assert_eq!(covered, egui::epaint::MarginF32::ZERO);
         assert_eq!(super::covered(window(), (0, 0, 10, 10), 0.0), egui::epaint::MarginF32::ZERO, "no scale yet");
+    }
+
+    #[test]
+    fn the_keyboard_opening_is_drawn_soon() {
+        use std::time::Duration;
+        assert_eq!(repaint_after(true, Duration::from_secs(60)), Duration::ZERO);
+        assert!(repaint_after(false, Duration::from_millis(300)) <= Duration::from_millis(100), "right after a tap");
+        assert!(repaint_after(false, Duration::from_secs(60)) <= Duration::from_secs(1), "never stale for long");
     }
 
     fn key(key: Key, modifiers: Modifiers) -> Event {

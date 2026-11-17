@@ -43,7 +43,8 @@ crate = "option-ext"
 allow = ["MPL-2.0"]
 
 # The Mozilla CA bundle that rustls uses to check the TLS certificate of a sync server.
-# CDLA-Permissive-2.0 is a permissive licence for data; pdfcraft carries webpki-root-certs too.
+# CDLA-Permissive-2.0 is a permissive licence for data. webpki-roots: the sync websocket's roots;
+# webpki-root-certs: the sync client's HTTPS roots on Android (crates/sync/src/client.rs).
 [[licenses.exceptions]]
 crate = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]

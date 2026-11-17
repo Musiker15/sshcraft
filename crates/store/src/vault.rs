@@ -89,18 +89,18 @@ impl KeyringMasterKey {
     }
 }
 
-/// Makes the Android Keystore store keyring-core's default, once per process.
+/// Makes the Android Keystore store keyring-core's default, once per process. A failure is not
+/// kept: the next use tries again.
 #[cfg(target_os = "android")]
 fn android_store() -> Result<(), VaultError> {
-    static STORE: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
-    STORE
-        .get_or_init(|| {
-            let store = android_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
-            keyring_core::set_default_store(store);
-            Ok(())
-        })
-        .clone()
-        .map_err(VaultError::Keyring)
+    static READY: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if READY.get().is_some() {
+        return Ok(());
+    }
+    let store = android_native_keyring_store::Store::new().map_err(|e| VaultError::Keyring(e.to_string()))?;
+    keyring_core::set_default_store(store);
+    let _ = READY.set(());
+    Ok(())
 }
 
 impl MasterKeyProvider for KeyringMasterKey {
