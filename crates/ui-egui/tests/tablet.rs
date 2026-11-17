@@ -156,6 +156,24 @@ fn the_key_bar_pastes_from_the_system_clipboard() {
     until(&mut h, "the pasted text", |app| shown(app, tab, "pasted-text"));
 }
 
+/// The on-screen keyboard covers the lower part of the window; the Android app reports it as a
+/// bottom safe-area inset. The key bar and the terminal stay above it.
+#[test]
+fn the_key_bar_stays_above_the_on_screen_keyboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _server, _tab) = connected_tablet(dir.path());
+    let window = h.ctx.input(|i| i.viewport_rect());
+    let keyboard = 300.0;
+    let inset = egui::epaint::MarginF32 { bottom: keyboard, ..Default::default() };
+    h.input_mut().safe_area_insets = Some(egui::SafeAreaInsets(inset));
+    h.run_steps(3);
+    let visible = window.bottom() - keyboard;
+    let bar = h.get_by_label("PgUp").rect();
+    assert!(bar.bottom() <= visible, "the key bar ends at {} above the keyboard at {visible}", bar.bottom());
+    let terminal = h.get_by_label("Terminal").rect();
+    assert!(terminal.bottom() <= bar.top() + 1.0, "the terminal is above the bar");
+}
+
 /// The counter-check: the desktop has no key bar.
 #[test]
 fn the_desktop_has_no_key_bar() {

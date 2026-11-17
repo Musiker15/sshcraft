@@ -20,6 +20,13 @@ pub enum Form {
     Tablet,
 }
 
+/// The part of `ui` the system leaves free: on a tablet the on-screen keyboard and the system
+/// bars cover the rest (reported as safe-area insets); on the desktop it is all of `ui`.
+fn visible(ui: &egui::Ui) -> egui::UiBuilder {
+    let area = ui.ctx().content_rect().intersect(ui.max_rect());
+    egui::UiBuilder::new().max_rect(if area.is_positive() { area } else { ui.max_rect() })
+}
+
 /// Reads the system clipboard's text for the key bar's Paste (set by the Android app).
 pub type PasteSource = std::sync::Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
@@ -406,7 +413,7 @@ impl SshcraftApp {
             // Output keeps flowing into the terminals; only the lock screen is drawn, and the
             // quit question (no toasts: they can name hosts and addresses).
             crate::session_tab::pump_all(self, &ctx);
-            crate::lock::show(self, ui);
+            ui.scope_builder(visible(ui), |ui| crate::lock::show(self, ui));
             crate::quit::show(self, &ctx);
             crate::window::resize_edges(self, &ctx);
             return;
@@ -427,7 +434,7 @@ impl SshcraftApp {
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
-        crate::shell::show(self, ui);
+        ui.scope_builder(visible(ui), |ui| crate::shell::show(self, ui));
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
         crate::quick_connect::show(self, &ctx);
