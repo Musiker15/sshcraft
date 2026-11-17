@@ -2,16 +2,28 @@
 //! it commits (typed, swiped, pasted from its clipboard) and showing or hiding it for the input
 //! view that has the text connection.
 
-// The JavaVM and the activity are only reachable as the raw pointers android-activity put into
-// ndk-context. This module is one of the two places in this crate that may use unsafe
-// (AGENTS.md, "Never crash"); every block states why it is sound.
+// The JavaVM and the activity are only reachable as raw pointers from android-activity. This
+// module is one of the two places in this crate that may use unsafe (AGENTS.md, "Never
+// crash"); every block states why it is sound.
 #![allow(unsafe_code)]
+
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 use jni::objects::{JObject, JString, JValue};
 use jni::{Env, JavaVM, jni_sig, jni_str};
 
 /// At most this many commits are taken in one frame.
 const MAX_PER_FRAME: usize = 64;
+
+/// The activity, from `AndroidApp::activity_as_ptr`. Not the context in ndk-context: that is the
+/// application, which has none of MainActivity's methods.
+static ACTIVITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Keeps the activity for the calls below; android_main gives it before the first frame.
+pub fn set_activity(activity: *mut c_void) {
+    ACTIVITY.store(activity, Ordering::Release);
+}
 
 fn vm() -> JavaVM {
     let context = ndk_context::android_context();
@@ -22,10 +34,13 @@ fn vm() -> JavaVM {
 
 /// Runs `f` with the activity on a thread attached to the VM.
 pub(crate) fn with_activity<T>(f: impl FnOnce(&mut Env, &JObject) -> jni::errors::Result<T>) -> Result<T, String> {
+    let raw = ACTIVITY.load(Ordering::Acquire);
+    if raw.is_null() {
+        return Err("no activity yet".into());
+    }
     vm().attach_current_thread(|env| -> jni::errors::Result<T> {
-        let raw = ndk_context::android_context().context();
-        // SAFETY: the context in ndk-context is a global reference to the activity that
-        // android-activity holds while the activity exists, which is as long as this app runs.
+        // SAFETY: android-activity keeps this reference to the activity valid while the activity
+        // exists, and the process ends with it (android_main). The wrapper never deletes it.
         let activity = unsafe { JObject::from_raw(env, raw.cast()) };
         f(env, &activity)
     })

@@ -178,6 +178,7 @@ fn android_main(android: AndroidApp) {
 }
 
 fn run(android: AndroidApp) {
+    crate::keyboard::set_activity(android.activity_as_ptr());
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(e) => return show_problem(&android, format!("{}\n\n{e}", tr("SSHCraft could not start."))),
