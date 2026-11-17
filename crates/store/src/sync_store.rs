@@ -8,6 +8,9 @@ use uuid::Uuid;
 use super::{Store, StoreError, parse_uuid};
 use sshcraft_model::model::ServerId;
 
+/// A server may sync everything: what is made here goes there (Store::set_sync_all).
+pub(crate) const SCHEMA_V14: &str = "ALTER TABLE sync_servers ADD COLUMN sync_all INTEGER NOT NULL DEFAULT 0;";
+
 /// The kinds of items that sync.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -262,6 +265,59 @@ impl Store {
         super::carry_passwords(&tx, kind, id)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Whether server `id` syncs everything (see `set_sync_all`).
+    pub fn sync_all(&self, id: ServerId) -> Result<bool, StoreError> {
+        Ok(self.conn.query_row("SELECT sync_all FROM sync_servers WHERE id = ?1", [id.0.to_string()], |r| r.get(0)).optional()?.unwrap_or(false))
+    }
+
+    /// Lets server `id` sync everything, or not. On, it is the only one that does, and its sync
+    /// and key sync go on with it: what is made on this device from then on goes there (the
+    /// inserts above), and `local_roots` names what still lives only here. Off, items stay where
+    /// they are and new ones stay on this device, as before.
+    pub fn set_sync_all(&self, id: ServerId, on: bool) -> Result<(), StoreError> {
+        let exists: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM sync_servers WHERE id = ?1)", [id.0.to_string()], |r| r.get(0))?;
+        if !exists {
+            return Err(StoreError::Malformed("no such server".into()));
+        }
+        if on {
+            self.update_server_flags(id, true, true)?;
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        if on {
+            tx.execute("UPDATE sync_servers SET sync_all = 0", [])?;
+        }
+        tx.execute("UPDATE sync_servers SET sync_all = ?2 WHERE id = ?1", params![id.0.to_string(), on])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The server that syncs everything, when there is one with sync on.
+    pub fn everything_server(&self) -> Result<Option<ServerId>, StoreError> {
+        let raw: Option<String> = self
+            .conn
+            .query_row("SELECT id FROM sync_servers WHERE sync_all = 1 AND sync_enabled = 1 AND revoked = 0 LIMIT 1", [], |r| r.get(0))
+            .optional()?;
+        raw.map(|t| parse_uuid(&t).map(ServerId)).transpose()
+    }
+
+    /// What lives only on this device, as the tops of their trees: top-level groups (their
+    /// subgroups, hosts and passwords move with them), hosts outside groups, identities, and
+    /// keys that may leave this device. Passwords move with what they belong to.
+    pub fn local_roots(&self) -> Result<Vec<(ItemKind, String)>, StoreError> {
+        let mut out = Vec::new();
+        for (kind, sql) in [
+            (ItemKind::Group, "SELECT id FROM groups WHERE location IS NULL AND parent_id IS NULL ORDER BY id"),
+            (ItemKind::Host, "SELECT id FROM hosts WHERE location IS NULL AND group_id IS NULL ORDER BY id"),
+            (ItemKind::Identity, "SELECT id FROM identities WHERE location IS NULL ORDER BY id"),
+            (ItemKind::Key, "SELECT id FROM keys WHERE location IS NULL AND kind = 'vault' ORDER BY id"),
+        ] {
+            let mut stmt = self.conn.prepare(sql)?;
+            let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+            out.extend(ids.into_iter().map(|id| (kind, id)));
+        }
+        Ok(out)
     }
 
     /// Stores an area's verified manifest and this device's envelope; keeps the cursor.

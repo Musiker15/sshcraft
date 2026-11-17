@@ -137,7 +137,7 @@ crash on hostile input is a security bug. **This outranks feature work.**
 - **wasm:** `cargo xtask wasm` checks `proto` and `model` for `wasm32-unknown-unknown`. The other
   crates need the network, files or the operating system, and SSHCraft has no web build (SSH needs
   TCP), so they are exempt. This deviates from "never break wasm" in the other Craft apps.
-- **Data stays compatible:** database schema 13 (older ones migrate on first start), keyring service `de.musiker15.sshcraft`, the data
+- **Data stays compatible:** database schema 14 (older ones migrate on first start), keyring service `de.musiker15.sshcraft`, the data
   folder of `sshcraft_platform::data_dir()`. Tests pin all three; changing one needs a migration.
 - **Dependencies:** take the newest version (`cargo search <crate> --limit 1`). A licence outside
   the house-rule list needs an exception for that one crate in `deny.toml`, with the reason it is

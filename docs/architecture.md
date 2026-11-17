@@ -16,7 +16,7 @@ layering: a crate depends only on lower layers, and nothing below L6 depends on 
 | L0 | `proto` | Account and device keys, device log, area keys, signed and encrypted records, rollback protection |
 | L0 | `platform` | Platform folders: the data folder of the app |
 | L1 | `model` | Pure data: hosts, groups, identities, key metadata, forwarding rules, agent policy, shell events |
-| L2 | `store` | SQLite database (schema 13), vault with the master key in the OS credential store, session logs, history, snippets, agent audit log |
+| L2 | `store` | SQLite database (schema 14), vault with the master key in the OS credential store, session logs, history, snippets, agent audit log |
 | L2 | `term` | Terminal emulation on `alacritty_terminal`: screen, scrollback, selection, regex search, marks, the escape sequence rules, keys and mouse as bytes |
 | L3 | `import` | Import from ssh config, known_hosts, key files, CSV, PuTTY, MobaXterm, SecureCRT; export as CSV and JSON |
 | L3 | `ssh` | SSH sessions on russh: authentication, jump hosts, proxies, agent forwarding, tunnels, authorized_keys |
@@ -149,7 +149,7 @@ reads `config.toml`.
 - Private keys and passwords are stored only as XChaCha20-Poly1305 ciphertext; the master key is
   in the operating system's credential store under `de.musiker15.sshcraft`. When it is missing
   while keys exist, no new one is created.
-- Tests pin the folder, the service name and schema 13; older databases migrate on open.
+- Tests pin the folder, the service name and schema 14; older databases migrate on open.
 
 ## Sync
 
