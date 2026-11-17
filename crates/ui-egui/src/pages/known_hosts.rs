@@ -42,7 +42,7 @@ pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     load(app);
     ui.horizontal_wrapped(|ui| {
-        ui.heading(tr("Known hosts"));
+        crate::widgets::buttons::title(ui, tr("Known hosts"));
         ui.add_space(16.0);
         let files = app.form == crate::app::Form::Desktop;
         if files && ui.button(tr("Import known_hosts")).clicked() {

@@ -91,7 +91,7 @@ pub(crate) fn save(app: &mut SshcraftApp, change: impl FnOnce(&mut EngineSetting
 }
 
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
-    ui.heading(tr("Settings"));
+    crate::widgets::buttons::page_title(ui, tr("Settings"));
     ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
         // No agents on a tablet: no control channel, no MCP, no CLI.
@@ -422,7 +422,7 @@ fn macros(app: &mut SshcraftApp, ui: &mut Ui) {
     let ok = draft.valid() && !clash;
     let (mut keep, mut store) = (true, false);
     ui.horizontal_wrapped(|ui| {
-        store = ui.add_enabled(ok, egui::Button::new(tr("Save"))).clicked();
+        store = ui.add_enabled(ok, crate::widgets::buttons::main_action(tr("Save"))).clicked();
         if ui.button(tr("Cancel")).clicked() {
             keep = false;
         }

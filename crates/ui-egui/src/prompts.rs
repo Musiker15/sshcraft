@@ -260,7 +260,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         }
         match &prompt.kind {
             PromptKind::HostKey { host_name, address, port, fingerprint } => {
-                ui.heading(tr("Unknown host key"));
+                crate::widgets::buttons::title(ui, tr("Unknown host key"));
                 ui.add_space(6.0);
                 let at = format!("{}:{port}", visible(address));
                 ui.label(trf(
@@ -281,14 +281,14 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             PromptKind::ProxyCommand { what, host_name, command } => {
                 if what == "password_ref" {
-                    ui.heading(tr("Send a password from your password manager?"));
+                    crate::widgets::buttons::title(ui, tr("Send a password from your password manager?"));
                     ui.add_space(6.0);
                     ui.label(trf(
                         "{host} wants this password from your password manager, sent to the server below. It was not set up for this server on this device (it came with sync or a share, or the address changed). Allow it only if the password belongs to this server.",
                         &[("host", &visible(host_name))],
                     ));
                 } else {
-                    ui.heading(tr("Run a program to connect?"));
+                    crate::widgets::buttons::title(ui, tr("Run a program to connect?"));
                     ui.add_space(6.0);
                     ui.label(trf(
                         "{host} connects through this program on your computer. It was not set up on this device (it came with sync, a share or an agent, or it changed). Allow it only if you know it.",
@@ -311,7 +311,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
             }
             PromptKind::Agent { agent, action, target, detail } => {
-                ui.heading(tr("An AI agent asks"));
+                crate::widgets::buttons::title(ui, tr("An AI agent asks"));
                 ui.add_space(6.0);
                 egui::Grid::new(("sshcraft-agent-question", prompt.id)).num_columns(2).min_col_width(90.0).show(ui, |ui| {
                     ui.label(tr("Agent"));
@@ -346,7 +346,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             PromptKind::Auth { host_name, username, name, instructions, lines } => {
                 let who = if username.is_empty() { visible(host_name) } else { format!("{}@{}", visible(username), visible(host_name)) };
-                ui.heading(trf("Sign in to {host}", &[("host", &who)]));
+                crate::widgets::buttons::title(ui, trf("Sign in to {host}", &[("host", &who)]));
                 if !name.is_empty() {
                     ui.label(visible(name));
                 }

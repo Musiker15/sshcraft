@@ -72,7 +72,10 @@ pub fn after(app: &mut SshcraftApp, ctx: &egui::Context, restore: Option<egui::S
         return;
     }
     let Some(field) = focused_field(app, ctx) else { return };
-    app.field_paste.field = ctx.output(|o| o.ime.as_ref().filter(|ime| ime.owner == field).map(|ime| ime.rect));
+    // The whole field, not only the line the cursor is on: the lower edge of a tall field may be
+    // under the keyboard while its cursor line is not.
+    app.field_paste.field =
+        ctx.read_response(field).map(|r| r.rect).or_else(|| ctx.output(|o| o.ime.as_ref().filter(|ime| ime.owner == field).map(|ime| ime.rect)));
     // Above the keyboard and the navigation bar, which the content rect leaves out.
     let corner = ctx.content_rect().right_bottom() - egui::vec2(16.0, 16.0);
     let area =

@@ -262,7 +262,7 @@ pub fn show_import(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut choose, mut run_preview, mut run_apply) = (true, false, false, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-import")).show(ctx, |ui| {
         ui.set_width(560.0);
-        ui.heading(tr("Import from another program"));
+        crate::widgets::buttons::title(ui, tr("Import from another program"));
         ui.add_space(8.0);
         egui::ComboBox::from_id_salt("sshcraft-import-source").selected_text(import.source.label()).width(320.0).show_ui(ui, |ui| {
             for kind in ImportSourceKind::ALL {
@@ -348,7 +348,7 @@ pub fn show_export(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut go) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-export")).show(ctx, |ui| {
         ui.set_width(440.0);
-        ui.heading(tr("Export hosts"));
+        crate::widgets::buttons::title(ui, tr("Export hosts"));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.radio_value(&mut export.json, false, tr("CSV (the values each host uses)"));

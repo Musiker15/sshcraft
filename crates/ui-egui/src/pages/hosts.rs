@@ -447,7 +447,7 @@ fn smart_chips(app: &mut SshcraftApp, ui: &mut Ui) {
     let mut keep = true;
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(200.0));
-        if ui.add_enabled(group.valid() && !clash, egui::Button::new(tr("Save"))).clicked() {
+        if ui.add_enabled(group.valid() && !clash, crate::widgets::buttons::main_action(tr("Save"))).clicked() {
             let applied = group.name.clone();
             crate::pages::settings::save(app, |s| s.appearance.smart_groups.push(group));
             app.ui.hosts.smart = Some(applied);
@@ -529,7 +529,7 @@ fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all
 /// The menu of a host, on a right click in any of its rows.
 pub(crate) fn host_menu(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_groups: &[Group]) {
     let id = row.host.id;
-    if ui.button(tr("Connect")).clicked() {
+    if ui.add(crate::widgets::buttons::main_action(tr("Connect"))).clicked() {
         app.ui.connect_request = Some(ConnectRequest::Host(id));
     }
     if ui.button(tr("Move to server…")).clicked() {

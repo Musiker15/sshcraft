@@ -63,7 +63,7 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut go = false;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-backup")).show(ctx, |ui| {
         ui.set_max_width(420.0);
-        ui.heading(if form.restore { tr("Restore from backup") } else { tr("Create backup") });
+        crate::widgets::buttons::title(ui, if form.restore { tr("Restore from backup") } else { tr("Create backup") });
         ui.add_space(6.0);
         let label = ui.label(tr("Passphrase"));
         ui.add(egui::TextEdit::singleline(&mut *form.passphrase).password(true)).labelled_by(label.id);

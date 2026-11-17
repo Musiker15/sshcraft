@@ -952,7 +952,7 @@ pub fn show_clipboard_question(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut choice = None;
     egui::Modal::new(egui::Id::unique("sshcraft-clipboard")).show(ctx, |ui| {
         ui.set_width(460.0);
-        ui.heading(tr("Clipboard"));
+        crate::widgets::buttons::title(ui, tr("Clipboard"));
         ui.add_space(6.0);
         ui.label(trf(
             "A program on {host} wants to put {count} characters in the clipboard. Allow it?",
@@ -1703,7 +1703,7 @@ pub fn show_picker(app: &mut SshcraftApp, ctx: &egui::Context) {
         ui.set_width(420.0);
         match &mut picker {
             Picker::Local(shells) => {
-                ui.heading(tr("Local terminal"));
+                crate::widgets::buttons::title(ui, tr("Local terminal"));
                 ui.add_space(6.0);
                 for shell in shells.iter() {
                     let label = shell.get("label").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -1713,7 +1713,7 @@ pub fn show_picker(app: &mut SshcraftApp, ctx: &egui::Context) {
                 }
             }
             Picker::Serial { ports, settings } => {
-                ui.heading(tr("Serial port"));
+                crate::widgets::buttons::title(ui, tr("Serial port"));
                 ui.add_space(6.0);
                 let mut port = settings.get("port").and_then(Value::as_str).unwrap_or_default().to_string();
                 let mut baud = settings.get("baud").and_then(Value::as_u64).unwrap_or(115_200);
@@ -1731,7 +1731,7 @@ pub fn show_picker(app: &mut SshcraftApp, ctx: &egui::Context) {
                 });
                 settings["port"] = json!(port);
                 settings["baud"] = json!(baud);
-                if ui.button(tr("Connect")).clicked() {
+                if ui.add(crate::widgets::buttons::main_action(tr("Connect"))).clicked() {
                     chosen = Some((json!({ "kind": "serial", "settings": settings.clone() }), port));
                 }
             }

@@ -171,7 +171,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     };
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-key-dialog")).show(ctx, |ui| {
         ui.set_width(480.0);
-        ui.heading(title);
+        crate::widgets::buttons::title(ui, title);
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-key-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| match &mut dialog {
             KeyDialog::Generate(form) => {
@@ -303,7 +303,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut submit = false;
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-identity-dialog")).show(ctx, |ui| {
         ui.set_width(480.0);
-        ui.heading(if form.id.is_some() { tr("Edit identity") } else { tr("New identity") });
+        crate::widgets::buttons::title(ui, if form.id.is_some() { tr("Edit identity") } else { tr("New identity") });
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-identity-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| {
             ui.label(tr("Name"));
@@ -339,7 +339,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.colored_label(Tokens::get(ui.ctx()).danger, error);
         }
         ui.horizontal_wrapped(|ui| {
-            submit = ui.add_enabled(!busy, egui::Button::new(tr("Save"))).clicked();
+            submit = ui.add_enabled(!busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }
@@ -478,7 +478,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         );
     }
     ui.horizontal_wrapped(|ui| {
-        ui.heading(tr("Keys"));
+        crate::widgets::buttons::page_title(ui, tr("Keys"));
         ui.add_space(16.0);
         if ui.button(tr("Generate key")).clicked() {
             app.ui.key_dialog = Some(KeyDialog::Generate(GenerateForm { name: String::new(), kind: KeyType::Ed25519, passphrase: String::new() }));
@@ -511,7 +511,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     crate::pages::key_sources::agent_section(app, ui);
     ui.add_space(20.0);
     ui.horizontal_wrapped(|ui| {
-        ui.heading(tr("Identities"));
+        crate::widgets::buttons::title(ui, tr("Identities"));
         ui.add_space(16.0);
         if ui.button(tr("New identity")).clicked() {
             app.ui.identity_form = Some(IdentityForm::default());

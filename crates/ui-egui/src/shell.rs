@@ -387,7 +387,7 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
 pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     ui.add_space(16.0);
-    ui.heading(tr("New tab"));
+    crate::widgets::buttons::title(ui, tr("New tab"));
     ui.add_space(8.0);
     // A tablet has neither a local shell nor serial ports to open.
     if app.form == crate::app::Form::Desktop {

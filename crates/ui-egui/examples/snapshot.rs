@@ -4,7 +4,7 @@
 //! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]`
 //!
 //! `cargo run -p sshcraft-ui-egui --example snapshot -- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab
-//! [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic] [--size WIDTHxHEIGHT] [--tablet]`
+//! [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic] [--size WIDTHxHEIGHT] [--tablet] [--click LABEL|right:LABEL]...`
 //!
 //! `--captions` draws the window's own title bar with that family's window buttons, as on a
 //! desktop where the app draws the frame.
@@ -120,8 +120,10 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     let mut captions = None;
     let mut size = egui::vec2(1200.0, 800.0);
     let mut tablet = false;
+    let mut clicks = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--click" => clicks.push(args.next().ok_or("--click needs a label")?),
             "--size" => {
                 let text = args.next().ok_or("--size needs WIDTHxHEIGHT")?;
                 let (w, h) = text.split_once('x').ok_or("--size needs WIDTHxHEIGHT")?;
@@ -174,6 +176,24 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     for _ in 0..40 {
         h.run_steps(1);
         std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    // Open menus and the like: a click (or `right:` a right click) on the last node so named.
+    for label in clicks {
+        use egui_kittest::kittest::Queryable;
+        let (right, name) = match label.strip_prefix("right:") {
+            Some(name) => (true, name.to_string()),
+            None => (false, label.clone()),
+        };
+        let node = h.query_all_by_label(&name).last().ok_or(format!("nothing labelled {name:?}"))?;
+        if right {
+            node.click_secondary();
+        } else {
+            node.click();
+        }
+        for _ in 0..6 {
+            h.run_steps(1);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
     }
     let image = h.render().map_err(|e| e.to_string())?;
     image.save(out).map_err(|e| e.to_string())

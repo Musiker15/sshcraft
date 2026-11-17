@@ -188,7 +188,7 @@ enum RowAction {
 pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     ui.horizontal_wrapped(|ui| {
-        ui.heading(tr("Snippets"));
+        crate::widgets::buttons::page_title(ui, tr("Snippets"));
         ui.add_space(16.0);
         if ui.button(tr("New snippet")).clicked() {
             app.ui.snippet_form = Some(SnippetForm::default());
@@ -328,13 +328,13 @@ fn form_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let problem = problem(&form.name, &form.package, &form.content);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-snippet")).show(ctx, |ui| {
         ui.set_width(560.0);
-        ui.heading(if form.id.is_some() { tr("Edit snippet") } else { tr("New snippet") });
+        crate::widgets::buttons::title(ui, if form.id.is_some() { tr("Edit snippet") } else { tr("New snippet") });
         form_body(ui, &mut form, &hosts);
         if let Some(problem) = problem {
             ui.label(egui::RichText::new(problem).color(tokens.danger));
         }
         ui.horizontal_wrapped(|ui| {
-            save = ui.add_enabled(problem.is_none() && !busy, egui::Button::new(tr("Save"))).clicked();
+            save = ui.add_enabled(problem.is_none() && !busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }
@@ -379,7 +379,7 @@ fn run_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut go) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-snippet-run")).show(ctx, |ui| {
         ui.set_width(520.0);
-        ui.heading(trf("Run {name}", &[("name", &visible(&name))]));
+        crate::widgets::buttons::title(ui, trf("Run {name}", &[("name", &visible(&name))]));
         if job.missing > 0 {
             let count = job.missing.to_string();
             ui.label(egui::RichText::new(trf("{count} default host was deleted and is left out.", &[("count", &count)])).color(tokens.warning));

@@ -158,7 +158,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     load_states(app);
     let tokens = Tokens::get(ui.ctx());
     ui.horizontal_wrapped(|ui| {
-        ui.heading(tr("Port forwarding"));
+        crate::widgets::buttons::page_title(ui, tr("Port forwarding"));
         ui.add_space(16.0);
         if ui.button(tr("New rule")).clicked() {
             app.ui.forward_form = Some(ForwardForm::new());
@@ -326,7 +326,7 @@ fn wizard(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut save) = (true, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-forward")).show(ctx, |ui| {
         ui.set_width(560.0);
-        ui.heading(if form.editing { tr("Edit rule") } else { tr("New rule") });
+        crate::widgets::buttons::title(ui, if form.editing { tr("Edit rule") } else { tr("New rule") });
         ui.add_space(6.0);
         let before = form.rule.kind;
         form_grid(ui, &mut form, &hosts);
@@ -360,7 +360,7 @@ fn wizard(app: &mut SshcraftApp, ctx: &egui::Context) {
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            save = ui.add_enabled(problem.is_none() && !busy, egui::Button::new(tr("Save"))).clicked();
+            save = ui.add_enabled(problem.is_none() && !busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if ui.button(tr("Cancel")).clicked() {
                 keep = false;
             }

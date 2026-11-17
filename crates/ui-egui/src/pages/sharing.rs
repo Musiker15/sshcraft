@@ -140,7 +140,7 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut keep, mut do_find, mut do_share) = (true, false, false);
     let modal = egui::Modal::new(egui::Id::unique("sshcraft-share")).show(ctx, |ui| {
         ui.set_width(540.0);
-        ui.heading(trf("Share {name}", &[("name", &visible(&form.title))]));
+        crate::widgets::buttons::title(ui, trf("Share {name}", &[("name", &visible(&form.title))]));
         ui.label(egui::RichText::new(tr("Only with accounts on the same server.")).color(tokens.text_dim));
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Email"));
@@ -308,7 +308,7 @@ pub fn remove_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (mut close, mut go) = (false, false);
     egui::Modal::new(egui::Id::unique("sshcraft-remove-recipient")).show(ctx, |ui| {
         ui.set_width(460.0);
-        ui.heading(tr("Remove recipient"));
+        crate::widgets::buttons::title(ui, tr("Remove recipient"));
         ui.label(tr("They lose access, and the share gets a new key."));
         if keys {
             ui.label(

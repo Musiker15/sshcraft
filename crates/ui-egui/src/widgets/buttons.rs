@@ -124,3 +124,20 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, label));
     response
 }
+
+/// A page's title: 28 points, as on the Hosts page.
+pub fn page_title(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    let response = heading(ui, text.as_ref(), 28.0);
+    ui.add_space(6.0);
+    response
+}
+
+/// A section's or a dialog's title: 20 points.
+pub fn title(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    heading(ui, text.as_ref(), 20.0)
+}
+
+/// The main action of a form (save, create, connect): white words on the accent.
+pub fn main_action(label: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(label.to_string()).color(egui::Color32::WHITE)).fill(crate::theme::Tokens::dark().accent)
+}
