@@ -161,3 +161,50 @@ fn the_new_tab_names_each_host_with_its_group() {
     assert!(h.query_by_label("Masterblack: root").is_some(), "the host in a group carries its group's name");
     assert!(h.query_by_label("loose").is_some(), "a host without a group keeps its name alone");
 }
+
+#[test]
+fn a_hosts_tags_show_in_its_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.set_size(vec2(1280.0, 800.0));
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "servers", "defaults": {} } }));
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "tagged", "group_id": group, "tags": ["prod"], "settings": { "address": "192.0.2.4" } } }),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.hosts.is_empty() || h.state().data.groups.is_empty() {
+        assert!(Instant::now() < deadline, "timed out waiting for the host");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(4);
+    let row = h.get_by_label("tagged").rect();
+    let tag = h.query_all_by_label("prod").map(|n| n.rect()).find(|r| (r.center().y - row.center().y).abs() < 12.0);
+    assert!(tag.is_some_and(|t| t.left() > row.left()), "the tag sits in the host's row");
+}
+
+#[test]
+fn the_overview_offers_the_tags_of_hosts_in_groups() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.set_size(vec2(1280.0, 800.0));
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "servers", "defaults": {} } }));
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "grouped", "group_id": group, "tags": ["zone-a"], "settings": { "address": "192.0.2.4" } } }),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.hosts.is_empty() || h.state().data.groups.is_empty() {
+        assert!(Instant::now() < deadline, "timed out waiting for the host");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(4);
+    // One pill in the host's row, one chip to filter by.
+    assert_eq!(h.query_all_by_label("zone-a").count(), 2, "the tag is offered as a filter chip too");
+}

@@ -177,7 +177,10 @@ fn one_line(ui: &Ui, text: &str, width: f32, font: FontId, color: egui::Color32)
 /// centred in the row's height; the whole block takes clicks and is named by the host.
 fn text_block(ui: &mut Ui, row: &HostRow, address: Option<&str>, width: f32, size: f32) -> egui::Response {
     let tokens = Tokens::get(ui.ctx());
-    let (name, cut) = one_line(ui, &row.host.name, width, FontId::proportional(size), tokens.text_strong);
+    // Tags take at most 45 % of the line after the name; the name is cut first to its share.
+    let pills = tag_pills(ui, &row.host.tags, width * 0.45);
+    let pills_width: f32 = pills.iter().map(|(g, _)| g.size().x + PILL_PAD * 2.0 + PILL_GAP).sum();
+    let (name, cut) = one_line(ui, &row.host.name, (width - pills_width).max(24.0), FontId::proportional(size), tokens.text_strong);
     let address = address.map(|a| (one_line(ui, a, width, FontId::monospace(12.0), tokens.text_dim).0, a.to_string()));
     let warn = crate::pages::hosts::needs_own_sign_in(&row.host)
         .then(|| one_line(ui, tr("Add your own sign-in"), width, FontId::proportional(12.0), tokens.warning).0);
@@ -186,7 +189,13 @@ fn text_block(ui: &mut Ui, row: &HostRow, address: Option<&str>, width: f32, siz
     let total = name.size().y + address.as_ref().map_or(0.0, |(g, _)| g.size().y + 1.0) + warn.as_ref().map_or(0.0, |g| g.size().y + 1.0);
     let mut y = rect.center().y - total / 2.0;
     let h = name.size().y;
+    let mut x = rect.left() + name.size().x + PILL_GAP + 2.0;
     ui.painter().galley(egui::pos2(rect.left(), y), name, tokens.text_strong);
+    for (galley, tag) in pills {
+        let at = egui::Rect::from_min_size(egui::pos2(x, y + (h - 18.0) / 2.0), vec2(galley.size().x + PILL_PAD * 2.0, 18.0));
+        draw_pill(ui, at, galley, &tag, row.host.id);
+        x = at.right() + PILL_GAP;
+    }
     y += h + 1.0;
     if let Some((galley, text)) = address {
         // Its own node too, so screen readers read the address.
@@ -209,6 +218,36 @@ fn text_block(ui: &mut Ui, row: &HostRow, address: Option<&str>, width: f32, siz
     let label = row.host.name.clone();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &label));
     if cut { response.on_hover_text(crate::widgets::visible(&row.host.name)) } else { response }
+}
+
+const PILL_PAD: f32 = 6.0;
+const PILL_GAP: f32 = 4.0;
+
+/// The host's tags laid out as pills, as many as fit in `max_width`.
+fn tag_pills(ui: &Ui, tags: &[String], max_width: f32) -> Vec<(std::sync::Arc<egui::Galley>, String)> {
+    let tokens = Tokens::get(ui.ctx());
+    let mut used = 0.0;
+    let mut out = Vec::new();
+    for tag in tags.iter().take(4) {
+        let galley = one_line(ui, tag, 90.0, FontId::proportional(11.5), tokens.text_dim).0;
+        let w = galley.size().x + PILL_PAD * 2.0 + PILL_GAP;
+        if used + w > max_width {
+            break;
+        }
+        used += w;
+        out.push((galley, tag.clone()));
+    }
+    out
+}
+
+/// One tag pill at `at`, named by the tag for screen readers.
+fn draw_pill(ui: &mut Ui, at: Rect, galley: std::sync::Arc<egui::Galley>, tag: &str, host: sshcraft_model::model::HostId) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.painter().rect(at, 9.0, tokens.button, Stroke::new(1.0, tokens.separator), StrokeKind::Inside);
+    ui.painter().galley(egui::pos2(at.left() + PILL_PAD, at.center().y - galley.size().y / 2.0), galley, tokens.text_dim);
+    let node = ui.interact(at, ui.scope_id().with(("tag", host, tag)), Sense::hover());
+    let tag = crate::widgets::visible(tag);
+    node.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &tag));
 }
 
 /// The short label of the host's system for its tile: three letters, or SSH when unknown.
@@ -262,6 +301,17 @@ pub fn host_card(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, compact: boo
                     });
                 });
             });
+            let pills = tag_pills(ui, &row.host.tags, inner);
+            if !pills.is_empty() {
+                ui.add_space(10.0);
+                let (line, _) = ui.allocate_exact_size(vec2(inner, 18.0), Sense::hover());
+                let mut x = line.left();
+                for (galley, tag) in pills {
+                    let at = egui::Rect::from_min_size(egui::pos2(x, line.top()), vec2(galley.size().x + PILL_PAD * 2.0, 18.0));
+                    draw_pill(ui, at, galley, &tag, row.host.id);
+                    x = at.right() + PILL_GAP;
+                }
+            }
             ui.add_space(14.0);
         }
         ui.horizontal(|ui| {

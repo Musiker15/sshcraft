@@ -161,28 +161,44 @@ const REACHABILITY_EVERY: f64 = 60.0;
 const REACHABILITY_MAX: usize = 500;
 
 /// Checks the shown hosts once a minute while the setting is on.
+/// Whether the page shows the overview: the top level with no search, tag, dynamic group or
+/// "Show all".
+fn is_overview(view: &HostsView) -> bool {
+    view.group.is_none() && view.search.trim().is_empty() && view.tags.is_empty() && view.smart.is_none() && !view.show_all
+}
+
 fn refresh_reachability(app: &mut SshcraftApp, ctx: &egui::Context) {
     if !app.data.settings.appearance.show_reachability {
         app.ui.hosts.reachability = Reachability::default();
         return;
     }
     let now = ctx.input(|i| i.time);
-    let state = &app.ui.hosts.reachability;
-    let due = state.checked_at.is_none_or(|at| now - at >= REACHABILITY_EVERY);
     ctx.request_repaint_after(std::time::Duration::from_secs_f64(REACHABILITY_EVERY));
-    if !due || state.loading {
+    if app.ui.hosts.reachability.loading {
         return;
     }
-    let ids: Vec<HostId> = app.ui.hosts.cache.shown.iter().filter_map(|&k| app.data.hosts.get(k)).map(|r| r.host.id).take(REACHABILITY_MAX).collect();
+    // The overview shows hosts in group cards and under "Recently connected" too, not only the
+    // ones without a group in `shown`: there every host gets its dot.
+    let ids: Vec<HostId> = if is_overview(&app.ui.hosts) {
+        app.data.hosts.iter().map(|r| r.host.id).take(REACHABILITY_MAX).collect()
+    } else {
+        app.ui.hosts.cache.shown.iter().filter_map(|&k| app.data.hosts.get(k)).map(|r| r.host.id).take(REACHABILITY_MAX).collect()
+    };
+    // Due every minute, and at once for a host without a result yet (just loaded or added). An
+    // empty list (the hosts are not loaded yet) checks nothing and starts no wait.
+    let state = &app.ui.hosts.reachability;
+    let unknown = ids.iter().any(|id| !state.hosts.contains_key(id));
+    let due = unknown || state.checked_at.is_none_or(|at| now - at >= REACHABILITY_EVERY);
+    if !due || ids.is_empty() {
+        return;
+    }
     app.ui.hosts.reachability.checked_at = Some(now);
-    if ids.is_empty() {
-        return;
-    }
     app.ui.hosts.reachability.loading = true;
+    let asked = ids.clone();
     app.runner.run(
         "host.reachable",
         json!({ "ids": ids }),
-        Box::new(|app, result| {
+        Box::new(move |app, result| {
             app.ui.hosts.reachability.loading = false;
             if let Ok(serde_json::Value::Array(rows)) = result {
                 for row in rows {
@@ -190,6 +206,11 @@ fn refresh_reachability(app: &mut SshcraftApp, ctx: &egui::Context) {
                         app.ui.hosts.reachability.hosts.insert(id, row["reachable"].as_bool());
                     }
                 }
+            }
+            // Every host asked about has an entry now, so a failed check waits its minute
+            // instead of being asked again in the next frame.
+            for id in asked {
+                app.ui.hosts.reachability.hosts.entry(id).or_insert(None);
             }
         }),
     );
@@ -466,7 +487,20 @@ fn smart_chips(app: &mut SshcraftApp, ui: &mut Ui) {
 }
 
 fn tag_chips(app: &mut SshcraftApp, ui: &mut Ui) {
-    let all = app.ui.hosts.cache.tags.clone();
+    // The overview shows every host (in cards too), so it offers every tag; a level or a search
+    // offers the tags found there.
+    let all = if is_overview(&app.ui.hosts) {
+        let mut tags: Vec<String> = Vec::new();
+        for tag in app.data.hosts.iter().flat_map(|r| r.host.tags.iter()) {
+            if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                tags.push(tag.clone());
+            }
+        }
+        tags.sort_by_key(|t| t.to_lowercase());
+        tags
+    } else {
+        app.ui.hosts.cache.tags.clone()
+    };
     if all.is_empty() {
         return;
     }
@@ -633,8 +667,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     if app.ui.hosts.group.is_some() || !app.ui.hosts.search.trim().is_empty() {
         app.ui.hosts.show_all = false;
     }
-    let view = &app.ui.hosts;
-    let overview = view.group.is_none() && view.search.trim().is_empty() && view.tags.is_empty() && view.smart.is_none() && !view.show_all;
+    let overview = is_overview(&app.ui.hosts);
     header(app, ui, overview);
     if overview {
         ui.add_space(12.0);

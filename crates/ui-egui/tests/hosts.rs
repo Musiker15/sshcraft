@@ -310,6 +310,46 @@ fn reachability_is_checked_only_when_switched_on() {
     until(&mut h, "the check", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
 }
 
+/// The overview shows hosts in group cards and under "Recently connected", not only those
+/// without a group; their dots must be checked too.
+#[test]
+fn reachability_covers_the_hosts_in_group_cards() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "servers", "defaults": {} } }));
+    let id = HostId(uuid::Uuid::new_v4());
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": id, "name": "in-group", "group_id": group, "settings": { "address": "127.0.0.1", "port": port } } }),
+    );
+    let mut settings = run(&session, "settings.get", json!({}));
+    settings["appearance"]["show_reachability"] = json!(true);
+    run(&session, "settings.save", json!({ "settings": settings }));
+    until(&mut h, "the check of the host in a group", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
+}
+
+/// Right after the start the hosts are not loaded yet; that empty moment must not hold the first
+/// check back for a minute.
+#[test]
+fn reachability_checks_hosts_that_arrive_after_the_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let mut settings = run(&session, "settings.get", json!({}));
+    settings["appearance"]["show_reachability"] = json!(true);
+    run(&session, "settings.save", json!({ "settings": settings }));
+    until(&mut h, "the setting", |app| app.data.settings.appearance.show_reachability);
+    h.run_steps(5);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let id = HostId(uuid::Uuid::new_v4());
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "late", "settings": { "address": "127.0.0.1", "port": port } } }));
+    until(&mut h, "the check of the late host", |app| app.ui.hosts.reachability.hosts.get(&id) == Some(&Some(true)));
+}
+
 #[test]
 fn chosen_hosts_change_together() {
     let dir = tempfile::tempdir().unwrap();

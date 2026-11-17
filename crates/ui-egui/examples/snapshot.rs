@@ -86,7 +86,13 @@ fn sample_data(session: &Session) -> Result<(), String> {
     let mut ids = Vec::new();
     for (name, address, group, os) in hosts {
         let id = uuid::Uuid::new_v4();
-        let host = json!({ "id": id, "name": name, "group_id": group, "os": os, "settings": { "address": address, "port": 22 } });
+        let tags: Vec<&str> = match name {
+            "web-01" | "web-02" | "postgres-main" => vec!["prod"],
+            "staging" => vec!["staging", "ci"],
+            "nas" | "raspberry-pi" => vec!["home"],
+            _ => Vec::new(),
+        };
+        let host = json!({ "id": id, "name": name, "group_id": group, "os": os, "tags": tags, "settings": { "address": address, "port": 22 } });
         run(session, "host.save", json!({ "host": host }))?;
         ids.push((name, id));
     }
