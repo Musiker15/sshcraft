@@ -120,6 +120,15 @@ pub struct PullReport {
     pub rejected: Vec<String>,
 }
 
+/// A record waiting to be applied: its change number, the record, and why it did not apply.
+type Waiting = (u64, SealedRecord, SyncError);
+
+/// The cursor to store for an area: before the first record that waits to be applied, so the
+/// next pull fetches it again.
+fn keep_cursor<R, E>(cursor: u64, waiting: &[(u64, R, E)]) -> u64 {
+    waiting.iter().map(|(seq, _, _)| seq.saturating_sub(1)).fold(cursor, u64::min)
+}
+
 /// One lock per server: a sync pass and a share or device command on the same server run one
 /// after the other, so they never work on the same rotation or listing at once.
 pub fn server_lock(server: ServerId) -> std::sync::Arc<tokio::sync::Mutex<()>> {
@@ -332,6 +341,54 @@ impl Engine {
         Ok(Some((manifest, key)))
     }
 
+    /// Records of one area that verified but could not apply yet, tried again in rounds as long
+    /// as each round applies something: what still waits, and how many applied.
+    fn retry_waiting(
+        &self,
+        store: &Mutex<Store>,
+        vault: &Vault,
+        (key, manifest, personal): (&AreaKey, &AreaManifest, Option<Uuid>),
+        cache: &HashMap<AccountPublic, DeviceSet>,
+        tracker: &mut VersionTracker,
+        mut deferred: Vec<Waiting>,
+    ) -> (Vec<Waiting>, usize) {
+        let mut applied = 0;
+        while !deferred.is_empty() {
+            let mut waiting = Vec::new();
+            let mut progress = false;
+            for (seq, record, err) in deferred {
+                let Some(author_devices) = cache.get(&record.header.author_account) else {
+                    waiting.push((seq, record, err));
+                    continue;
+                };
+                let before = tracker.clone();
+                match tracker.accept_record(&record, key, manifest, author_devices) {
+                    Ok((Freshness::New, body)) => match self.take(store, vault, &record.header, &body, personal) {
+                        Ok(taken) => {
+                            applied += usize::from(taken);
+                            progress = true;
+                        }
+                        Err(err) => {
+                            *tracker = before;
+                            waiting.push((seq, record, err));
+                        }
+                    },
+                    // Settled some other way meanwhile.
+                    Ok((Freshness::Unchanged, _)) => progress = true,
+                    Err(err) => {
+                        *tracker = before;
+                        waiting.push((seq, record, SyncError::Proto(err)));
+                    }
+                }
+            }
+            deferred = waiting;
+            if !progress {
+                break;
+            }
+        }
+        (deferred, applied)
+    }
+
     /// The verified devices of `account`, fetched once per pull.
     async fn devices_cached(
         &self,
@@ -460,8 +517,9 @@ impl Engine {
             self.note_share(store, &manifest)?;
             let mut cursor = lock(store)?.areas(self.server)?.into_iter().find(|a| a.area_id == area_id.0).map_or(0, |a| a.cursor);
             // A record that verified but could not be applied yet (its group not here yet, for
-            // example) is fetched again next time: the stored cursor stays before it.
-            let mut retry_from: Option<u64> = None;
+            // example) is tried again at the end of this area, and, if it still does not apply,
+            // fetched again next time: the stored cursor stays before it.
+            let mut deferred = Vec::new();
             loop {
                 let page = self.client.records(area_id, cursor, PAGE).await;
                 let (records, more) = self.revoked_check(store, page)?;
@@ -517,21 +575,28 @@ impl Engine {
                                 Err(err @ SyncError::GroupCycle) => report.rejected.push(format!("record {record_id}: {err}")),
                                 Err(err) => {
                                     tracker = before;
-                                    retry_from = Some(retry_from.map_or(seq - 1, |r| r.min(seq - 1)));
-                                    report.rejected.push(format!("record {record_id}: {err}"))
+                                    deferred.push((seq, record, err));
                                 }
                             }
                         }
                         Err(err) => report.rejected.push(format!("record {record_id}: {err}")),
                     }
                 }
-                let keep = retry_from.map_or(cursor, |r| r.min(cursor));
-                lock(store)?.set_cursor(self.server, area_id.0, keep)?;
+                lock(store)?.set_cursor(self.server, area_id.0, keep_cursor(cursor, &deferred))?;
                 self.save_state(store, &devices, &tracker)?;
                 if !more {
                     break;
                 }
             }
+            // A host before its group, a subgroup before its parent.
+            let (waiting, applied) = self.retry_waiting(store, vault, (&key, &manifest, personal), &cache, &mut tracker, deferred);
+            report.applied += applied;
+            let deferred = waiting;
+            for (_, record, err) in &deferred {
+                report.rejected.push(format!("record {}: {err}", record.header.record_id));
+            }
+            lock(store)?.set_cursor(self.server, area_id.0, keep_cursor(cursor, &deferred))?;
+            self.save_state(store, &devices, &tracker)?;
         }
         self.save_state(store, &devices, &tracker)?;
         for (assignment, header) in assignments {
