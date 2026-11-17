@@ -85,6 +85,13 @@ impl eframe::App for Tablet {
         // the text connection (crate::keyboard).
         let ime = ui.ctx().output(|o| o.ime.clone());
         let tapped = ui.input(|i| i.pointer.any_pressed());
+        // A tap into the terminal or field that wants text, not onto the key bar beside it.
+        let press = ui.input(|i| i.pointer.press_origin());
+        let asked_now = ime.as_ref().is_some_and(|ime| {
+            // The widget's whole area: a field reports only where its text is.
+            let area = ui.ctx().read_response(ime.owner).map_or(ime.rect, |r| r.rect.union(ime.rect));
+            press.is_some_and(|at| area.contains(at))
+        });
         match ime {
             Some(ime) => self.last_ime = Some((ime, std::time::Instant::now())),
             None => {
@@ -118,6 +125,17 @@ impl eframe::App for Tablet {
             self.owner = owner;
         }
         let wanted = self.last_ime.is_some();
+        // The user closed the keyboard and tapped the terminal or field again: nothing changed
+        // for egui, so it is asked for here. The height is the whole window's, not the part the
+        // keyboard leaves free.
+        let window_px = ui.ctx().viewport_rect().height() * ui.ctx().pixels_per_point();
+        let up = crate::keyboard_up(self.edges.3, window_px);
+        // Asked a moment after the tap, as after another field took the keyboard: asked during
+        // the tap itself, Android drops it.
+        if wanted && self.reshow.is_none() && crate::show_again(tapped, asked_now, up) {
+            self.reshow = Some(std::time::Instant::now() + crate::RESHOW_AFTER);
+            ui.ctx().request_repaint_after(crate::RESHOW_AFTER);
+        }
         let reshow = wanted && self.reshow.is_some_and(|at| std::time::Instant::now() >= at);
         if wanted != self.keyboard || reshow {
             let shown = crate::keyboard::show(wanted);

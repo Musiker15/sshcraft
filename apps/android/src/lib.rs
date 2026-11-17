@@ -60,6 +60,21 @@ pub fn keep_keyboard(since: std::time::Duration) -> bool {
     since < KEEP_KEYBOARD
 }
 
+/// Whether the on-screen keyboard is up: what the system covers at the bottom (`bottom_px`, the
+/// keyboard and the navigation bar) is more than a fifth of the window. The navigation bar alone
+/// is far less.
+pub fn keyboard_up(bottom_px: i32, window_height_px: f32) -> bool {
+    window_height_px > 0.0 && bottom_px as f32 > window_height_px * 0.2
+}
+
+/// Whether a tap opens the keyboard again: the user closed it (the back key, the keyboard's own
+/// button) and tapped into the terminal or field that still wants text (`asked_now`; a tap on
+/// the key bar beside it leaves the keyboard closed). Nothing else changed, so
+/// without this the keyboard stayed closed until another field took the focus.
+pub fn show_again(tapped: bool, asked_now: bool, up: bool) -> bool {
+    tapped && asked_now && !up
+}
+
 /// When to draw the next frame without input: at once after the visible area changed (the
 /// on-screen keyboard opened or closed, the tablet turned), often for a while after input (the
 /// keyboard animates after a tap), and once a second otherwise, since Android tells the app
@@ -257,5 +272,20 @@ mod tests {
             craft_settings::Location::Dir(dir) => assert!(dir.starts_with(data), "{dir:?}"),
             other => panic!("settings must be written in the data folder, not {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_navigation_bar_alone_is_no_keyboard() {
+        assert!(!keyboard_up(72, 1600.0), "a navigation bar");
+        assert!(keyboard_up(900, 1600.0), "a keyboard");
+        assert!(!keyboard_up(900, 0.0), "no window yet");
+    }
+
+    #[test]
+    fn a_tap_reopens_a_closed_keyboard() {
+        assert!(show_again(true, true, false), "closed by the user, tapped again");
+        assert!(!show_again(true, true, true), "already up");
+        assert!(!show_again(false, true, false), "no tap: the user closed it on purpose");
+        assert!(!show_again(true, false, false), "the tap went to something without text");
     }
 }
