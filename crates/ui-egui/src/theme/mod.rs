@@ -52,6 +52,19 @@ pub fn apply(ctx: &egui::Context, settings: &EngineSettings) {
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, tokens.separator);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, tokens.text_dim);
     ctx.set_visuals(visuals);
+    // Type and room of the redesign: 14 point text, buttons about 30 points high. The minimum
+    // height of controls stays egui's: a taller one kept fields from scrolling above the
+    // on-screen keyboard (tablet test `a_field_under_the_keyboard_scrolls_into_view`).
+    ctx.all_styles_mut(|style| {
+        use egui::{FontFamily, FontId, TextStyle};
+        style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Body, FontId::new(14.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Button, FontId::new(14.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional));
+        style.spacing.button_padding = egui::vec2(12.0, 7.0);
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    });
 }
 
 /// The terminal's background for the tokens, so a terminal tab sits flush with the app.

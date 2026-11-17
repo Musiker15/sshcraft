@@ -24,6 +24,12 @@ pub enum Icon {
     Maximize,
     Detach,
     Save,
+    /// A prompt without a frame: connect over SSH.
+    Prompt,
+    /// A folder: files (SFTP).
+    Folder,
+    /// Three dots: more actions.
+    More,
 }
 
 /// Draws `icon` into `rect` (square works best) with lines of `color`.
@@ -70,6 +76,19 @@ pub fn draw(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             painter.rect_stroke(Rect::from_min_max(p(-0.7, -0.35), p(0.7, 0.35)), 2.0, stroke, egui::StrokeKind::Inside);
             for x in [-0.35, 0.0, 0.35] {
                 painter.circle_filled(p(x, 0.0), s * 0.05, color);
+            }
+        }
+        Icon::Prompt => {
+            painter.add(egui::Shape::line(vec![p(-0.7, -0.45), p(-0.2, 0.0), p(-0.7, 0.45)], stroke));
+            line(p(0.0, 0.5), p(0.7, 0.5));
+        }
+        Icon::Folder => {
+            let points = vec![p(-0.85, -0.6), p(-0.25, -0.6), p(-0.05, -0.4), p(0.85, -0.4), p(0.85, 0.65), p(-0.85, 0.65)];
+            painter.add(egui::Shape::closed_line(points, stroke));
+        }
+        Icon::More => {
+            for x in [-0.55, 0.0, 0.55] {
+                painter.circle_filled(p(x, 0.0), s * 0.07, color);
             }
         }
         Icon::Plus => {
@@ -165,13 +184,29 @@ pub fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str) -> bool {
     response.on_hover_text(label).clicked()
 }
 
-/// The app icon: a prompt (`>_`) in SSHCraft's green on a dark rounded square, 64 by 64 pixels.
+/// The app icon: the SSHCraft mark (logo V3) in white on a blue rounded square, 64 by 64
+/// pixels, as in `assets/app-icon/sshcraft.svg`.
 pub fn app_icon() -> egui::IconData {
     const SIZE: usize = 64;
     let mut rgba = vec![0u8; SIZE * SIZE * 4];
-    let bg = [0x0f, 0x11, 0x15, 0xff];
-    let fg = [0x00, 0xe6, 0x76, 0xff];
+    let bg = [0x00, 0x71, 0xff, 0xff];
     let radius = 12.0_f32;
+    // The mark on its 64-unit grid, drawn at 75 % with 8 pixels around it (as the SVG does).
+    let at = |[x, y]: [f32; 2]| [8.0 + x * 0.75, 8.0 + y * 0.75];
+    let top = [[45.0, 13.0], [25.0, 13.0], [19.0, 19.0], [19.0, 26.0], [25.0, 32.0], [32.0, 32.0]].map(at);
+    let bottom = [[32.0, 32.0], [39.0, 32.0], [45.0, 38.0], [45.0, 45.0], [39.0, 51.0], [22.0, 51.0]].map(at);
+    let half = 3.0_f32;
+    // Inside a stroke of width 6 along the line: square ends, joins filled by a disc.
+    let on_line = |points: &[[f32; 2]], fx: f32, fy: f32| {
+        points.windows(2).any(|w| {
+            let ([x0, y0], [x1, y1]) = (w[0], w[1]);
+            let (vx, vy) = (x1 - x0, y1 - y0);
+            let len2 = vx * vx + vy * vy;
+            let t = ((fx - x0) * vx + (fy - y0) * vy) / len2;
+            let (px, py) = (x0 + t * vx, y0 + t * vy);
+            (0.0..=1.0).contains(&t) && (fx - px).powi(2) + (fy - py).powi(2) <= half * half
+        }) || points[1..points.len() - 1].iter().any(|[x, y]| (fx - x).powi(2) + (fy - y).powi(2) <= half * half)
+    };
     for y in 0..SIZE {
         for x in 0..SIZE {
             let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
@@ -179,19 +214,14 @@ pub fn app_icon() -> egui::IconData {
             let dx = (radius - fx).max(fx - (SIZE as f32 - radius)).max(0.0);
             let dy = (radius - fy).max(fy - (SIZE as f32 - radius)).max(0.0);
             let inside = dx * dx + dy * dy <= radius * radius;
-            // `>`: two strokes meeting at (30, 32); `_`: a bar from x 34 to 50 at y 44 to 48.
-            let chevron = |x0: f32, y0: f32, x1: f32, y1: f32| {
-                let (vx, vy) = (x1 - x0, y1 - y0);
-                let t = (((fx - x0) * vx + (fy - y0) * vy) / (vx * vx + vy * vy)).clamp(0.0, 1.0);
-                let (px, py) = (x0 + t * vx, y0 + t * vy);
-                (fx - px).powi(2) + (fy - py).powi(2) <= 3.2_f32.powi(2)
-            };
-            let mark =
-                chevron(16.0, 20.0, 30.0, 32.0) || chevron(30.0, 32.0, 16.0, 44.0) || ((34.0..=50.0).contains(&fx) && (42.0..=47.0).contains(&fy));
+            let cursor = (16.25..=22.25).contains(&fx) && (43.25..=49.25).contains(&fy);
             let color = if !inside {
                 [0, 0, 0, 0]
-            } else if mark {
-                fg
+            } else if cursor || on_line(&top, fx, fy) {
+                [0xff, 0xff, 0xff, 0xff]
+            } else if on_line(&bottom, fx, fy) {
+                // White at 55 % over the blue.
+                [0x8c, 0xbe, 0xff, 0xff]
             } else {
                 bg
             };
@@ -212,5 +242,9 @@ mod tests {
         assert_eq!((icon.width, icon.height), (64, 64));
         assert_eq!(icon.rgba.len(), 64 * 64 * 4);
         assert_eq!(icon.rgba[3], 0, "the corner is transparent");
+        let px = |x: usize, y: usize| &icon.rgba[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4];
+        assert_eq!(px(19, 46), [0xff, 0xff, 0xff, 0xff], "the cursor square is white");
+        assert_eq!(px(32, 25), [0x00, 0x71, 0xff, 0xff], "inside the S the tile is blue");
+        assert_eq!(px(30, 17), [0xff, 0xff, 0xff, 0xff], "the top bar is white");
     }
 }

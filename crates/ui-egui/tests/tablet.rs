@@ -72,7 +72,11 @@ fn the_desktop_still_offers_them() {
     assert!(h.query_by_label("Dropdown window").is_some());
     h.state_mut().ui.page = Page::Hosts;
     h.run_steps(3);
+    h.get_by_label("More").click();
+    h.run_steps(2);
     assert!(h.query_by_label("Import").is_some());
+    h.key_press(Key::Escape);
+    h.run_steps(2);
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::T);
     h.run_steps(2);
     assert!(h.query_by_label("Local terminal").is_some());

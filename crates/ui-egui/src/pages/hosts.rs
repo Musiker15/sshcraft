@@ -19,8 +19,7 @@ use crate::widgets::{elided_label, visible};
 
 /// The widest a host or group name is drawn; longer names are cut.
 pub const MAX_NAME_WIDTH: f32 = 260.0;
-/// The height of one row of entries, and the width of an entry in the grid.
-const ROW_HEIGHT: f32 = crate::pages::host_items::ROW_HEIGHT;
+/// The width of an entry in the grid.
 const CELL_WIDTH: f32 = 340.0;
 /// The most characters a tag chip shows; the whole tag is in its tooltip.
 const MAX_TAG_CHARS: usize = 40;
@@ -409,7 +408,7 @@ fn smart_chips(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         for g in &saved {
             let on = app.ui.hosts.smart.as_deref() == Some(g.name.as_str());
-            let response = ui.selectable_label(on, visible(&g.name)).on_hover_text(describe(g));
+            let response = crate::widgets::buttons::chip(ui, &visible(&g.name), on).on_hover_text(describe(g));
             if response.clicked() {
                 if on {
                     leave_smart(app);
@@ -469,7 +468,7 @@ fn tag_chips(app: &mut SshcraftApp, ui: &mut Ui) {
             let on = app.ui.hosts.tags.iter().any(|t| t.eq_ignore_ascii_case(tag));
             let shown: String = visible(tag).chars().take(MAX_TAG_CHARS).collect();
             let shown = if shown.chars().count() < visible(tag).chars().count() { format!("{shown}…") } else { shown };
-            if ui.selectable_label(on, shown).on_hover_text(visible(tag)).clicked() {
+            if crate::widgets::buttons::chip(ui, &shown, on).on_hover_text(visible(tag)).clicked() {
                 if on {
                     app.ui.hosts.tags.retain(|t| !t.eq_ignore_ascii_case(tag));
                 } else {
@@ -626,46 +625,15 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     let view = &app.ui.hosts;
     let overview = view.group.is_none() && view.search.trim().is_empty() && view.tags.is_empty() && view.smart.is_none() && !view.show_all;
-    let tokens = Tokens::get(ui.ctx());
-    let heading = if overview { tr("Where do you want to connect?") } else { tr("Hosts") };
-    ui.label(egui::RichText::new(heading).size(24.0).strong().color(tokens.text_strong));
-    ui.add_space(8.0);
-    ui.horizontal_wrapped(|ui| {
-        let search_width = (ui.available_width() - 330.0).clamp(240.0, 640.0);
-        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.search).hint_text(tr("Search")).desired_width(search_width).margin(vec2(10.0, 8.0)));
-        if ui.button(tr("New group")).clicked() {
-            new_group(app);
-        }
-        let new = egui::Button::new(egui::RichText::new(tr("New host")).strong().color(egui::Color32::WHITE))
-            .fill(tokens.accent)
-            .corner_radius(tokens.radius);
-        if ui.add(new).clicked() {
-            new_host(app);
-        }
-        // Both read or write files, which a tablet cannot pick.
-        let files = app.form == crate::app::Form::Desktop;
-        if files && ui.button(tr("Import")).clicked() {
-            app.ui.import = Some(crate::pages::import_export::ImportState::default());
-        }
-        if files && ui.button(tr("Export")).clicked() {
-            app.ui.export = Some(crate::pages::import_export::ExportState { group: app.ui.hosts.group, ..Default::default() });
-        }
-        if !overview {
-            let grid = app.data.settings.appearance.host_view == HostView::Grid;
-            let toggle = if grid { tr("List") } else { tr("Grid") };
-            if ui.button(toggle).clicked() {
-                let mut settings = app.data.settings.clone();
-                settings.appearance.host_view = if grid { HostView::List } else { HostView::Grid };
-                app.run_reported("settings.save", json!({ "settings": settings }));
-            }
-        }
-    });
+    header(app, ui, overview);
     if overview {
-        ui.add_space(14.0);
+        ui.add_space(12.0);
         smart_chips(app, ui);
         tag_chips(app, ui);
         selection_bar(app, ui, &all_groups);
+        ui.add_space(16.0);
         overview_sections(app, ui, &all_groups);
+        new_host_bar(app, ui);
         dialogs(app, ui);
         return;
     }
@@ -684,13 +652,14 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let grid = app.data.settings.appearance.host_view == HostView::Grid;
     let per_row = if grid { ((ui.available_width() / CELL_WIDTH).floor() as usize).max(1) } else { 1 };
     // Only the rows in view are drawn.
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, count.div_ceil(per_row), |ui, range| {
+    let row_height = crate::pages::host_items::row_height(app);
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_height, count.div_ceil(per_row), |ui, range| {
         for line in range {
             ui.horizontal(|ui| {
-                ui.set_height(ROW_HEIGHT);
+                ui.set_height(row_height);
                 for i in line * per_row..((line + 1) * per_row).min(count) {
                     let width = if grid { CELL_WIDTH } else { ui.available_width() };
-                    ui.allocate_ui_with_layout(vec2(width, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(vec2(width, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.set_min_width(width);
                         if let Some(g) = sub.get(i) {
                             group_entry(app, ui, g);
@@ -702,7 +671,113 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             });
         }
     });
+    new_host_bar(app, ui);
     dialogs(app, ui);
+}
+
+/// The page's title, the search field and the buttons beside it, laid out for the window's width:
+/// a wide window shows "New group" and "New host" by name, a medium one a blue plus, a phone only
+/// the search (its bar holds "New group", "New host" floats at the bottom). Import, export and the
+/// list or grid choice sit behind the button with three dots.
+fn header(app: &mut SshcraftApp, ui: &mut Ui, overview: bool) {
+    use crate::shell::Layout as L;
+    use crate::widgets::buttons;
+    let layout = crate::shell::layout_for(ui.ctx().content_rect().width());
+    if layout != L::Narrow {
+        let heading = if overview { tr("Where do you want to connect?") } else { tr("Hosts") };
+        let size = if layout == L::Wide { 28.0 } else { 26.0 };
+        buttons::heading(ui, heading, size);
+        ui.add_space(14.0);
+    }
+    // Both read or write files, which a tablet cannot pick.
+    let files = app.form == crate::app::Form::Desktop;
+    let height = if crate::pages::host_items::touch(app) { 54.0 } else { 50.0 };
+    let gap = 10.0;
+    let more = files || !overview || layout == L::Medium;
+    let mut right = 0.0;
+    if layout == L::Wide {
+        right += buttons::width_for(ui, tr("New group"), false, height) + gap;
+        right += buttons::width_for(ui, tr("New host"), true, height) + gap;
+    } else if layout == L::Medium {
+        right += height + gap;
+    }
+    if more && layout != L::Narrow {
+        right += height + gap;
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        let width = (ui.available_width() - right).max(160.0);
+        buttons::search(ui, &mut app.ui.hosts.search, tr("Search hosts"), vec2(width, height));
+        if layout == L::Wide {
+            if buttons::ghost(ui, tr("New group"), height).clicked() {
+                new_group(app);
+            }
+            if buttons::primary(ui, Some(Icon::Plus), tr("New host"), height).clicked() {
+                new_host(app);
+            }
+        } else if layout == L::Medium && buttons::square(ui, Icon::Plus, tr("New host"), height, true).clicked() {
+            new_host(app);
+        }
+        if more && layout != L::Narrow {
+            let response = buttons::square(ui, Icon::More, tr("More"), height, false);
+            egui::Popup::menu(&response).show(|ui| {
+                ui.set_min_width(180.0);
+                if layout == L::Medium && ui.button(tr("New group")).clicked() {
+                    new_group(app);
+                }
+                if files && ui.button(tr("Import")).clicked() {
+                    app.ui.import = Some(crate::pages::import_export::ImportState::default());
+                }
+                if files && ui.button(tr("Export")).clicked() {
+                    app.ui.export = Some(crate::pages::import_export::ExportState { group: app.ui.hosts.group, ..Default::default() });
+                }
+                if !overview {
+                    view_toggle(app, ui);
+                }
+            });
+        }
+    });
+    if layout == L::Narrow && !overview {
+        ui.add_space(6.0);
+        view_toggle(app, ui);
+    }
+}
+
+/// Switches the hosts between a list and a grid.
+fn view_toggle(app: &mut SshcraftApp, ui: &mut Ui) {
+    let grid = app.data.settings.appearance.host_view == HostView::Grid;
+    let toggle = if grid { tr("List") } else { tr("Grid") };
+    if ui.button(toggle).clicked() {
+        let mut settings = app.data.settings.clone();
+        settings.appearance.host_view = if grid { HostView::List } else { HostView::Grid };
+        app.run_reported("settings.save", json!({ "settings": settings }));
+    }
+}
+
+/// On a phone, "New host" floats as a wide blue button at the bottom of the page.
+fn new_host_bar(app: &mut SshcraftApp, ui: &mut Ui) {
+    if crate::shell::layout_for(ui.ctx().content_rect().width()) != crate::shell::Layout::Narrow {
+        return;
+    }
+    let screen = ui.ctx().content_rect();
+    let rect =
+        egui::Rect::from_min_max(egui::pos2(screen.left() + 14.0, screen.bottom() - 76.0), egui::pos2(screen.right() - 14.0, screen.bottom() - 22.0));
+    let mut clicked = false;
+    egui::Area::new(egui::Id::unique("sshcraft-new-host-bar")).order(egui::Order::Middle).fixed_pos(rect.min).show(ui.ctx(), |ui| {
+        let tokens = Tokens::get(ui.ctx());
+        let (at, response) = ui.allocate_exact_size(rect.size(), Sense::click());
+        ui.painter().rect_filled(at.translate(vec2(0.0, 6.0)), 16.0, egui::Color32::from_black_alpha(70));
+        ui.painter().rect_filled(at, 16.0, if response.hovered() { tokens.accent_strong } else { tokens.accent });
+        let galley = ui.painter().layout_no_wrap(tr("New host").to_string(), FontId::proportional(16.0), egui::Color32::WHITE);
+        let start = at.center().x - (galley.size().x + 30.0) / 2.0;
+        draw(ui.painter(), Icon::Plus, egui::Rect::from_center_size(egui::pos2(start + 10.0, at.center().y), vec2(20.0, 20.0)), egui::Color32::WHITE);
+        ui.painter().galley(egui::pos2(start + 30.0, at.center().y - galley.size().y / 2.0), galley, egui::Color32::WHITE);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("New host")));
+        clicked = response.clicked();
+    });
+    if clicked {
+        new_host(app);
+    }
 }
 
 /// The forms and questions the Hosts page opens.
@@ -723,25 +798,33 @@ const LOOSE_HOSTS: usize = 12;
 /// The gap between cards and tiles.
 const GAP: f32 = 14.0;
 
-/// Lays `count` items out in columns at least `min_width` wide; `item(ui, index, width)` draws
-/// one.
-fn columns(ui: &mut Ui, count: usize, min_width: f32, mut item: impl FnMut(&mut Ui, usize, f32)) {
+/// Lays `count` items out in columns at least `min_width` wide; `item(ui, index, width, height)`
+/// draws one, at least `height` high: the tallest of its row in the last frame, so a row's cards
+/// line up at the bottom.
+fn columns(ui: &mut Ui, id: &str, count: usize, min_width: f32, mut item: impl FnMut(&mut Ui, usize, f32, f32)) {
     let full = ui.available_width();
     let cols = ((full + GAP) / (min_width + GAP)).floor().max(1.0) as usize;
     let width = ((full - GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
     let mut i = 0;
+    let mut line = 0;
     while i < count {
+        let key = ui.scope_id().with((id, line, cols));
+        let last: f32 = ui.ctx().data(|d| d.get_temp(key)).unwrap_or(0.0);
+        let mut tallest: f32 = 0.0;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             for j in i..(i + cols).min(count) {
-                ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                let shown = ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.set_width(width);
-                    item(ui, j, width);
+                    item(ui, j, width, last);
                 });
+                tallest = tallest.max(shown.response.rect.height());
             }
         });
+        ui.ctx().data_mut(|d| d.insert_temp(key, tallest));
         ui.add_space(GAP);
         i += cols;
+        line += 1;
     }
 }
 
@@ -749,101 +832,160 @@ fn columns(ui: &mut Ui, count: usize, min_width: f32, mut item: impl FnMut(&mut 
 fn section(ui: &mut Ui, title: &str) {
     let tokens = Tokens::get(ui.ctx());
     ui.label(egui::RichText::new(title).size(14.0).strong().color(tokens.text_dim));
-    ui.add_space(8.0);
+    ui.add_space(12.0);
 }
 
 /// A host row on a tile of its own, as in "Without a group".
 fn host_tile(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all_groups: &[Group], width: f32) {
     let tokens = Tokens::get(ui.ctx());
-    egui::Frame::new().fill(tokens.panel).stroke(egui::Stroke::new(1.0, tokens.separator)).corner_radius(tokens.radius_card).inner_margin(4.0).show(
-        ui,
-        |ui| {
-            let inner = (width - 10.0).max(1.0);
-            ui.allocate_ui_with_layout(vec2(inner, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.set_min_size(vec2(inner, ROW_HEIGHT));
-                crate::pages::host_items::host_row(app, ui, pos, row, all_groups);
-            });
-        },
-    );
+    let height = crate::pages::host_items::row_height(app) + 8.0;
+    egui::Frame::new().fill(tokens.panel).stroke(egui::Stroke::new(1.0, tokens.separator)).corner_radius(14).inner_margin(1.0).show(ui, |ui| {
+        ui.set_max_width(width - 2.0);
+        let inner = (width - 6.0).max(1.0);
+        ui.allocate_ui_with_layout(vec2(inner, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_size(vec2(inner, height));
+            crate::pages::host_items::host_row(app, ui, pos, row, all_groups);
+        });
+    });
 }
 
-/// A top-level group as a card: its name (opens it), how many hosts it has, its first hosts,
-/// how many subgroups it has, and "Show all" when it holds more than fit.
-fn group_card(app: &mut SshcraftApp, ui: &mut Ui, group: &Group, all_groups: &[Group], width: f32) {
+/// A card of hosts: a title (which opens the group when `open` is set), how many hosts it has,
+/// its first hosts, how many subgroups, and "Show all" when it holds more than fit.
+#[allow(clippy::too_many_arguments)]
+fn host_group_card(
+    app: &mut SshcraftApp,
+    ui: &mut Ui,
+    title: &str,
+    open: Option<GroupId>,
+    hosts: &[usize],
+    subgroups: usize,
+    all_groups: &[Group],
+    width: f32,
+    min_height: f32,
+) {
     let tokens = Tokens::get(ui.ctx());
-    let hosts = app.ui.hosts.cache.by_group.get(&group.id).cloned().unwrap_or_default();
-    let subgroups = app.ui.hosts.cache.subgroups.get(&group.id).copied().unwrap_or(0);
-    egui::Frame::new().fill(tokens.panel).stroke(egui::Stroke::new(1.0, tokens.separator)).corner_radius(tokens.radius_card).inner_margin(8.0).show(
-        ui,
-        |ui| {
-            let inner = (width - 18.0).max(1.0);
-            ui.set_width(inner);
-            ui.horizontal(|ui| {
-                let name = egui::RichText::new(visible(&group.name)).strong().size(15.0).color(tokens.text_strong);
-                if ui.add(egui::Label::new(name).sense(Sense::click())).clicked() {
-                    app.ui.hosts.group = Some(group.id);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let count =
-                        if hosts.len() == 1 { tr("1 host").to_string() } else { trf("{count} hosts", &[("count", &hosts.len().to_string())]) };
-                    ui.label(egui::RichText::new(count).size(12.5).color(tokens.text_dim));
-                });
+    let row_height = crate::pages::host_items::row_height(app);
+    egui::Frame::new().fill(tokens.panel).stroke(egui::Stroke::new(1.0, tokens.separator)).corner_radius(18).inner_margin(8.0).show(ui, |ui| {
+        let inner = (width - 18.0).max(1.0);
+        ui.set_width(inner);
+        ui.set_min_height((min_height - 18.0).max(0.0));
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.allocate_ui_with_layout(vec2(inner, 38.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_size(vec2(inner, 38.0));
+            ui.add_space(12.0);
+            let name = egui::RichText::new(visible(title)).strong().size(15.5).color(tokens.text_strong);
+            let response = ui.add(egui::Label::new(name).sense(if open.is_some() { Sense::click() } else { Sense::hover() }));
+            if let Some(id) = open
+                && response.clicked()
+            {
+                app.ui.hosts.group = Some(id);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(12.0);
+                let count = if hosts.len() == 1 { tr("1 host").to_string() } else { trf("{count} hosts", &[("count", &hosts.len().to_string())]) };
+                ui.label(egui::RichText::new(count).size(13.0).color(tokens.text_dim));
             });
-            for (n, &k) in hosts.iter().take(GROUP_CARD_HOSTS).enumerate() {
-                if let Some(row) = app.data.hosts.get(k).cloned() {
-                    ui.allocate_ui_with_layout(vec2(inner, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.set_min_size(vec2(inner, ROW_HEIGHT));
-                        crate::pages::host_items::host_row(app, ui, n, &row, all_groups);
-                    });
+        });
+        for (n, &k) in hosts.iter().take(GROUP_CARD_HOSTS).enumerate() {
+            if let Some(row) = app.data.hosts.get(k).cloned() {
+                ui.allocate_ui_with_layout(vec2(inner, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.set_min_size(vec2(inner, row_height));
+                    crate::pages::host_items::host_row(app, ui, n, &row, all_groups);
+                });
+            }
+        }
+        if subgroups > 0 || hosts.len() > GROUP_CARD_HOSTS {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                if subgroups > 0 {
+                    ui.label(egui::RichText::new(trf("{count} subgroups", &[("count", &subgroups.to_string())])).size(13.0).color(tokens.text_dim));
                 }
-            }
-            if subgroups > 0 {
-                ui.label(egui::RichText::new(trf("{count} subgroups", &[("count", &subgroups.to_string())])).size(12.5).color(tokens.text_dim));
-            }
-            if hosts.len() > GROUP_CARD_HOSTS && ui.link(trf("Show all {count}", &[("count", &hosts.len().to_string())])).clicked() {
-                app.ui.hosts.group = Some(group.id);
-            }
-        },
-    );
+                if hosts.len() > GROUP_CARD_HOSTS && ui.link(trf("Show all {count}", &[("count", &hosts.len().to_string())])).clicked() {
+                    match open {
+                        Some(id) => app.ui.hosts.group = Some(id),
+                        None => app.ui.hosts.show_all = true,
+                    }
+                }
+            });
+            ui.add_space(4.0);
+        }
+    });
 }
 
 /// The overview at the root: recently connected hosts, the hosts without a group, the groups.
+/// On a phone the recent hosts scroll sideways and the hosts without a group form a card like
+/// a group's.
 fn overview_sections(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
     let tokens = Tokens::get(ui.ctx());
+    let narrow = crate::shell::layout_for(ui.ctx().content_rect().width()) == crate::shell::Layout::Narrow;
     let recent: Vec<HostRow> = app.data.recent.iter().filter_map(|id| app.data.hosts.iter().find(|r| r.host.id == *id)).take(4).cloned().collect();
     let loose: Vec<usize> = app.ui.hosts.cache.shown.clone();
     let groups: Vec<Group> = app.ui.hosts.cache.sub.clone();
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
         if !recent.is_empty() {
             section(ui, tr("Recently connected"));
-            columns(ui, recent.len(), 230.0, |ui, i, _| {
-                if let Some(row) = recent.get(i) {
-                    crate::pages::host_items::host_card(app, ui, row);
-                }
-            });
+            if narrow {
+                egui::ScrollArea::horizontal().id_salt("sshcraft-recent").show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        for row in &recent {
+                            ui.allocate_ui_with_layout(vec2(156.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                                ui.set_width(156.0);
+                                crate::pages::host_items::host_card(app, ui, row, true);
+                            });
+                        }
+                    });
+                });
+                ui.add_space(16.0);
+            } else {
+                columns(ui, "recent", recent.len(), 230.0, |ui, i, _, _| {
+                    if let Some(row) = recent.get(i) {
+                        crate::pages::host_items::host_card(app, ui, row, false);
+                    }
+                });
+                ui.add_space(14.0);
+            }
         }
         if !loose.is_empty() {
-            section(ui, tr("Without a group"));
-            columns(ui, loose.len().min(LOOSE_HOSTS), 230.0, |ui, i, width| {
-                if let Some(row) = loose.get(i).and_then(|&k| app.data.hosts.get(k)).cloned() {
-                    host_tile(app, ui, i, &row, all_groups, width);
+            if narrow {
+                let width = ui.available_width();
+                host_group_card(app, ui, tr("Without a group"), None, &loose, 0, all_groups, width, 0.0);
+                ui.add_space(16.0);
+            } else {
+                section(ui, tr("Without a group"));
+                columns(ui, "loose", loose.len().min(LOOSE_HOSTS), 230.0, |ui, i, width, _| {
+                    if let Some(row) = loose.get(i).and_then(|&k| app.data.hosts.get(k)).cloned() {
+                        host_tile(app, ui, i, &row, all_groups, width);
+                    }
+                });
+                if loose.len() > LOOSE_HOSTS && ui.link(trf("Show all {count}", &[("count", &loose.len().to_string())])).clicked() {
+                    app.ui.hosts.show_all = true;
                 }
-            });
-            if loose.len() > LOOSE_HOSTS && ui.link(trf("Show all {count}", &[("count", &loose.len().to_string())])).clicked() {
-                app.ui.hosts.show_all = true;
+                ui.add_space(14.0);
             }
-            ui.add_space(8.0);
         }
         if !groups.is_empty() {
-            section(ui, tr("Groups"));
-            columns(ui, groups.len(), 300.0, |ui, i, width| {
+            if !narrow {
+                section(ui, tr("Groups"));
+            }
+            // A tablet shows the groups one under the other, a wide window side by side.
+            let min_width = if crate::shell::layout_for(ui.ctx().content_rect().width()) == crate::shell::Layout::Medium { 420.0 } else { 300.0 };
+            columns(ui, "groups", groups.len(), min_width, |ui, i, width, height| {
                 if let Some(group) = groups.get(i) {
-                    group_card(app, ui, group, all_groups, width);
+                    let hosts = app.ui.hosts.cache.by_group.get(&group.id).cloned().unwrap_or_default();
+                    let subgroups = app.ui.hosts.cache.subgroups.get(&group.id).copied().unwrap_or(0);
+                    host_group_card(app, ui, &group.name, Some(group.id), &hosts, subgroups, all_groups, width, height);
                 }
             });
         }
         if recent.is_empty() && loose.is_empty() && groups.is_empty() {
             ui.label(egui::RichText::new(tr("No hosts here yet.")).color(tokens.text_dim));
+        }
+        // Room under the last card for the floating "New host" of a phone.
+        if narrow {
+            ui.add_space(84.0);
         }
     });
 }

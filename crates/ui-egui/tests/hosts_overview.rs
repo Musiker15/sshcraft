@@ -135,8 +135,16 @@ fn searching_leaves_the_overview() {
 fn the_tablet_header_has_no_import() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, _session) = hosts_page(dir.path());
-    assert!(h.query_by_label("Import").is_some(), "the desktop imports");
+    h.get_by_label("More").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Import").is_some(), "the desktop imports, behind More");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
     h.state_mut().form = Form::Tablet;
     h.run_steps(3);
+    if let Some(more) = h.query_by_label("More") {
+        more.click();
+        h.run_steps(2);
+    }
     assert!(h.query_by_label("Import").is_none());
 }

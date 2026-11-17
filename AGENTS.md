@@ -194,7 +194,7 @@ Each has a test where it can have one.
   `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]` (the
   terminal) or `-- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de]`
   (the whole window on sample data; `--captions windows|adwaita|breeze|generic` adds the app's own
-  title bar with its window buttons). Both run an engine on a temp folder.
+  title bar with its window buttons, `--size WIDTHxHEIGHT` sets the window, `--tablet` the touch form). Both run an engine on a temp folder.
 - Interface tests run the app in egui_kittest on a test engine (`sshcraft_ui_egui::testing`,
   feature `testing`).
 - Agents: `cargo run -p sshcraft-cli -- --help`; with the app's *Allow agent control* on,

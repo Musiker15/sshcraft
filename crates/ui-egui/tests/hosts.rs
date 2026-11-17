@@ -267,7 +267,21 @@ fn the_host_form_takes_a_password_reference() {
     h.run_steps(3);
     hosts::edit_host(h.state_mut(), id);
     h.run_steps(2);
+    // The form is taller than the window: scroll it down to the password part.
+    // The wheel over the middle of the form, which is centred in the window.
+    let at = h.ctx.content_rect().center();
+    h.event(egui::Event::PointerMoved(at));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -600.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    });
+    h.run_steps(10);
     h.get_by_label("From a password manager").click();
+    h.run_steps(2);
+    h.get_by_label("Reference").scroll_to_me();
     h.run_steps(2);
     h.get_by_label("Reference").click();
     h.run_steps(1);

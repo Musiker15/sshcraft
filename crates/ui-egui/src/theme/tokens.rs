@@ -63,8 +63,8 @@ impl Tokens {
             warning: hex(0xe5b44b),
             success: hex(0x3fcf8e),
             info: hex(0x5aa9ff),
-            radius: 8,
-            radius_card: 14,
+            radius: 10,
+            radius_card: 16,
         }
     }
 
@@ -92,8 +92,8 @@ impl Tokens {
             warning: hex(0x9a6b00),
             success: hex(0x12a150),
             info: hex(0x1f5fbf),
-            radius: 8,
-            radius_card: 14,
+            radius: 10,
+            radius_card: 16,
         }
     }
 

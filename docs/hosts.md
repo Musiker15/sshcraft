@@ -5,12 +5,22 @@
 How SSHCraft keeps hosts in groups, with tags and symbols, and how hosts come in from other
 programs and go out again. Sync and sharing of all this are described in [sync.md](sync.md).
 
+## The overview
+
+The Hosts page opens on an overview: the hosts you connected to last, then the hosts in no group
+(at most twelve, *Show all* lists the rest), then a card for every top-level group with its first
+eight hosts and the number of its subgroups. A click on a group's name opens the group. Every host
+has an **SSH** button that connects right away; **SFTP** is there but stays disabled until the file
+browser lands. The button with three dots beside the search holds import, export and the choice
+between list and grid. Searching, picking a tag or a dynamic group, or opening a group switches to the list
+(or the grid), and the path above it leads back.
+
 ## Groups and subgroups
 
 Groups can be nested up to 64 levels deep. A host takes every value it does not set
 itself from the nearest group above it that sets it: address and port from the top group,
-the user from a middle one, the port on the host itself, for example. The hosts page shows one
-level at a time; double-click a group to open it, the path above the list leads back.
+the user from a middle one, the port on the host itself, for example. Inside a group the page
+shows one level at a time; double-click a subgroup to open it, the path above the list leads back.
 
 A group cannot be put into itself or one of its own subgroups. When two devices nest two groups
 into each other at the same time, the later change wins and the other group moves to the top
@@ -55,7 +65,7 @@ nothing about them. It is off by default because it reaches out to every host in
 
 ## Import
 
-*Hosts → New → Import* reads one source, shows a preview and creates exactly the entries left
+*Hosts → ⋯ → Import* (desktop only) reads one source, shows a preview and creates exactly the entries left
 checked. Entries with a warning start unchecked. A host that already exists at the same place with
 the same address and port is not created again when it also has the same name and user, or when
 the new entry knows no user (a `known_hosts` entry for a host imported before). All names on one
@@ -116,7 +126,7 @@ nothing that is there; a wrong passphrase or a changed file adds nothing.
 
 ## Export
 
-*Hosts → New → Export* writes everything, one place or one group with its subgroups:
+*Hosts → ⋯ → Export* (desktop only) writes everything, one place or one group with its subgroups:
 
 - **CSV**: one row per host with the values it effectively uses (a flat table has no
   inheritance), in the columns the CSV import reads back.

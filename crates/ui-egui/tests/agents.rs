@@ -146,6 +146,8 @@ fn a_hidden_host_is_listed_and_shown_again() {
         app.ui.agents.policy.as_ref().is_some_and(|p| p["hidden"].as_array().is_some_and(|a| !a.is_empty())) && !app.data.hosts.is_empty()
     });
     assert!(h.query_by_label("secret-db").is_some());
+    h.get_by_label("Show again").scroll_to_me();
+    h.run_steps(2);
     h.get_by_label("Show again").click();
     let deadline = Instant::now() + Duration::from_secs(10);
     while run(&session, "agent.policy", json!({}))["hidden"].as_array().is_some_and(|a| !a.is_empty()) {
@@ -178,6 +180,8 @@ fn the_log_lists_outcomes_and_clears() {
     agents_page(&mut h);
     until(&mut h, "the log", |app| app.ui.agents.log.as_ref().is_some_and(|l| !l.is_empty()));
     assert!(h.query_all_by_label_contains("host.delete").next().is_some(), "the denied delete is in the log");
+    h.get_by_label("Clear the log").scroll_to_me();
+    h.run_steps(2);
     h.get_by_label("Clear the log").click();
     let deadline = Instant::now() + Duration::from_secs(10);
     while run(&session, "agent.log", json!({})).as_array().is_some_and(|l| !l.is_empty()) {
