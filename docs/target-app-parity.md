@@ -36,4 +36,4 @@ with other clients, with sources, is the German
 | AI agents | AI features in the app | MCP and command line with rights per action |
 | Platforms | Windows, macOS, Linux | Windows, Linux, FreeBSD since v0.1.0 (unsigned); macOS builds, not released yet |
 | SFTP | yes | S1, after the first release |
-| Mobile | yes | M1 to M3, after the first release |
+| Mobile | yes | Android tablets since M1 (sideloaded APK); phones M2, iOS and iPadOS M3 |

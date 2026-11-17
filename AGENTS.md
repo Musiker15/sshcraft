@@ -202,6 +202,10 @@ Each has a test where it can have one.
   build.
 - `cargo xtask linux` runs clippy and the tests on Linux in a Docker container (from Windows or
   macOS); macOS and FreeBSD run in CI.
+- `cargo xtask android --check` runs clippy for Android, `cargo xtask android [--debug]
+  [--install]` builds the APK; both need the Android SDK and NDK ([docs/android.md](docs/android.md)).
+  CI has no Android SDK, so run `--check` before pushing a change to `apps/android`, `ui-egui`,
+  `store` or `sync`.
 - Packages and releases: [`docs/releasing.md`](docs/releasing.md). `cargo xtask version [set X.Y.Z]`
   prints or sets the one version of the workspace; `cargo xtask sbom` and `cargo xtask stores`
   make a release's bill of materials and store entries. Never start a release or push to `release`

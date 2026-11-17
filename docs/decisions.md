@@ -8,6 +8,7 @@ of the rebuild, which left the tree with R7 and are in the history at
 
 | Date | Decision |
 |---|---|
+| 2026-11-17 | Android runs the egui interface in a NativeActivity, Rust only: no Java, Kotlin or Gradle, and the APK is put together by `cargo xtask android` from the SDK's tools. GameActivity (better IME, screen readers) waits for M2 because it needs Gradle. The master key is kept by keyring-core's Android store, encrypted with a Keystore key; app data is excluded from Android backup. HTTPS uses Mozilla's roots there, since the platform verifier needs Java. |
 | 2026-11-15 | A password reference is used for an address only after it was allowed on this device, like a proxy command; copies in a share never carry one. |
 | 2026-11-15 | A TOTP secret is a sealed password row and follows the rules of passwords; a stored password no longer answers a question for a one-time code. |
 | 2026-11-15 | The trash keeps rows with their sealed parts as they were and restores them under their ids; what sync deletes goes there too. Versions come from saves in SSHCraft, at most 20 per item. |

@@ -43,4 +43,8 @@ submissions follow. Next is S1 (SFTP).
 
 ## After the first release
 
-M1 to M3 (Android, iOS and iPadOS), S1 (SFTP). A database client follows as a separate sister app.
+| Step | Result |
+|---|---|
+| M1 | Android tablets (13+, arm64): the egui interface in a NativeActivity with a key bar, touch scrolling and Android's clipboard; the master key in the Android Keystore; sync; the APK built and signed by `cargo xtask android` ([android.md](android.md)) |
+
+M2 (GameActivity, phones, notifications), M3 (iOS and iPadOS), S1 (SFTP). A database client follows as a separate sister app.
