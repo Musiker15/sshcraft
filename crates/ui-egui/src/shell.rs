@@ -114,31 +114,36 @@ fn wide_sidebar(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(18.0);
     sidebar(app, ui, 0..5);
     let sync = sync_state(app, &tokens);
-    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.add_space(20.0);
-        sidebar(app, ui, 5..6);
-        if let Some((state, color, name)) = sync {
-            ui.add_space(4.0);
-            egui::Frame::new()
-                .fill(tokens.button)
-                .stroke(egui::Stroke::new(1.0, tokens.separator))
-                .corner_radius(12)
-                .inner_margin(12.0)
-                .outer_margin(egui::Margin::symmetric(4, 0))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.spacing_mut().item_spacing.y = 6.0;
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.horizontal(|ui| {
-                            let (dot, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-                            ui.painter().circle_filled(dot.center(), 4.0, color);
-                            ui.label(egui::RichText::new(state).strong().size(13.0).color(tokens.text_strong));
-                        });
-                        ui.label(egui::RichText::new(crate::widgets::visible(&name)).size(12.0).color(tokens.text_dim));
-                    });
+    // The sync card and the settings sit at the bottom: the space above them is what is left
+    // minus their height in the last frame. (A bottom-up layout would hand the card all the
+    // height there is.)
+    let key = ui.scope_id().with("sshcraft-sidebar-bottom");
+    let below: f32 = ui.ctx().data(|d| d.get_temp(key)).unwrap_or(64.0);
+    ui.add_space((ui.available_height() - below).max(8.0));
+    let start = ui.cursor().top();
+    if let Some((state, color, name)) = sync {
+        egui::Frame::new()
+            .fill(tokens.button)
+            .stroke(egui::Stroke::new(1.0, tokens.separator))
+            .corner_radius(12)
+            .inner_margin(12.0)
+            .outer_margin(egui::Margin::symmetric(4, 0))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 6.0;
+                ui.horizontal(|ui| {
+                    let (dot, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 4.0, color);
+                    ui.label(egui::RichText::new(state).strong().size(13.0).color(tokens.text_strong));
                 });
-        }
-    });
+                ui.label(egui::RichText::new(crate::widgets::visible(&name)).size(12.0).color(tokens.text_dim));
+            });
+        ui.add_space(8.0);
+    }
+    sidebar(app, ui, 5..6);
+    ui.add_space(16.0);
+    let used = ui.cursor().top() - start;
+    ui.ctx().data_mut(|d| d.insert_temp(key, used));
 }
 
 /// One symbol of the rail, 52 points square.

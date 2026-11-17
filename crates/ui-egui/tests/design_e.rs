@@ -81,3 +81,15 @@ fn a_phone_has_new_host_floating_at_the_bottom() {
     assert!(button.bottom() > 800.0 - 40.0 && button.width() > 300.0, "a wide button at the bottom, not {button:?}");
     assert!(h.query_by_label("New group").is_some(), "the bar holds New group");
 }
+
+#[test]
+fn the_sync_card_is_only_as_tall_as_its_two_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = with_hosts(dir.path(), 1280.0);
+    h.state_mut().data.servers = vec![json!({ "id": "s1", "name": "home", "status": { "state": "idle" } })];
+    h.run_steps(3);
+    let state = h.get_by_label("Up to date").rect();
+    let settings = h.get_by_label("Settings").rect();
+    assert!(settings.top() - state.top() < 90.0, "the card ends near the settings: state at {state:?}, settings at {settings:?}");
+    assert!(state.top() > 800.0 - 200.0, "the card sits at the bottom, not at {state:?}");
+}
