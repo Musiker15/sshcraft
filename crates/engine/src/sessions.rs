@@ -993,10 +993,19 @@ pub(crate) fn end_error(code: ErrorCode, detail: Option<String>) -> Failure {
 /// password) is used.
 async fn unlock_secrets(ctx: &Context) -> Result<&Arc<Vault>, Failure> {
     let vault = ctx.vault.as_ref().ok_or_else(|| end_error(ErrorCode::VaultLocked, None))?;
-    let language = ctx.settings().general.language;
-    let reason = hello_reason(language, sys_locale::get_locale().as_deref());
-    ctx.gate.ensure(reason).await.map_err(|code| end_error(code, None))?;
+    presence_for_secrets(ctx).await?;
     Ok(vault)
+}
+
+/// Windows Hello before a secret, unless the user switched it off
+/// (`general.hello_before_secrets`).
+async fn presence_for_secrets(ctx: &Context) -> Result<(), Failure> {
+    let settings = ctx.settings();
+    if !settings.general.hello_before_secrets {
+        return Ok(());
+    }
+    let reason = hello_reason(settings.general.language, sys_locale::get_locale().as_deref());
+    ctx.gate.ensure(reason).await.map_err(|code| end_error(code, None))
 }
 
 fn vault_failure(e: sshcraft_store::vault::VaultError) -> Failure {
@@ -1531,8 +1540,7 @@ async fn referenced_password(
     }
     // A password from a manager is a secret like a stored one: Windows Hello first (it needs
     // no vault, so the gate is asked directly).
-    let reason = hello_reason(ctx.settings().general.language, sys_locale::get_locale().as_deref());
-    ctx.gate.ensure(reason).await.map_err(|code| end_error(code, None))?;
+    presence_for_secrets(ctx).await?;
     let database = match reference.manager {
         Manager::KeePassXc => reference.reference.split_once('#').map(|(db, _)| db.to_owned()),
         _ => None,

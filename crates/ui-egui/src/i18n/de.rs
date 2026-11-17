@@ -276,6 +276,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SSHCraft does not check for updates and sends no telemetry" => "SSHCraft sucht nicht nach Updates und sendet keine Telemetrie",
         "App lock" => "App-Sperre",
         "Lock after" => "Sperren nach",
+        "Ask Windows Hello before the first stored key or password" => {
+            "Vor dem ersten gespeicherten Schlüssel oder Passwort nach Windows Hello fragen"
+        }
+        "Once per start. Off, anything running as your Windows user can use the stored keys and passwords through SSHCraft without a question." => {
+            "Einmal pro Start. Ausgeschaltet kann alles, was unter deinem Windows-Benutzer läuft, die gespeicherten Schlüssel und Passwörter ohne Rückfrage über SSHCraft nutzen."
+        }
         " minutes without input" => " Minuten ohne Eingabe",
         "0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again." => {
             "0 sperrt nie. Zum Entsperren fragt Windows Hello, und Schlüssel und Passwörter fragen es erneut."

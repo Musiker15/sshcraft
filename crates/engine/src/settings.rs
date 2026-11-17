@@ -196,6 +196,10 @@ pub struct General {
     pub trash_days: u32,
     /// Minutes without input until the window locks, within [`LOCK_MINUTES`]; 0 never.
     pub lock_after_minutes: u32,
+    /// Windows Hello once per run before the first key or password from the vault is used. Off,
+    /// anything running as this Windows user reaches the stored secrets through SSHCraft without
+    /// a question. Agents cannot change it: `settings.save` has no agent access.
+    pub hello_before_secrets: bool,
 }
 
 /// The allowed range of `general.lock_after_minutes`.
@@ -206,7 +210,14 @@ pub const TRASH_DAYS: std::ops::RangeInclusive<u32> = 1..=365;
 
 impl Default for General {
     fn default() -> Self {
-        Self { language: LanguageSetting::default(), system_title_bar: false, update_host_keys: true, trash_days: 30, lock_after_minutes: 0 }
+        Self {
+            language: LanguageSetting::default(),
+            system_title_bar: false,
+            update_host_keys: true,
+            trash_days: 30,
+            lock_after_minutes: 0,
+            hello_before_secrets: true,
+        }
     }
 }
 

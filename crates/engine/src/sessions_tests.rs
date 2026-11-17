@@ -242,6 +242,38 @@ async fn stored_key_asks_hello_once_per_run() {
     assert_eq!(presence.asked(), 1);
 }
 
+/// With "Windows Hello before the first key" switched off, a stored key is used without asking.
+#[tokio::test]
+async fn stored_key_skips_hello_when_switched_off() {
+    let f = fixture(true).await;
+    let presence = Arc::new(FakePresence::new(&[Presence::Declined]));
+    let mut settings = crate::settings::EngineSettings::default();
+    settings.general.hello_before_secrets = false;
+    let manager = SessionManager::new(ManagerParts {
+        store: f.store.clone(),
+        vault: Some(f.vault.clone()),
+        prompter: f.prompter.clone(),
+        auth: Arc::new(sshcraft_ssh::NoPrompter),
+        agent: Arc::new(TestAgents { keys: vec![f.key.clone()], reachable: true }),
+        presence: presence.clone(),
+        security: None,
+        settings: Arc::new(move || settings.clone()),
+        runtime: tokio::runtime::Handle::current(),
+        delay_scale: 0.01,
+    });
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: f.host_id }, 80, 24, sink.clone());
+    sink.wait_for(connected).await;
+    assert_eq!(presence.asked(), 0, "no Windows Hello when switched off");
+}
+
+#[test]
+fn hello_before_secrets_is_on_by_default() {
+    assert!(crate::settings::EngineSettings::default().general.hello_before_secrets);
+    let old: crate::settings::General = serde_json::from_str(r#"{ "language": "de" }"#).unwrap();
+    assert!(old.hello_before_secrets, "settings saved before the switch keep asking");
+}
+
 #[tokio::test]
 async fn declined_hello_ends_without_connecting() {
     let f = fixture(true).await;

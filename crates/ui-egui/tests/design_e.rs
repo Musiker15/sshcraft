@@ -208,3 +208,19 @@ fn the_overview_offers_the_tags_of_hosts_in_groups() {
     // One pill in the host's row, one chip to filter by.
     assert_eq!(h.query_all_by_label("zone-a").count(), 2, "the tag is offered as a filter chip too");
 }
+
+#[test]
+fn the_hello_switch_is_in_the_general_settings_and_saves() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
+    h.run_steps(4);
+    assert!(h.state().data.settings.general.hello_before_secrets, "on by default");
+    h.get_by_label("Ask Windows Hello before the first stored key or password").click();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.settings.general.hello_before_secrets {
+        assert!(Instant::now() < deadline, "the switch was not saved");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}

@@ -166,6 +166,16 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
         .weak(),
     );
     save(app, |s| s.general.lock_after_minutes = minutes);
+    // Agents cannot change this one: settings.save has no agent access.
+    let mut hello = app.data.settings.general.hello_before_secrets;
+    ui.checkbox(&mut hello, tr("Ask Windows Hello before the first stored key or password"));
+    ui.label(
+        egui::RichText::new(tr(
+            "Once per start. Off, anything running as your Windows user can use the stored keys and passwords through SSHCraft without a question.",
+        ))
+        .weak(),
+    );
+    save(app, |s| s.general.hello_before_secrets = hello);
     ui.add_space(12.0);
     crate::pages::backup::section(app, ui);
     let ctx = ui.ctx().clone();
