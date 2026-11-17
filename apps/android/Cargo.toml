@@ -28,10 +28,14 @@ winit = { version = "0.30.13", default-features = false, features = ["android-na
 tokio = { workspace = true }
 async-trait = { workspace = true }
 android_clipboard = "0.1.0"
+# The keyboard's text connection (src/keyboard.rs): the VM and the activity from android-activity.
+jni = "0.22.4"
+ndk-context = "0.1.1"
 
 # android-activity calls the exported `android_main`, and exporting a symbol counts as unsafe
-# code. The workspace forbids unsafe, so this crate states its own lints like `crates/fido`:
-# denied crate-wide and allowed on that one function only. The clippy entries match the workspace.
+# code; the keyboard's text connection needs the raw JavaVM and activity. The workspace forbids
+# unsafe, so this crate states its own lints like `crates/fido`: denied crate-wide and allowed on
+# `android_main` and in `src/keyboard.rs` only. The clippy entries match the workspace.
 [lints.rust]
 unsafe_code = "deny"
 

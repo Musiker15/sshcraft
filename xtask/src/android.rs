@@ -1,6 +1,6 @@
 //! `cargo xtask android [--check] [--debug] [--install]`: the APK for Android tablets, built from
-//! `apps/android` with the NDK and put together with the SDK's own tools (aapt2, zipalign,
-//! apksigner), no Gradle. `docs/android.md` says what to install.
+//! `apps/android` with the NDK and put together with the SDK's own tools (aapt2, d8, zipalign,
+//! apksigner) and the JDK's javac for the few Java classes in `apps/android/java`, no Gradle. `docs/android.md` says what to install.
 //!
 //! - `--check`: only clippy for the Android target on the crates that differ there
 //! - `--debug`: a debug build (faster to build, slower to run)
@@ -160,7 +160,8 @@ pub fn version_code(version: &str) -> Result<u32, String> {
     Ok(major * 10_000 + minor * 100 + patch)
 }
 
-/// The manifest: a NativeActivity that loads `lib<LIB>.so`, kept alive across every change it
+/// The manifest: SSHCraft's NativeActivity (`MainActivity`, with the keyboard's text
+/// connection) that loads `lib<LIB>.so`, kept alive across every change it
 /// can follow (a restart would end the process, see `apps/android`), the window resized for the
 /// on-screen keyboard, network access, and no backup or device transfer of the app's data: the
 /// vault's key stays in this device's Keystore, so copied data could not be opened.
@@ -177,12 +178,12 @@ pub fn manifest(version: &str, code: u32) -> String {
     <application
         android:label="SSHCraft"
         android:icon="@mipmap/ic_launcher"
-        android:hasCode="false"
+        android:hasCode="true"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:extractNativeLibs="false">
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="de.musiker15.sshcraft.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|locale|layoutDirection|fontScale|colorMode|touchscreen|mcc|mnc"
@@ -270,8 +271,9 @@ fn package(root: &Path, sdk: &Sdk, work: &Path, library: &Path, version: &str) -
         .arg(work.join("AndroidManifest.xml"))
         .arg(work.join("res.zip"));
     crate::run(link, "aapt2 link")?;
+    let dex = java(root, sdk, work)?;
     let unaligned = work.join("unaligned.apk");
-    add_library(&linked, library, &unaligned)?;
+    add_files(&linked, &[(library_entry(), library.to_path_buf()), ("classes.dex".to_string(), dex)], &unaligned)?;
     let aligned = work.join("aligned.apk");
     let mut align = Command::new(sdk.tool("zipalign"));
     // 16 KiB pages for the uncompressed library (Android 15 devices may use them).
@@ -329,8 +331,76 @@ fn signing_key(work: &Path, sign: &mut Command) -> Result<(), String> {
     Ok(())
 }
 
-/// Copies `linked` to `out` and adds the library uncompressed (Android maps it from the APK).
-fn add_library(linked: &Path, library: &Path, out: &Path) -> Result<(), String> {
+/// The `.java` files under `dir`, sorted, at most a few folders deep.
+pub fn java_sources(dir: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() && depth < 8 {
+                walk(&path, depth + 1, out);
+            } else if path.extension().is_some_and(|e| e == "java") {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, 0, &mut out);
+    out.sort();
+    out
+}
+
+/// The JDK's tool `name` (javac, java, keytool): from `JAVA_HOME`, else from the `PATH`.
+fn jdk(name: &str) -> PathBuf {
+    std::env::var_os("JAVA_HOME").map_or_else(|| PathBuf::from(name), |home| PathBuf::from(home).join("bin").join(exe(name)))
+}
+
+/// Compiles `apps/android/java` against the platform's android.jar and turns it into
+/// classes.dex with d8; returns that file.
+fn java(root: &Path, sdk: &Sdk, work: &Path) -> Result<PathBuf, String> {
+    let sources = java_sources(&root.join("apps/android/java"));
+    if sources.is_empty() {
+        return Err("android: no Java sources in apps/android/java".into());
+    }
+    let classes = work.join("classes");
+    let mut javac = Command::new(jdk("javac"));
+    javac
+        .args(["-source", "17", "-target", "17", "-nowarn", "-encoding", "UTF-8", "-classpath"])
+        .arg(&sdk.platform_jar)
+        .arg("-d")
+        .arg(&classes)
+        .args(&sources);
+    crate::run(javac, "javac")?;
+    let mut compiled = Vec::new();
+    let mut stack = vec![classes.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(|e| format!("android: {}: {e}", dir.display()))?.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "class") {
+                compiled.push(path);
+            }
+        }
+    }
+    let dex_dir = work.join("dex");
+    std::fs::create_dir_all(&dex_dir).map_err(|e| format!("android: {}: {e}", dex_dir.display()))?;
+    let mut d8 = Command::new(jdk("java"));
+    d8.arg("-cp")
+        .arg(sdk.build_tools.join("lib").join("d8.jar"))
+        .arg("com.android.tools.r8.D8")
+        .args(["--release", "--min-api", &MIN_SDK.to_string(), "--lib"])
+        .arg(&sdk.platform_jar)
+        .arg("--output")
+        .arg(&dex_dir)
+        .args(&compiled);
+    crate::run(d8, "d8")?;
+    Ok(dex_dir.join("classes.dex"))
+}
+
+/// Copies `linked` to `out` and adds `files` (path in the APK, file) uncompressed: Android maps
+/// the library straight from the APK.
+fn add_files(linked: &Path, files: &[(String, PathBuf)], out: &Path) -> Result<(), String> {
     let zip_err = |e: zip::result::ZipError| format!("android: the APK: {e}");
     let io_err = |e: std::io::Error| format!("android: the APK: {e}");
     let mut archive = zip::ZipArchive::new(std::fs::File::open(linked).map_err(io_err)?).map_err(zip_err)?;
@@ -340,9 +410,11 @@ fn add_library(linked: &Path, library: &Path, out: &Path) -> Result<(), String> 
         writer.raw_copy_file(entry).map_err(zip_err)?;
     }
     let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    writer.start_file(library_entry(), options).map_err(zip_err)?;
-    let bytes = std::fs::read(library).map_err(io_err)?;
-    writer.write_all(&bytes).map_err(io_err)?;
+    for (entry, file) in files {
+        writer.start_file(entry.as_str(), options).map_err(zip_err)?;
+        let bytes = std::fs::read(file).map_err(io_err)?;
+        writer.write_all(&bytes).map_err(io_err)?;
+    }
     writer.finish().map_err(zip_err)?;
     Ok(())
 }
@@ -371,7 +443,8 @@ mod tests {
             r#"android:minSdkVersion="33""#,
             r#"android:targetSdkVersion="36""#,
             "android.permission.INTERNET",
-            r#"android:name="android.app.NativeActivity""#,
+            r#"android:name="de.musiker15.sshcraft.MainActivity""#,
+            r#"android:hasCode="true""#,
             r#"android:value="sshcraft_android""#,
             r#"android:windowSoftInputMode="adjustResize""#,
             r#"android:extractNativeLibs="false""#,
@@ -384,6 +457,15 @@ mod tests {
             assert!(m.contains(wanted), "the manifest lacks {wanted}");
         }
         assert_eq!(library_entry(), "lib/arm64-v8a/libsshcraft_android.so");
+    }
+
+    #[test]
+    fn the_activity_class_is_built_from_the_tree() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let sources = java_sources(&root.join("apps/android/java"));
+        let names: Vec<String> = sources.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+        assert!(names.contains(&"MainActivity.java".to_string()), "found {names:?}");
+        assert!(manifest("0.3.0", 300).contains("de.musiker15.sshcraft.MainActivity"));
     }
 
     #[test]

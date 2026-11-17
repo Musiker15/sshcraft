@@ -5852,6 +5852,8 @@ dependencies = [
  "async-trait",
  "eframe",
  "egui",
+ "jni 0.22.4",
+ "ndk-context",
  "sshcraft-engine",
  "sshcraft-fido",
  "sshcraft-ui-egui",

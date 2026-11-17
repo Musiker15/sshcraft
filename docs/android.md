@@ -33,7 +33,8 @@ hand, and a key can be imported by pasting it.
 ## Typing
 
 Tap the terminal to open the on-screen keyboard. The app moves up so the line you type stays
-visible. Under the terminal is a bar of the keys an on-screen keyboard lacks:
+visible. What the keyboard pastes from its own clipboard, swiped words and umlauts arrive as
+typed; text of more than one character goes to the terminal as one paste. Under the terminal is a bar of the keys an on-screen keyboard lacks:
 
 | Key | What it does |
 |---|---|
@@ -61,6 +62,7 @@ the bar puts the selection on Android's clipboard.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
 - No desktop notifications, no dropdown window, no desktop shortcuts, no X11 forwarding, no
   FIDO keys and no screen reader support yet.
+- A word the keyboard is still composing appears only once the keyboard commits it.
 - The sync server's certificate is checked against Mozilla's list of public authorities, not
   Android's own store, so a server with a certificate from a private or user-installed authority
   is not trusted on Android.
@@ -71,7 +73,8 @@ The open points are in [gaps.md](gaps.md).
 
 ## Building it
 
-The APK is built on a desktop with the Android SDK, the NDK and a JDK; the shared CI has no
+The APK is built on a desktop with the Android SDK, the NDK and a JDK (javac and d8 build the
+small Java part in `apps/android/java`); the shared CI has no
 Android SDK, so this runs locally.
 
 1. Install the SDK command-line tools, then `platform-tools`, `platforms;android-36`,

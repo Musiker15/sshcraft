@@ -32,6 +32,8 @@ struct Tablet {
     content: (i32, i32, i32, i32),
     content_changed: bool,
     last_input: std::time::Instant,
+    /// Whether the on-screen keyboard was asked for last.
+    keyboard: bool,
 }
 
 impl eframe::App for Tablet {
@@ -51,6 +53,13 @@ impl eframe::App for Tablet {
         for text in copied {
             // A clipboard the system refuses keeps the text in egui's clipboard only.
             let _ = android_clipboard::set_text(text);
+        }
+        // The keyboard follows whether a terminal or a field wants text, through the view with
+        // the text connection (crate::keyboard).
+        let wanted = ui.ctx().output(|o| o.ime.is_some());
+        if wanted != self.keyboard {
+            crate::keyboard::show(wanted);
+            self.keyboard = wanted;
         }
     }
 
@@ -78,6 +87,9 @@ impl eframe::App for Tablet {
             raw_input.safe_area_insets = Some(egui::SafeAreaInsets(covered));
         }
         crate::clipboard_keys(&mut raw_input.events, clipboard_text);
+        for text in crate::keyboard::take_text() {
+            raw_input.events.push(crate::committed(text));
+        }
     }
 }
 
@@ -136,7 +148,7 @@ fn run(android: AndroidApp) {
             app.form = Form::Tablet;
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);
-            Ok(Box::new(Tablet { app, android: handle, content: (0, 0, 0, 0), content_changed: true, last_input: std::time::Instant::now() }))
+            Ok(Box::new(Tablet { app, android: handle, content: (0, 0, 0, 0), content_changed: true, last_input: std::time::Instant::now(), keyboard: false }))
         }),
     );
     // The activity is gone; the engine's tasks end with the runtime.

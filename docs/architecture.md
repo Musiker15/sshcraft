@@ -94,7 +94,8 @@ reads `config.toml`.
 - **App.** `apps/sshcraft` opens the engine (`SessionConfig::for_app`, the real data folder),
   takes the window handle for Windows Hello and security keys, and runs `SshcraftApp` in eframe.
   A second start, or a running Tauri version, shows why and stops. `apps/android` does the same
-  on Android in the app's private storage and sets `Form::Tablet`: no local shell, file dialogs
+  on Android in the app's private storage (in `MainActivity`, a NativeActivity with a text
+  connection for the keyboard) and sets `Form::Tablet`: no local shell, file dialogs
   or agents, a key bar under the focused terminal, drag to scroll, and the interface kept inside
   the area the on-screen keyboard leaves ([android.md](android.md)).
 - **Frame.** `SshcraftApp::frame` takes the answers of earlier commands, the engine's events

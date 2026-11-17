@@ -39,6 +39,17 @@ pub fn repaint_after(content_changed: bool, since_input: std::time::Duration) ->
     }
 }
 
+/// Text the on-screen keyboard committed at once, as egui's event: one character is typed, more
+/// (a paste from the keyboard's clipboard, a swiped word) are a paste, so the terminal sends
+/// them as one bracketed paste and a field inserts them whole.
+pub fn committed(text: String) -> egui::Event {
+    if text.chars().nth(1).is_some() || text.contains(['\n', '\r']) {
+        egui::Event::Paste(text.replace("\r\n", "\n"))
+    } else {
+        egui::Event::Text(text)
+    }
+}
+
 /// What a hardware keyboard's clipboard key does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClipboardKey {
@@ -91,6 +102,8 @@ pub fn clipboard_keys(events: &mut Vec<egui::Event>, clipboard: impl FnOnce() ->
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "android")]
+mod keyboard;
 
 #[cfg(test)]
 mod tests {
@@ -125,6 +138,15 @@ mod tests {
         assert_eq!(repaint_after(true, Duration::from_secs(60)), Duration::ZERO);
         assert!(repaint_after(false, Duration::from_millis(300)) <= Duration::from_millis(100), "right after a tap");
         assert!(repaint_after(false, Duration::from_secs(60)) <= Duration::from_secs(1), "never stale for long");
+    }
+
+    #[test]
+    fn a_keyboard_paste_is_a_paste_and_a_letter_is_typed() {
+        assert_eq!(committed("a".into()), Event::Text("a".into()));
+        assert_eq!(committed("ä".into()), Event::Text("ä".into()), "one character, however many bytes");
+        assert_eq!(committed("ssh-ed25519 AAAA".into()), Event::Paste("ssh-ed25519 AAAA".into()));
+        assert_eq!(committed("\r".into()), Event::Paste(String::from("\r")), "a line break is never typed as text");
+        assert_eq!(committed("a\r\nb".into()), Event::Paste("a\nb".into()));
     }
 
     fn key(key: Key, modifiers: Modifiers) -> Event {

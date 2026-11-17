@@ -105,8 +105,9 @@ crash on hostile input is a security bug. **This outranks feature work.**
   (`webauthn.dll`, WinRT). That crate states its own lints with `unsafe_code = "deny"`; only
   `webauthn.rs` and `presence.rs` allow it, and every block has a `// SAFETY:` comment.
   `apps/android`: android-activity calls the exported `android_main`, and `#[unsafe(no_mangle)]`
-  counts as unsafe code. That crate states its own lints the same way and allows it on that one
-  function, which has no `unsafe` block. Do not add `unsafe` anywhere else; if a platform API
+  counts as unsafe code; the keyboard's text connection needs the raw JavaVM and activity from
+  ndk-context. That crate states its own lints the same way and allows unsafe on `android_main`
+  and in `src/keyboard.rs` only, every block with a `// SAFETY:` comment. Do not add `unsafe` anywhere else; if a platform API
   needs it, use a maintained safe wrapper crate.
 
 ## Non-negotiables
@@ -137,6 +138,9 @@ crash on hostile input is a security bug. **This outranks feature work.**
   | exempt | `apps/*`, `xtask` |
 
 - **Rust only.** No handwritten JavaScript or TypeScript, no Tauri, Electron or webview shell.
+  The one exception is `apps/android/java`: Android APIs that only take Java (the keyboard's
+  text connection) get the smallest Java class that hands the data to Rust, built by
+  `cargo xtask android` with javac and d8. No Gradle, no Kotlin, no logic in Java.
 - **wasm:** `cargo xtask wasm` checks `proto` and `model` for `wasm32-unknown-unknown`. The other
   crates need the network, files or the operating system, and SSHCraft has no web build (SSH needs
   TCP), so they are exempt. This deviates from "never break wasm" in the other Craft apps.
