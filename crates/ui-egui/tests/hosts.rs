@@ -90,7 +90,8 @@ fn groups_open_by_double_click_and_the_path_leads_back() {
     let prod = add_group(&session, "prod", None, json!({}));
     add_host(&session, "db", Some(prod), &[]);
     until(&mut h, "the data", |app| !app.data.groups.is_empty() && !app.data.hosts.is_empty());
-    assert!(h.query_by_label("db").is_none(), "hosts in a group are inside it");
+    // At the root the group's card lists its hosts (design E).
+    assert!(h.query_by_label("db").is_some(), "the group card lists its hosts");
     double_click(&mut h, "prod");
     h.run_steps(2);
     assert_eq!(h.state().ui.hosts.group, Some(prod));
@@ -350,7 +351,6 @@ fn a_dynamic_group_finds_tagged_hosts_in_every_group() {
     add_host(&session, "gamma", None, &["db"]);
     save_dynamic_groups(&session, json!([{ "name": "Web servers", "tags": ["web"] }]));
     until(&mut h, "the data", |app| app.data.hosts.len() == 3 && !app.data.settings.appearance.smart_groups.is_empty());
-    assert!(h.query_by_label("alpha").is_none(), "alpha is in a group below");
     h.get_by_label("Web servers").click();
     h.run_steps(2);
     assert!(h.query_by_label("alpha").is_some(), "found in its group");
@@ -360,7 +360,7 @@ fn a_dynamic_group_finds_tagged_hosts_in_every_group() {
     h.get_by_label("Web servers").click();
     h.run_steps(2);
     assert!(h.state().ui.hosts.smart.is_none() && h.state().ui.hosts.tags.is_empty());
-    assert!(h.query_by_label("alpha").is_none());
+    // Back at the overview: every host again, alpha in its group's card.
     assert!(h.query_by_label("gamma").is_some());
 }
 
