@@ -148,7 +148,14 @@ fn run(android: AndroidApp) {
             app.form = Form::Tablet;
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);
-            Ok(Box::new(Tablet { app, android: handle, content: (0, 0, 0, 0), content_changed: true, last_input: std::time::Instant::now(), keyboard: false }))
+            Ok(Box::new(Tablet {
+                app,
+                android: handle,
+                content: (0, 0, 0, 0),
+                content_changed: true,
+                last_input: std::time::Instant::now(),
+                keyboard: false,
+            }))
         }),
     );
     // The activity is gone; the engine's tasks end with the runtime.
