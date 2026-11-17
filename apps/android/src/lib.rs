@@ -140,6 +140,13 @@ mod android;
 #[cfg(target_os = "android")]
 mod keyboard;
 
+/// Where `config.toml` lives: in the app's own data folder. Android has no config folder the
+/// settings library could find, so it fell back to a folder the app cannot write, and every
+/// setting (the language among them) was lost on the next start.
+pub fn settings_location(data_dir: &std::path::Path) -> craft_settings::Location {
+    craft_settings::Location::Dir(data_dir.join("config"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +248,14 @@ mod tests {
         let mut events = vec![key(Key::C, Modifiers::CTRL | Modifiers::SHIFT), key(Key::V, Modifiers::ALT), Event::Text("v".into())];
         clipboard_keys(&mut events, || panic!("the clipboard was read"));
         assert_eq!(events.len(), 3);
+    }
+
+    #[test]
+    fn settings_live_in_the_app_data_folder() {
+        let data = std::path::Path::new("/data/user/0/de.musiker15.sshcraft/files");
+        match super::settings_location(data) {
+            craft_settings::Location::Dir(dir) => assert!(dir.starts_with(data), "{dir:?}"),
+            other => panic!("settings must be written in the data folder, not {other:?}"),
+        }
     }
 }

@@ -5878,6 +5878,7 @@ dependencies = [
  "android_clipboard",
  "android_logger",
  "async-trait",
+ "craft-settings",
  "eframe",
  "egui",
  "jni 0.22.4",

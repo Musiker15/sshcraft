@@ -19,6 +19,7 @@ crate-type = ["cdylib", "rlib"]
 gl = []
 
 [dependencies]
+craft-settings = { workspace = true }
 egui = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]

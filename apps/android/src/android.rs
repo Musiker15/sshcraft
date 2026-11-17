@@ -235,7 +235,8 @@ fn run(android: AndroidApp) {
     let Some(data_dir) = android.internal_data_path() else {
         return show_problem(&android, tr("SSHCraft could not open its data.").to_string());
     };
-    let config = SessionConfig::for_app(data_dir, runtime.handle().clone(), Arc::new(NoPresence), None);
+    let mut config = SessionConfig::for_app(data_dir.clone(), runtime.handle().clone(), Arc::new(NoPresence), None);
+    config.settings = crate::settings_location(&data_dir);
     let (session, vault) = {
         let _inside = runtime.enter();
         match Session::open(config) {
