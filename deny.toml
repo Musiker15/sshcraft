@@ -43,7 +43,8 @@ crate = "option-ext"
 allow = ["MPL-2.0"]
 
 # The Mozilla CA bundle that rustls uses to check the TLS certificate of a sync server.
-# CDLA-Permissive-2.0 is a permissive licence for data; pdfcraft carries webpki-root-certs too.
+# CDLA-Permissive-2.0 is a permissive licence for data. webpki-roots: the sync websocket's roots;
+# webpki-root-certs: the sync client's HTTPS roots on Android (crates/sync/src/client.rs).
 [[licenses.exceptions]]
 crate = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]
@@ -82,4 +83,9 @@ ignore = [
     { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; Linux keyring store still on zbus 5" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; Linux keyring store still on zbus 5" },
     { id = "RUSTSEC-2023-0071", reason = "local signing only, no network timing oracle; Ed25519 is the default" },
+    # chrono: declared unmaintained on 2026-11-17, with no release to move to. The Craft house
+    # rules require time to go through chrono (house-rules-rust, rule 5), and russh pulls it in
+    # through russh-util. Unmaintained is not a known flaw. Look again when craft-contrib names
+    # another time crate or russh drops chrono.
+    { id = "RUSTSEC-2026-0543", reason = "house rules require chrono; russh depends on it; no known flaw" },
 ]

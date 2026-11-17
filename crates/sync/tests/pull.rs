@@ -150,3 +150,47 @@ async fn an_operator_block_is_not_a_revocation() {
     on_server.set_admin_blocked(device, false).await.unwrap();
     assert!(pull(&b).await.is_ok());
 }
+
+/// Records that arrive before what they belong to (a host before its group, a subgroup before
+/// its parent, as when a group with everything in it moves to the server) apply in the same
+/// pull, not only in the next one: until then the host was missing and the window showed
+/// "FOREIGN KEY constraint failed".
+#[tokio::test]
+async fn records_before_their_group_apply_in_the_same_pull() {
+    use sshcraft_model::model::{ConnectionSettings, Group, GroupId};
+    use sshcraft_proto::record::{RecordHeader, SealedRecord};
+    use sshcraft_sync::items::{ItemBody, SyncItem, encode};
+    let server = TestServer::start().await;
+    let (a, b) = (Dev::new(), Dev::new());
+    let export = create(&server, &a, "a@example.org").await;
+    join(&server, &b, &export).await;
+    let top =
+        Group { id: GroupId::new(), name: "srv".into(), defaults: ConnectionSettings::default(), location: None, parent_id: None, tags: Vec::new() };
+    let sub = Group { id: GroupId::new(), name: "web".into(), parent_id: Some(top.id), ..top.clone() };
+    let mut host = sample_host("web-01");
+    host.group_id = Some(sub.id);
+    write_host(&server, &a, &host, Uuid::new_v4(), 1, 100).await;
+    let (manifest, key) = a.area();
+    let row = a.row();
+    for group in [&sub, &top] {
+        let item = SyncItem { modified_at: 100, body: ItemBody::Group { group: group.clone() } };
+        let header = RecordHeader {
+            record_id: Uuid::new_v4(),
+            area_id: manifest.area_id,
+            version: 1,
+            key_version: manifest.key_version,
+            author_account: sshcraft_proto::identity::AccountPublic(row.account),
+            author_device: row.device_id,
+        };
+        let record = SealedRecord::seal(header, &encode(&item).unwrap(), &key, &a.keys());
+        a.client(&server).await.put_record(&record).await.unwrap();
+    }
+
+    let report = pull(&b).await.unwrap();
+    assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+    assert_eq!(report.applied, 3);
+    let hosts = b.hosts();
+    assert_eq!(hosts.len(), 1, "the host arrives in the same pull");
+    assert_eq!(hosts[0].group_id, Some(sub.id));
+    assert!(pull(&b).await.unwrap().rejected.is_empty(), "nothing is left over for the next pull");
+}

@@ -7,6 +7,7 @@ pub mod fonts;
 pub mod hex;
 pub mod highlight;
 pub mod hints;
+pub mod key_bar;
 mod keys;
 pub mod layout;
 pub mod paint;

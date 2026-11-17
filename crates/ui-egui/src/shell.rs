@@ -160,15 +160,18 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(16.0);
     ui.heading(tr("New tab"));
     ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui.button(tr("Local terminal")).clicked() {
-            app.ui.connect_request = Some(crate::state::ConnectRequest::Local);
-        }
-        if ui.button(tr("Serial port")).clicked() {
-            app.ui.connect_request = Some(crate::state::ConnectRequest::Serial);
-        }
-    });
-    ui.add_space(8.0);
+    // A tablet has neither a local shell nor serial ports to open.
+    if app.form == crate::app::Form::Desktop {
+        ui.horizontal(|ui| {
+            if ui.button(tr("Local terminal")).clicked() {
+                app.ui.connect_request = Some(crate::state::ConnectRequest::Local);
+            }
+            if ui.button(tr("Serial port")).clicked() {
+                app.ui.connect_request = Some(crate::state::ConnectRequest::Serial);
+            }
+        });
+        ui.add_space(8.0);
+    }
     ui.label(tr("Quick connect"));
     let mut text = std::mem::take(&mut app.ui.quick_text);
     if let Some(problem) = crate::quick_connect::field(app, ui, &mut text) {
@@ -191,7 +194,9 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
         })
         .collect();
     hosts.sort_by_key(|row| row.host.name.to_lowercase());
+    let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
         for row in hosts {
             ui.horizontal(|ui| {
                 let (icon, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());

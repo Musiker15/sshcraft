@@ -9,6 +9,8 @@ pub mod confirm;
 pub mod control;
 pub mod data;
 pub mod dropdown;
+pub mod field_paste;
+pub mod file_dialogs;
 pub mod fonts;
 pub mod forms;
 pub mod handoff;

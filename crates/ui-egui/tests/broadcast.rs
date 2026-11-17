@@ -120,7 +120,8 @@ fn focus_reports_go_only_to_their_own_terminal() {
     let palette = TermPalette::dark();
     let mut seen = Vec::new();
     let mut h = egui_kittest::Harness::new_ui(|ui| {
-        let r = TerminalView { term: &mut term, palette: &palette, font: FontId::monospace(14.0), ligatures: true, highlighter: None }.show(ui);
+        let r = TerminalView { term: &mut term, palette: &palette, font: FontId::monospace(14.0), ligatures: true, highlighter: None, touch: false }
+            .show(ui);
         r.response.request_focus();
         seen.push((r.input.clone(), r.reports.clone()));
     });

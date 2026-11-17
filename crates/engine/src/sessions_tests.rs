@@ -317,6 +317,49 @@ async fn agent_unavailable_ends_with_error_and_no_retry() {
     assert!(!statuses.iter().any(|s| matches!(s, SessionStatus::Reconnecting { .. })));
 }
 
+/// A device without the agent (Android) signs with the same key imported into the vault: the
+/// host stays set to the agent, so the devices that have it keep using it.
+#[tokio::test]
+async fn without_the_agent_the_same_key_from_the_vault_signs() {
+    let f = fixture(true).await;
+    let host = f.agent_host();
+    let manager = f.manager_with(Some(f.vault.clone()), false);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| connected_count(s) == 1 || ended(s).is_some()).await;
+    assert_eq!(connected_count(&sink.statuses()), 1, "{:?}", sink.statuses());
+}
+
+/// Without the agent and without that key in the vault, the error still names the agent.
+#[tokio::test]
+async fn without_the_agent_another_vault_key_is_not_used() {
+    let f = fixture(true).await;
+    let other = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let host = Host {
+        forwards: Vec::new(),
+        location: None,
+        id: HostId::new(),
+        name: "other agent key".into(),
+        group_id: None,
+        settings: ConnectionSettings {
+            address: Some("127.0.0.1".into()),
+            port: Some(f.server.port),
+            username: Some("tester".into()),
+            key: Some(KeyRef::Agent { fingerprint: other.fingerprint(russh::keys::HashAlg::Sha256).to_string() }),
+            ..Default::default()
+        },
+        tags: Vec::new(),
+        os: None,
+    };
+    f.store.lock().unwrap().upsert_host(&host).unwrap();
+    let host = host.id;
+    let manager = f.manager_with(Some(f.vault.clone()), false);
+    let sink = Arc::new(RecordingSink::default());
+    manager.open(SessionTarget::Host { host_id: host }, 80, 24, sink.clone());
+    sink.wait_for(|s| ended(s).is_some()).await;
+    assert_eq!(ended_code(&sink.statuses()), Some(ErrorCode::AgentUnavailable));
+}
+
 #[tokio::test]
 async fn agent_key_needs_no_vault() {
     let f = fixture(true).await;

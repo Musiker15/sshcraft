@@ -27,6 +27,7 @@ layering: a crate depends only on lower layers, and nothing below L6 depends on 
 | L5 | `engine` | The session: every action as a command, the agent gate, terminal sessions, forwarding, recording, settings |
 | L6 | `ui-egui` | The egui interface; so far the terminal: layout and painting, the widget, the output pump |
 | exempt | `apps/sshcraft-server` | The sync server program |
+| exempt | `apps/android` | The Android app: `android_main`, the tablet form, Android's clipboard and insets |
 | exempt | `xtask` | `ci`, `fmt`, `clippy`, `test`, `layers`, `assets`, `deny`, `wasm`, `perf` |
 
 Coming with the rebuild: `mcp` (L6), `apps/sshcraft` and `apps/sshcraft-cli`.
@@ -92,7 +93,11 @@ reads `config.toml`.
 
 - **App.** `apps/sshcraft` opens the engine (`SessionConfig::for_app`, the real data folder),
   takes the window handle for Windows Hello and security keys, and runs `SshcraftApp` in eframe.
-  A second start, or a running Tauri version, shows why and stops.
+  A second start, or a running Tauri version, shows why and stops. `apps/android` does the same
+  on Android in the app's private storage (in `MainActivity`, a NativeActivity with a text
+  connection for the keyboard) and sets `Form::Tablet`: no local shell, file dialogs
+  or agents, a key bar under the focused terminal, drag to scroll, and the interface kept inside
+  the area the on-screen keyboard leaves ([android.md](android.md)).
 - **Frame.** `SshcraftApp::frame` takes the answers of earlier commands, the engine's events
   (data changed, questions, links to open) and the answers of file dialogs; fetches what is
   stale; applies tokens, theme and language; runs the shortcuts; draws the shell (sidebar, tabs,

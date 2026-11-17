@@ -955,12 +955,14 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut cancel = false;
     let mut save = false;
     let title = if form.editing { tr("Edit host") } else { tr("New host") };
+    let field_scroll = app.field_paste.scroll;
     let modal = egui::Modal::new(egui::Id::unique(title)).show(ctx, |ui| {
         ui.set_width(540.0);
         ui.heading(title);
         egui::ScrollArea::vertical().max_height(form_height(ui.ctx())).min_scrolled_height(form_height(ui.ctx())).auto_shrink([false, false]).show(
             ui,
             |ui| {
+                crate::field_paste::scroll_into_view(ui, field_scroll);
                 egui::Grid::new("sshcraft-host").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(ui, |ui| {
                     ui.label(tr("Name"));
                     ui.add(egui::TextEdit::singleline(&mut form.host.name).desired_width(280.0));
@@ -1101,12 +1103,14 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut cancel = false;
     let mut save = false;
     let title = if form.editing { tr("Edit group") } else { tr("New group") };
+    let field_scroll = app.field_paste.scroll;
     let modal = egui::Modal::new(egui::Id::unique(title)).show(ctx, |ui| {
         ui.set_width(540.0);
         ui.heading(title);
         egui::ScrollArea::vertical().max_height(form_height(ui.ctx())).min_scrolled_height(form_height(ui.ctx())).auto_shrink([false, false]).show(
             ui,
             |ui| {
+                crate::field_paste::scroll_into_view(ui, field_scroll);
                 egui::Grid::new("sshcraft-group").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(ui, |ui| {
                     ui.label(tr("Name"));
                     ui.add(egui::TextEdit::singleline(&mut form.group.name).desired_width(280.0));

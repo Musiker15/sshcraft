@@ -1,0 +1,56 @@
+[package]
+name = "sshcraft-android"
+description = "SSHCraft on Android: the egui interface in a NativeActivity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# libsshcraft_android.so for the APK; the rlib lets the helpers below be tested on the desktop.
+# Not `sshcraft`: on Windows a cdylib of that name would share sshcraft.pdb with the desktop app.
+[lib]
+name = "sshcraft_android"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# OpenGL ES instead of Vulkan: the emulator's Vulkan driver (gfxstream) crashes under wgpu.
+# `cargo xtask android --emulator` sets it; the APK for tablets never does.
+gl = []
+
+[dependencies]
+craft-settings = { workspace = true }
+egui = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+sshcraft-engine = { workspace = true }
+sshcraft-fido = { workspace = true }
+sshcraft-ui-egui = { workspace = true }
+# Not the workspace's eframe: its accesskit feature needs GameActivity (eframe refuses it with
+# NativeActivity), so screen readers on Android wait for the GameActivity build (docs/gaps.md).
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "android-native-activity"] }
+# The version eframe uses (the storytold fork through [patch]); its AndroidApp type must match.
+winit = { version = "0.30.13", default-features = false, features = ["android-native-activity"] }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+android_clipboard = "0.1.0"
+# The keyboard's text connection (src/keyboard.rs): the VM and the activity from android-activity.
+jni = "0.22.4"
+ndk-context = "0.1.1"
+# Rust's log to logcat: without it a failure on Android leaves no trace.
+android_logger = "0.15.1"
+log = "0.4.35"
+
+# android-activity calls the exported `android_main`, and exporting a symbol counts as unsafe
+# code; the keyboard's text connection needs the raw JavaVM and activity. The workspace forbids
+# unsafe, so this crate states its own lints like `crates/fido`: denied crate-wide and allowed on
+# `android_main` and in `src/keyboard.rs` only. The clippy entries match the workspace.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"
