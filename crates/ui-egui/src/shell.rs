@@ -12,35 +12,186 @@ use crate::widgets::icons::{Icon, draw};
 
 /// The widest a tab may be; its title is cut to fit.
 pub const MAX_TAB_WIDTH: f32 = 200.0;
-const SIDEBAR_WIDTH: f32 = 188.0;
+const SIDEBAR_WIDTH: f32 = 236.0;
+/// The rail of a medium window: symbols only.
+const RAIL_WIDTH: f32 = 76.0;
+/// Narrower than this (a phone held upright), the sidebar folds away behind a menu button.
+pub const NARROW_BELOW: f32 = 700.0;
+/// From this width on, the sidebar shows the names of the pages.
+pub const WIDE_FROM: f32 = 1000.0;
+
+/// How the window lays itself out, chosen by its width alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    /// A bar at the top; the sidebar folds out over the page.
+    Narrow,
+    /// A rail of symbols on the left.
+    Medium,
+    /// The sidebar with the logo, the names of the pages and the sync state.
+    Wide,
+}
+
+/// The layout for a window `width` points wide.
+pub fn layout_for(width: f32) -> Layout {
+    if width < NARROW_BELOW {
+        Layout::Narrow
+    } else if width < WIDE_FROM {
+        Layout::Medium
+    } else {
+        Layout::Wide
+    }
+}
+/// How wide the folded-out sidebar is at most.
+const DRAWER_WIDTH: f32 = 260.0;
 
 fn sidebar_entry(ui: &mut Ui, icon: Icon, label: &str, selected: bool) -> bool {
     let tokens = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
     if selected || response.hovered() {
         ui.painter().rect_filled(rect, tokens.radius, if selected { tokens.row_selected } else { tokens.row_hover });
     }
     let color = if selected { tokens.text_strong } else { tokens.text };
-    draw(ui.painter(), icon, egui::Rect::from_center_size(rect.left_center() + vec2(18.0, 0.0), vec2(16.0, 16.0)), color);
-    ui.painter().text(rect.left_center() + vec2(36.0, 0.0), egui::Align2::LEFT_CENTER, label, FontId::proportional(14.0), color);
+    draw(ui.painter(), icon, egui::Rect::from_center_size(rect.left_center() + vec2(20.0, 0.0), vec2(18.0, 18.0)), color);
+    ui.painter().text(rect.left_center() + vec2(40.0, 0.0), egui::Align2::LEFT_CENTER, label, FontId::proportional(14.0), color);
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, label));
     response.clicked()
 }
 
-fn sidebar(app: &mut SshcraftApp, ui: &mut Ui) {
-    ui.add_space(10.0);
-    for (page, icon, label) in [
+/// The pages the sidebar leads to.
+fn pages() -> [(Page, Icon, &'static str); 6] {
+    [
         (Page::Hosts, Icon::Host, tr("Hosts")),
         (Page::Keys, Icon::Key, tr("Keys")),
         (Page::Snippets, Icon::Snippet, tr("Snippets")),
         (Page::Forwarding, Icon::Forward, tr("Port forwarding")),
         (Page::Logs, Icon::Log, tr("Logs")),
         (Page::Settings, Icon::Settings, tr("Settings")),
-    ] {
+    ]
+}
+
+/// The sidebar's entries; true when one was chosen.
+fn sidebar(app: &mut SshcraftApp, ui: &mut Ui) -> bool {
+    ui.add_space(10.0);
+    let mut chosen = false;
+    for (page, icon, label) in pages() {
         if sidebar_entry(ui, icon, label, app.ui.page == page) {
             app.ui.page = page;
+            chosen = true;
         }
     }
+    chosen
+}
+
+/// The sidebar of a wide window: the logo with the name, the pages, and the sync state at the
+/// bottom when a sync server is set up.
+fn wide_sidebar(app: &mut SshcraftApp, ui: &mut Ui) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_space(16.0);
+    ui.horizontal(|ui| {
+        ui.add_space(6.0);
+        crate::widgets::logo::logo_tile(ui, 32.0);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("SSHCraft").strong().size(16.0).color(tokens.text_strong));
+    });
+    ui.add_space(8.0);
+    sidebar(app, ui);
+    let server = app.data.servers.first().cloned();
+    if let Some(server) = server {
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            ui.add_space(12.0);
+            egui::Frame::new()
+                .fill(tokens.row_hover)
+                .stroke(egui::Stroke::new(1.0, tokens.separator))
+                .corner_radius(tokens.radius_card)
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let id = server.get("id").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+                    let name = server.get("name").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+                    let state = crate::pages::sync::status_text(app.data.sync_status.get(&id).or_else(|| server.get("status")));
+                    ui.label(egui::RichText::new(state).strong().size(13.0));
+                    ui.label(egui::RichText::new(crate::widgets::visible(&name)).size(12.0).color(tokens.text_dim));
+                });
+        });
+    }
+}
+
+/// The rail of a medium window: the logo and one symbol per page, each named for screen readers
+/// and in its hover text.
+fn rail(app: &mut SshcraftApp, ui: &mut Ui) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.vertical_centered(|ui| {
+        ui.add_space(16.0);
+        crate::widgets::logo::logo_tile(ui, 40.0);
+        ui.add_space(12.0);
+        for (page, icon, label) in pages() {
+            let selected = app.ui.page == page;
+            let (rect, response) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::click());
+            if selected || response.hovered() {
+                ui.painter().rect_filled(rect, tokens.radius_card, if selected { tokens.row_selected } else { tokens.row_hover });
+            }
+            draw(
+                ui.painter(),
+                icon,
+                egui::Rect::from_center_size(rect.center(), vec2(20.0, 20.0)),
+                if selected { tokens.text_strong } else { tokens.text_dim },
+            );
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, label));
+            if response.on_hover_text(label).clicked() {
+                app.ui.page = page;
+            }
+            ui.add_space(4.0);
+        }
+    });
+}
+
+/// The bar of a narrow window: the menu button that folds the sidebar out, and the page's name.
+fn nav_bar(app: &mut SshcraftApp, ui: &mut Ui) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        let (rect, response) = ui.allocate_exact_size(vec2(36.0, 32.0), Sense::click());
+        if response.hovered() || app.ui.nav_open {
+            ui.painter().rect_filled(rect, tokens.radius, tokens.row_hover);
+        }
+        // Three lines, the usual sign for a menu.
+        for dy in [-6.0, 0.0, 6.0] {
+            let y = rect.center().y + dy;
+            ui.painter()
+                .line_segment([egui::pos2(rect.center().x - 8.0, y), egui::pos2(rect.center().x + 8.0, y)], egui::Stroke::new(2.0, tokens.text));
+        }
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Menu")));
+        if response.clicked() {
+            app.ui.nav_open = !app.ui.nav_open;
+        }
+        let title = pages().into_iter().find(|(page, _, _)| *page == app.ui.page).map_or_else(
+            || match app.ui.page {
+                Page::Tab(i) => app.ui.tabs.get(i).map_or_else(|| tr("New tab").to_string(), |t| t.title.clone()),
+                _ => String::new(),
+            },
+            |(_, _, label)| label.to_string(),
+        );
+        ui.label(egui::RichText::new(title).strong().color(tokens.text_strong));
+    });
+}
+
+/// The sidebar folded out over the page of a narrow window, from `top` down; a tap beside it
+/// closes it, as does choosing a page.
+fn drawer(app: &mut SshcraftApp, ctx: &egui::Context, top: f32) {
+    let tokens = Tokens::get(ctx);
+    let screen = ctx.content_rect();
+    let area = egui::Rect::from_min_max(egui::pos2(screen.left(), top), screen.max);
+    egui::Area::new(egui::Id::unique("sshcraft-drawer")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
+        ui.set_min_size(area.size());
+        let backdrop = ui.interact(area, ui.scope_id().with("backdrop"), Sense::click());
+        backdrop.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Close the menu")));
+        ui.painter().rect_filled(area, 0.0, egui::Color32::from_black_alpha(140));
+        let side = egui::Rect::from_min_size(area.min, vec2(DRAWER_WIDTH.min(area.width() * 0.8), area.height()));
+        ui.painter().rect_filled(side, 0.0, tokens.sidebar);
+        let chosen = ui.scope_builder(egui::UiBuilder::new().max_rect(side.shrink2(vec2(8.0, 0.0))), |ui| sidebar(app, ui)).inner;
+        if chosen || backdrop.clicked() {
+            app.ui.nav_open = false;
+        }
+    });
 }
 
 /// The tab bar: one entry per tab with its title cut to [`MAX_TAB_WIDTH`], a close button, and
@@ -217,10 +368,31 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     // The menus and the title bar span the window, above the sidebar.
     crate::window::strip(app, ui);
-    egui::Panel::left("sshcraft-sidebar")
-        .exact_size(SIDEBAR_WIDTH)
-        .frame(egui::Frame::new().fill(tokens.sidebar).inner_margin(vec2(8.0, 0.0)))
-        .show(ui, |ui| sidebar(app, ui));
+    // A phone held upright has no room for the sidebar beside the page: it folds away behind a
+    // menu button and opens over the page.
+    let mut drawer_top = None;
+    match layout_for(ui.ctx().content_rect().width()) {
+        Layout::Narrow => {
+            let bar = egui::Panel::top("sshcraft-nav-bar")
+                .frame(egui::Frame::new().fill(tokens.sidebar).inner_margin(vec2(8.0, 4.0)))
+                .show(ui, |ui| nav_bar(app, ui));
+            drawer_top = Some(bar.response.rect.bottom());
+        }
+        Layout::Medium => {
+            app.ui.nav_open = false;
+            egui::Panel::left("sshcraft-rail")
+                .exact_size(RAIL_WIDTH)
+                .frame(egui::Frame::new().fill(tokens.sidebar).stroke(egui::Stroke::new(1.0, tokens.separator)))
+                .show(ui, |ui| rail(app, ui));
+        }
+        Layout::Wide => {
+            app.ui.nav_open = false;
+            egui::Panel::left("sshcraft-sidebar")
+                .exact_size(SIDEBAR_WIDTH)
+                .frame(egui::Frame::new().fill(tokens.sidebar).stroke(egui::Stroke::new(1.0, tokens.separator)).inner_margin(vec2(12.0, 0.0)))
+                .show(ui, |ui| wide_sidebar(app, ui));
+        }
+    }
     if !app.ui.tabs.is_empty() {
         egui::Panel::top("sshcraft-tabs").frame(egui::Frame::new().fill(tokens.bg).inner_margin(vec2(8.0, 6.0))).show(ui, |ui| tab_bar(app, ui));
     }
@@ -234,4 +406,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         Page::Tab(i) if i < app.ui.tabs.len() => crate::panes::show(app, ui, i),
         Page::Tab(_) => new_tab_page(app, ui),
     });
+    if let Some(top) = drawer_top
+        && app.ui.nav_open
+    {
+        drawer(app, &ui.ctx().clone(), top);
+    }
 }

@@ -900,6 +900,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "An SSH client with end-to-end encrypted, self-hosted sync." => "Ein SSH-Client mit Ende-zu-Ende-verschlüsseltem, selbst gehostetem Sync.",
         "Licence: {licence}" => "Lizenz: {licence}",
         "Menu" => "Menü",
+        "Close the menu" => "Menü schließen",
         "Scroll menu up" => "Menü nach oben scrollen",
         "Scroll menu down" => "Menü nach unten scrollen",
         "Show All" => "Alle einblenden",

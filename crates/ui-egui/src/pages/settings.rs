@@ -567,9 +567,12 @@ fn shortcuts(app: &mut SshcraftApp, ui: &mut Ui) {
     }
     ui.add_space(6.0);
     let mut action: Option<(usize, &'static str)> = None;
-    egui::Grid::new("sshcraft-shortcuts").num_columns(3).min_col_width(120.0).spacing([16.0, 8.0]).show(ui, |ui| {
-        for (i, command) in ui_commands().iter().enumerate() {
-            ui.label(tr(command.label));
+    // One row per command that wraps when the window is narrow: the name and the shortcut keep
+    // their columns while there is room and are cut (full text on hover), the buttons move to the
+    // next line instead of leaving the window.
+    for (i, command) in ui_commands().iter().enumerate() {
+        ui.horizontal_wrapped(|ui| {
+            ui.add_sized(egui::vec2(240.0, 22.0), egui::Label::new(tr(command.label)).truncate());
             let chords = app.bindings.chords(command.id);
             let text = if app.ui.settings.recording == Some(i) {
                 tr("Press a key combination (Escape cancels)").to_string()
@@ -588,21 +591,19 @@ fn shortcuts(app: &mut SshcraftApp, ui: &mut Ui) {
                     .collect::<Vec<_>>()
                     .join(", ")
             };
-            ui.label(egui::RichText::new(text).monospace());
-            ui.horizontal(|ui| {
-                if ui.button(tr("Change")).clicked() {
-                    action = Some((i, "change"));
-                }
-                if ui.add_enabled(!chords.is_empty(), egui::Button::new(tr("Remove"))).clicked() {
-                    action = Some((i, "remove"));
-                }
-                if ui.button(tr("Default")).clicked() {
-                    action = Some((i, "default"));
-                }
-            });
-            ui.end_row();
-        }
-    });
+            ui.add_sized(egui::vec2(260.0, 22.0), egui::Label::new(egui::RichText::new(text).monospace()).truncate());
+            if ui.button(tr("Change")).clicked() {
+                action = Some((i, "change"));
+            }
+            if ui.add_enabled(!chords.is_empty(), egui::Button::new(tr("Remove"))).clicked() {
+                action = Some((i, "remove"));
+            }
+            if ui.button(tr("Default")).clicked() {
+                action = Some((i, "default"));
+            }
+        });
+        ui.add_space(4.0);
+    }
     let Some((i, what)) = action else { return };
     let Some(command) = ui_commands().get(i) else { return };
     app.ui.settings.error = None;

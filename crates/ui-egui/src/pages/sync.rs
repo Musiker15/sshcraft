@@ -143,7 +143,7 @@ fn text(v: &Value, key: &str) -> String {
 }
 
 /// A server's state, in words.
-fn status_text(status: Option<&Value>) -> String {
+pub(crate) fn status_text(status: Option<&Value>) -> String {
     let Some(s) = status else { return tr("Sync off").to_string() };
     match s.get("state").and_then(Value::as_str).unwrap_or_default() {
         "idle" => tr("Up to date").to_string(),

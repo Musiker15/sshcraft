@@ -57,6 +57,9 @@ pub struct TabState {
 #[serde(default)]
 pub struct UiState {
     pub page: Page,
+    /// In a narrow window, whether the sidebar is folded out over the page (crate::shell).
+    #[serde(skip)]
+    pub nav_open: bool,
     pub tabs: Vec<TabState>,
     /// The id the next new-pane page gets.
     pub next_pane: u64,
