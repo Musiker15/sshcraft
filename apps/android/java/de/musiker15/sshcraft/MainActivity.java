@@ -30,14 +30,6 @@ public class MainActivity extends NativeActivity {
     /** At most this many characters wait; a keyboard cannot flood the app. */
     private static final int MAX_WAITING = 1 << 20;
 
-    /**
-     * What the system covers of the window, in pixels (keyboard, status and navigation bars,
-     * camera cutout), packed as four 16-bit values: left, top, right, bottom. Android 15 draws
-     * apps edge to edge and no longer shrinks the window for the keyboard, so the app keeps
-     * these parts free itself.
-     */
-    private static volatile long covered;
-
     private InputView input;
 
     @Override
@@ -58,20 +50,26 @@ public class MainActivity extends NativeActivity {
             }
         }
         input.requestFocus();
-        getWindow().getDecorView().setOnApplyWindowInsetsListener((view, insets) -> {
-            Insets used = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime() | WindowInsets.Type.displayCutout());
-            covered = pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48;
-            return view.onApplyWindowInsets(insets);
-        });
     }
 
     private static long pack(int pixels) {
         return Math.max(0, Math.min(pixels, 0xFFFF));
     }
 
-    /** {@link #covered}: left, top, right and bottom in pixels, 16 bits each. */
-    public static long covered() {
-        return covered;
+    /**
+     * What the system covers of the window now, in pixels (keyboard, status and navigation bars,
+     * camera cutout), packed as four 16-bit values: left, top, right, bottom. Android 15 draws
+     * apps edge to edge and no longer shrinks the window for the keyboard, so the app keeps
+     * these parts free itself. Read from the window each time, so no callback can be missed.
+     */
+    public long covered() {
+        View decor = getWindow().getDecorView();
+        WindowInsets insets = decor == null ? null : decor.getRootWindowInsets();
+        if (insets == null) {
+            return 0;
+        }
+        Insets used = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime() | WindowInsets.Type.displayCutout());
+        return pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48;
     }
 
     /** The oldest text the keyboard committed, or null when there is none. */
@@ -88,7 +86,16 @@ public class MainActivity extends NativeActivity {
             }
             if (show) {
                 input.requestFocus();
-                manager.showSoftInput(input, 0);
+                // On the next turn of the loop: the keyboard binds to a newly focused view only
+                // after the focus change went through.
+                input.post(() -> {
+                    manager.restartInput(input);
+                    manager.showSoftInput(input, 0);
+                    // The way for an app drawn edge to edge (Android 11 and later).
+                    if (getWindow().getInsetsController() != null) {
+                        getWindow().getInsetsController().show(WindowInsets.Type.ime());
+                    }
+                });
             } else {
                 manager.hideSoftInputFromWindow(input.getWindowToken(), 0);
             }

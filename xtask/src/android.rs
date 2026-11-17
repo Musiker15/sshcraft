@@ -187,7 +187,7 @@ pub fn manifest(version: &str, code: u32) -> String {
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|locale|layoutDirection|fontScale|colorMode|touchscreen|mcc|mnc"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="stateHidden|adjustResize">
             <meta-data android:name="android.app.lib_name" android:value="{LIB}" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -446,7 +446,7 @@ mod tests {
             r#"android:name="de.musiker15.sshcraft.MainActivity""#,
             r#"android:hasCode="true""#,
             r#"android:value="sshcraft_android""#,
-            r#"android:windowSoftInputMode="adjustResize""#,
+            r#"android:windowSoftInputMode="stateHidden|adjustResize""#,
             r#"android:extractNativeLibs="false""#,
             r#"android:allowBackup="false""#,
             "keyboardHidden",

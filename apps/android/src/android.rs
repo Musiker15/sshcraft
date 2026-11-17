@@ -36,6 +36,27 @@ struct Tablet {
     last_input: std::time::Instant,
     /// Whether the on-screen keyboard was asked for last.
     keyboard: bool,
+    /// The last request for text and when it was made (see crate::keep_keyboard).
+    last_ime: Option<(egui::output::IMEOutput, std::time::Instant)>,
+    /// Calls into MainActivity that failed, each said once.
+    reported: Vec<String>,
+}
+
+impl Tablet {
+    /// Says once why a call into the Java side failed: without it the keyboard or the insets
+    /// stop working with nothing to show for it.
+    fn report<T>(&mut self, result: Result<T, String>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(why) => {
+                if !self.reported.contains(&why) && self.reported.len() < 8 {
+                    self.app.toasts.error(&format!("Android: {why}"));
+                    self.reported.push(why);
+                }
+                None
+            }
+        }
+    }
 }
 
 impl eframe::App for Tablet {
@@ -58,9 +79,33 @@ impl eframe::App for Tablet {
         }
         // The keyboard follows whether a terminal or a field wants text, through the view with
         // the text connection (crate::keyboard).
-        let wanted = ui.ctx().output(|o| o.ime.is_some());
+        let ime = ui.ctx().output(|o| o.ime.clone());
+        let tapped = ui.input(|i| i.pointer.any_pressed());
+        match ime {
+            Some(ime) => self.last_ime = Some((ime, std::time::Instant::now())),
+            // The user tapped elsewhere: the field is left and the keyboard goes.
+            None if tapped => self.last_ime = None,
+            None => {
+                // Opening the keyboard moves the interface up, and the field may lose its focus
+                // in the frame in between: the request of a moment ago stands, for egui-winit
+                // too, which would close the keyboard at once, and the field gets its focus back.
+                match &self.last_ime {
+                    Some((ime, at)) if crate::keep_keyboard(at.elapsed()) => {
+                        let ime = ime.clone();
+                        if ui.ctx().memory(|m| m.focused().is_none()) {
+                            ui.ctx().memory_mut(|m| m.request_focus(ime.owner));
+                        }
+                        ui.ctx().output_mut(|o| o.ime = Some(ime));
+                        ui.ctx().request_repaint_after(crate::KEEP_KEYBOARD);
+                    }
+                    _ => self.last_ime = None,
+                }
+            }
+        }
+        let wanted = self.last_ime.is_some();
         if wanted != self.keyboard {
-            crate::keyboard::show(wanted);
+            let shown = crate::keyboard::show(wanted);
+            self.report(shown);
             self.keyboard = wanted;
         }
     }
@@ -77,7 +122,8 @@ impl eframe::App for Tablet {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let rect = self.android.content_rect();
         let content = (rect.left, rect.top, rect.right, rect.bottom);
-        let edges = crate::unpack_covered(crate::keyboard::covered());
+        let covered = crate::keyboard::covered();
+        let edges = self.report(covered).map_or(self.edges, crate::unpack_covered);
         if (content, edges) != (self.content, self.edges) {
             self.content = content;
             self.edges = edges;
@@ -94,7 +140,8 @@ impl eframe::App for Tablet {
             raw_input.safe_area_insets = Some(egui::SafeAreaInsets(covered));
         }
         crate::clipboard_keys(&mut raw_input.events, clipboard_text);
-        for text in crate::keyboard::take_text() {
+        let taken = crate::keyboard::take_text();
+        for text in self.report(taken).unwrap_or_default() {
             raw_input.events.push(crate::committed(text));
         }
     }
@@ -163,6 +210,8 @@ fn run(android: AndroidApp) {
                 content_changed: true,
                 last_input: std::time::Instant::now(),
                 keyboard: false,
+                last_ime: None,
+                reported: Vec::new(),
             }))
         }),
     );

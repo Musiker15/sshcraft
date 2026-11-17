@@ -33,7 +33,7 @@ pub(crate) fn with_activity<T>(f: impl FnOnce(&mut Env, &JObject) -> jni::errors
 }
 
 /// What the keyboard committed since the last frame, oldest first.
-pub fn take_text() -> Vec<String> {
+pub fn take_text() -> Result<Vec<String>, String> {
     with_activity(|env, activity| {
         let class = env.get_object_class(activity)?;
         let mut out = Vec::new();
@@ -47,23 +47,21 @@ pub fn take_text() -> Vec<String> {
         }
         Ok(out)
     })
-    .unwrap_or_default()
+    .map_err(|e| format!("takeText: {e}"))
 }
 
 /// What the system covers of the window, packed as `MainActivity.covered` packs it.
-pub fn covered() -> u64 {
-    with_activity(|env, activity| {
-        let class = env.get_object_class(activity)?;
-        env.call_static_method(&class, jni_str!("covered"), jni_sig!("()J"), &[])?.j()
-    })
-    .map_or(0, |packed| packed as u64)
+pub fn covered() -> Result<u64, String> {
+    with_activity(|env, activity| env.call_method(activity, jni_str!("covered"), jni_sig!("()J"), &[])?.j())
+        .map(|packed| packed as u64)
+        .map_err(|e| format!("covered: {e}"))
 }
 
 /// Shows the keyboard for the text connection, or hides it.
-pub fn show(visible: bool) {
-    // A keyboard that cannot be shown leaves the hardware keyboard and the key bar.
-    let _ = with_activity(|env, activity| {
+pub fn show(visible: bool) -> Result<(), String> {
+    with_activity(|env, activity| {
         env.call_method(activity, jni_str!("keyboard"), jni_sig!("(Z)V"), &[JValue::Bool(visible)])?;
         Ok(())
-    });
+    })
+    .map_err(|e| format!("keyboard: {e}"))
 }

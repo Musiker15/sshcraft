@@ -45,6 +45,17 @@ pub fn covered_edges((left, top, right, bottom): (i32, i32, i32, i32), ppp: f32)
     egui::epaint::MarginF32 { left: points(left), top: points(top), right: points(right), bottom: points(bottom) }
 }
 
+/// How long the keyboard stays asked for after the last frame that wanted it.
+pub const KEEP_KEYBOARD: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Whether the keyboard stays open in a frame that does not ask for it, `since` the last frame
+/// that did. Opening the keyboard moves the interface up (the window insets change), and a frame
+/// in between may lose the field's request for text; closing then would close the keyboard the
+/// user just opened.
+pub fn keep_keyboard(since: std::time::Duration) -> bool {
+    since < KEEP_KEYBOARD
+}
+
 /// When to draw the next frame without input: at once after the visible area changed (the
 /// on-screen keyboard opened or closed, the tablet turned), often for a while after input (the
 /// keyboard animates after a tap), and once a second otherwise, since Android tells the app
@@ -170,6 +181,14 @@ mod tests {
         let java = include_str!("../java/de/musiker15/sshcraft/MainActivity.java");
         assert!(java.contains("pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48"));
         assert!(java.contains("Math.min(pixels, 0xFFFF)"));
+    }
+
+    #[test]
+    fn a_single_frame_without_a_field_keeps_the_keyboard() {
+        use std::time::Duration;
+        assert!(keep_keyboard(Duration::from_millis(16)), "one frame of a layout change");
+        assert!(keep_keyboard(Duration::from_millis(300)));
+        assert!(!keep_keyboard(Duration::from_millis(500)), "the field was left");
     }
 
     #[test]
