@@ -25,21 +25,54 @@ pub fn covered(window: egui::Rect, content: (i32, i32, i32, i32), ppp: f32) -> e
     }
 }
 
-/// Puts a hardware keyboard's paste keys (Ctrl+Shift+V, Shift+Insert) into a paste of `clipboard`
-/// (Android's clipboard, read only when such a key came). egui's own clipboard on Android knows
-/// only what was copied inside the app.
-pub fn paste_keys(events: &mut Vec<egui::Event>, clipboard: impl FnOnce() -> Option<String>) {
-    let is_paste = |e: &egui::Event| {
-        matches!(e, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, .. } if modifiers.ctrl && modifiers.shift)
-            || matches!(e, egui::Event::Key { key: egui::Key::Insert, pressed: true, modifiers, .. } if modifiers.shift_only())
-    };
-    let Some(at) = events.iter().position(is_paste) else { return };
-    match clipboard() {
-        Some(text) if !text.is_empty() => events[at] = egui::Event::Paste(text),
-        _ => {
-            events.remove(at);
+/// What a hardware keyboard's clipboard key does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClipboardKey {
+    Copy,
+    Cut,
+    Paste,
+}
+
+fn clipboard_key(event: &egui::Event) -> Option<ClipboardKey> {
+    let egui::Event::Key { key, pressed: true, modifiers, .. } = event else { return None };
+    match key {
+        egui::Key::C if modifiers.command_only() => Some(ClipboardKey::Copy),
+        egui::Key::X if modifiers.command_only() => Some(ClipboardKey::Cut),
+        // Ctrl+V in a field; Ctrl+Shift+V and Shift+Insert in the terminal.
+        egui::Key::V if modifiers.command_only() || (modifiers.ctrl && modifiers.shift && !modifiers.alt) => Some(ClipboardKey::Paste),
+        egui::Key::Insert if modifiers.shift_only() => Some(ClipboardKey::Paste),
+        _ => None,
+    }
+}
+
+/// A hardware keyboard's clipboard keys, as egui-winit makes them on the desktop, but with
+/// Android's clipboard: Ctrl+C and Ctrl+X become copy and cut, the paste keys a paste of
+/// `clipboard` (read only when such a key came; nothing is pasted from an empty one). The app
+/// turns egui-winit's own handling off, because its clipboard on Android reaches no other app.
+pub fn clipboard_keys(events: &mut Vec<egui::Event>, clipboard: impl FnOnce() -> Option<String>) {
+    if !events.iter().any(|e| clipboard_key(e).is_some()) {
+        return;
+    }
+    // Read once per frame, however many paste keys came.
+    let mut read = Some(clipboard);
+    let mut text: Option<String> = None;
+    let mut out = Vec::with_capacity(events.len());
+    for event in events.drain(..) {
+        match clipboard_key(&event) {
+            None => out.push(event),
+            Some(ClipboardKey::Copy) => out.push(egui::Event::Copy),
+            Some(ClipboardKey::Cut) => out.push(egui::Event::Cut),
+            Some(ClipboardKey::Paste) => {
+                if let Some(read) = read.take() {
+                    text = read().filter(|t| !t.is_empty()).map(|t| t.replace("\r\n", "\n"));
+                }
+                if let Some(text) = &text {
+                    out.push(egui::Event::Paste(text.clone()));
+                }
+            }
         }
     }
+    *events = out;
 }
 
 #[cfg(target_os = "android")]
@@ -77,19 +110,29 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_shift_v_pastes_the_system_clipboard() {
-        let mut events = vec![Event::Text("a".into()), key(Key::V, Modifiers::CTRL | Modifiers::SHIFT)];
-        paste_keys(&mut events, || Some("from android".into()));
-        assert_eq!(events, vec![Event::Text("a".into()), Event::Paste("from android".into())]);
+    fn the_paste_keys_paste_the_system_clipboard() {
+        for paste in [key(Key::V, Modifiers::COMMAND), key(Key::V, Modifiers::CTRL | Modifiers::SHIFT), key(Key::Insert, Modifiers::SHIFT)] {
+            let mut events = vec![Event::Text("a".into()), paste];
+            clipboard_keys(&mut events, || Some("from\r\nandroid".into()));
+            assert_eq!(events, vec![Event::Text("a".into()), Event::Paste("from\nandroid".into())]);
+        }
         let mut events = vec![key(Key::Insert, Modifiers::SHIFT)];
-        paste_keys(&mut events, || None);
+        clipboard_keys(&mut events, || None);
         assert!(events.is_empty(), "an empty clipboard pastes nothing");
     }
 
     #[test]
+    fn ctrl_c_and_x_copy_and_cut() {
+        let mut events = vec![key(Key::C, Modifiers::COMMAND), key(Key::X, Modifiers::COMMAND)];
+        clipboard_keys(&mut events, || panic!("copying reads no clipboard"));
+        assert_eq!(events, vec![Event::Copy, Event::Cut]);
+    }
+
+    #[test]
     fn other_keys_never_read_the_clipboard() {
-        let mut events = vec![key(Key::V, Modifiers::CTRL), Event::Text("v".into())];
-        paste_keys(&mut events, || panic!("the clipboard was read"));
-        assert_eq!(events.len(), 2);
+        // Ctrl+Shift+C is the terminal's own copy key; Alt+V is typed as usual.
+        let mut events = vec![key(Key::C, Modifiers::CTRL | Modifiers::SHIFT), key(Key::V, Modifiers::ALT), Event::Text("v".into())];
+        clipboard_keys(&mut events, || panic!("the clipboard was read"));
+        assert_eq!(events.len(), 3);
     }
 }

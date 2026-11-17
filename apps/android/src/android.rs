@@ -55,14 +55,14 @@ impl eframe::App for Tablet {
     }
 
     /// The parts the system covers (status bar, navigation bar, on-screen keyboard) stay free,
-    /// and a hardware keyboard's paste keys paste the system clipboard.
+    /// and a hardware keyboard's clipboard keys use the system clipboard.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let content = self.android.content_rect();
         if let Some(window) = raw_input.screen_rect {
             let covered = crate::covered(window, (content.left, content.top, content.right, content.bottom), ctx.pixels_per_point());
             raw_input.safe_area_insets = Some(egui::SafeAreaInsets(covered));
         }
-        crate::paste_keys(&mut raw_input.events, clipboard_text);
+        crate::clipboard_keys(&mut raw_input.events, clipboard_text);
     }
 }
 
@@ -77,7 +77,9 @@ impl eframe::App for Problem {
 }
 
 fn options(android: &AndroidApp) -> eframe::NativeOptions {
-    eframe::NativeOptions { android_app: Some(android.clone()), ..Default::default() }
+    // egui-winit's clipboard keys use its own clipboard, which on Android reaches no other app;
+    // clipboard_keys handles them with Android's instead.
+    eframe::NativeOptions { android_app: Some(android.clone()), clipboard_shortcuts: false, ..Default::default() }
 }
 
 fn show_problem(android: &AndroidApp, text: String) {
