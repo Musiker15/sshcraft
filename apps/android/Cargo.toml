@@ -24,7 +24,7 @@ sshcraft-ui-egui = { workspace = true }
 # NativeActivity), so screen readers on Android wait for the GameActivity build (docs/gaps.md).
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "android-native-activity"] }
 # The version eframe uses (the storytold fork through [patch]); its AndroidApp type must match.
-winit = { version = "0.30.13", features = ["android-native-activity"] }
+winit = { version = "0.30.13", default-features = false, features = ["android-native-activity"] }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 android_clipboard = "0.1.0"
