@@ -36,6 +36,7 @@ These need the repository's settings and secrets, so only the owner sets them up
    | `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` | Windows signing with a .pfx |
    | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE` | Windows signing with Azure Trusted Signing instead |
    | `LINUX_SIGNING_KEY` | the GPG signature of the rpm packages and the Flatpak bundle |
+   | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` | the Android release key (the keystore as base64, key alias `sshcraft`) for [`android-release.yml`](../.github/workflows/android-release.yml) |
 
 The maintainer field of the deb and rpm packages says `SSHCraft maintainers`;
 `SSHCRAFT_MAINTAINER` (`Name <address>`) in the environment of `packaging/linux/package.sh`
@@ -101,10 +102,17 @@ gh release create v<v> --draft --target <commit> --title "SSHCraft v<v>" --gener
 The draft then has no macOS packages and nothing signed but the APK, which the release notes
 should say. The maintainer checks and publishes it as above.
 
-**Android.** The shared workflow has no Android SDK, so the APK is always built locally with
-`cargo xtask android` ([android.md](android.md)) and signed with the release key, which is kept
-outside the repository (`SSHCRAFT_ANDROID_KEYSTORE`, `SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE`). Every
-APK of a release must be signed with that same key, or Android refuses the update.
+**Android.** The shared workflow has no Android SDK, so SSHCraft builds the APK in a job of its
+own, [`android-release.yml`](../.github/workflows/android-release.yml). A push to `release` signs
+it with the release key from the `release` environment, waits for the draft of that version (at
+most an hour) and attaches the APK; it stops when the two secrets are missing rather than sign with
+another key. A run by hand builds a test APK with a throwaway debug key and keeps it as the
+artifact `android-test-apk`. For an unsigned release put together by hand, the APK comes from the
+artifact `android-apk` of that job or is built locally with `cargo xtask android`
+([android.md](android.md)), with `SSHCRAFT_ANDROID_KEYSTORE` and
+`SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE` naming the release key. Every APK of a release must be
+signed with that same key, or Android refuses the update. The APK is added after the draft's
+`SHA256SUMS.txt` was made; add its line when you attach it by hand.
 
 ## What gets built
 
@@ -115,7 +123,7 @@ APK of a release must be signed with that same key, or Android refuses the updat
 | Linux x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
 | Flatpak x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
 | FreeBSD 15 x86_64, aarch64 | `sshcraft-<v>-freebsd-<arch>.tar.gz` |
-| Android 13+ tablets, arm64 | `sshcraft-<v>-android-arm64.apk`, built locally ([android.md](android.md)) |
+| Android 13+ tablets and phones, arm64 | `sshcraft-<v>-android-arm64.apk`, from `android-release.yml` or built locally ([android.md](android.md)) |
 | Sync server, Linux x86_64 and aarch64 | `sshcraft-server-<v>-linux-<arch>.tar.gz`: the program, a systemd unit and an example environment file ([server.md](server.md#install-the-program)) |
 
 SSHCraft has no web build: SSH needs TCP.
