@@ -51,7 +51,7 @@ pub struct Store {
     pub(crate) conn: rusqlite::Connection,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE groups (
@@ -350,6 +350,17 @@ impl Store {
         if version < 13 {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(crate::trash::SCHEMA_V13)?;
+            tx.pragma_update(None, "user_version", 13)?;
+            tx.commit()?;
+        }
+        if version < 14 {
+            let tx = conn.unchecked_transaction()?;
+            // Only when missing: a database rebuilt from older steps may have it already.
+            let has: bool =
+                tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('sync_servers') WHERE name = 'sync_all')", [], |r| r.get(0))?;
+            if !has {
+                tx.execute_batch(sync_store::SCHEMA_V14)?;
+            }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -399,10 +410,11 @@ impl Store {
         tx.execute(
             // The location is set on insert only (or taken from the parent); moving an item goes
             // through `set_location`, so a form that sends an item back without its location
-            // cannot move it.
+            // cannot move it. A new item without one goes to the server that syncs everything.
             "INSERT INTO groups (id, name, defaults, location, parent_id, tags)
              VALUES (?1, ?2, ?3,
-                 CASE WHEN ?5 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?5) ELSE ?4 END,
+                 CASE WHEN ?5 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?5)
+                     ELSE COALESCE(?4, (SELECT id FROM sync_servers WHERE sync_all = 1 AND sync_enabled = 1 AND revoked = 0 LIMIT 1)) END,
                  ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, defaults = excluded.defaults,
                  parent_id = excluded.parent_id, tags = excluded.tags,
@@ -477,7 +489,8 @@ impl Store {
             // A host in a group always lives where its group lives.
             "INSERT INTO hosts (id, name, group_id, settings, location, tags, os, forwards)
              VALUES (?1, ?2, ?3, ?4,
-                 CASE WHEN ?3 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?3) ELSE ?5 END,
+                 CASE WHEN ?3 IS NOT NULL THEN (SELECT location FROM groups WHERE id = ?3)
+                     ELSE COALESCE(?5, (SELECT id FROM sync_servers WHERE sync_all = 1 AND sync_enabled = 1 AND revoked = 0 LIMIT 1)) END,
                  ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, group_id = excluded.group_id,
              settings = excluded.settings, tags = excluded.tags, os = excluded.os,
@@ -659,7 +672,11 @@ impl Store {
         self.conn.execute(
             "INSERT INTO keys (id, name, algorithm, fingerprint, public_key, sealed_secret, location,
                  kind, protected, certificate)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6,
+                 COALESCE(?7, CASE WHEN ?8 = 'vault' THEN
+                     (SELECT id FROM sync_servers WHERE sync_all = 1 AND sync_enabled = 1 AND sync_keys = 1
+                      AND revoked = 0 LIMIT 1) END),
+                 ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, algorithm = excluded.algorithm,
              fingerprint = excluded.fingerprint, public_key = excluded.public_key,
              sealed_secret = excluded.sealed_secret, kind = excluded.kind,

@@ -261,3 +261,88 @@ fn device_key_cannot_move_to_server() {
     // Back to "only on this device" is fine.
     store.set_location(ItemKind::Key, &id, None).unwrap();
 }
+
+fn key_record(kind: sshcraft_model::keytypes::KeyKind) -> KeyRecord {
+    KeyRecord {
+        id: KeyId::new(),
+        name: "k".into(),
+        algorithm: "ssh-ed25519".into(),
+        fingerprint: "SHA256:x".into(),
+        public_key: "ssh-ed25519 AAAA".into(),
+        sealed_secret: vec![1],
+        location: None,
+        kind,
+        protected: false,
+        certificate: None,
+    }
+}
+
+/// With "sync everything" on for a server, what is made here goes there: top-level groups and
+/// hosts, identities, and keys when the server syncs keys. A host in a group still follows its
+/// group, and a key bound to this device stays here.
+#[test]
+fn new_items_go_to_the_server_that_syncs_everything() {
+    let store = Store::open_in_memory().unwrap();
+    let s = server(&store);
+    store.set_sync_all(s, true).unwrap();
+    let g = group("prod");
+    store.upsert_group(&g).unwrap();
+    let top = host("web", None);
+    store.upsert_host(&top).unwrap();
+    assert_eq!(store.location_of(ItemKind::Group, &g.id.0.to_string()).unwrap(), Some(s));
+    assert_eq!(location_of_host(&store, top.id), Some(s));
+    let key = key_record(sshcraft_model::keytypes::KeyKind::Vault);
+    store.put_key_record(&key).unwrap();
+    assert_eq!(store.location_of(ItemKind::Key, &key.id.0.to_string()).unwrap(), Some(s), "set_sync_all turns key sync on");
+    let device = key_record(sshcraft_model::keytypes::KeyKind::Device);
+    store.put_key_record(&device).unwrap();
+    assert_eq!(store.location_of(ItemKind::Key, &device.id.0.to_string()).unwrap(), None, "a device key never leaves");
+}
+
+/// The counter-check: without "sync everything" new items stay on this device, as before.
+#[test]
+fn without_sync_everything_new_items_stay_here() {
+    let store = Store::open_in_memory().unwrap();
+    let _s = server(&store);
+    let top = host("web", None);
+    store.upsert_host(&top).unwrap();
+    assert_eq!(location_of_host(&store, top.id), None);
+}
+
+/// One server at a time syncs everything; switching it off keeps items where they are, and a
+/// server with sync switched off takes nothing.
+#[test]
+fn one_server_syncs_everything_at_a_time() {
+    let store = Store::open_in_memory().unwrap();
+    let a = server(&store);
+    let b = server(&store);
+    store.set_sync_all(a, true).unwrap();
+    store.set_sync_all(b, true).unwrap();
+    assert_eq!(store.everything_server().unwrap(), Some(b));
+    assert!(!store.sync_all(a).unwrap());
+    store.update_server_flags(b, false, true).unwrap();
+    assert_eq!(store.everything_server().unwrap(), None, "a server with sync off takes nothing");
+    let h = host("db", None);
+    store.upsert_host(&h).unwrap();
+    assert_eq!(location_of_host(&store, h.id), None);
+}
+
+/// What still lives only here when "sync everything" goes on: the top of each tree.
+#[test]
+fn local_roots_are_the_tops_of_what_is_here() {
+    let store = Store::open_in_memory().unwrap();
+    let g = group("prod");
+    store.upsert_group(&g).unwrap();
+    let inside = host("web", Some(g.id));
+    store.upsert_host(&inside).unwrap();
+    let top = host("db", None);
+    store.upsert_host(&top).unwrap();
+    store.put_key_record(&key_record(sshcraft_model::keytypes::KeyKind::Vault)).unwrap();
+    store.put_key_record(&key_record(sshcraft_model::keytypes::KeyKind::Device)).unwrap();
+    let roots = store.local_roots().unwrap();
+    let kinds: Vec<ItemKind> = roots.iter().map(|(k, _)| *k).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == ItemKind::Group).count(), 1);
+    assert_eq!(kinds.iter().filter(|k| **k == ItemKind::Host).count(), 1, "the grouped host goes with its group");
+    assert_eq!(kinds.iter().filter(|k| **k == ItemKind::Key).count(), 1, "the device key stays");
+    assert!(roots.contains(&(ItemKind::Host, top.id.0.to_string())));
+}

@@ -299,3 +299,26 @@ fn moving_a_host_in_a_group_moves_its_top_group() {
     until(&mut h, "the moved host", |app| app.data.hosts.first().and_then(|r| r.host.location.map(|l| l.0.to_string())) == Some(server.clone()));
     assert!(h.state().data.groups.iter().all(|g| g.group.location.map(|l| l.0.to_string()) == Some(server.clone())), "both groups moved with it");
 }
+
+/// The switch "Sync everything" moves what lives only on this device to the server and stays
+/// on; it starts off.
+#[test]
+fn sync_everything_moves_what_is_here() {
+    let dir = tempfile::tempdir().unwrap();
+    let server_dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (origin, api_key, _stop) = sync_server(&session, server_dir.path());
+    create(&mut h, &origin, &api_key);
+    h.get_by_label("I have kept the key").click();
+    let run = |id: &str, params| session.runtime().block_on(session.execute(Caller::User, id, params)).unwrap();
+    run("host.save", json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "web-01", "settings": { "address": "192.0.2.1" } } }));
+    until(&mut h, "the server and the host", |app| !app.data.servers.is_empty() && !app.data.hosts.is_empty());
+    let server = h.state().data.servers[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(h.state().data.servers[0]["sync_all"], false, "it starts off");
+    assert_eq!(h.state().data.hosts[0].host.location, None);
+    h.get_by_label("Sync everything").click();
+    until(&mut h, "the host on the server", |app| {
+        app.data.hosts.first().and_then(|r| r.host.location.map(|l| l.0.to_string())) == Some(server.clone())
+    });
+    until(&mut h, "the switch on", |app| app.data.servers.first().is_some_and(|s| s["sync_all"] == true));
+}

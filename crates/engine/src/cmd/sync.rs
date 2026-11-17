@@ -23,6 +23,7 @@ pub fn specs() -> Vec<CommandSpec> {
         query("sync.servers", "Sync servers", "none", run_servers),
         command("sync.set_server", "Switch sync", "{ id, sync_enabled, sync_keys }", run_set_server),
         command("sync.server_logs", "Switch log sync", "{ id, on }", run_server_logs),
+        command("sync.sync_all", "Sync everything", "{ id, on }", run_sync_all),
         sealed(command(
             "sync.create_account",
             "Create a sync account",
@@ -51,6 +52,8 @@ pub struct ServerView {
     pub sync_keys: bool,
     /// Session logs sync too.
     pub sync_logs: bool,
+    /// Everything on this device syncs here, and new items go here (see `sync::sync_everything`).
+    pub sync_all: bool,
     pub revoked: bool,
     pub status: StatusView,
 }
@@ -108,15 +111,22 @@ fn run_servers(ctx: Ctx, _: Value) -> Out {
         let rows = session.store().servers()?;
         let servers: Vec<ServerView> = rows
             .into_iter()
-            .map(|row| ServerView {
-                status: server_status(row.revoked, session.sync().status(row.id)),
-                sync_logs: session.store().sync_logs(row.id).unwrap_or(false),
-                id: row.id,
-                name: row.name,
-                origin: row.origin,
-                sync_enabled: row.sync_enabled,
-                sync_keys: row.sync_keys,
-                revoked: row.revoked,
+            .map(|row| {
+                // One lock at a time: a guard taken inside the struct below would live until its
+                // end, and a second one would wait for it forever.
+                let sync_logs = session.store().sync_logs(row.id).unwrap_or(false);
+                let sync_all = session.store().sync_all(row.id).unwrap_or(false);
+                ServerView {
+                    status: server_status(row.revoked, session.sync().status(row.id)),
+                    sync_logs,
+                    sync_all,
+                    id: row.id,
+                    name: row.name,
+                    origin: row.origin,
+                    sync_enabled: row.sync_enabled,
+                    sync_keys: row.sync_keys,
+                    revoked: row.revoked,
+                }
             })
             .collect();
         to_value(&servers)
@@ -218,6 +228,21 @@ fn run_server_logs(ctx: Ctx, params: Value) -> Out {
         let LogsParams { id, on } = parse("sync.server_logs", params)?;
         sshcraft_sync::logs::set_sync_logs(&ctx.session.store(), id, on, now_ms()).map_err(sync_error)?;
         ctx.session.sync().nudge(&[id]);
+        Ok(Value::Null)
+    })
+}
+
+/// Switches "sync everything" for a server; on, what lives only here moves there now.
+fn run_sync_all(ctx: Ctx, params: Value) -> Out {
+    sync_run(move || {
+        let LogsParams { id, on } = parse("sync.sync_all", params)?;
+        let servers = crate::sync::sync_everything(&ctx.session.store(), id, on, now_ms())?;
+        if on {
+            // Sync and key sync went on with it.
+            ctx.session.sync().start(id);
+        }
+        ctx.session.sync().nudge(&servers);
+        ctx.session.announce(&servers);
         Ok(Value::Null)
     })
 }

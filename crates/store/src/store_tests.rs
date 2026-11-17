@@ -325,7 +325,7 @@ fn schema_11_migrates_known_hosts_to_host_keys() {
     drop(store);
     let store = Store::open(&path).unwrap();
     let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-    assert_eq!(version, 13);
+    assert_eq!(version, 14);
     let keys = store.all_host_keys().unwrap();
     assert_eq!(keys.len(), 2);
     assert_eq!((keys[0].address.as_str(), keys[0].port, keys[0].fingerprint.as_str()), ("a.org", 22, "SHA256:a"));
@@ -399,4 +399,22 @@ fn approved_commands_are_kept_by_digest() {
     store.approve_command(&a).unwrap();
     assert!(store.command_approved(&a).unwrap());
     assert!(!store.command_approved(&b).unwrap());
+}
+
+#[test]
+fn schema_13_gains_sync_everything_switched_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sshcraft.db");
+    let store = Store::open(&path).unwrap();
+    store.conn.execute_batch("ALTER TABLE sync_servers DROP COLUMN sync_all; PRAGMA user_version = 13;").unwrap();
+    drop(store);
+    let store = Store::open(&path).unwrap();
+    let version: i64 = store.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+    assert_eq!(version, 14);
+    let column: i64 =
+        store.conn.query_row("SELECT COUNT(*) FROM pragma_table_info('sync_servers') WHERE name = 'sync_all'", [], |r| r.get(0)).unwrap();
+    assert_eq!(column, 1, "the column is there after the migration");
+    drop(store);
+    // Opening again does not try to add it twice.
+    Store::open(&path).unwrap();
 }

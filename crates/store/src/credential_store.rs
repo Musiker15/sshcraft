@@ -41,7 +41,8 @@ impl Store {
         let body = IdentityBody { username: identity.username.clone(), key: identity.key.clone(), password: identity.password };
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO identities (id, name, body, location) VALUES (?1, ?2, ?3, ?4)
+            // A new identity without a place goes to the server that syncs everything.
+            "INSERT INTO identities (id, name, body, location) VALUES (?1, ?2, ?3, COALESCE(?4, (SELECT id FROM sync_servers WHERE sync_all = 1 AND sync_enabled = 1 AND revoked = 0 LIMIT 1)))
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, body = excluded.body",
             params![id, identity.name.trim(), to_json(&body)?, identity.location.map(|s| s.0.to_string())],
         )?;

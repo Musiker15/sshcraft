@@ -182,6 +182,11 @@ fn servers(app: &mut SshcraftApp, ui: &mut Ui) {
                     app.run_reported("sync.server_logs", json!({ "id": id, "on": logs }));
                     app.data.dirty |= crate::data::Refresh::SERVERS;
                 }
+                let mut all = server.get("sync_all").and_then(Value::as_bool).unwrap_or(false);
+                if ui.checkbox(&mut all, tr("Sync everything")).changed() {
+                    app.run_reported("sync.sync_all", json!({ "id": id, "on": all }));
+                    app.data.dirty |= crate::data::Refresh::SERVERS | crate::data::Refresh::DATA;
+                }
                 if ui.button(tr("Devices")).clicked() {
                     load_devices(app, &id);
                 }
@@ -195,6 +200,12 @@ fn servers(app: &mut SshcraftApp, ui: &mut Ui) {
                     );
                 }
             });
+            if server.get("sync_all").and_then(Value::as_bool).unwrap_or(false) {
+                ui.label(
+                    egui::RichText::new(tr("Everything on this device syncs here, and new items go here too. Keys bound to this device stay here."))
+                        .color(tokens.text_dim),
+                );
+            }
         });
     }
 }

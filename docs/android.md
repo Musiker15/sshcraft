@@ -26,9 +26,11 @@ an update signed with another key; an APK with a different fingerprint is not fr
 
 Under **Settings > Sync**, add your sync server and choose **Join with account key**, then paste
 the account key (from your password manager): with Ctrl+V on a hardware keyboard, or with the
-**Paste** button that shows in the lower right corner while a text field has the keyboard. Hosts, groups,
-keys and snippets arrive as on any other device ([sync.md](sync.md)). Hosts can also be added by
-hand, and a key can be imported by pasting it.
+**Paste** button that shows in the lower right corner while a text field has the keyboard. Hosts and groups
+arrive as on any other device, keys and passwords too when *Keys and passwords* is on
+([sync.md](sync.md)). Snippets stay on each device. Hosts can also be added by hand, and a key
+can be imported by pasting it. Android has no SSH agent: for a host that uses a key from Proton
+Pass on the PC, import that key on the tablet and leave the host set to the agent.
 
 ## Typing
 
