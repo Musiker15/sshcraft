@@ -20,9 +20,16 @@ pub enum Form {
     Tablet,
 }
 
+/// Reads the system clipboard's text for the key bar's Paste (set by the Android app).
+pub type PasteSource = std::sync::Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 pub struct SshcraftApp {
     /// Desktop unless the app sets otherwise; never changes while the window is open.
     pub form: Form,
+    /// Ctrl and Alt held on the tablet's key bar.
+    pub key_bar: crate::terminal::key_bar::KeyBar,
+    /// Where the key bar's Paste reads from; nothing is pasted without one.
+    pub paste_source: Option<PasteSource>,
     pub session: Session,
     pub runner: Runner,
     pub data: Data,
@@ -111,6 +118,8 @@ impl SshcraftApp {
             link: crate::link::LinkWatch::default(),
             dropdown_hidden: false,
             form: Form::Desktop,
+            key_bar: crate::terminal::key_bar::KeyBar::default(),
+            paste_source: None,
             handoff_dir: None,
             handoff_next: 0.0,
             control: None,

@@ -19,6 +19,8 @@ pub struct TerminalView<'a> {
     pub ligatures: bool,
     /// Patterns coloured wherever they appear (setting `terminal.highlights`).
     pub highlighter: Option<&'a super::highlight::Highlighter>,
+    /// A touch screen (the tablet form): a drag scrolls, a long press starts a selection.
+    pub touch: bool,
 }
 
 /// What happened in one frame.
@@ -47,6 +49,8 @@ struct State {
     wheel: f32,
     /// An Alt+key was sent as `ESC key`; the text event egui-winit sends for it is skipped.
     skip_alt_text: bool,
+    /// A long press started a selection that the drag now extends (touch only).
+    touch_select: bool,
 }
 
 const MOUSE_ANY: TermModes = TermModes::MOUSE_REPORT.union(TermModes::MOUSE_DRAG).union(TermModes::MOUSE_MOTION);
@@ -159,6 +163,36 @@ fn mouse(ui: &Ui, response: &Response, frame: &Frame, term: &mut Terminal, out: 
     }
 }
 
+/// A finger on a touch screen: a long press starts a selection and the drag after it extends
+/// it; any other drag scrolls like the wheel. Returns whether the touch took the pointer.
+fn touch(response: &Response, frame: &Frame, state: &mut State, term: &mut Terminal, out: &mut Vec<u8>) -> bool {
+    let pos = response.interact_pointer_pos();
+    if response.long_touched()
+        && let Some(pos) = pos
+    {
+        let (col, row) = frame.cell_at(pos);
+        term.select_start(term.point_at(col, row), SelectionKind::Simple);
+        state.touch_select = true;
+        return true;
+    }
+    if state.touch_select {
+        if let Some(pos) = pos {
+            let (col, row) = frame.cell_at(pos);
+            term.select_update(term.point_at(col, row));
+        }
+        if response.drag_stopped() || !response.is_pointer_button_down_on() {
+            state.touch_select = false;
+        }
+        return true;
+    }
+    if response.dragged() {
+        let at = pos.map_or((0, 0), |p| frame.cell_at(p));
+        scroll_lines(frame, state, term, out, response.drag_delta().y / frame.metrics.height, at);
+        return true;
+    }
+    response.drag_started() || response.drag_stopped()
+}
+
 /// The wheel: the history, arrow keys in a full-screen program that asked for them, or reports.
 fn wheel(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out: &mut Vec<u8>) {
     let lines: f32 = ui.input(|i| {
@@ -174,6 +208,13 @@ fn wheel(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out: &m
             })
             .sum()
     });
+    let at = ui.input(|i| i.pointer.hover_pos()).map_or((0, 0), |p| frame.cell_at(p));
+    scroll_lines(frame, state, term, out, lines, at);
+}
+
+/// `lines` of scrolling (positive: back in the history) at cell `(col, row)`: the history, arrow
+/// keys in a full-screen program that asked for them, or wheel reports.
+fn scroll_lines(frame: &Frame, state: &mut State, term: &mut Terminal, out: &mut Vec<u8>, lines: f32, (col, row): (u16, u16)) {
     state.wheel += lines;
     let whole = state.wheel.trunc();
     state.wheel -= whole;
@@ -182,7 +223,6 @@ fn wheel(ui: &Ui, frame: &Frame, state: &mut State, term: &mut Terminal, out: &m
         return;
     }
     let count = steps.unsigned_abs().min(MAX_WHEEL_STEPS);
-    let (col, row) = ui.input(|i| i.pointer.hover_pos()).map_or((0, 0), |p| frame.cell_at(p));
     if frame.report_mouse {
         let button = if steps > 0 { MouseButton::WheelUp } else { MouseButton::WheelDown };
         for _ in 0..count {
@@ -280,7 +320,7 @@ fn draw(
 
 impl TerminalView<'_> {
     pub fn show(self, ui: &mut Ui) -> TerminalResponse {
-        let Self { term, palette, font, ligatures, highlighter } = self;
+        let Self { term, palette, font, ligatures, highlighter, touch: touch_screen } = self;
         // A server may print any character: one no font has is a box, never a panic.
         ui.ctx().set_missing_glyph_policy(egui::epaint::text::MissingGlyphPolicy::Tofu);
         let metrics = CellMetrics::measure(ui.ctx(), &font);
@@ -321,7 +361,9 @@ impl TerminalView<'_> {
             state.focused = focused;
         }
 
-        mouse(ui, &response, &frame, term, &mut out);
+        if !(touch_screen && touch(&response, &frame, &mut state, term, &mut out.reports)) {
+            mouse(ui, &response, &frame, term, &mut out);
+        }
         if response.hovered() {
             wheel(ui, &frame, &mut state, term, &mut out.reports);
         }

@@ -1453,6 +1453,73 @@ fn snippet_bar(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, mut full: Rect
     full
 }
 
+/// A tap on the key bar (`bar`, when `shown`) is a press outside the terminal, which egui
+/// answers by taking the terminal's focus away for that frame: the terminal would not ask for
+/// text input, and Android closes the on-screen keyboard. For a press on the bar this turns that
+/// off until the terminal is drawn and returns what to put back.
+fn keep_focus_for_bar(ctx: &egui::Context, shown: bool, bar: Rect) -> Option<egui::SurrenderFocusOn> {
+    let on_bar = shown && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| bar.contains(p));
+    on_bar.then(|| {
+        let before = ctx.options(|o| o.input_options.surrender_focus_on);
+        ctx.options_mut(|o| o.input_options.surrender_focus_on = egui::SurrenderFocusOn::Never);
+        before
+    })
+}
+
+/// The bar of special keys in `rect` under the terminal `view` of session `id` (tablet only).
+/// Its buttons never take the keyboard focus, so the on-screen keyboard stays open; what a tap
+/// sends goes to the session (and the panes it broadcasts to) when `can_send`.
+fn key_bar(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, view: egui::Id, can_send: bool) {
+    let Some(bytes) = key_bar_tap(app, ui, id, rect, view) else { return };
+    if !can_send {
+        return;
+    }
+    if let Some(tab) = app.terminals.get_mut(&id) {
+        tab.term.scroll_to_bottom();
+    }
+    for target in broadcast_targets(app, id) {
+        send(app, target, &bytes);
+    }
+}
+
+/// Draws the bar and returns the bytes of the button tapped.
+fn key_bar_tap(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, rect: Rect, view: egui::Id) -> Option<Vec<u8>> {
+    use crate::terminal::key_bar::{BarKey, KEYS};
+    let modes = app.terminals.get(&id).map(|t| t.term.modes()).unwrap_or_default();
+    let selection = app.terminals.get(&id).and_then(|t| t.term.selection_text());
+    let (ctrl, alt) = (app.key_bar.ctrl, app.key_bar.alt);
+    let mut tapped = None;
+    let mut copy = false;
+    ui.scope_builder(UiBuilder::new().max_rect(rect).id_salt(("sshcraft-key-bar", id)), |ui| {
+        egui::ScrollArea::horizontal().id_salt(("sshcraft-key-bar-scroll", id)).show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                for (key, label) in KEYS {
+                    let label = if key == BarKey::Paste { tr("Paste") } else { label };
+                    let held = (key == BarKey::Ctrl && ctrl) || (key == BarKey::Alt && alt);
+                    // Click only, not focusable: the terminal keeps the keyboard.
+                    if ui.add(egui::Button::new(label).selected(held).sense(egui::Sense::CLICK).min_size(egui::vec2(36.0, 26.0))).clicked() {
+                        tapped = Some(key);
+                    }
+                }
+                if selection.is_some() && ui.add(egui::Button::new(tr("Copy")).sense(egui::Sense::CLICK)).clicked() {
+                    copy = true;
+                }
+            });
+        });
+    });
+    if copy && let Some(text) = selection {
+        ui.ctx().copy_text(text);
+    }
+    let key = tapped?;
+    ui.ctx().memory_mut(|m| m.request_focus(view));
+    let paste = if key == BarKey::Paste { app.paste_source.as_ref().and_then(|source| source()) } else { None };
+    let bytes = app.key_bar.press(key, modes, paste.as_deref());
+    if let Some(text) = &paste {
+        app.pastes.push(text);
+    }
+    (!bytes.is_empty()).then_some(bytes)
+}
+
 /// The height of the snippet bar above a terminal, in points.
 const SNIPPET_BAR_HEIGHT: f32 = 26.0;
 
@@ -1462,12 +1529,17 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     let full = snippet_bar(app, ui, id, ui.available_rect_before_wrap());
     let composing = app.terminals.get(&id).is_some_and(|t| t.compose.is_some());
     let compose_height = if composing { crate::terminal::compose::COMPOSE_HEIGHT } else { 0.0 };
-    let whole = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
+    // On a tablet the focused terminal has the bar of special keys right under it.
+    let tablet = app.form == crate::app::Form::Tablet;
+    let bar_height = if tablet && focused { crate::terminal::key_bar::KEY_BAR_HEIGHT } else { 0.0 };
+    let above_bar = Rect::from_min_max(full.min, pos2(full.max.x, (full.max.y - STATUS_HEIGHT - compose_height).max(full.min.y)));
+    let whole = Rect::from_min_max(above_bar.min, pos2(above_bar.max.x, (above_bar.max.y - bar_height).max(above_bar.min.y)));
+    let bar_rect = Rect::from_min_max(pos2(above_bar.min.x, whole.max.y), above_bar.max);
     // The hex view takes the lower part, below the terminal: nothing of one reaches the other.
     let hex_open = app.terminals.get(&id).is_some_and(|t| t.hex.is_some());
     let term_rect = if hex_open { Rect::from_min_max(whole.min, pos2(whole.max.x, whole.lerp_inside(egui::vec2(0.0, 0.6)).y)) } else { whole };
     let hex_rect = Rect::from_min_max(pos2(whole.min.x, term_rect.max.y), whole.max);
-    let compose_rect = Rect::from_min_max(pos2(full.min.x, whole.max.y), pos2(full.max.x, (whole.max.y + compose_height).min(full.max.y)));
+    let compose_rect = Rect::from_min_max(pos2(full.min.x, above_bar.max.y), pos2(full.max.x, (above_bar.max.y + compose_height).min(full.max.y)));
     let status_rect = Rect::from_min_max(pos2(full.min.x, compose_rect.max.y), full.max);
     // Ctrl+Enter sends the compose field, before the terminal or the field itself sees the key.
     let compose_send = focused && composing && ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
@@ -1515,17 +1587,28 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     // terminal has the keyboard (not a search field or a dialog).
     let has_keys = tab.view.is_some_and(|v| ctx.memory(|m| m.has_focus(v)));
     let taken = if focused && !blocked && has_keys { completion_keys(&ctx, tab) } else { None };
+    // Ctrl and Alt held on the bar apply to what the keyboard types next.
+    if tablet && focused && !blocked && has_keys {
+        let bar = &mut app.key_bar;
+        ctx.input_mut(|i| bar.apply(&mut i.events));
+    }
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
     let line_context = crate::history::LineContext {
         prompt: before_cursor(&tab.term).0,
         above: before_cursor(&tab.term).1,
         alt_screen: tab.term.modes().contains(sshcraft_term::TermModes::ALT_SCREEN),
         broadcast: false,
     };
+    let surrender = keep_focus_for_bar(&ctx, bar_height > 0.0, bar_rect);
     let response = ui
         .scope_builder(UiBuilder::new().max_rect(term_rect).id_salt(id), |ui| {
-            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures, highlighter: Some(&app_highlighter) }.show(ui)
+            TerminalView { term: &mut tab.term, palette: &palette, font: font.clone(), ligatures, highlighter: Some(&app_highlighter), touch: tablet }
+                .show(ui)
         })
         .inner;
+    if let Some(surrender) = surrender {
+        ctx.options_mut(|o| o.input_options.surrender_focus_on = surrender);
+    }
     if let Some(badge) = &look.badge {
         paint_badge(ui, term_rect, badge, look.color);
     }
@@ -1562,6 +1645,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
             send(app, target, &typed);
         }
         track_line(app, id, &typed, crate::history::LineContext { broadcast, ..line_context });
+    }
+    if bar_height > 0.0 {
+        key_bar(app, ui, id, bar_rect, response.response.id, can_send);
     }
     if let Some(bytes) = compose_and_pastes(app, ui, id, compose_rect, term_rect, focused && can_send, compose_send)
         && can_send
