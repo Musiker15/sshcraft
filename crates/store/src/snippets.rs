@@ -17,13 +17,19 @@ pub const MAX_TARGETS: usize = 50;
 pub struct Snippet {
     pub id: SnippetId,
     pub name: String,
-    /// The package (folder) it is in; empty for none.
-    #[serde(default)]
+    /// The package (folder) it is in; empty for none. `snippet.save` documents it as optional, so
+    /// a client sending `null` gets none instead of an error.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub package: String,
     pub content: String,
     /// Hosts the snippet runs on unless others are picked.
     #[serde(default)]
     pub default_targets: Vec<HostId>,
+}
+
+/// A string that may come as `null`, which reads as empty.
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -146,6 +152,15 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_null_package_reads_as_none() {
+        let snippet: Snippet = serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::new_v4(), "name": "update", "package": null, "content": "apt update"
+        }))
+        .unwrap();
+        assert_eq!(snippet.package, "");
+    }
     use crate::vault::MemoryMasterKey;
 
     fn setup() -> (Store, Vault) {

@@ -217,6 +217,13 @@ pub struct HostsCache {
     subgroups: std::collections::HashMap<GroupId, usize>,
 }
 
+impl HostsCache {
+    /// Every group, for working out what a host inherits.
+    pub(crate) fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+}
+
 fn update_cache(app: &mut SshcraftApp) {
     let view = &app.ui.hosts;
     let everywhere = view.smart.is_some();
@@ -488,28 +495,31 @@ fn group_entry(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
         if response.double_clicked() {
             app.ui.hosts.group = Some(group.id);
         }
-        let id = group.id;
-        response.context_menu(|ui| {
-            if ui.button(tr("Open")).clicked() {
-                app.ui.hosts.group = Some(id);
-            }
-            if ui.button(tr("Edit")).clicked() {
-                edit_group(app, id);
-            }
-            if ui.button(tr("Move to server…")).clicked() {
-                crate::pages::sync::ask_move(app, "group", &id.0.to_string(), &group.name);
-            }
-            if ui.button(tr("Share…")).clicked() {
-                crate::pages::sharing::ask_share(app, &id.0.to_string(), None);
-            }
-            if ui.button(tr("Hide from agents")).clicked() {
-                crate::pages::agents::set_hidden(app, &id.0.to_string(), true);
-            }
-            if ui.button(tr("Delete")).clicked() {
-                ask_delete_group(app, id);
-            }
-        });
+        response.context_menu(|ui| group_menu(app, ui, group));
     });
+}
+
+/// The menu of a group, on a right click on its name in a list or on its card.
+fn group_menu(app: &mut SshcraftApp, ui: &mut Ui, group: &Group) {
+    let id = group.id;
+    if ui.button(tr("Open")).clicked() {
+        app.ui.hosts.group = Some(id);
+    }
+    if ui.button(tr("Edit")).clicked() {
+        edit_group(app, id);
+    }
+    if ui.button(tr("Move to server…")).clicked() {
+        crate::pages::sync::ask_move(app, "group", &id.0.to_string(), &group.name);
+    }
+    if ui.button(tr("Share…")).clicked() {
+        crate::pages::sharing::ask_share(app, &id.0.to_string(), None);
+    }
+    if ui.button(tr("Hide from agents")).clicked() {
+        crate::pages::agents::set_hidden(app, &id.0.to_string(), true);
+    }
+    if ui.button(tr("Delete")).clicked() {
+        ask_delete_group(app, id);
+    }
 }
 
 fn host_entry(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, all_groups: &[Group]) {
@@ -856,7 +866,7 @@ fn host_group_card(
     app: &mut SshcraftApp,
     ui: &mut Ui,
     title: &str,
-    open: Option<GroupId>,
+    open: Option<&Group>,
     hosts: &[usize],
     subgroups: usize,
     all_groups: &[Group],
@@ -875,10 +885,11 @@ fn host_group_card(
             ui.add_space(12.0);
             let name = egui::RichText::new(visible(title)).strong().size(15.5).color(tokens.text_strong);
             let response = ui.add(egui::Label::new(name).sense(if open.is_some() { Sense::click() } else { Sense::hover() }));
-            if let Some(id) = open
-                && response.clicked()
-            {
-                app.ui.hosts.group = Some(id);
+            if let Some(group) = open {
+                if response.clicked() {
+                    app.ui.hosts.group = Some(group.id);
+                }
+                response.context_menu(|ui| group_menu(app, ui, group));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(12.0);
@@ -903,7 +914,7 @@ fn host_group_card(
                 }
                 if hosts.len() > GROUP_CARD_HOSTS && ui.link(trf("Show all {count}", &[("count", &hosts.len().to_string())])).clicked() {
                     match open {
-                        Some(id) => app.ui.hosts.group = Some(id),
+                        Some(group) => app.ui.hosts.group = Some(group.id),
                         None => app.ui.hosts.show_all = true,
                     }
                 }
@@ -976,7 +987,7 @@ fn overview_sections(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
                 if let Some(group) = groups.get(i) {
                     let hosts = app.ui.hosts.cache.by_group.get(&group.id).cloned().unwrap_or_default();
                     let subgroups = app.ui.hosts.cache.subgroups.get(&group.id).copied().unwrap_or(0);
-                    host_group_card(app, ui, &group.name, Some(group.id), &hosts, subgroups, all_groups, width, height);
+                    host_group_card(app, ui, &group.name, Some(group), &hosts, subgroups, all_groups, width, height);
                 }
             });
         }

@@ -93,3 +93,71 @@ fn the_sync_card_is_only_as_tall_as_its_two_lines() {
     assert!(settings.top() - state.top() < 90.0, "the card ends near the settings: state at {state:?}, settings at {settings:?}");
     assert!(state.top() > 800.0 - 200.0, "the card sits at the bottom, not at {state:?}");
 }
+
+#[test]
+fn a_host_shows_the_address_it_takes_from_its_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.set_size(vec2(1280.0, 800.0));
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "servers", "defaults": { "address": "198.51.100.77" } } }));
+    run(&session, "host.save", json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "inherits", "group_id": group, "settings": {} } }));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.hosts.is_empty() || h.state().data.groups.is_empty() {
+        assert!(Instant::now() < deadline, "timed out waiting for the host");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(4);
+    assert!(h.query_by_label_contains("198.51.100.77").is_some(), "the group's address shows under the host");
+}
+
+#[test]
+fn a_group_card_has_the_group_menu() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.set_size(vec2(1280.0, 800.0));
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "servers", "defaults": {} } }));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.groups.is_empty() {
+        assert!(Instant::now() < deadline, "timed out waiting for the group");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.run_steps(4);
+    h.get_by_label("servers").click_secondary();
+    h.run_steps(2);
+    // The menu's "Edit", not the menu bar's.
+    h.query_all_by_label("Edit").last().expect("the group menu").click();
+    h.run_steps(2);
+    assert!(h.state().ui.group_form.is_some(), "Edit opens the group's form");
+}
+
+#[test]
+fn the_new_tab_names_each_host_with_its_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let group = uuid::Uuid::new_v4();
+    run(&session, "group.save", json!({ "group": { "id": group, "name": "Masterblack", "defaults": {} } }));
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "root", "group_id": group, "settings": { "address": "192.0.2.9" } } }),
+    );
+    run(
+        &session,
+        "host.save",
+        json!({ "host": { "id": uuid::Uuid::new_v4(), "name": "loose", "group_id": null, "settings": { "address": "192.0.2.8" } } }),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().data.hosts.len() < 2 || h.state().data.groups.is_empty() {
+        assert!(Instant::now() < deadline, "timed out waiting for the hosts");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    h.state_mut().open_new_tab();
+    h.run_steps(4);
+    assert!(h.query_by_label("Masterblack: root").is_some(), "the host in a group carries its group's name");
+    assert!(h.query_by_label("loose").is_some(), "a host without a group keeps its name alone");
+}

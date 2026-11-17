@@ -118,6 +118,7 @@ pub fn host_row(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, a
         ui.painter().rect_filled(rect, 12.0, tokens.row_hover);
     }
     let state = reach(app, &tokens, row);
+    let address = shown_address(app, row);
     let touch = touch(app);
     let size = if touch { 44.0 } else { 34.0 };
     // A phone draws the symbols without a frame, as in its own lists.
@@ -134,7 +135,7 @@ pub fn host_row(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, a
             ui.add_space(12.0);
             dot(ui, state);
             let width = (ui.available_width() - 8.0).max(24.0);
-            let response = text_block(ui, row, width, if touch { 15.5 } else { 15.0 });
+            let response = text_block(ui, row, address.as_deref(), width, if touch { 15.5 } else { 15.0 });
             if response.clicked() {
                 // The modifiers of the release that made the click; held keys as a fallback.
                 let modifiers = ui.input(|i| {
@@ -157,6 +158,12 @@ pub fn host_row(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, a
     });
 }
 
+/// The address the host connects to: its own, or the one it inherits from its groups.
+pub fn shown_address(app: &SshcraftApp, row: &HostRow) -> Option<String> {
+    let chain = crate::pages::host_form::chain(row.host.group_id, app.ui.hosts.cache.groups());
+    sshcraft_model::model::effective_endpoint(&row.host, &chain).ok().map(|(address, _)| address).or_else(|| row.host.settings.address.clone())
+}
+
 /// `text` laid out on one line at most `width` wide, cut with "…"; true when it was cut.
 fn one_line(ui: &Ui, text: &str, width: f32, font: FontId, color: egui::Color32) -> (std::sync::Arc<egui::Galley>, bool) {
     let mut job = egui::text::LayoutJob::single_section(crate::widgets::visible(text), egui::TextFormat::simple(font, color));
@@ -168,23 +175,26 @@ fn one_line(ui: &Ui, text: &str, width: f32, font: FontId, color: egui::Color32)
 
 /// The host's name over its address (and, for a host shared without sign-in, a warning),
 /// centred in the row's height; the whole block takes clicks and is named by the host.
-fn text_block(ui: &mut Ui, row: &HostRow, width: f32, size: f32) -> egui::Response {
+fn text_block(ui: &mut Ui, row: &HostRow, address: Option<&str>, width: f32, size: f32) -> egui::Response {
     let tokens = Tokens::get(ui.ctx());
     let (name, cut) = one_line(ui, &row.host.name, width, FontId::proportional(size), tokens.text_strong);
-    let address = row.host.settings.address.as_deref().map(|a| one_line(ui, a, width, FontId::monospace(12.0), tokens.text_dim).0);
+    let address = address.map(|a| (one_line(ui, a, width, FontId::monospace(12.0), tokens.text_dim).0, a.to_string()));
     let warn = crate::pages::hosts::needs_own_sign_in(&row.host)
         .then(|| one_line(ui, tr("Add your own sign-in"), width, FontId::proportional(12.0), tokens.warning).0);
     let height = ui.available_height().max(20.0);
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-    let total = name.size().y + address.as_ref().map_or(0.0, |g| g.size().y + 1.0) + warn.as_ref().map_or(0.0, |g| g.size().y + 1.0);
+    let total = name.size().y + address.as_ref().map_or(0.0, |(g, _)| g.size().y + 1.0) + warn.as_ref().map_or(0.0, |g| g.size().y + 1.0);
     let mut y = rect.center().y - total / 2.0;
     let h = name.size().y;
     ui.painter().galley(egui::pos2(rect.left(), y), name, tokens.text_strong);
     y += h + 1.0;
-    if let Some(galley) = address {
-        let h = galley.size().y;
-        ui.painter().galley(egui::pos2(rect.left(), y), galley, tokens.text_dim);
-        y += h + 1.0;
+    if let Some((galley, text)) = address {
+        // Its own node too, so screen readers read the address.
+        let at = egui::Rect::from_min_size(egui::pos2(rect.left(), y), galley.size());
+        ui.painter().galley(at.min, galley, tokens.text_dim);
+        let node = ui.interact(at, ui.scope_id().with(("address", row.host.id)), Sense::hover());
+        node.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &text));
+        y += at.height() + 1.0;
     }
     if let Some(galley) = warn {
         // Its own node, so screen readers (and tests) find the warning with its explanation.
@@ -224,6 +234,7 @@ fn os_tile(ui: &mut Ui, row: &HostRow, side: f32) {
 pub fn host_card(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, compact: bool) {
     let tokens = Tokens::get(ui.ctx());
     let state = reach(app, &tokens, row);
+    let address = shown_address(app, row);
     let margin = if compact { 14.0 } else { 16.0 };
     egui::Frame::new().fill(tokens.panel).stroke(Stroke::new(1.0, tokens.separator)).corner_radius(16).inner_margin(margin).show(ui, |ui| {
         let inner = ui.available_width();
@@ -245,7 +256,7 @@ pub fn host_card(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, compact: boo
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
                         elided_label(ui, &row.host.name, width, tokens.text_strong, FontId::proportional(15.0));
-                        if let Some(address) = &row.host.settings.address {
+                        if let Some(address) = &address {
                             elided_label(ui, address, width, tokens.text_dim, FontId::monospace(12.5));
                         }
                     });

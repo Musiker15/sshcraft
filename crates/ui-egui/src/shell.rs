@@ -412,25 +412,32 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add(egui::TextEdit::singleline(&mut app.ui.new_tab_query).hint_text(tr("Search hosts")).desired_width(320.0));
     ui.add_space(8.0);
     let query = app.ui.new_tab_query.to_lowercase();
-    let mut hosts: Vec<_> = app
+    // "Group: host", so hosts of the same name in different groups can be told apart.
+    let shown = |row: &crate::data::HostRow| -> String {
+        let group = row.host.group_id.and_then(|id| app.data.groups.iter().find(|g| g.group.id == id));
+        match group {
+            Some(g) => format!("{}: {}", g.group.name, row.host.name),
+            None => row.host.name.clone(),
+        }
+    };
+    let mut hosts: Vec<(String, &crate::data::HostRow)> = app
         .data
         .hosts
         .iter()
-        .filter(|row| {
-            query.is_empty()
-                || row.host.name.to_lowercase().contains(&query)
-                || row.host.settings.address.as_deref().is_some_and(|a| a.contains(&query))
+        .map(|row| (shown(row), row))
+        .filter(|(label, row)| {
+            query.is_empty() || label.to_lowercase().contains(&query) || row.host.settings.address.as_deref().is_some_and(|a| a.contains(&query))
         })
         .collect();
-    hosts.sort_by_key(|row| row.host.name.to_lowercase());
+    hosts.sort_by_key(|(label, _)| label.to_lowercase());
     let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().show(ui, |ui| {
         crate::field_paste::scroll_into_view(ui, field_scroll);
-        for row in hosts {
+        for (label, row) in hosts {
             ui.horizontal(|ui| {
                 let (icon, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                 draw(ui.painter(), Icon::Host, icon, tokens.text_dim);
-                if elided_label(ui, &row.host.name, 360.0, tokens.text, FontId::proportional(14.0)).clicked() {
+                if elided_label(ui, &label, 360.0, tokens.text, FontId::proportional(14.0)).clicked() {
                     app.ui.connect_request = Some(crate::state::ConnectRequest::Host(row.host.id));
                 }
                 if let Some(address) = &row.host.settings.address {
