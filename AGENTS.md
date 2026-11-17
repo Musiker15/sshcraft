@@ -100,11 +100,15 @@ crash on hostile input is a security bug. **This outranks feature work.**
 - **`panic = "unwind"` stays** (the default) so the engine's last-resort guard around command
   dispatch, from R2 on, can turn an escaped panic into an error.
 - **Every crash fix lands with a test that panicked before the fix.**
-- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`. The one exception is
+- **No `unsafe`.** The workspace sets `unsafe_code = "forbid"`. There are two exceptions.
   `crates/fido`: FIDO2 security keys and Windows Hello are only reachable through the Windows API
   (`webauthn.dll`, WinRT). That crate states its own lints with `unsafe_code = "deny"`; only
-  `webauthn.rs` and `presence.rs` allow it, and every block has a `// SAFETY:` comment. Do not
-  add `unsafe` anywhere else; if a platform API needs it, use a maintained safe wrapper crate.
+  `webauthn.rs` and `presence.rs` allow it, and every block has a `// SAFETY:` comment.
+  `apps/android`: android-activity calls the exported `android_main`, and `#[unsafe(no_mangle)]`
+  counts as unsafe code; the keyboard's text connection needs the raw JavaVM and activity from
+  ndk-context. That crate states its own lints the same way and allows unsafe on `android_main`
+  and in `src/keyboard.rs` only, every block with a `// SAFETY:` comment. Do not add `unsafe` anywhere else; if a platform API
+  needs it, use a maintained safe wrapper crate.
 
 ## Non-negotiables
 
@@ -134,6 +138,9 @@ crash on hostile input is a security bug. **This outranks feature work.**
   | exempt | `apps/*`, `xtask` |
 
 - **Rust only.** No handwritten JavaScript or TypeScript, no Tauri, Electron or webview shell.
+  The one exception is `apps/android/java`: Android APIs that only take Java (the keyboard's
+  text connection) get the smallest Java class that hands the data to Rust, built by
+  `cargo xtask android` with javac and d8. No Gradle, no Kotlin, no logic in Java.
 - **wasm:** `cargo xtask wasm` checks `proto` and `model` for `wasm32-unknown-unknown`. The other
   crates need the network, files or the operating system, and SSHCraft has no web build (SSH needs
   TCP), so they are exempt. This deviates from "never break wasm" in the other Craft apps.
@@ -199,6 +206,10 @@ Each has a test where it can have one.
   build.
 - `cargo xtask linux` runs clippy and the tests on Linux in a Docker container (from Windows or
   macOS); macOS and FreeBSD run in CI.
+- `cargo xtask android --check` runs clippy for Android, `cargo xtask android [--debug]
+  [--install]` builds the APK; both need the Android SDK and NDK ([docs/android.md](docs/android.md)).
+  CI has no Android SDK, so run `--check` before pushing a change to `apps/android`, `ui-egui`,
+  `store` or `sync`.
 - Packages and releases: [`docs/releasing.md`](docs/releasing.md). `cargo xtask version [set X.Y.Z]`
   prints or sets the one version of the workspace; `cargo xtask sbom` and `cargo xtask stores`
   make a release's bill of materials and store entries. Never start a release or push to `release`

@@ -12,6 +12,8 @@ sshcraft-proto = { workspace = true }
 sshcraft-model = { workspace = true }
 sshcraft-store = { workspace = true }
 reqwest = { workspace = true }
+# Mozilla's root certificates for HTTPS on Android (`client::mozilla_roots`).
+webpki-root-certs = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

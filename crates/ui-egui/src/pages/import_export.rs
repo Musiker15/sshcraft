@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use craft_dialogs::{Answer, FileDialog};
+use crate::file_dialogs::{Answer, FileDialog};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sshcraft_import::import::{ImportCandidate, ImportWarning};

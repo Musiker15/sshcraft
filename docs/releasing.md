@@ -91,13 +91,20 @@ run on `main`, which builds everything but macOS without signing:
 gh workflow run release.yml --ref main -f dry-run=true           # wait until it is green
 gh run download <run-id> --dir dist/draft                        # every release-* artifact
 cd dist/draft && find . -type f -exec mv {} . \; && find . -type d -empty -delete
-sha256sum -- * > SHA256SUMS.txt
-cargo xtask sbom dist/draft/sshcraft-<v>.cdx.json                 # from the workspace root
+cargo xtask android                                               # from the workspace root, with the release key
+cp dist/android/sshcraft-<v>-android-arm64.apk dist/draft/
+cd dist/draft && sha256sum -- * > SHA256SUMS.txt && cd -
+cargo xtask sbom dist/draft/sshcraft-<v>.cdx.json
 gh release create v<v> --draft --target <commit> --title "SSHCraft v<v>" --generate-notes dist/draft/*
 ```
 
-The draft then has no macOS packages and nothing signed, which the release notes should say. The
-maintainer checks and publishes it as above.
+The draft then has no macOS packages and nothing signed but the APK, which the release notes
+should say. The maintainer checks and publishes it as above.
+
+**Android.** The shared workflow has no Android SDK, so the APK is always built locally with
+`cargo xtask android` ([android.md](android.md)) and signed with the release key, which is kept
+outside the repository (`SSHCRAFT_ANDROID_KEYSTORE`, `SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE`). Every
+APK of a release must be signed with that same key, or Android refuses the update.
 
 ## What gets built
 
@@ -108,6 +115,7 @@ maintainer checks and publishes it as above.
 | Linux x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
 | Flatpak x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
 | FreeBSD 15 x86_64, aarch64 | `sshcraft-<v>-freebsd-<arch>.tar.gz` |
+| Android 13+ tablets, arm64 | `sshcraft-<v>-android-arm64.apk`, built locally ([android.md](android.md)) |
 | Sync server, Linux x86_64 and aarch64 | `sshcraft-server-<v>-linux-<arch>.tar.gz`: the program, a systemd unit and an example environment file ([server.md](server.md#install-the-program)) |
 
 SSHCraft has no web build: SSH needs TCP.

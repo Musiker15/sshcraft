@@ -1133,13 +1133,35 @@ async fn public_half(ctx: &Context, key: &KeyRef) -> Result<(PublicKey, bool), (
             Ok((public, verify_required))
         }
         KeyRef::Agent { fingerprint } => {
-            let mut agent = ctx.agent.connect().await.map_err(|e| (ErrorCode::AgentUnavailable, Some(e.to_string())))?;
+            let mut agent = match ctx.agent.connect().await {
+                Ok(agent) => agent,
+                Err(e) => {
+                    let twin = stored_twin(ctx, fingerprint).map_err(failure_code)?;
+                    return match twin {
+                        Some(id) => Box::pin(public_half(ctx, &KeyRef::Stored { id })).await,
+                        None => Err((ErrorCode::AgentUnavailable, Some(e.to_string()))),
+                    };
+                }
+            };
             let keys = sshcraft_ssh::list_agent_keys(&mut agent).await.map_err(|e| (ErrorCode::AgentUnavailable, Some(e.to_string())))?;
             let found = keys.into_iter().find(|k| &k.fingerprint == fingerprint).ok_or((ErrorCode::AgentKeyMissing, None))?;
             let public = PublicKey::from_openssh(&found.public_key).map_err(|e| (ErrorCode::InvalidKey, Some(e.to_string())))?;
             Ok((public, false))
         }
     }
+}
+
+/// A key in the vault with the fingerprint of an agent key: where there is no agent (Android),
+/// the user imports the same key, and the host stays set to the agent for the devices that have
+/// one. A device key never stands in, only one the user imported.
+fn stored_twin(ctx: &Context, fingerprint: &str) -> Result<Option<KeyId>, Failure> {
+    // Without the vault no stored key signs: the agent stays what is missing.
+    if ctx.vault.is_none() {
+        return Ok(None);
+    }
+    let store = ctx.store.lock().unwrap_or_else(PoisonError::into_inner);
+    let keys = sshcraft_store::vault::list_keys(&store).map_err(vault_failure)?;
+    Ok(keys.into_iter().find(|k| k.fingerprint == fingerprint && k.kind == KeyKind::Vault).map(|k| k.id))
 }
 
 /// A failure as a command error.
@@ -1184,10 +1206,17 @@ async fn hop(ctx: &Context, resolved: &ResolvedHost, opened: &OpenedKeys) -> Res
             certificate = cert;
             Some(credential)
         }
-        Some(KeyRef::Agent { fingerprint }) => Some(Credential::Agent {
-            fingerprint: fingerprint.clone(),
-            agent: ctx.agent.connect().await.map_err(|e| end_error(ErrorCode::AgentUnavailable, Some(e.to_string())))?,
-        }),
+        Some(KeyRef::Agent { fingerprint }) => match ctx.agent.connect().await {
+            Ok(agent) => Some(Credential::Agent { fingerprint: fingerprint.clone(), agent }),
+            Err(e) => match stored_twin(ctx, fingerprint)? {
+                Some(id) => {
+                    let (credential, cert) = stored_credential(ctx, id, resolved, opened).await?;
+                    certificate = cert;
+                    Some(credential)
+                }
+                None => return Err(end_error(ErrorCode::AgentUnavailable, Some(e.to_string()))),
+            },
+        },
     };
     // The TOTP secret becomes a maker of the code of the moment it is asked for.
     let totp = match resolved.totp {

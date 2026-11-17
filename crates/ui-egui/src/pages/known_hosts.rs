@@ -44,12 +44,13 @@ pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.heading(tr("Known hosts"));
         ui.add_space(16.0);
-        if ui.button(tr("Import known_hosts")).clicked() {
-            let dialog = craft_dialogs::FileDialog::open().title(tr("Import known_hosts"));
+        let files = app.form == crate::app::Form::Desktop;
+        if files && ui.button(tr("Import known_hosts")).clicked() {
+            let dialog = crate::file_dialogs::FileDialog::open().title(tr("Import known_hosts"));
             app.dialogs.ask(dialog, DialogFor::KnownHostsImport);
         }
-        if ui.button(tr("Export known_hosts")).clicked() {
-            let dialog = craft_dialogs::FileDialog::save().title(tr("Export known_hosts")).file_name("known_hosts");
+        if files && ui.button(tr("Export known_hosts")).clicked() {
+            let dialog = crate::file_dialogs::FileDialog::save().title(tr("Export known_hosts")).file_name("known_hosts");
             app.dialogs.ask(dialog, DialogFor::KnownHostsExport);
         }
     });

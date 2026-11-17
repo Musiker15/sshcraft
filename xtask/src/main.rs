@@ -14,9 +14,12 @@
 //! - `sbom [out.json]` (not part of `ci`): the CycloneDX bill of materials of a release (`sbom.rs`)
 //! - `stores <SHA256SUMS.txt> [out-dir]` (not part of `ci`): the winget manifests and the
 //!   Homebrew cask of a release (`stores.rs`)
+//! - `android [--check] [--debug] [--install]` (not part of `ci`, CI has no Android SDK): the
+//!   signed APK for Android tablets (`android.rs`)
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod android;
 mod assets;
 mod layers;
 mod linux;
@@ -55,13 +58,14 @@ fn main() -> ExitCode {
     let result = match arg.as_deref() {
         Some("ci") => cmd_ci(),
         Some("linux") => linux::run(),
-        Some(name @ ("version" | "sbom" | "stores")) => {
+        Some(name @ ("version" | "sbom" | "stores" | "android")) => {
             let rest: Vec<String> = std::env::args().skip(2).collect();
             let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
             match (std::env::current_dir(), name) {
                 (Err(e), _) => Err(format!("the workspace root: {e}")),
                 (Ok(root), "sbom") => sbom::run(&root, &rest),
                 (Ok(root), "stores") => stores::run(&root, &rest),
+                (Ok(root), "android") => android::run(&root, &rest),
                 (Ok(root), _) => version::run(&root, &rest),
             }
         }
@@ -82,7 +86,7 @@ fn main() -> ExitCode {
 
 fn usage() -> String {
     let names: Vec<&str> = CI.iter().map(|(n, _)| *n).collect();
-    format!("usage: cargo xtask <ci|linux|version|sbom|stores|{}>", names.join("|"))
+    format!("usage: cargo xtask <ci|linux|version|sbom|stores|android|{}>", names.join("|"))
 }
 
 /// The cargo that runs this tool, so `cargo +toolchain xtask` stays on that toolchain.

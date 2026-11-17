@@ -413,7 +413,7 @@ fn key_row(app: &mut SshcraftApp, ui: &mut Ui, key: &KeyRow) {
             if ui.button(tr("Copy public key")).clicked() {
                 copy_public_key(app, &id, ctx.clone());
             }
-            if ui.button(tr("Move to…")).clicked() {
+            if ui.button(tr("Move to server…")).clicked() {
                 crate::pages::sync::ask_move(app, "key", &id, &key.name);
             }
             ui.menu_button(tr("Install on host"), |ui| {
@@ -487,7 +487,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             app.ui.key_dialog =
                 Some(KeyDialog::Import(ImportForm { name: String::new(), text: String::new(), passphrase: String::new(), save_passphrase: true }));
         }
-        if ui.button(tr("Import from Proton Pass")).clicked() {
+        // pass-cli is a desktop program.
+        if app.form == crate::app::Form::Desktop && ui.button(tr("Import from Proton Pass")).clicked() {
             crate::pages::key_sources::open_passcli(app);
         }
         if let Some(support) = app.data.security

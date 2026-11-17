@@ -206,7 +206,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Jump hosts" => "Sprung-Hosts",
         "Key" => "Schlüssel",
         "List" => "Liste",
-        "Move to" => "Verschieben nach",
+        "Move to group" => "In Gruppe verschieben",
         "Name" => "Name",
         "New group" => "Neue Gruppe",
         "New host" => "Neuer Host",
@@ -295,6 +295,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Restore from backup" => "Aus Sicherung wiederherstellen",
         "Create backup" => "Sicherung erstellen",
         "Passphrase again" => "Passphrase wiederholen",
+        "Files cannot be picked on this device." => "Auf diesem Gerät lassen sich keine Dateien auswählen.",
         "Keep it in your password manager: without it the file cannot be opened." => {
             "Bewahre sie im Passwortmanager auf: ohne sie lässt sich die Datei nicht öffnen."
         }
@@ -755,7 +756,10 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Move {name}" => "{name} verschieben",
         "This device only" => "Nur dieses Gerät",
         "Move" => "Verschieben",
-        "Move to…" => "Verschieben nach…",
+        "Move to server…" => "Auf Server verschieben…",
+        "{name} is in a group, so the whole group {group} moves, with everything in it." => {
+            "{name} liegt in einer Gruppe, deshalb wandert die ganze Gruppe {group} mit allem darin."
+        }
         // Sharing
         "Move it to a sync server first: shares live there." => "Verschiebe es zuerst auf einen Sync-Server: dort liegen Freigaben.",
         "Shared." => "Geteilt.",

@@ -97,7 +97,10 @@ impl ServerClient {
         if plain.is_some() && !loopback(host) {
             return Err(SyncError::PlainHttp);
         }
-        let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().map_err(|e| SyncError::Network(e.to_string()))?;
+        let builder = reqwest::Client::builder().timeout(REQUEST_TIMEOUT);
+        #[cfg(target_os = "android")]
+        let builder = builder.tls_certs_only(mozilla_roots());
+        let http = builder.build().map_err(|e| SyncError::Network(e.to_string()))?;
         Ok(Self { http, origin, api_key: None, token: None })
     }
 
@@ -353,5 +356,24 @@ pub mod failpoints {
             }
             None => false,
         }
+    }
+}
+
+/// Mozilla's root certificates, which the sync websocket uses on every platform. HTTPS on Android
+/// uses them too: reqwest's default there, the platform verifier, needs a Java part the app does
+/// not have and panics on the first connection without it.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn mozilla_roots() -> Vec<reqwest::Certificate> {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().filter_map(|der| reqwest::Certificate::from_der(der).ok()).collect()
+}
+
+#[cfg(test)]
+mod android_roots_tests {
+    #[test]
+    fn every_mozilla_root_loads() {
+        let roots = super::mozilla_roots();
+        assert_eq!(roots.len(), webpki_root_certs::TLS_SERVER_ROOT_CERTS.len());
+        assert!(roots.len() > 100, "the bundle has the public roots");
+        assert!(reqwest::Client::builder().tls_certs_only(roots).build().is_ok());
     }
 }

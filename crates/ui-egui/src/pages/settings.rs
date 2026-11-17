@@ -94,7 +94,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.heading(tr("Settings"));
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        for section in Section::ALL {
+        // No agents on a tablet: no control channel, no MCP, no CLI.
+        for section in Section::ALL.into_iter().filter(|s| *s != Section::Agents || app.form == crate::app::Form::Desktop) {
             if ui.selectable_label(app.ui.settings.section == section, section.label()).clicked() {
                 app.ui.settings.section = section;
                 app.ui.settings.recording = None;
@@ -103,15 +104,19 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         }
     });
     ui.separator();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match app.ui.settings.section {
-        Section::General => general(app, ui),
-        Section::Appearance => appearance(app, ui),
-        Section::Terminal => terminal(app, ui),
-        Section::Shortcuts => shortcuts(app, ui),
-        Section::Sync => crate::pages::sync::show(app, ui),
-        Section::Agents => crate::pages::agents::show(app, ui),
-        Section::Connections => crate::pages::connections::show(app, ui),
-        Section::Trash => crate::pages::trash::show(app, ui),
+    let field_scroll = app.field_paste.scroll;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        crate::field_paste::scroll_into_view(ui, field_scroll);
+        match app.ui.settings.section {
+            Section::General => general(app, ui),
+            Section::Appearance => appearance(app, ui),
+            Section::Terminal => terminal(app, ui),
+            Section::Shortcuts => shortcuts(app, ui),
+            Section::Sync => crate::pages::sync::show(app, ui),
+            Section::Agents => crate::pages::agents::show(app, ui),
+            Section::Connections => crate::pages::connections::show(app, ui),
+            Section::Trash => crate::pages::trash::show(app, ui),
+        }
     });
 }
 
@@ -126,12 +131,15 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     });
     save(app, |s| s.general.language = language);
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(tr("Window")).strong());
-    let mut system = app.data.settings.general.system_title_bar;
-    ui.checkbox(&mut system, tr("Use system title bar"));
-    ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
-    save(app, |s| s.general.system_title_bar = system);
-    ui.add_space(12.0);
+    // A tablet has no title bar to choose.
+    if app.form == crate::app::Form::Desktop {
+        ui.label(egui::RichText::new(tr("Window")).strong());
+        let mut system = app.data.settings.general.system_title_bar;
+        ui.checkbox(&mut system, tr("Use system title bar"));
+        ui.label(egui::RichText::new(tr("The desktop draws the title bar. Takes effect after a restart.")).weak());
+        save(app, |s| s.general.system_title_bar = system);
+        ui.add_space(12.0);
+    }
     ui.label(egui::RichText::new(tr("Host keys")).strong());
     let mut update = app.data.settings.general.update_host_keys;
     ui.checkbox(&mut update, tr("Take new host keys a server announces"));
@@ -204,23 +212,26 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.label(tr("Ligatures"));
         ui.checkbox(&mut a.ligatures, tr("Join characters where the font has ligatures (->, !=)"));
         ui.end_row();
-        ui.label(tr("Dropdown window"));
-        ui.horizontal(|ui| {
-            // Typed as a draft: half a combination is never saved or registered system-wide.
-            let typed = app.ui.settings.dropdown_shortcut.get_or_insert_with(|| a.dropdown_shortcut.clone().unwrap_or_default());
-            let response = ui
-                .add(egui::TextEdit::singleline(typed).hint_text("Ctrl+`").desired_width(120.0).char_limit(40))
-                .on_hover_text(tr("A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off."));
-            let text = typed.trim().to_string();
-            let valid = text.is_empty() || sshcraft_engine::settings::valid_combo(&text);
-            if response.lost_focus() && valid {
-                a.dropdown_shortcut = (!text.is_empty()).then_some(text);
-                app.ui.settings.dropdown_shortcut = None;
-            } else if !valid {
-                ui.label(egui::RichText::new(tr("Like Ctrl+` or Ctrl+Alt+T")).color(crate::theme::Tokens::get(ui.ctx()).danger));
-            }
-        });
-        ui.end_row();
+        // A system-wide shortcut is a desktop thing.
+        if app.form == crate::app::Form::Desktop {
+            ui.label(tr("Dropdown window"));
+            ui.horizontal(|ui| {
+                // Typed as a draft: half a combination is never saved or registered system-wide.
+                let typed = app.ui.settings.dropdown_shortcut.get_or_insert_with(|| a.dropdown_shortcut.clone().unwrap_or_default());
+                let response = ui
+                    .add(egui::TextEdit::singleline(typed).hint_text("Ctrl+`").desired_width(120.0).char_limit(40))
+                    .on_hover_text(tr("A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off."));
+                let text = typed.trim().to_string();
+                let valid = text.is_empty() || sshcraft_engine::settings::valid_combo(&text);
+                if response.lost_focus() && valid {
+                    a.dropdown_shortcut = (!text.is_empty()).then_some(text);
+                    app.ui.settings.dropdown_shortcut = None;
+                } else if !valid {
+                    ui.label(egui::RichText::new(tr("Like Ctrl+` or Ctrl+Alt+T")).color(crate::theme::Tokens::get(ui.ctx()).danger));
+                }
+            });
+            ui.end_row();
+        }
         ui.label(tr("Reachability"));
         ui.checkbox(&mut a.show_reachability, tr("Show in the host list whether each host answers (connects to them every minute)"));
         ui.end_row();

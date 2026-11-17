@@ -38,6 +38,10 @@ impl std::fmt::Debug for HeldPassphrase {
 const MIN: usize = 12;
 
 pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
+    // A backup is a file, and a tablet cannot pick one.
+    if app.form == crate::app::Form::Tablet {
+        return;
+    }
     ui.label(egui::RichText::new(tr("Backup")).strong());
     ui.label(
         egui::RichText::new(tr("One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here."))
@@ -91,9 +95,9 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             form.error = Some(tr("The two passphrases differ.").to_owned());
         } else {
             let dialog = if form.restore {
-                craft_dialogs::FileDialog::open().title(tr("Restore from backup"))
+                crate::file_dialogs::FileDialog::open().title(tr("Restore from backup"))
             } else {
-                craft_dialogs::FileDialog::save().title(tr("Create backup")).file_name("sshcraft.backup")
+                crate::file_dialogs::FileDialog::save().title(tr("Create backup")).file_name("sshcraft.backup")
             };
             app.dialogs.ask(dialog, DialogFor::Backup { restore: form.restore });
             app.ui.backup_passphrase = Some(HeldPassphrase(std::mem::take(&mut form.passphrase)));

@@ -18,6 +18,12 @@ pub trait Notifier: Send {
 pub struct Desktop;
 
 impl Notifier for Desktop {
+    #[cfg(target_os = "android")]
+    fn notify(&self, _title: &str, _body: &str) {
+        // Android notifications need the activity's Java side; M1 shows none (docs/gaps.md).
+    }
+
+    #[cfg(not(target_os = "android"))]
     fn notify(&self, title: &str, body: &str) {
         let (title, body) = (title.to_string(), body.to_string());
         // Off the interface thread: the desktop service may take a moment to answer.

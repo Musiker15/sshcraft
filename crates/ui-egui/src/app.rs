@@ -11,7 +11,36 @@ use crate::runner::Runner;
 use crate::state::{Page, PaneSlot, Panes, TabState, UiState};
 use crate::toasts::Toasts;
 
+/// What the window runs on. A tablet (the Android app) has no local shell, no file dialogs and no
+/// agents, and gets a bar of special keys under the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Form {
+    #[default]
+    Desktop,
+    Tablet,
+}
+
+/// The part of `ui` the system leaves free: on a tablet the on-screen keyboard and the system
+/// bars cover the rest (reported as safe-area insets); on the desktop it is all of `ui`.
+fn visible(ui: &egui::Ui) -> egui::UiBuilder {
+    let area = ui.ctx().content_rect().intersect(ui.max_rect());
+    egui::UiBuilder::new().max_rect(if area.is_positive() { area } else { ui.max_rect() })
+}
+
+/// Reads the system clipboard's text for the key bar's Paste (set by the Android app).
+pub type PasteSource = std::sync::Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 pub struct SshcraftApp {
+    /// Desktop unless the app sets otherwise; never changes while the window is open.
+    pub form: Form,
+    /// Ctrl and Alt held on the tablet's key bar.
+    pub key_bar: crate::terminal::key_bar::KeyBar,
+    /// Where the key bar's Paste reads from; nothing is pasted without one.
+    pub paste_source: Option<PasteSource>,
+    /// The session the key bar's held keys belong to; they let go when another one has the bar.
+    pub key_bar_session: Option<sshcraft_engine::SessionId>,
+    /// The Paste button for text fields on a tablet.
+    pub field_paste: crate::field_paste::FieldPaste,
     pub session: Session,
     pub runner: Runner,
     pub data: Data,
@@ -21,7 +50,7 @@ pub struct SshcraftApp {
     pub lock: crate::lock::LockState,
     pub bindings: Bindings,
     /// File dialogs: asked in a frame, shown after it, answered on a later frame.
-    pub dialogs: craft_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
+    pub dialogs: crate::file_dialogs::Dialogs<crate::pages::import_export::DialogFor>,
     /// Shows desktop notifications.
     pub notifier: Box<dyn crate::notify::Notifier>,
     /// The last pastes, in memory only.
@@ -72,6 +101,10 @@ impl SshcraftApp {
         crate::fonts::install_embedded(ctx, crate::fonts::CRAFT_FONTS);
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         let events = session.subscribe();
+        // Sync with every server that has it on, and the session logs' housekeeping. Without
+        // this, sync ran only in the session that set a server up, and every restart said
+        // "Sync off" until the switch was flipped.
+        session.start();
         // Terminal output wakes the window; nothing polls for it.
         let waker = ctx.clone();
         session.set_terminal_waker(std::sync::Arc::new(move || waker.request_repaint()));
@@ -85,7 +118,7 @@ impl SshcraftApp {
             toasts: Toasts::default(),
             lock: crate::lock::LockState::default(),
             bindings: Bindings::default(),
-            dialogs: craft_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
+            dialogs: crate::file_dialogs::Dialogs::new(std::sync::Arc::new(move || wake.request_repaint())),
             notifier: Box::new(crate::notify::Desktop),
             patterns: crate::terminal::highlight::Patterns::default(),
             pastes: crate::terminal::compose::PasteHistory::default(),
@@ -99,6 +132,11 @@ impl SshcraftApp {
             bindings_from: None,
             link: crate::link::LinkWatch::default(),
             dropdown_hidden: false,
+            form: Form::Desktop,
+            key_bar: crate::terminal::key_bar::KeyBar::default(),
+            paste_source: None,
+            key_bar_session: None,
+            field_paste: crate::field_paste::FieldPaste::default(),
             handoff_dir: None,
             handoff_next: 0.0,
             control: None,
@@ -358,7 +396,10 @@ impl SshcraftApp {
         for (then, result) in self.runner.take_done() {
             then(self, result);
         }
-        crate::link::tick(self, ctx);
+        // No agents on a tablet, whatever the settings say.
+        if self.form == Form::Desktop {
+            crate::link::tick(self, ctx);
+        }
         crate::lock::tick(self, ctx);
         crate::control::process(self, ctx);
         crate::quit::logic(self, ctx);
@@ -385,7 +426,7 @@ impl SshcraftApp {
             // Output keeps flowing into the terminals; only the lock screen is drawn, and the
             // quit question (no toasts: they can name hosts and addresses).
             crate::session_tab::pump_all(self, &ctx);
-            crate::lock::show(self, ui);
+            ui.scope_builder(visible(ui), |ui| crate::lock::show(self, ui));
             crate::quit::show(self, &ctx);
             crate::window::resize_edges(self, &ctx);
             return;
@@ -406,7 +447,8 @@ impl SshcraftApp {
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
-        crate::shell::show(self, ui);
+        let keep_field = crate::field_paste::before(self, ui);
+        ui.scope_builder(visible(ui), |ui| crate::shell::show(self, ui));
         crate::session_tab::take_request(self);
         crate::session_tab::show_picker(self, &ctx);
         crate::quick_connect::show(self, &ctx);
@@ -456,6 +498,7 @@ impl SshcraftApp {
             }
         }
         self.toasts.show(&ctx);
+        crate::field_paste::after(self, &ctx, keep_field);
         crate::window::resize_edges(self, &ctx);
         self.forms.observe(crate::forms::shape(&self.ui));
     }
