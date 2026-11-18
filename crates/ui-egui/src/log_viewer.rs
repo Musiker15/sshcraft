@@ -106,10 +106,10 @@ impl LogViewer {
         self.beginning_missing
     }
 
-    /// The byte position of the top visible line (lines counted by their line breaks).
+    /// The byte position of the top visible line. The screen is counted in lines of the output,
+    /// not rows: a long line that wraps over several rows is one line break apart from the next.
     fn top_offset(&self) -> u64 {
-        let screen = self.term.screen();
-        let below = usize::from(screen.rows).saturating_add(screen.display_offset);
+        let below = self.term.logical_lines_from_top();
         let top = self.line_starts.len().saturating_sub(below);
         self.line_starts.get(top).copied().unwrap_or(0)
     }
@@ -342,4 +342,28 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         None => {}
     }
     app.log_viewer = Some(viewer);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogViewer;
+
+    /// A line wider than the viewer wraps over several rows; a new mark still lands on the line
+    /// at the top of the screen, not a few lines above it.
+    #[test]
+    fn a_mark_lands_on_the_top_line_despite_wrapped_lines() {
+        let mut bytes = Vec::new();
+        for i in 0..60 {
+            bytes.extend_from_slice(format!("line{i}\r\n").as_bytes());
+        }
+        bytes.extend(std::iter::repeat_n(b'x', 400));
+        bytes.extend_from_slice(b"\r\n");
+        for i in 0..5 {
+            bytes.extend_from_slice(format!("tail{i}\r\n").as_bytes());
+        }
+        let viewer = LogViewer::from_bytes("log".into(), &bytes, &[]);
+        // 160 by 40: the long line takes three rows, so line29 is the top row on screen.
+        let expected = bytes.windows(8).position(|w| w == b"line29\r\n").unwrap() as u64;
+        assert_eq!(viewer.top_offset(), expected);
+    }
 }

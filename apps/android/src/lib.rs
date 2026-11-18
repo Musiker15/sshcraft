@@ -174,6 +174,8 @@ mod background;
 #[cfg(target_os = "android")]
 mod biometric;
 #[cfg(target_os = "android")]
+mod files;
+#[cfg(target_os = "android")]
 mod keyboard;
 
 /// Where `config.toml` lives: in the app's own data folder. Android has no config folder the

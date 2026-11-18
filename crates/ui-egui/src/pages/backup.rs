@@ -38,8 +38,8 @@ impl std::fmt::Debug for HeldPassphrase {
 const MIN: usize = 12;
 
 pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
-    // A backup is a file, and a tablet cannot pick one.
-    if app.form == crate::app::Form::Tablet {
+    // A backup is a file: offered where one can be picked.
+    if !crate::file_dialogs::can_pick(app) {
         return;
     }
     ui.label(egui::RichText::new(tr("Backup")).strong());

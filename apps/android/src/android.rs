@@ -271,6 +271,7 @@ fn run(android: AndroidApp) {
             app.form = Form::Tablet;
             // The app lock is offered where the device can confirm the user.
             app.lock_available = crate::biometric::available();
+            app.dialogs.set_picker(Arc::new(crate::files::SystemPicker));
             app.notifier = Box::new(crate::background::Notices);
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);

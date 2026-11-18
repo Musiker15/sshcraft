@@ -743,8 +743,8 @@ fn header(app: &mut SshcraftApp, ui: &mut Ui, overview: bool) {
         buttons::heading(ui, heading, size);
         ui.add_space(14.0);
     }
-    // Both read or write files, which a tablet cannot pick.
-    let files = app.form == crate::app::Form::Desktop;
+    // Both read or write files: offered where one can be picked.
+    let files = crate::file_dialogs::can_pick(app);
     let height = if crate::pages::host_items::touch(app) { 54.0 } else { 50.0 };
     let gap = 10.0;
     let more = files || !overview || layout == L::Medium;
