@@ -106,7 +106,8 @@ jobs:
               printf 'FreeBSD-ports: { url: "https://pkg.FreeBSD.org/${ABI}/quarterly" }\n' >/usr/local/etc/pkg/repos/FreeBSD.conf
               pkg update -f -q
             fi
-            pkg install -y bash git curl pkgconf cmake-core libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader fontconfig freetype2
+            # dejavu: the tests ask fontconfig for fonts, and fontique panics when it finds none.
+            pkg install -y bash git curl pkgconf cmake-core libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader fontconfig freetype2 dejavu
             if [ "$ARCH" = aarch64 ]; then
               pkg install -y rust
             else
