@@ -210,7 +210,7 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.end_row();
         ui.label(tr("Terminal font"));
         let typed = app.ui.settings.font_family.get_or_insert_with(|| a.font_family.clone());
-        let response = ui.add(egui::TextEdit::singleline(typed).desired_width(300.0).hint_text(tr("comma separated")));
+        let response = ui.add(egui::TextEdit::singleline(typed).desired_width(crate::widgets::fit(ui, 300.0)).hint_text(tr("comma separated")));
         if response.lost_focus() {
             a.font_family = typed.trim().to_string();
             app.ui.settings.font_family = None;
@@ -229,7 +229,7 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
                 // Typed as a draft: half a combination is never saved or registered system-wide.
                 let typed = app.ui.settings.dropdown_shortcut.get_or_insert_with(|| a.dropdown_shortcut.clone().unwrap_or_default());
                 let response = ui
-                    .add(egui::TextEdit::singleline(typed).hint_text("Ctrl+`").desired_width(120.0).char_limit(40))
+                    .add(egui::TextEdit::singleline(typed).hint_text("Ctrl+`").desired_width(crate::widgets::fit(ui, 120.0)).char_limit(40))
                     .on_hover_text(tr("A shortcut that shows SSHCraft at the top of the screen from any program, and hides it again. Empty: off."));
                 let text = typed.trim().to_string();
                 let valid = text.is_empty() || sshcraft_engine::settings::valid_combo(&text);
@@ -419,12 +419,12 @@ fn macros(app: &mut SshcraftApp, ui: &mut Ui) {
         app.ui.settings.macro_draft = Some((None, String::new(), String::new()));
     }
     let Some((place, mut name, mut text)) = app.ui.settings.macro_draft.take() else { return };
-    ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(240.0));
+    ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(crate::widgets::fit(ui, 240.0)));
     ui.add(
         egui::TextEdit::multiline(&mut text)
             .hint_text("cd /srv/app\n$ => make deploy")
             .desired_rows(4)
-            .desired_width(420.0)
+            .desired_width(crate::widgets::fit(ui, 420.0))
             .font(egui::TextStyle::Monospace),
     );
     let draft = Macro { name: name.trim().to_string(), steps: crate::macros::parse_steps(&text) };
@@ -465,7 +465,7 @@ fn patterns(app: &mut SshcraftApp, ui: &mut Ui, t: &mut sshcraft_engine::setting
     let mut remove = None;
     for (i, h) in highlights.iter_mut().enumerate() {
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut h.pattern).desired_width(260.0).hint_text(tr("Pattern")));
+            ui.add(egui::TextEdit::singleline(&mut h.pattern).desired_width(crate::widgets::fit(ui, 260.0)).hint_text(tr("Pattern")));
             let mut color = crate::terminal::highlight::swatch(h.color);
             if ui.color_edit_button_srgba(&mut color).changed() {
                 h.color = [color.r(), color.g(), color.b()];
@@ -493,7 +493,7 @@ fn patterns(app: &mut SshcraftApp, ui: &mut Ui, t: &mut sshcraft_engine::setting
     let mut remove = None;
     for (i, trigger) in triggers.iter_mut().enumerate() {
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut trigger.pattern).desired_width(260.0).hint_text(tr("Pattern")));
+            ui.add(egui::TextEdit::singleline(&mut trigger.pattern).desired_width(crate::widgets::fit(ui, 260.0)).hint_text(tr("Pattern")));
             let label = |a: TriggerAction| match a {
                 TriggerAction::Notify => tr("Notify"),
                 TriggerAction::Bell => tr("Mark the tab"),

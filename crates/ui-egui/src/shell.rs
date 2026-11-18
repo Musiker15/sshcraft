@@ -140,6 +140,10 @@ fn wide_sidebar(app: &mut SshcraftApp, ui: &mut Ui) {
             });
         ui.add_space(8.0);
     }
+    // A touch screen has no menu bar; its commands are in the palette.
+    if app.form == crate::app::Form::Tablet && sidebar_entry(ui, Icon::More, tr("Commands"), false) {
+        app.ui.palette.open = true;
+    }
     sidebar(app, ui, 5..6);
     ui.add_space(16.0);
     let used = ui.cursor().top() - start;
@@ -184,6 +188,17 @@ fn rail(app: &mut SshcraftApp, ui: &mut Ui) {
         ui.add_space(18.0);
         let (page, icon, label) = (Page::Settings, Icon::Settings, tr("Settings"));
         rail_entry(app, ui, page, icon, label);
+        if app.form == crate::app::Form::Tablet {
+            let (rect, response) = ui.allocate_exact_size(vec2(52.0, 52.0), Sense::click());
+            if response.hovered() {
+                ui.painter().rect_filled(rect, 14.0, tokens.row_hover);
+            }
+            draw(ui.painter(), Icon::More, egui::Rect::from_center_size(rect.center(), vec2(22.0, 22.0)), tokens.text_dim);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Commands")));
+            if response.on_hover_text(tr("Commands")).clicked() {
+                app.ui.palette.open = true;
+            }
+        }
         if let Some((state, color, _)) = sync {
             ui.add_space(2.0);
             let (dot, response) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
@@ -225,6 +240,17 @@ fn nav_bar(app: &mut SshcraftApp, ui: &mut Ui) {
         );
         ui.label(egui::RichText::new(title).strong().size(18.0).color(tokens.text_strong));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if app.form == crate::app::Form::Tablet {
+                let (rect, response) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
+                if response.hovered() {
+                    ui.painter().rect_filled(rect, 12.0, tokens.row_hover);
+                }
+                draw(ui.painter(), Icon::More, egui::Rect::from_center_size(rect.center(), vec2(22.0, 22.0)), tokens.text_strong);
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tr("Commands")));
+                if response.clicked() {
+                    app.ui.palette.open = true;
+                }
+            }
             if app.ui.page == Page::Hosts {
                 let (rect, response) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
                 if response.hovered() {
@@ -409,7 +435,7 @@ pub fn new_tab_page(app: &mut SshcraftApp, ui: &mut Ui) {
     app.ui.quick_text = text;
     crate::pages::templates::list(app, ui);
     ui.add_space(8.0);
-    ui.add(egui::TextEdit::singleline(&mut app.ui.new_tab_query).hint_text(tr("Search hosts")).desired_width(320.0));
+    ui.add(egui::TextEdit::singleline(&mut app.ui.new_tab_query).hint_text(tr("Search hosts")).desired_width(crate::widgets::fit(ui, 320.0)));
     ui.add_space(8.0);
     let query = app.ui.new_tab_query.to_lowercase();
     // "Group: host", so hosts of the same name in different groups can be told apart.

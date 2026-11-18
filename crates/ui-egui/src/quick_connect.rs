@@ -98,7 +98,8 @@ pub fn connect(app: &mut SshcraftApp, text: &str) -> Result<(), String> {
 pub fn field(app: &mut SshcraftApp, ui: &mut Ui, text: &mut String) -> Option<String> {
     let mut go = false;
     ui.horizontal(|ui| {
-        let response = ui.add(egui::TextEdit::singleline(text).hint_text("user@host:port").desired_width(260.0).char_limit(256));
+        let response =
+            ui.add(egui::TextEdit::singleline(text).hint_text("user@host:port").desired_width(crate::widgets::fit(ui, 260.0)).char_limit(256));
         go = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         go |= ui.add_enabled(!app.forms.busy(), crate::widgets::buttons::main_action(tr("Connect"))).clicked();
     });
@@ -113,8 +114,9 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut dialog) = app.ui.quick_connect.take() else { return };
     let tokens = Tokens::get(ctx);
     let mut keep = true;
-    egui::Modal::new(egui::Id::unique("sshcraft-quick-connect")).show(ctx, |ui| {
-        ui.set_width(420.0);
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-quick-connect")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 420.0));
         crate::widgets::buttons::title(ui, tr("Quick connect"));
         ui.add_space(6.0);
         ui.label(egui::RichText::new(tr("A new host is saved under this name; you can delete it later.")).color(tokens.text_dim));

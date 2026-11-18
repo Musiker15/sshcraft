@@ -182,8 +182,9 @@ pub fn passcli_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let tokens = Tokens::get(ctx);
     let busy = app.forms.busy();
     let (mut keep, mut import) = (true, None);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-passcli")).show(ctx, |ui| {
-        ui.set_width(480.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-passcli")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 480.0));
         crate::widgets::buttons::title(ui, tr("Import from Proton Pass"));
         ui.add_space(8.0);
         egui::ScrollArea::vertical().max_height(300.0).min_scrolled_height(300.0).auto_shrink([false, false]).show(ui, |ui| match &view {

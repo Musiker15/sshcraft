@@ -119,13 +119,14 @@ pub fn show_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.template_form.take() else { return };
     let busy = app.forms.busy();
     let (mut keep, mut submit) = (true, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-template")).show(ctx, |ui| {
-        ui.set_width(620.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-template")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 620.0));
         crate::widgets::buttons::title(ui, tr("Save as workspace"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(tr("Name"));
-            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(300.0).char_limit(100));
+            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 300.0)).char_limit(100));
         });
         ui.add_space(6.0);
         egui::ScrollArea::vertical().max_height(260.0).min_scrolled_height(260.0).auto_shrink([false, false]).show(ui, |ui| {
@@ -135,9 +136,9 @@ pub fn show_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(tr("Command")).strong());
                 ui.end_row();
                 for pane in &mut form.panes {
-                    ui.add(egui::TextEdit::singleline(&mut pane.title).desired_width(150.0).char_limit(100));
-                    ui.add(egui::TextEdit::singleline(&mut pane.cwd).desired_width(180.0).char_limit(1000));
-                    ui.add(egui::TextEdit::singleline(&mut pane.command).desired_width(200.0).char_limit(1000));
+                    ui.add(egui::TextEdit::singleline(&mut pane.title).desired_width(crate::widgets::fit(ui, 150.0)).char_limit(100));
+                    ui.add(egui::TextEdit::singleline(&mut pane.cwd).desired_width(crate::widgets::fit(ui, 180.0)).char_limit(1000));
+                    ui.add(egui::TextEdit::singleline(&mut pane.command).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(1000));
                     ui.end_row();
                 }
             });

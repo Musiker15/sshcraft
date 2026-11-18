@@ -326,8 +326,9 @@ fn form_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let hosts: Vec<(HostId, String)> = app.data.hosts.iter().map(|r| (r.host.id, r.host.name.clone())).collect();
     let (mut keep, mut save) = (true, false);
     let problem = problem(&form.name, &form.package, &form.content);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-snippet")).show(ctx, |ui| {
-        ui.set_width(560.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-snippet")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 560.0));
         crate::widgets::buttons::title(ui, if form.id.is_some() { tr("Edit snippet") } else { tr("New snippet") });
         form_body(ui, &mut form, &hosts);
         if let Some(problem) = problem {
@@ -377,8 +378,9 @@ fn run_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         open_panes(app).into_iter().map(|s| (s, app.terminals.get(&s).map(|t| t.title.clone()).unwrap_or_default())).collect();
     let hosts: Vec<(HostId, String)> = app.data.hosts.iter().map(|r| (r.host.id, r.host.name.clone())).collect();
     let (mut keep, mut go) = (true, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-snippet-run")).show(ctx, |ui| {
-        ui.set_width(520.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-snippet-run")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 520.0));
         crate::widgets::buttons::title(ui, trf("Run {name}", &[("name", &visible(&name))]));
         if job.missing > 0 {
             let count = job.missing.to_string();
@@ -401,7 +403,7 @@ fn run_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             egui::Grid::new("sshcraft-snippet-values").num_columns(2).show(ui, |ui| {
                 for (name, value) in &mut job.values {
                     ui.label(visible(name));
-                    ui.add(egui::TextEdit::singleline(value).desired_width(320.0));
+                    ui.add(egui::TextEdit::singleline(value).desired_width(crate::widgets::fit(ui, 320.0)));
                     ui.end_row();
                 }
             });

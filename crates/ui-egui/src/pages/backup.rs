@@ -61,7 +61,8 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.backup.take() else { return };
     let mut keep = true;
     let mut go = false;
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-backup")).show(ctx, |ui| {
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-backup")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
         ui.set_max_width(420.0);
         crate::widgets::buttons::title(ui, if form.restore { tr("Restore from backup") } else { tr("Create backup") });
         ui.add_space(6.0);

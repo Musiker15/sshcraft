@@ -126,7 +126,12 @@ fn selection_bar(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
                 }
             }
         });
-        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.selection.tag).hint_text(tr("Tag")).desired_width(100.0).char_limit(32));
+        ui.add(
+            egui::TextEdit::singleline(&mut app.ui.hosts.selection.tag)
+                .hint_text(tr("Tag"))
+                .desired_width(crate::widgets::fit(ui, 100.0))
+                .char_limit(32),
+        );
         let tag = app.ui.hosts.selection.tag.trim().to_string();
         if ui.add_enabled(!tag.is_empty(), egui::Button::new(tr("Add tag"))).clicked() {
             bulk(app, json!({ "add_tags": [tag] }));
@@ -134,7 +139,12 @@ fn selection_bar(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
         if ui.add_enabled(!tag.is_empty(), egui::Button::new(tr("Remove tag"))).clicked() {
             bulk(app, json!({ "remove_tags": [tag] }));
         }
-        ui.add(egui::TextEdit::singleline(&mut app.ui.hosts.selection.user).hint_text(tr("User")).desired_width(100.0).char_limit(100));
+        ui.add(
+            egui::TextEdit::singleline(&mut app.ui.hosts.selection.user)
+                .hint_text(tr("User"))
+                .desired_width(crate::widgets::fit(ui, 100.0))
+                .char_limit(100),
+        );
         if ui.button(tr("Set user")).on_hover_text(tr("Empty: take the user from the group again")).clicked() {
             let user = app.ui.hosts.selection.user.trim().to_string();
             bulk(app, json!({ "username": user }));
@@ -467,7 +477,7 @@ fn smart_chips(app: &mut SshcraftApp, ui: &mut Ui) {
     let clash = saved.iter().any(|g| sshcraft_engine::settings::same_name(&g.name, &group.name));
     let mut keep = true;
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(200.0));
+        ui.add(egui::TextEdit::singleline(&mut name).hint_text(tr("Name")).char_limit(64).desired_width(crate::widgets::fit(ui, 200.0)));
         if ui.add_enabled(group.valid() && !clash, crate::widgets::buttons::main_action(tr("Save"))).clicked() {
             let applied = group.name.clone();
             crate::pages::settings::save(app, |s| s.appearance.smart_groups.push(group));
@@ -636,7 +646,8 @@ fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
         Confirm::DeleteHost(_, name) => trf("Delete the host {name}?", &[("name", &visible(name))]),
         Confirm::DeleteGroup(_, name) => trf("Delete the group {name} with its subgroups and all their hosts?", &[("name", &visible(name))]),
     };
-    egui::Modal::new(egui::Id::unique("sshcraft-confirm")).show(ctx, |ui| {
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-confirm")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
         ui.set_max_width(420.0);
         ui.label(text);
         ui.add_space(8.0);
@@ -976,7 +987,7 @@ fn overview_sections(app: &mut SshcraftApp, ui: &mut Ui, all_groups: &[Group]) {
                         ui.spacing_mut().item_spacing.x = 10.0;
                         for row in &recent {
                             ui.allocate_ui_with_layout(vec2(156.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                                ui.set_width(156.0);
+                                ui.set_width(crate::widgets::fit(ui, 156.0));
                                 crate::pages::host_items::host_card(app, ui, row, true);
                             });
                         }

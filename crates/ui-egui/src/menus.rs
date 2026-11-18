@@ -222,8 +222,9 @@ pub fn about(app: &mut SshcraftApp, ctx: &egui::Context) {
         return;
     }
     let mut close = false;
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-about")).show(ctx, |ui| {
-        ui.set_width(360.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-about")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 360.0));
         crate::widgets::buttons::title(ui, APP_NAME);
         ui.label(crate::i18n::trf("Version {version}", &[("version", env!("CARGO_PKG_VERSION"))]));
         ui.add_space(6.0);

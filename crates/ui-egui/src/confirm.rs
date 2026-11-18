@@ -33,8 +33,9 @@ pub fn ask(app: &mut SshcraftApp, title: String, body: &str, button: &'static st
 pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(confirm) = app.ui.ask.clone() else { return };
     let (mut close, mut go) = (false, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-confirm")).show(ctx, |ui| {
-        ui.set_width(440.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-confirm")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 440.0));
         crate::widgets::buttons::title(ui, &confirm.title);
         ui.add_space(6.0);
         ui.label(&confirm.body);

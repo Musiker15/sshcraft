@@ -214,7 +214,7 @@ fn connection(app: &mut SshcraftApp, ui: &mut Ui, tokens: &Tokens) {
         let label = ui.label(tr("Port (0: any free port)"));
         let current = integrations.agent_port;
         let text = app.ui.agents.port_text.get_or_insert_with(|| current.to_string());
-        let field = ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(5)).labelled_by(label.id);
+        let field = ui.add(egui::TextEdit::singleline(text).desired_width(crate::widgets::fit(ui, 70.0)).char_limit(5)).labelled_by(label.id);
         if field.lost_focus() {
             match text.trim().parse::<u16>() {
                 Ok(port) if port != current => {

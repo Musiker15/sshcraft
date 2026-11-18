@@ -138,13 +138,14 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let tokens = Tokens::get(ctx);
     let busy = app.forms.busy();
     let (mut keep, mut do_find, mut do_share) = (true, false, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-share")).show(ctx, |ui| {
-        ui.set_width(540.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-share")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 540.0));
         crate::widgets::buttons::title(ui, trf("Share {name}", &[("name", &visible(&form.title))]));
         ui.label(egui::RichText::new(tr("Only with accounts on the same server.")).color(tokens.text_dim));
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Email"));
-            ui.add(egui::TextEdit::singleline(&mut form.email).desired_width(260.0).char_limit(320));
+            ui.add(egui::TextEdit::singleline(&mut form.email).desired_width(crate::widgets::fit(ui, 260.0)).char_limit(320));
             do_find = ui.add_enabled(!form.email.trim().is_empty(), egui::Button::new(tr("Find"))).clicked();
         });
         if let Some(r) = form.recipient.clone() {
@@ -306,8 +307,9 @@ pub fn remove_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some((server, area, account, keys)) = app.ui.shares.removing.clone() else { return };
     let tokens = Tokens::get(ctx);
     let (mut close, mut go) = (false, false);
-    egui::Modal::new(egui::Id::unique("sshcraft-remove-recipient")).show(ctx, |ui| {
-        ui.set_width(460.0);
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-remove-recipient")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 460.0));
         crate::widgets::buttons::title(ui, tr("Remove recipient"));
         ui.label(tr("They lose access, and the share gets a new key."));
         if keys {

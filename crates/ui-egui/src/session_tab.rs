@@ -950,8 +950,9 @@ pub fn show_clipboard_question(app: &mut SshcraftApp, ctx: &egui::Context) {
         No,
     }
     let mut choice = None;
-    egui::Modal::new(egui::Id::unique("sshcraft-clipboard")).show(ctx, |ui| {
-        ui.set_width(460.0);
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-clipboard")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 460.0));
         crate::widgets::buttons::title(ui, tr("Clipboard"));
         ui.add_space(6.0);
         ui.label(trf(
@@ -1699,8 +1700,9 @@ pub fn show_picker(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut picker) = app.ui.picker.take() else { return };
     let mut keep = true;
     let mut chosen: Option<(Value, String)> = None;
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-picker")).show(ctx, |ui| {
-        ui.set_width(420.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-picker")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 420.0));
         match &mut picker {
             Picker::Local(shells) => {
                 crate::widgets::buttons::title(ui, tr("Local terminal"));
