@@ -232,8 +232,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     if list.is_empty() {
         ui.label(egui::RichText::new(tr("No session logs. Recording is off unless a host or the settings turn it on.")).color(tokens.text_dim));
     }
-    // Exporting writes a file, which a tablet cannot pick.
-    let tablet = app.form == crate::app::Form::Tablet;
+    // Exporting writes a file: offered where one can be picked.
+    let tablet = !crate::file_dialogs::can_pick(app);
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         if list.is_empty() {
             return;
