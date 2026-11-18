@@ -35,6 +35,8 @@ struct Tablet {
     sessions: usize,
     /// Calls into MainActivity that failed, each said once.
     reported: Vec<String>,
+    /// The word the keyboard is composing (crate::Composer).
+    composer: crate::Composer,
 }
 
 impl Tablet {
@@ -180,8 +182,8 @@ impl eframe::App for Tablet {
         }
         crate::clipboard_keys(&mut raw_input.events, clipboard_text);
         let taken = crate::keyboard::take_text();
-        for text in self.report(taken).unwrap_or_default() {
-            raw_input.events.push(crate::committed(text));
+        for entry in self.report(taken).unwrap_or_default() {
+            raw_input.events.extend(self.composer.events(entry));
         }
     }
 }
@@ -288,6 +290,7 @@ fn run(android: AndroidApp) {
                 reshow: None,
                 sessions: 0,
                 reported: Vec::new(),
+                composer: crate::Composer::default(),
             }))
         }),
     );
