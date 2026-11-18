@@ -19,18 +19,59 @@ use std::process::Command;
 pub const PACKAGE: &str = "de.musiker15.sshcraft";
 /// The library android-activity loads: `lib<LIB>.so`.
 const LIB: &str = "sshcraft_android";
-/// A CPU the APK is built for: the Rust target, Android's ABI name and the APK's suffix.
+/// A CPU the APK is built for: the Rust target, Android's ABI name, the APK's suffix and the
+/// prefix of the NDK's clang for it (armv7's differs from the Rust target).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Target {
     pub triple: &'static str,
     pub abi: &'static str,
     pub suffix: &'static str,
+    pub clang: &'static str,
 }
 
-/// Tablets: the release APK.
-pub const ARM64: Target = Target { triple: "aarch64-linux-android", abi: "arm64-v8a", suffix: "arm64" };
-/// The x86_64 emulator on a desktop, for trying a build there (`--emulator`); never released.
-pub const X86_64: Target = Target { triple: "x86_64-linux-android", abi: "x86_64", suffix: "x86_64" };
+/// Most phones and tablets.
+pub const ARM64: Target = Target { triple: "aarch64-linux-android", abi: "arm64-v8a", suffix: "arm64", clang: "aarch64-linux-android" };
+/// Older and cheaper devices with a 32-bit ARM processor.
+pub const ARMV7: Target = Target { triple: "armv7-linux-androideabi", abi: "armeabi-v7a", suffix: "armv7", clang: "armv7a-linux-androideabi" };
+/// Chromebooks and x86 tablets, and the emulator on a desktop (`--emulator`, drawn with OpenGL ES).
+pub const X86_64: Target = Target { triple: "x86_64-linux-android", abi: "x86_64", suffix: "x86_64", clang: "x86_64-linux-android" };
+
+/// Every target a release has an APK for.
+pub const RELEASED: [Target; 3] = [ARM64, ARMV7, X86_64];
+
+/// What `cargo xtask android` was asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    pub check: bool,
+    pub debug: bool,
+    pub install: bool,
+    pub target: Target,
+    /// The emulator: x86_64, drawn with OpenGL ES (its Vulkan driver crashes under wgpu).
+    pub emulator: bool,
+}
+
+/// The options from the command line.
+pub fn options(args: &[&str]) -> Result<Options, String> {
+    let mut o = Options { check: false, debug: false, install: false, target: ARM64, emulator: false };
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match *arg {
+            "--check" => o.check = true,
+            "--debug" => o.debug = true,
+            "--emulator" => {
+                o.target = X86_64;
+                o.emulator = true;
+            }
+            "--install" => o.install = true,
+            "--abi" => {
+                let abi = args.next().ok_or(format!("android: --abi needs arm64, armv7 or x86_64\n{USAGE}"))?;
+                o.target = RELEASED.into_iter().find(|t| t.suffix == *abi).ok_or(format!("android: unknown ABI `{abi}`\n{USAGE}"))?;
+            }
+            other => return Err(format!("android: unknown option `{other}`\n{USAGE}")),
+        }
+    }
+    Ok(o)
+}
 /// Android 13, decided for M1 (docs/android.md).
 pub const MIN_SDK: u32 = 33;
 pub const TARGET_SDK: u32 = 36;
@@ -38,20 +79,10 @@ const KEY_ALIAS: &str = "sshcraft";
 /// Launcher icons from `assets/app-icon/hicolor`, one per density bucket.
 const ICONS: [(&str, &str); 5] = [("mdpi", "48x48"), ("hdpi", "64x64"), ("xhdpi", "128x128"), ("xxhdpi", "256x256"), ("xxxhdpi", "512x512")];
 
-const USAGE: &str = "usage: cargo xtask android [--check] [--debug] [--emulator] [--install]";
+const USAGE: &str = "usage: cargo xtask android [--check] [--debug] [--abi arm64|armv7|x86_64] [--emulator] [--install]";
 
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
-    let (mut check, mut debug, mut install) = (false, false, false);
-    let mut target = ARM64;
-    for arg in args {
-        match *arg {
-            "--check" => check = true,
-            "--debug" => debug = true,
-            "--emulator" => target = X86_64,
-            "--install" => install = true,
-            other => return Err(format!("android: unknown option `{other}`\n{USAGE}")),
-        }
-    }
+    let Options { check, debug, install, target, emulator } = options(args)?;
     let sdk = Sdk::find()?;
     if check {
         return cargo(
@@ -76,7 +107,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     }
     let mut build = vec!["build", "--target", target.triple, "-p", "sshcraft-android"];
     // The emulator's Vulkan driver crashes under wgpu; it draws with OpenGL ES.
-    if target == X86_64 {
+    if emulator {
         build.extend(["--features", "sshcraft-android/gl"]);
     }
     if !debug {
@@ -101,6 +132,11 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
 /// `.exe` on Windows.
 fn exe(name: &str) -> String {
     if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
+}
+
+/// The NDK's clang for `target` at the minimum API level.
+fn clang_name(target: Target) -> String {
+    format!("{}{MIN_SDK}-clang{}", target.clang, if cfg!(windows) { ".cmd" } else { "" })
 }
 
 /// The SDK and NDK found on this machine.
@@ -139,7 +175,7 @@ impl Sdk {
         } else {
             "linux-x86_64"
         };
-        let name = format!("{}{MIN_SDK}-clang{}", target.triple, if cfg!(windows) { ".cmd" } else { "" });
+        let name = clang_name(target);
         let clang = self.ndk.join("toolchains").join("llvm").join("prebuilt").join(host).join("bin").join(name);
         if clang.is_file() { Ok(clang) } else { Err(format!("android: {} is missing", clang.display())) }
     }
@@ -205,6 +241,11 @@ pub fn manifest(version: &str, code: u32) -> String {
     <uses-sdk android:minSdkVersion="{MIN_SDK}" android:targetSdkVersion="{TARGET_SDK}" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Sessions stay open in the background: a foreground service with its notification
+         (SessionService), and the app's own notifications. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="SSHCraft"
         android:icon="@mipmap/ic_launcher"
@@ -224,6 +265,14 @@ pub fn manifest(version: &str, code: u32) -> String {
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name="de.musiker15.sshcraft.SessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the user's open SSH sessions and their network running while the app is in the background" />
+        </service>
     </application>
 </manifest>
 "#
@@ -454,6 +503,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_abi_picks_the_target_and_the_emulator_draws_with_gl() {
+        assert_eq!(options(&[]).unwrap().target, ARM64);
+        assert_eq!(options(&["--abi", "armv7"]).unwrap().target, ARMV7);
+        let x86 = options(&["--abi", "x86_64"]).unwrap();
+        assert_eq!((x86.target, x86.emulator), (X86_64, false), "a released x86_64 build draws with Vulkan");
+        let emulator = options(&["--emulator", "--debug"]).unwrap();
+        assert_eq!((emulator.target, emulator.emulator, emulator.debug), (X86_64, true, true));
+        assert!(options(&["--abi", "mips"]).is_err());
+        assert!(options(&["--abi"]).is_err());
+    }
+
+    #[test]
+    fn armv7_uses_the_ndks_armv7a_clang() {
+        assert!(clang_name(ARMV7).starts_with("armv7a-linux-androideabi33-clang"));
+        assert!(clang_name(ARM64).starts_with("aarch64-linux-android33-clang"));
+    }
+
+    #[test]
     fn the_version_code_orders_releases() {
         assert_eq!(version_code("0.2.0"), Ok(200));
         assert_eq!(version_code("1.2.3"), Ok(10203));
@@ -461,6 +528,22 @@ mod tests {
         assert!(version_code("0.3.0").unwrap() > version_code("0.2.99").unwrap());
         assert!(version_code("1.2").is_err());
         assert!(version_code("0.100.0").is_err(), "minor 100 would collide with major 1");
+    }
+
+    #[test]
+    fn the_manifest_keeps_sessions_open_in_the_background() {
+        let m = manifest("0.3.0", 300);
+        for wanted in [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+            "android.permission.POST_NOTIFICATIONS",
+            r#"android:name="de.musiker15.sshcraft.SessionService""#,
+            r#"android:foregroundServiceType="specialUse""#,
+            r#"android:exported="false""#,
+            "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
+        ] {
+            assert!(m.contains(wanted), "the manifest lacks {wanted}");
+        }
     }
 
     #[test]

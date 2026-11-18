@@ -153,6 +153,8 @@ pub fn clipboard_keys(events: &mut Vec<egui::Event>, clipboard: impl FnOnce() ->
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
+mod background;
+#[cfg(target_os = "android")]
 mod keyboard;
 
 /// Where `config.toml` lives: in the app's own data folder. Android has no config folder the

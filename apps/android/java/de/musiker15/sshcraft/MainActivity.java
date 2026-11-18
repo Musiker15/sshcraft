@@ -1,6 +1,12 @@
 package de.musiker15.sshcraft;
 
+import android.Manifest;
 import android.app.NativeActivity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.Context;
 import android.os.Bundle;
 import android.graphics.Insets;
@@ -53,6 +59,47 @@ public class MainActivity extends NativeActivity {
         // NativeActivity sets its own keyboard mode in onCreate, which opens the keyboard for a
         // focused editor at start. It opens when the app asks for it (keyboard()), not before.
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        // Notifications (open sessions, messages) need the user's yes since Android 13.
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 1);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        // The app ends: nothing is left to keep open.
+        stopService(new Intent(this, SessionService.class));
+        super.onDestroy();
+    }
+
+    /**
+     * Starts, updates or stops the service that keeps sessions open in the background: Rust
+     * calls this when the number of open sessions changes, with the notification's text and the
+     * channel's name in the app's language. Zero stops it.
+     */
+    public void sessions(int count, String text, String channel) {
+        Intent intent = new Intent(this, SessionService.class);
+        if (count <= 0) {
+            stopService(intent);
+            return;
+        }
+        intent.putExtra(SessionService.TEXT, text);
+        intent.putExtra(SessionService.CHANNEL_NAME, channel);
+        startForegroundService(intent);
+    }
+
+    /** Shows one of the app's messages as a notification; Rust says what and in which channel. */
+    public void notify(String title, String body, String channel, int id) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(new NotificationChannel(SessionService.MESSAGES, channel, NotificationManager.IMPORTANCE_DEFAULT));
+        Notification notification = new Notification.Builder(this, SessionService.MESSAGES)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(new Notification.BigTextStyle().bigText(body))
+                .setSmallIcon(SessionService.icon(this))
+                .setAutoCancel(true)
+                .build();
+        manager.notify(id, notification);
     }
 
     private static long pack(int pixels) {
