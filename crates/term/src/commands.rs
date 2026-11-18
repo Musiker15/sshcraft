@@ -265,6 +265,18 @@ impl Terminal {
         Some(self.lines_text(first, last))
     }
 
+    /// The lines of the output from the top row on screen to the bottom of the terminal, the one
+    /// the top row belongs to included: a line that wraps over several rows counts once. A log
+    /// viewer maps the screen to the output's line breaks with it.
+    pub fn logical_lines_from_top(&self) -> usize {
+        let grid = self.term.grid();
+        let Some(last) = grid.columns().checked_sub(1) else { return 0 };
+        let top = -i32::try_from(grid.display_offset()).unwrap_or(i32::MAX);
+        let bottom = grid.bottommost_line().0;
+        // Every row that is not continued in the next one ends a line.
+        (top.max(grid.topmost_line().0)..=bottom).filter(|&line| !grid[Line(line)][Column(last)].flags.contains(Flags::WRAPLINE)).count()
+    }
+
     /// The text of lines `first..=last`; a wrapped line continues without a line break.
     fn lines_text(&self, first: i32, last: i32) -> String {
         let grid = self.term.grid();

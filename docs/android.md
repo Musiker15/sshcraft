@@ -64,8 +64,10 @@ the bar puts the selection on Android's clipboard.
   Android Keystore that never leaves the device. The app's data is excluded from Android's
   backup and from the transfer to a new device, so a new device starts empty and gets its data
   through sync.
-- No local terminal or serial port, and no file dialogs: importing hosts from a file, exporting,
-  backups to a file, saving a session log and `known_hosts` files are desktop only.
+- No local terminal or serial port.
+- Files come through Android's own picker: importing hosts, exporting them, backups, saving a
+  session log and `known_hosts` files work as on the desktop, in any place the picker reaches
+  (the device, a cloud drive). A folder cannot be picked.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
 - No dropdown window, no desktop shortcuts, no X11 forwarding, no FIDO keys and no screen reader
   support yet.

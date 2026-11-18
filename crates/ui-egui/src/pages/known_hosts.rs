@@ -48,7 +48,7 @@ pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
         Some(tr("Known hosts")),
         app,
         |ui, app| {
-            let files = app.form == crate::app::Form::Desktop;
+            let files = crate::file_dialogs::can_pick(app);
             if files && ui.button(tr("Import known_hosts")).clicked() {
                 let dialog = crate::file_dialogs::FileDialog::open().title(tr("Import known_hosts"));
                 app.dialogs.ask(dialog, DialogFor::KnownHostsImport);

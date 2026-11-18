@@ -918,6 +918,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "{n} h ago" => "vor {n} Std.",
         "yesterday" => "gestern",
         "{n} days ago" => "vor {n} Tagen",
+        "Folders cannot be picked on this device." => "Ordner lassen sich auf diesem Gerät nicht auswählen.",
         "1 session open" => "1 Sitzung offen",
         "{count} sessions open" => "{count} Sitzungen offen",
         "Open sessions" => "Offene Sitzungen",
