@@ -244,3 +244,22 @@ fn the_key_list_says_where_each_key_lives() {
     assert!(at("home", synced), "the synced key names its server");
     assert!(at("This device only", local), "the local key says it stays here");
 }
+
+#[test]
+fn a_recent_card_says_when_it_was_connected() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    h.set_size(vec2(1280.0, 800.0));
+    let id = uuid::Uuid::new_v4();
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "recent-one", "group_id": null, "settings": { "address": "192.0.2.7" } } }));
+    let five_minutes_ago = chrono::Utc::now().timestamp_millis() - 5 * 60_000;
+    sshcraft_engine::testing::touch_recent(&session, sshcraft_model::model::HostId(id), five_minutes_ago);
+    // Saving again tells the app the hosts changed, so it fetches the recent ones too.
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "recent-one", "group_id": null, "settings": { "address": "192.0.2.7" } } }));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.query_by_label("Last 5 min ago").is_none() {
+        assert!(Instant::now() < deadline, "the card does not say when it was connected");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run_steps(1);
+    }
+}

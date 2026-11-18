@@ -7,7 +7,7 @@ use sshcraft_model::model::Group;
 
 use crate::app::SshcraftApp;
 use crate::data::HostRow;
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::state::ConnectRequest;
 use crate::theme::Tokens;
 use crate::widgets::elided_label;
@@ -285,6 +285,9 @@ pub fn host_card(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, compact: boo
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| dot(ui, state));
             });
             elided_label(ui, &row.host.name, inner, tokens.text_strong, FontId::proportional(15.0));
+            if let Some(when) = last_connected(app, row) {
+                ui.label(egui::RichText::new(when).size(12.0).color(tokens.text_dim));
+            }
         } else {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
@@ -331,5 +334,49 @@ pub fn host_card(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, compact: boo
             }
             wide_button(ui, sftp, tr("SFTP"), false, false, half);
         });
+        if !compact && let Some(when) = last_connected(app, row) {
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new(trf("Last {when}", &[("when", &when)])).size(12.0).color(tokens.text_dim));
+        }
     });
+}
+
+/// How long ago `at_ms` was, seen from `now_ms` (milliseconds since 1970), in words: just now,
+/// minutes, hours, yesterday, days.
+pub fn ago(now_ms: i64, at_ms: i64) -> String {
+    let span = chrono::TimeDelta::milliseconds(now_ms.saturating_sub(at_ms).max(0));
+    let n = |v: i64| v.to_string();
+    if span < chrono::TimeDelta::minutes(1) {
+        tr("just now").to_string()
+    } else if span < chrono::TimeDelta::hours(1) {
+        trf("{n} min ago", &[("n", &n(span.num_minutes()))])
+    } else if span < chrono::TimeDelta::days(1) {
+        trf("{n} h ago", &[("n", &n(span.num_hours()))])
+    } else if span < chrono::TimeDelta::days(2) {
+        tr("yesterday").to_string()
+    } else {
+        trf("{n} days ago", &[("n", &n(span.num_days()))])
+    }
+}
+
+/// When the host was connected to last, in words, if it is among the recent ones.
+fn last_connected(app: &SshcraftApp, row: &HostRow) -> Option<String> {
+    let at = *app.data.recent_at.get(&row.host.id)?;
+    Some(ago(chrono::Utc::now().timestamp_millis(), at))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ago;
+
+    #[test]
+    fn ago_reads_like_a_person_would_say_it() {
+        let min = 60_000;
+        assert_eq!(ago(10 * min, 10 * min - 5_000), "just now");
+        assert_eq!(ago(100 * min, 95 * min), "5 min ago");
+        assert_eq!(ago(10 * 60 * min, 7 * 60 * min), "3 h ago");
+        assert_eq!(ago(30 * 60 * min, 30 * 60 * min - 25 * 60 * min), "yesterday");
+        assert_eq!(ago(10 * 24 * 60 * min, 7 * 24 * 60 * min), "3 days ago");
+        assert_eq!(ago(0, 5_000), "just now", "a time in the future reads as now");
+    }
 }

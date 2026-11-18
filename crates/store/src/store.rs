@@ -735,9 +735,18 @@ impl Store {
 
     /// Hosts connected to most recently, newest first.
     pub fn recent_hosts(&self, limit: u32) -> Result<Vec<HostId>, StoreError> {
-        let mut stmt = self.conn.prepare("SELECT host_id FROM recent_hosts ORDER BY connected_at DESC, host_id LIMIT ?1")?;
-        let rows = stmt.query_map([limit], |r| r.get::<_, String>(0))?;
-        rows.map(|row| Ok(HostId(parse_uuid(&row?)?))).collect()
+        Ok(self.recent_hosts_with_times(limit)?.into_iter().map(|(id, _)| id).collect())
+    }
+
+    /// [`Store::recent_hosts`] with when each was connected to last (milliseconds since 1970).
+    pub fn recent_hosts_with_times(&self, limit: u32) -> Result<Vec<(HostId, i64)>, StoreError> {
+        let mut stmt = self.conn.prepare("SELECT host_id, connected_at FROM recent_hosts ORDER BY connected_at DESC, host_id LIMIT ?1")?;
+        let rows = stmt.query_map([limit], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        rows.map(|row| {
+            let (id, at) = row?;
+            Ok((HostId(parse_uuid(&id)?), at))
+        })
+        .collect()
     }
 
     pub fn has_key_records(&self) -> Result<bool, StoreError> {
