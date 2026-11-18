@@ -65,14 +65,17 @@ the bar puts the selection on Android's clipboard.
 - No local terminal or serial port, and no file dialogs: importing hosts from a file, exporting,
   backups to a file, saving a session log and `known_hosts` files are desktop only.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
-- No desktop notifications, no dropdown window, no desktop shortcuts, no X11 forwarding, no
-  FIDO keys and no screen reader support yet.
+- No dropdown window, no desktop shortcuts, no X11 forwarding, no FIDO keys and no screen reader
+  support yet.
 - A word the keyboard is still composing appears only once the keyboard commits it.
 - The sync server's certificate is checked against Mozilla's list of public authorities, not
   Android's own store, so a server with a certificate from a private or user-installed authority
   is not trusted on Android.
-- When Android sends SSHCraft to the background it may cut the network. Sessions reconnect
-  when you come back ([connections.md](connections.md)).
+- While sessions are open, a notification ("2 sessions open") keeps SSHCraft and its network
+  running in the background; Android stops a backgrounded app's network otherwise. It goes away
+  with the last session. Android asks once whether SSHCraft may show notifications.
+- The app's messages (a long command ended, a message from a server) come as notifications,
+  while SSHCraft is on screen or just went to the background.
 
 The open points are in [gaps.md](gaps.md).
 

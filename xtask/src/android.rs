@@ -205,6 +205,11 @@ pub fn manifest(version: &str, code: u32) -> String {
     <uses-sdk android:minSdkVersion="{MIN_SDK}" android:targetSdkVersion="{TARGET_SDK}" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Sessions stay open in the background: a foreground service with its notification
+         (SessionService), and the app's own notifications. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="SSHCraft"
         android:icon="@mipmap/ic_launcher"
@@ -224,6 +229,14 @@ pub fn manifest(version: &str, code: u32) -> String {
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name="de.musiker15.sshcraft.SessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the user's open SSH sessions and their network running while the app is in the background" />
+        </service>
     </application>
 </manifest>
 "#
@@ -461,6 +474,22 @@ mod tests {
         assert!(version_code("0.3.0").unwrap() > version_code("0.2.99").unwrap());
         assert!(version_code("1.2").is_err());
         assert!(version_code("0.100.0").is_err(), "minor 100 would collide with major 1");
+    }
+
+    #[test]
+    fn the_manifest_keeps_sessions_open_in_the_background() {
+        let m = manifest("0.3.0", 300);
+        for wanted in [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+            "android.permission.POST_NOTIFICATIONS",
+            r#"android:name="de.musiker15.sshcraft.SessionService""#,
+            r#"android:foregroundServiceType="specialUse""#,
+            r#"android:exported="false""#,
+            "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
+        ] {
+            assert!(m.contains(wanted), "the manifest lacks {wanted}");
+        }
     }
 
     #[test]
