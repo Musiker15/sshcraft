@@ -122,7 +122,9 @@ cargo xtask stores dist/SHA256SUMS.txt      # writes dist/stores/
 
 The templates are in [`packaging/winget/`](../packaging/winget) and
 [`packaging/homebrew/`](../packaging/homebrew); `{{version}}` and `{{sha256:<file>}}` are their
-only placeholders, and a file the checksums do not list stops the command. Submitting is the
+only placeholders, and a file the checksums do not list stops the command. A store whose
+platform the release has no files for at all is left out with a note: without macOS packages
+there is no Homebrew cask. Submitting is the
 maintainer's step, never an automatic one:
 
 | Store | What to submit |
