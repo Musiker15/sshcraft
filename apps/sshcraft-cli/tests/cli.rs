@@ -20,6 +20,19 @@ fn cli(link: &std::path::Path, args: &[&str]) -> Output {
     Command::new(CLI).args(args).env("SSHCRAFT_LINK_DIR", link).output().unwrap()
 }
 
+/// Without any argument the program shows its help and ends well: package managers (winget's
+/// check among them) start a newly installed program that way. A wrong argument stays a usage
+/// error.
+#[test]
+fn without_arguments_it_shows_the_help_and_succeeds() {
+    let link = tempfile::tempdir().unwrap();
+    let out = cli(link.path(), &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Usage"), "the help is printed");
+    let wrong = cli(link.path(), &["no-such-command"]);
+    assert_eq!(wrong.status.code(), Some(2), "a wrong argument is still a usage error");
+}
+
 #[test]
 fn without_the_app_the_exit_code_is_3() {
     let link = tempfile::tempdir().unwrap();
