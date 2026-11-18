@@ -23,8 +23,8 @@ impl Default for LockState {
     }
 }
 
-/// Whether this system can unlock with the user's presence (Windows Hello). Elsewhere the lock
-/// is not offered yet.
+/// Whether the desktop can unlock with the user's presence (Windows Hello); the app starts with
+/// this as `lock_available`, and Android sets its own. Elsewhere the lock is not offered yet.
 pub fn supported() -> bool {
     cfg!(windows)
 }
@@ -46,14 +46,14 @@ pub fn tick(app: &mut SshcraftApp, ctx: &egui::Context) {
     let minutes = app.data.settings.general.lock_after_minutes;
     let limit = Duration::from_secs(u64::from(minutes) * 60);
     let idle = app.lock.last_input.elapsed();
-    if minutes > 0 && supported() && !app.lock.locked && idle >= limit {
+    if minutes > 0 && app.lock_available && !app.lock.locked && idle >= limit {
         lock(app);
     }
     if !app.lock.locked && ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
         app.lock.last_input = Instant::now();
     }
     // Woken again when the time is up, also without input.
-    if minutes > 0 && supported() && !app.lock.locked {
+    if minutes > 0 && app.lock_available && !app.lock.locked {
         ctx.request_repaint_after(limit.saturating_sub(app.lock.last_input.elapsed()).max(Duration::from_secs(1)));
     }
 }
@@ -68,7 +68,12 @@ pub fn show(app: &mut SshcraftApp, ui: &mut egui::Ui) {
             ui.add_space(ui.available_height() / 3.0);
             crate::widgets::buttons::title(ui, tr("SSHCraft is locked"));
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(tr("Sessions keep running. Unlock with Windows Hello to see them.")).color(tokens.text_dim));
+            let how = if app.form == crate::app::Form::Tablet {
+                tr("Sessions keep running. Unlock with your fingerprint, face or screen lock to see them.")
+            } else {
+                tr("Sessions keep running. Unlock with Windows Hello to see them.")
+            };
+            ui.label(egui::RichText::new(how).color(tokens.text_dim));
             ui.add_space(12.0);
             if let Some(error) = &app.lock.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);

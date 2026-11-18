@@ -336,3 +336,32 @@ fn a_field_under_the_keyboard_scrolls_into_view() {
         window.bottom() - keyboard
     );
 }
+
+/// The app lock follows what the app found on the device: offered and named after the
+/// fingerprint on a tablet with a screen lock, never locking where nothing can unlock it.
+#[test]
+fn the_app_lock_follows_the_devices_screen_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(dir.path(), Form::Tablet);
+    h.state_mut().lock_available = true;
+    settings(&mut h, Section::General);
+    assert!(h.query_by_label_contains("fingerprint").is_some(), "the settings name the fingerprint");
+    h.state_mut().lock.locked = true;
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("fingerprint, face or screen lock").is_some(), "the lock screen says how to unlock");
+}
+
+#[test]
+fn nothing_locks_where_nothing_can_unlock() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, _session, ctx) = sshcraft_ui_egui::testing::app_on(dir.path());
+    app.form = Form::Tablet;
+    app.lock_available = false;
+    app.data.settings.general.lock_after_minutes = 1;
+    app.lock.last_input = Instant::now() - Duration::from_secs(120);
+    app.logic(&ctx);
+    assert!(!app.lock.locked, "locked without a way to unlock");
+    app.lock_available = true;
+    app.logic(&ctx);
+    assert!(app.lock.locked, "the counter-check: with a screen lock it locks");
+}

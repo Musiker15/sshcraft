@@ -98,6 +98,8 @@ pub struct Data {
     /// The hosts connected to last, newest first, as `host.recent` names them (deleted ones may
     /// still be in it; the Hosts page skips them).
     pub recent: Vec<sshcraft_model::model::HostId>,
+    /// When each of `recent` was connected to last, in milliseconds since 1970.
+    pub recent_at: std::collections::HashMap<sshcraft_model::model::HostId, i64>,
     pub groups: Vec<GroupRow>,
     pub keys: Vec<KeyRow>,
     pub identities: Vec<IdentityRow>,
@@ -172,10 +174,17 @@ pub fn refresh(app: &mut SshcraftApp) {
         // "Recently connected" on the Hosts page; a failure leaves the section out.
         app.runner.run(
             "host.recent",
-            json!({ "limit": 8 }),
+            json!({ "limit": 8, "with_times": true }),
             Box::new(|app, result| {
+                #[derive(serde::Deserialize)]
+                struct Recent {
+                    id: sshcraft_model::model::HostId,
+                    connected_at_ms: i64,
+                }
                 if let Ok(value) = result {
-                    app.data.recent = serde_json::from_value(value).unwrap_or_default();
+                    let rows: Vec<Recent> = serde_json::from_value(value).unwrap_or_default();
+                    app.data.recent = rows.iter().map(|r| r.id).collect();
+                    app.data.recent_at = rows.into_iter().map(|r| (r.id, r.connected_at_ms)).collect();
                     app.data.version = app.data.version.wrapping_add(1);
                 }
             }),

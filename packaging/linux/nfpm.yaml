@@ -33,6 +33,8 @@ overrides:
       - libc6 (>= ${GLIBC_FLOOR})
       - libgcc-s1
       - libxkbcommon0
+      # winit loads it for an X11 session; without it the window panics at start.
+      - libxkbcommon-x11-0
       - libvulkan1 | libegl1
       # The keyring (Secret Service over D-Bus), the file dialogs (GTK) and the fonts.
       - libdbus-1-3
@@ -53,6 +55,8 @@ overrides:
   rpm:
     depends:
       - libxkbcommon
+      # winit loads it for an X11 session; without it the window panics at start.
+      - libxkbcommon-x11
       - (vulkan-loader or libglvnd-egl)
       - dbus-libs
       - gtk3

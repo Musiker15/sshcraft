@@ -6,6 +6,23 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+/// The answer of the biometric prompt (`Biometric.poll` in `java/`, codes kept in step by a test).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    Pending,
+    Verified,
+    Declined,
+}
+
+/// `Biometric.poll`'s code as an answer: -1 open, 0 confirmed, anything else declined.
+pub fn answer(code: i32) -> Answer {
+    match code {
+        -1 => Answer::Pending,
+        0 => Answer::Verified,
+        _ => Answer::Declined,
+    }
+}
+
 /// The part of the window, in points, that the system covers: the status bar at the top, the
 /// navigation bar and the on-screen keyboard at the bottom. `window` is the window in points,
 /// `content` the visible content rect `(left, top, right, bottom)` in pixels, `ppp` the pixels
@@ -155,6 +172,8 @@ mod android;
 #[cfg(target_os = "android")]
 mod background;
 #[cfg(target_os = "android")]
+mod biometric;
+#[cfg(target_os = "android")]
 mod files;
 #[cfg(target_os = "android")]
 mod keyboard;
@@ -236,6 +255,24 @@ mod tests {
         assert_eq!(committed("ssh-ed25519 AAAA".into()), Event::Paste("ssh-ed25519 AAAA".into()));
         assert_eq!(committed("\r".into()), Event::Paste(String::from("\r")), "a line break is never typed as text");
         assert_eq!(committed("a\r\nb".into()), Event::Paste("a\nb".into()));
+    }
+
+    #[test]
+    fn only_a_confirmation_unlocks() {
+        assert_eq!(answer(0), Answer::Verified);
+        assert_eq!(answer(-1), Answer::Pending);
+        for declined in [1, 2, 7, i32::MIN, i32::MAX] {
+            assert_eq!(answer(declined), Answer::Declined, "code {declined}");
+        }
+    }
+
+    /// The codes `answer` reads are the ones the Java class writes.
+    #[test]
+    fn the_codes_match_the_java_class() {
+        let java = include_str!("../java/de/musiker15/sshcraft/Biometric.java");
+        for (name, code) in [("PENDING", -1), ("VERIFIED", 0), ("DECLINED", 1)] {
+            assert!(java.contains(&format!("public static final int {name} = {code};")), "{name} is {code} in Java");
+        }
     }
 
     fn key(key: Key, modifiers: Modifiers) -> Event {

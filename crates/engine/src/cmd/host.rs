@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "{ ids: at most 1000, patch: { group_id?, to_top_level?, add_tags?, remove_tags?, username?: empty to inherit, port?: 1 to 65535, key?, agent_forwarding?, x11? } } -> { updated }",
             run_bulk_update,
         ),
-        query("host.recent", "Recent hosts", "{ limit: at most 100 }", run_recent),
+        query("host.recent", "Recent hosts", "{ limit: at most 100, with_times?: true for [{ id, connected_at_ms }] }", run_recent),
         query(
             "host.containers",
             "Containers on a host",
@@ -384,12 +384,28 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
 #[derive(Deserialize)]
 struct RecentParams {
     limit: u32,
+    /// Also say when each host was connected to last; without it the answer is the ids alone, as
+    /// before.
+    #[serde(default)]
+    with_times: bool,
+}
+
+#[derive(serde::Serialize)]
+struct RecentHost {
+    id: HostId,
+    connected_at_ms: i64,
 }
 
 fn run_recent(ctx: Ctx, params: Value) -> Out {
     sync_run(move || {
-        let RecentParams { limit } = parse("host.recent", params)?;
-        to_value(&ctx.session.store().recent_hosts(limit.min(100))?)
+        let RecentParams { limit, with_times } = parse("host.recent", params)?;
+        let store = ctx.session.store();
+        if with_times {
+            let rows: Vec<RecentHost> =
+                store.recent_hosts_with_times(limit.min(100))?.into_iter().map(|(id, connected_at_ms)| RecentHost { id, connected_at_ms }).collect();
+            return to_value(&rows);
+        }
+        to_value(&store.recent_hosts(limit.min(100))?)
     })
 }
 

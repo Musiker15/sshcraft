@@ -58,6 +58,50 @@ fn ui_inspect_shows_the_page_and_its_tabs() {
 }
 
 #[test]
+fn ui_inspect_lists_the_widgets_a_script_can_click() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let queue = with_control(&mut h);
+    let state = request(&mut h, &queue, "ui.inspect", json!({})).unwrap();
+    let widgets = state["widgets"].as_array().expect("a list of widgets");
+    let button = widgets.iter().find(|w| w["label"] == "New host").expect("the New host button is listed");
+    assert_eq!(button["role"], "Button");
+    assert_eq!(button["enabled"], true);
+    let (x, y) = (
+        button["x"].as_f64().unwrap() + button["width"].as_f64().unwrap() / 2.0,
+        button["y"].as_f64().unwrap() + button["height"].as_f64().unwrap() / 2.0,
+    );
+    request(&mut h, &queue, "ui.click", json!({ "x": x, "y": y })).unwrap();
+    h.run_steps(2);
+    assert!(h.state().ui.host_form.is_some(), "the listed rectangle is where the button is");
+}
+
+/// A pasted private key and a typed passphrase are on the screen, unmasked and masked; neither
+/// reaches the channel, only the names of their fields do.
+#[test]
+fn ui_inspect_never_gives_a_pasted_key_or_a_passphrase() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let queue = with_control(&mut h);
+    request(&mut h, &queue, "ui.set", json!({ "page": "keys" })).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Import key").click();
+    h.run_steps(3);
+    {
+        let import = h.state_mut().ui.key_dialog.as_mut().and_then(sshcraft_ui_egui::pages::keys::KeyDialog::import_mut).expect("the dialog opened");
+        import.text = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n".into();
+        import.passphrase = "hunter2-correct-horse".into();
+    }
+    h.run_steps(3);
+    let state = request(&mut h, &queue, "ui.inspect", json!({})).unwrap();
+    let labels: Vec<&str> = state["widgets"].as_array().unwrap().iter().filter_map(|w| w["label"].as_str()).collect();
+    assert!(labels.contains(&"Private key") && labels.contains(&"Passphrase"), "the fields are listed: {labels:?}");
+    let answer = state.to_string();
+    assert!(!answer.contains("PRIVATE KEY-----") && !answer.contains("b3BlbnNzaC1rZXkt"), "the key stays out of the answer");
+    assert!(!answer.contains("hunter2"), "the passphrase stays out of the answer");
+}
+
+#[test]
 fn ui_click_presses_a_button() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, _session) = app_harness(dir.path());
