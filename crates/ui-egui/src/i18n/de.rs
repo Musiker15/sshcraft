@@ -912,6 +912,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SFTP comes with S1" => "SFTP kommt mit S1",
         "More" => "Mehr",
         "Commands" => "Befehle",
+        "Folders cannot be picked on this device." => "Ordner lassen sich auf diesem Gerät nicht auswählen.",
         "1 session open" => "1 Sitzung offen",
         "{count} sessions open" => "{count} Sitzungen offen",
         "Open sessions" => "Offene Sitzungen",

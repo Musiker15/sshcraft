@@ -282,6 +282,7 @@ fn run(android: AndroidApp) {
         Box::new(move |cc| {
             let mut app = SshcraftApp::new(session, &cc.egui_ctx);
             app.form = Form::Tablet;
+            app.dialogs.set_picker(Arc::new(crate::files::SystemPicker));
             app.notifier = Box::new(crate::background::Notices);
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);

@@ -2,10 +2,15 @@ package de.musiker15.sshcraft;
 
 import android.Manifest;
 import android.app.NativeActivity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.os.ParcelFileDescriptor;
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Map;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.Context;
 import android.os.Bundle;
@@ -42,6 +47,78 @@ public class MainActivity extends NativeActivity {
     private static final int MAX_WAITING = 1 << 20;
 
     private InputView input;
+
+    /** Picked files as "id<TAB>path" (an empty path: cancelled), until Rust takes them. */
+    private static final ConcurrentLinkedQueue<String> PICKED = new ConcurrentLinkedQueue<>();
+
+    /** The open requests: the request code Android hands back, Rust's id and whether to write. */
+    private final Map<Integer, long[]> picking = new HashMap<>();
+
+    /** Files picked lately stay open, so the path Rust got stays valid while it reads or writes. */
+    private final ArrayDeque<ParcelFileDescriptor> picked = new ArrayDeque<>();
+
+    /** At most this many picked files stay open; the oldest closes first. */
+    private static final int KEEP_OPEN = 8;
+
+    private int nextCode = 1000;
+
+    /**
+     * Opens the system's file picker for Rust's request {@code id}: a document to read, or one to
+     * create and write ({@code save}, named {@code name}). The answer comes through
+     * {@link #takePicked}.
+     */
+    public void pick(final long id, final boolean save, final String name, final String mime) {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(save ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType(mime == null || mime.isEmpty() ? "*/*" : mime);
+            if (save && name != null && !name.isEmpty()) {
+                intent.putExtra(Intent.EXTRA_TITLE, name);
+            }
+            int code = nextCode++;
+            picking.put(code, new long[] {id, save ? 1 : 0});
+            try {
+                startActivityForResult(intent, code);
+            } catch (ActivityNotFoundException e) {
+                picking.remove(code);
+                PICKED.add(id + "\t");
+            }
+        });
+    }
+
+    @Override
+    protected void onActivityResult(int code, int result, Intent data) {
+        super.onActivityResult(code, result, data);
+        long[] request = picking.remove(code);
+        if (request == null) {
+            return;
+        }
+        String path = "";
+        if (result == RESULT_OK && data != null && data.getData() != null) {
+            try {
+                ParcelFileDescriptor fd = getContentResolver().openFileDescriptor(data.getData(), request[1] == 1 ? "rwt" : "r");
+                if (fd != null) {
+                    picked.addLast(fd);
+                    while (picked.size() > KEEP_OPEN) {
+                        try {
+                            picked.removeFirst().close();
+                        } catch (java.io.IOException ignored) {
+                            // Closing an old file can fail; it is gone either way.
+                        }
+                    }
+                    path = "/proc/self/fd/" + fd.getFd();
+                }
+            } catch (Exception e) {
+                path = "";
+            }
+        }
+        PICKED.add(request[0] + "\t" + path);
+    }
+
+    /** The oldest answer of the file picker as "id<TAB>path", or null when there is none. */
+    public static String takePicked() {
+        return PICKED.poll();
+    }
 
     @Override
     protected void onCreate(Bundle state) {

@@ -91,7 +91,7 @@ this channel go through the gate as the caller `control`, like an agent of that 
 | `engine.commands` | none: every command, with `agents` saying whether agents reach it |
 | `engine.journal` | none: the commands run so far, without secrets |
 | `window.list` | none |
-| `ui.inspect` | none: the page, the settings section, the tabs with their panes, open questions, notices, the window size, whether a dialog is open |
+| `ui.inspect` | none: the page, the settings section, the tabs with their panes, open questions, notices, the window size, whether a dialog is open, and `widgets`: what is on the screen with a name or a click, `{role, label, x, y, width, height, enabled, focused, checked?}` in screen points, from the frame shown last. Names only, never what is typed into a field |
 | `ui.click` | `{x, y, button?: left\|right\|middle, count?: 1 to 8}` in screen points |
 | `ui.move` | `{x, y}` |
 | `ui.drag` | `{from: [x, y], to: [x, y]}` |
