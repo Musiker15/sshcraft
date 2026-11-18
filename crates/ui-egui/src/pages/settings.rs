@@ -96,27 +96,33 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         // No agents on a tablet: no control channel, no MCP, no CLI.
         for section in Section::ALL.into_iter().filter(|s| *s != Section::Agents || app.form == crate::app::Form::Desktop) {
-            if ui.selectable_label(app.ui.settings.section == section, section.label()).clicked() {
+            if crate::widgets::buttons::chip(ui, section.label(), app.ui.settings.section == section).clicked() {
                 app.ui.settings.section = section;
                 app.ui.settings.recording = None;
                 app.ui.settings.error = None;
             }
         }
     });
-    ui.separator();
+    ui.add_space(12.0);
     let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         crate::field_paste::scroll_into_view(ui, field_scroll);
-        match app.ui.settings.section {
-            Section::General => general(app, ui),
-            Section::Appearance => appearance(app, ui),
-            Section::Terminal => terminal(app, ui),
-            Section::Shortcuts => shortcuts(app, ui),
-            Section::Sync => crate::pages::sync::show(app, ui),
-            Section::Agents => crate::pages::agents::show(app, ui),
-            Section::Connections => crate::pages::connections::show(app, ui),
-            Section::Trash => crate::pages::trash::show(app, ui),
-        }
+        crate::widgets::buttons::card(
+            ui,
+            None,
+            app,
+            |_, _| {},
+            |ui, app| match app.ui.settings.section {
+                Section::General => general(app, ui),
+                Section::Appearance => appearance(app, ui),
+                Section::Terminal => terminal(app, ui),
+                Section::Shortcuts => shortcuts(app, ui),
+                Section::Sync => crate::pages::sync::show(app, ui),
+                Section::Agents => crate::pages::agents::show(app, ui),
+                Section::Connections => crate::pages::connections::show(app, ui),
+                Section::Trash => crate::pages::trash::show(app, ui),
+            },
+        );
     });
 }
 

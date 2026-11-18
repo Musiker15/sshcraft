@@ -205,9 +205,8 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let list = shown(app);
     let mut action = None;
     let mut delete_ids = None;
+    crate::widgets::buttons::page_title(ui, tr("Logs"));
     ui.horizontal_wrapped(|ui| {
-        crate::widgets::buttons::page_title(ui, tr("Logs"));
-        ui.add_space(16.0);
         ui.add(egui::TextEdit::singleline(&mut app.ui.logs.search).hint_text(tr("Search in all logs")).desired_width(crate::widgets::fit(ui, 240.0)));
         filter_box(app, ui);
         if ui.button(tr("Delete selected")).clicked() {
@@ -236,33 +235,44 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     // Exporting writes a file, which a tablet cannot pick.
     let tablet = app.form == crate::app::Form::Tablet;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        egui::Grid::new("sshcraft-logs").num_columns(7).min_col_width(60.0).spacing([12.0, 6.0]).show(ui, |ui| {
-            for log in &list {
-                let id = text(log, "id");
-                let mut on = app.ui.logs.selected.contains(&id);
-                if ui.add_enabled(!recording(log), egui::Checkbox::without_text(&mut on)).changed() {
-                    if on {
-                        app.ui.logs.selected.insert(id.clone());
-                    } else {
-                        app.ui.logs.selected.remove(&id);
-                    }
-                }
-                elided_label(ui, &host_label(app, log), 180.0, tokens.text, FontId::proportional(14.0));
-                ui.label(when(log.get("started_at").and_then(Value::as_i64).unwrap_or(0)));
-                ui.label(duration(log));
-                ui.label(size(log.get("size").and_then(Value::as_u64).unwrap_or(0)));
-                ui.label(if log.get("location").is_none_or(Value::is_null) { tr("This device") } else { tr("Sync server") });
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button(tr("Open")).clicked() {
-                        action = Some(LogAction::Open(id.clone()));
-                    }
-                    if !tablet && ui.button(tr("Export")).clicked() {
-                        action = Some(LogAction::Export(id.clone()));
+        if list.is_empty() {
+            return;
+        }
+        crate::widgets::buttons::card(
+            ui,
+            None,
+            &mut (),
+            |_, _| {},
+            |ui, _| {
+                egui::Grid::new("sshcraft-logs").num_columns(7).min_col_width(60.0).spacing([12.0, 6.0]).show(ui, |ui| {
+                    for log in &list {
+                        let id = text(log, "id");
+                        let mut on = app.ui.logs.selected.contains(&id);
+                        if ui.add_enabled(!recording(log), egui::Checkbox::without_text(&mut on)).changed() {
+                            if on {
+                                app.ui.logs.selected.insert(id.clone());
+                            } else {
+                                app.ui.logs.selected.remove(&id);
+                            }
+                        }
+                        elided_label(ui, &host_label(app, log), 180.0, tokens.text, FontId::proportional(14.0));
+                        ui.label(when(log.get("started_at").and_then(Value::as_i64).unwrap_or(0)));
+                        ui.label(duration(log));
+                        ui.label(size(log.get("size").and_then(Value::as_u64).unwrap_or(0)));
+                        ui.label(if log.get("location").is_none_or(Value::is_null) { tr("This device") } else { tr("Sync server") });
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(tr("Open")).clicked() {
+                                action = Some(LogAction::Open(id.clone()));
+                            }
+                            if !tablet && ui.button(tr("Export")).clicked() {
+                                action = Some(LogAction::Export(id.clone()));
+                            }
+                        });
+                        ui.end_row();
                     }
                 });
-                ui.end_row();
-            }
-        });
+            },
+        );
     });
     match delete_ids {
         Some(ids) if ids.is_empty() => delete(app, ids),

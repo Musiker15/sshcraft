@@ -41,43 +41,49 @@ fn load(app: &mut SshcraftApp) {
 pub fn section(app: &mut SshcraftApp, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     load(app);
-    ui.horizontal_wrapped(|ui| {
-        crate::widgets::buttons::title(ui, tr("Known hosts"));
-        ui.add_space(16.0);
-        let files = app.form == crate::app::Form::Desktop;
-        if files && ui.button(tr("Import known_hosts")).clicked() {
-            let dialog = crate::file_dialogs::FileDialog::open().title(tr("Import known_hosts"));
-            app.dialogs.ask(dialog, DialogFor::KnownHostsImport);
-        }
-        if files && ui.button(tr("Export known_hosts")).clicked() {
-            let dialog = crate::file_dialogs::FileDialog::save().title(tr("Export known_hosts")).file_name("known_hosts");
-            app.dialogs.ask(dialog, DialogFor::KnownHostsExport);
-        }
-    });
-    ui.label(
-        egui::RichText::new(tr("Servers whose host key SSHCraft trusts. Remove a key and the next connection asks again.")).color(tokens.text_dim),
-    );
-    ui.add_space(8.0);
-    let keys = app.data.host_keys.clone().unwrap_or_default();
-    if keys.is_empty() {
-        ui.label(egui::RichText::new(tr("No known hosts yet.")).color(tokens.text_dim));
-    }
     let mut remove = None;
-    egui::Grid::new("sshcraft-known-hosts").num_columns(4).striped(true).show(ui, |ui| {
-        for key in &keys {
-            let at = if key.port == 22 { visible(&key.address) } else { format!("{}:{}", visible(&key.address), key.port) };
-            ui.label(at);
+    let keys = app.data.host_keys.clone().unwrap_or_default();
+    crate::widgets::buttons::card(
+        ui,
+        Some(tr("Known hosts")),
+        app,
+        |ui, app| {
+            let files = app.form == crate::app::Form::Desktop;
+            if files && ui.button(tr("Import known_hosts")).clicked() {
+                let dialog = crate::file_dialogs::FileDialog::open().title(tr("Import known_hosts"));
+                app.dialogs.ask(dialog, DialogFor::KnownHostsImport);
+            }
+            if files && ui.button(tr("Export known_hosts")).clicked() {
+                let dialog = crate::file_dialogs::FileDialog::save().title(tr("Export known_hosts")).file_name("known_hosts");
+                app.dialogs.ask(dialog, DialogFor::KnownHostsExport);
+            }
+        },
+        |ui, _| {
             ui.label(
-                egui::RichText::new(key.algorithm.as_deref().map(visible).unwrap_or_else(|| tr("fingerprint only").to_owned()))
+                egui::RichText::new(tr("Servers whose host key SSHCraft trusts. Remove a key and the next connection asks again."))
                     .color(tokens.text_dim),
             );
-            ui.label(egui::RichText::new(visible(&key.fingerprint)).monospace().small());
-            if ui.small_button(tr("Remove")).on_hover_text(tr("The next connection asks again")).clicked() {
-                remove = Some(key.clone());
+            ui.add_space(8.0);
+            if keys.is_empty() {
+                ui.label(egui::RichText::new(tr("No known hosts yet.")).color(tokens.text_dim));
             }
-            ui.end_row();
-        }
-    });
+            egui::Grid::new("sshcraft-known-hosts").num_columns(4).striped(true).show(ui, |ui| {
+                for key in &keys {
+                    let at = if key.port == 22 { visible(&key.address) } else { format!("{}:{}", visible(&key.address), key.port) };
+                    ui.label(at);
+                    ui.label(
+                        egui::RichText::new(key.algorithm.as_deref().map(visible).unwrap_or_else(|| tr("fingerprint only").to_owned()))
+                            .color(tokens.text_dim),
+                    );
+                    ui.label(egui::RichText::new(visible(&key.fingerprint)).monospace().small());
+                    if ui.small_button(tr("Remove")).on_hover_text(tr("The next connection asks again")).clicked() {
+                        remove = Some(key.clone());
+                    }
+                    ui.end_row();
+                }
+            });
+        },
+    );
     if let Some(key) = remove {
         app.data.host_keys = None;
         app.run_reported("hostkey.remove", json!({ "address": key.address, "port": key.port, "fingerprint": key.fingerprint }));
