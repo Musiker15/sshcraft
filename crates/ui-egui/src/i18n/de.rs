@@ -921,6 +921,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Set up a fingerprint, face or screen lock on this device to use the app lock." => {
             "Richte auf diesem Gerät Fingerabdruck, Gesicht oder eine Bildschirmsperre ein, um die App-Sperre zu nutzen."
         }
+        "Last {when}" => "Zuletzt {when}",
+        "just now" => "gerade eben",
+        "{n} min ago" => "vor {n} Min.",
+        "{n} h ago" => "vor {n} Std.",
+        "yesterday" => "gestern",
+        "{n} days ago" => "vor {n} Tagen",
         "Folders cannot be picked on this device." => "Ordner lassen sich auf diesem Gerät nicht auswählen.",
         "1 session open" => "1 Sitzung offen",
         "{count} sessions open" => "{count} Sitzungen offen",

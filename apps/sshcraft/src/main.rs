@@ -138,11 +138,16 @@ impl eframe::App for Problem {
 }
 
 fn show_problem(text: String) -> ExitCode {
+    // Also on the terminal: without a display (or a library the window needs) the window below
+    // cannot open either.
+    eprintln!("SSHCraft: {text}");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_title("SSHCraft").with_inner_size([460.0, 160.0]).with_resizable(false),
         ..Default::default()
     };
-    let _ = eframe::run_native("SSHCraft", options, Box::new(move |_| Ok(Box::new(Problem(text)))));
+    if let Err(e) = eframe::run_native("SSHCraft", options, Box::new(move |_| Ok(Box::new(Problem(text))))) {
+        eprintln!("SSHCraft: the window could not open: {e}");
+    }
     ExitCode::FAILURE
 }
 
@@ -233,7 +238,12 @@ fn main() -> ExitCode {
     finish(runtime);
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+        // Said where it can be read: the window that would say it is the thing that failed (a
+        // missing X11 library, no display, no graphics driver).
+        Err(e) => {
+            eprintln!("SSHCraft: the window could not open: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
