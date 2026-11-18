@@ -208,8 +208,8 @@ Each has a test where it can have one.
   macOS); macOS and FreeBSD run in CI.
 - `cargo xtask android --check` runs clippy for Android, `cargo xtask android [--debug]
   [--install]` builds the APK; both need the Android SDK and NDK ([docs/android.md](docs/android.md)).
-  CI has no Android SDK, so run `--check` before pushing a change to `apps/android`, `ui-egui`,
-  `store` or `sync`.
+  CI runs `--check` on every pull request; the APK itself is built only for a release
+  (`android-release.yml`), so try a change to `apps/android` in the emulator before pushing it.
 - Packages and releases: [`docs/releasing.md`](docs/releasing.md). `cargo xtask version [set X.Y.Z]`
   prints or sets the one version of the workspace; `cargo xtask sbom` and `cargo xtask stores`
   make a release's bill of materials and store entries. Never start a release or push to `release`
@@ -234,11 +234,18 @@ and [`docs/architecture.md`](docs/architecture.md). Update the affected docs whe
 
 ## CI workflows
 
-- Workflows in `.github/workflows/` call the shared workflows in
-  [storytold/craft-common-actions](https://github.com/storytold/craft-common-actions) at `@main`.
-  Do not add or change CI in a feature or fix pull request.
-- `server-postgres.yml` runs its own job: no shared workflow offers a PostgreSQL service for the
-  server's storage contract tests. It moves to craft-common-actions once one does.
+- **SSHCraft keeps its own workflows.** This is an exception to house rule 11, decided by the
+  maintainer on 2026-11-18 ([docs/decisions.md](docs/decisions.md)): the shared workflows of
+  storytold/craft-common-actions could not be changed for SSHCraft's needs (an Android check, the
+  Arch dependencies, releases without macOS). The workflows in `.github/workflows/` and the
+  scripts in `.github/scripts/` are written for SSHCraft; they call no workflow or action of
+  craft-common-actions. That repository has no licence, so nothing is copied from it.
+- `ci.yml` runs the gate (`gate.yml`: `cargo xtask ci` per system) and clippy for Android. The
+  main branch requires the checks `gate / gate (ubuntu-24.04)` and `gate / gate (windows-latest)`:
+  keep those names when changing the gate.
+- A change to CI may go into the pull request that needs it. Say so in its description.
+- Third-party actions are pinned to a commit SHA with the version in a comment.
+- `server-postgres.yml` runs the server's storage contract tests against a PostgreSQL service.
 
 New workspace crates include `publish = false` and `[lints] workspace = true` (`fido` excepted,
 see "Never crash"), and production crate roots declare the `deny` attribute before their modules.

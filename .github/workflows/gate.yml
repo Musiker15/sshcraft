@@ -1,0 +1,90 @@
+name: Gate
+
+# `cargo xtask ci` on each system in `os`; called by ci.yml. Its jobs are named gate (<os>), so
+# the checks the main branch requires read gate / gate (<os>).
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: "JSON array of runner images"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  # Line tables keep backtraces readable at a fraction of the size of full debug info.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  # The fonts of the Craft family (OFL), pinned; the build works without them, CI uses them.
+  CRAFT_FONTS_REF: b076417b5880bd4154bd22f00695b1d28c6bea83
+  # Libraries the desktop crates build against on Linux.
+  LINUX_PACKAGES: >-
+    pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+    libgtk-3-dev libfontconfig1-dev libfreetype-dev libudev-dev libdbus-1-dev mesa-vulkan-drivers
+
+jobs:
+  gate:
+    name: gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os) }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out craft-fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+          persist-credentials: false
+      - name: Build with craft-fonts
+        shell: bash
+        run: |
+          echo "CRAFT_FONTS_DIR=$GITHUB_WORKSPACE/craft-fonts" >> "$GITHUB_ENV"
+          echo "CRAFT_FONTS_REQUIRED=1" >> "$GITHUB_ENV"
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL </dev/null >/dev/null 2>&1 &
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          read -ra packages <<< "$LINUX_PACKAGES"
+          .github/scripts/apt-install.sh "${packages[@]}"
+      - name: Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update \
+            --component clippy --component rustfmt --target wasm32-unknown-unknown
+          rustup default stable
+          rustc --version
+      - name: cargo-nextest and cargo-deny
+        uses: step-security/taiki-e-install-action@76747d22a7567cc4438546a84f11bdf18e670ab8 # v2.87.32
+        with:
+          tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
+      - uses: step-security/rust-cache@851174d9a2fdc03e0896e02844dcc61d81dd7851 # v2.9.1
+        with:
+          shared-key: gate
+          # Only main fills the cache; pull requests read it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Gate
+        shell: bash
+        run: cargo xtask ci
+      - name: Lockfile unchanged
+        shell: bash
+        run: git diff --exit-code -- Cargo.lock
