@@ -94,8 +94,15 @@ if has deb || has rpm; then
   command -v nfpm >/dev/null || { echo "error: nfpm not found (https://nfpm.goreleaser.com/install/)" >&2; exit 1; }
   export VERSION
   export NFPM_ARCH="$DEB_ARCH"
+  # The deb asks for the newest glibc symbol version the binaries use: the build host's glibc
+  # (2.35 on Ubuntu 22.04, 2.39 for the riscv64 build on 24.04), read from the binaries so it
+  # cannot drift from them. readelf reads any architecture.
+  GLIBC_FLOOR="$(readelf --version-info --wide "$STAGE/usr/bin/sshcraft" "$STAGE/usr/bin/sshcraft-cli" |
+    grep -oE 'GLIBC_[0-9]+\.[0-9]+(\.[0-9]+)?' | sed 's/^GLIBC_//' | sort -uV | tail -n 1)"
+  [[ "$GLIBC_FLOOR" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "error: no glibc version found in the binaries" >&2; exit 1; }
+  echo "deb depends on libc6 >= $GLIBC_FLOOR"
   # nfpm expands env vars in fields like `version` and `arch`, but not in `contents[].src`.
-  sed "s|\${STAGE}|$STAGE|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
+  sed -e "s|\${STAGE}|$STAGE|g" -e "s|\${GLIBC_FLOOR}|$GLIBC_FLOOR|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
   for fmt in deb rpm; do
     if has "$fmt"; then (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p "$fmt" -t "$DIST/$BASENAME.$fmt"); fi
   done

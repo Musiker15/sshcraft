@@ -1,14 +1,28 @@
 name: Release
 
-# Builds the signed packages of every platform into a draft GitHub release. Only a push to the
-# release branch or a run by hand starts it (docs/releasing.md); there is no nightly run.
+# Builds every package of an SSHCraft release and, on a push to the release branch, puts them into
+# a draft GitHub release `v<version>` that a maintainer checks and publishes (docs/releasing.md).
+# A run by hand is a dry run by default: everything is built, nothing is signed and no draft is
+# made; the files come back as one artifact. Nothing here runs on a schedule.
+#
+# Platforms: Windows x64 and arm64, Linux x86_64, aarch64 and riscv64 (with Flatpak and Arch
+# packages), FreeBSD x86_64 and aarch64, Android, and the sync server for Linux. No macOS: there
+# is no Apple developer account. A macOS job would sit beside `windows`, upload release-macos,
+# and add its files to the list in .github/scripts/assemble-release.sh.
+#
+# Signing is optional everywhere but Android: Windows is signed when WINDOWS_CERTIFICATE or the
+# Azure Trusted Signing secrets are set (packaging/windows/sign.ps1), the Linux packages when
+# LINUX_SIGNING_KEY is set. Every APK of a release must carry the one release key, or Android
+# refuses the update, so a real run stops without it.
+#
+# SSHCraft keeps its own workflows instead of the shared ones (docs/decisions.md, 2026-11-18).
 on:
   push:
     branches: [release]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version override for a test run, e.g. 0.2.0-rc.1 (empty: Cargo.toml)"
+        description: "Version override for a test run, e.g. 0.4.0-rc.1 (empty: Cargo.toml)"
         type: string
         default: ""
       dry-run:
@@ -17,39 +31,536 @@ on:
         default: true
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+
 jobs:
-  release:
-    uses: storytold/craft-common-actions/.github/workflows/release.yml@main
+  check:
+    name: Sources, version and SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      date: ${{ steps.v.outputs.date }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      override: ${{ steps.v.outputs.override }}
+      dry-run: ${{ steps.v.outputs.dry-run }}
+      draft: ${{ steps.v.outputs.draft }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
+        with:
+          toolchain: stable
+      # Before anything is built: git dependencies only from github.com/storytold, no source
+      # replaced or patched by a cargo config, and a Cargo.lock that matches the manifests.
+      - name: Crate sources
+        run: |
+          python3 .github/scripts/check_sources.py
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          override=false
+          if [ -n "$INPUT_VERSION" ]; then
+            version="${INPUT_VERSION#v}"
+            override=true
+          else
+            version="$(cargo xtask version | tail -n 1)"
+          fi
+          # Anchored, so a line break or anything else cannot reach the outputs below.
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          [[ "$version" =~ $semver ]] || { echo "::error::'$version' is not a version like 1.2.3 or 1.2.3-rc.1"; exit 1; }
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          dry=false
+          if [ "$DRY_RUN" = true ]; then dry=true; fi
+          # Only a push to the release branch makes a draft.
+          draft=false
+          if [ "$EVENT" = push ]; then draft=true; fi
+          {
+            echo "version=$version"
+            echo "date=$(date -u +%Y-%m-%d)"
+            echo "prerelease=$prerelease"
+            echo "override=$override"
+            echo "dry-run=$dry"
+            echo "draft=$draft"
+          } >> "$GITHUB_OUTPUT"
+          echo "### SSHCraft v$version (\`${GITHUB_SHA::9}\`), dry run: $dry, draft: $draft" >> "$GITHUB_STEP_SUMMARY"
+      # A published release is never rebuilt: its files and checksums are what people installed.
+      - name: Version not released yet
+        if: steps.v.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.v.outputs.version }}
+        run: |
+          if draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" &&
+            [ "$draft" != true ]; then
+            echo "::error::$TAG is already published. Set a new version (cargo xtask version set) first."
+            exit 1
+          fi
+      - name: SBOM
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          OVERRIDE: ${{ steps.v.outputs.override }}
+        run: |
+          if [ "$OVERRIDE" = true ]; then cargo xtask version set "$VERSION"; fi
+          cargo xtask sbom "dist/release/sshcraft-$VERSION.cdx.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sbom
+          path: dist/release/*.cdx.json
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: check
+    # Arm64 builds natively on GitHub's Arm runner, so its installer is also tried there.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    environment: ${{ needs.check.outputs.dry-run != 'true' && 'release' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, target: x86_64-pc-windows-msvc, runner: windows-latest }
+          - { arch: arm64, target: aarch64-pc-windows-msvc, runner: windows-11-arm }
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/build-setup
+        with:
+          version: ${{ needs.check.outputs.version }}
+          date: ${{ needs.check.outputs.date }}
+          override: ${{ needs.check.outputs.override }}
+          targets: ${{ matrix.target }}
+          cache-key: windows-${{ matrix.arch }}
+      - name: WiX
+        shell: pwsh
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'wix'
+          dotnet tool install --tool-path $tools wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'WiX could not be installed' }
+          $tools >> $env:GITHUB_PATH
+          $policy = Get-Content -Raw -LiteralPath packaging/windows/install-policy.json | ConvertFrom-Json
+          foreach ($extension in @($policy.extensions)) {
+            & (Join-Path $tools 'wix.exe') extension add -g "WixToolset.$extension.wixext/5.0.2"
+            if ($LASTEXITCODE -ne 0) { throw "WiX extension $extension could not be installed" }
+          }
+      # sign.ps1 signs when a certificate or Azure Trusted Signing is configured and leaves the
+      # files unsigned with a warning otherwise. A dry run never gets the secrets.
+      - name: Build, sign, package
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ needs.check.outputs.dry-run != 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ needs.check.outputs.dry-run != 'true' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          AZURE_TENANT_ID: ${{ needs.check.outputs.dry-run != 'true' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ needs.check.outputs.dry-run != 'true' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ needs.check.outputs.dry-run != 'true' && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_SIGNING_ENDPOINT: ${{ needs.check.outputs.dry-run != 'true' && secrets.AZURE_SIGNING_ENDPOINT || '' }}
+          AZURE_SIGNING_ACCOUNT: ${{ needs.check.outputs.dry-run != 'true' && secrets.AZURE_SIGNING_ACCOUNT || '' }}
+          AZURE_CERT_PROFILE: ${{ needs.check.outputs.dry-run != 'true' && secrets.AZURE_CERT_PROFILE || '' }}
+        run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
+      # The MSI installs per user without asking, the CLI reports the version being shipped, and
+      # the uninstall leaves nothing behind.
+      - name: Install, run and remove the MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = (Get-Item "dist/release/sshcraft-$env:SSHCRAFT_VERSION-windows-${{ matrix.arch }}.msi").FullName
+          $log = Join-Path $env:RUNNER_TEMP 'msi.log'
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList '/i', "`"$msi`"", '/qn', '/l*v', "`"$log`"", 'ALLUSERS=2', 'MSIINSTALLPERUSER=1'
+          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "msiexec /i exited with $($p.ExitCode)" }
+          # A per-user install records its folder in HKCU (the HKMU key of sshcraft.wxs).
+          $dir = (Get-ItemProperty -LiteralPath 'HKCU:\Software\SSHCraft').InstallDir
+          if (-not $dir) { throw 'the MSI recorded no InstallDir in HKCU:\Software\SSHCraft' }
+          foreach ($exe in 'sshcraft.exe', 'sshcraft-cli.exe') {
+            if (-not (Test-Path -LiteralPath (Join-Path $dir $exe))) { throw "$exe is not in $dir" }
+          }
+          $out = (& (Join-Path $dir 'sshcraft-cli.exe') --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "sshcraft-cli --version exited with $LASTEXITCODE" }
+          if (-not $out.Contains($env:SSHCRAFT_VERSION)) { throw "sshcraft-cli says '$out', expected $env:SSHCRAFT_VERSION" }
+          Write-Output "installed: $out"
+          $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList '/x', "`"$msi`"", '/qn'
+          if ($p.ExitCode -ne 0) { throw "msiexec /x exited with $($p.ExitCode)" }
+          if (Test-Path -LiteralPath (Join-Path $dir 'sshcraft.exe')) { throw "the uninstall left sshcraft.exe in $dir" }
+          Write-Output 'uninstalled'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: check
+    # Ubuntu 22.04 (glibc 2.35): the binaries run on every distribution with that glibc or a newer
+    # one, Debian 12 included. A newer runner would raise that floor.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, deb: amd64, runner: ubuntu-22.04 }
+          - { arch: aarch64, deb: arm64, runner: ubuntu-22.04-arm }
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The libraries of gate.yml, and the tools package.sh checks and packs with (zsync writes
+      # the AppImage's .zsync).
+      - name: Build and packaging tools
+        run: |
+          .github/scripts/apt-install.sh pkg-config libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgtk-3-dev libfontconfig1-dev libfreetype-dev \
+            libudev-dev libdbus-1-dev desktop-file-utils appstream zsync
+          .github/scripts/install-nfpm.sh ${{ matrix.deb }}
+      - uses: ./.github/actions/build-setup
+        with:
+          version: ${{ needs.check.outputs.version }}
+          date: ${{ needs.check.outputs.date }}
+          override: ${{ needs.check.outputs.override }}
+          cache-key: linux-${{ matrix.arch }}
+      - name: Build and package (AppImage, deb, rpm, tar.gz)
+        run: packaging/linux/package.sh
+      - name: Show the deb
+        run: dpkg-deb --field "dist/release/sshcraft-$SSHCRAFT_VERSION-linux-${{ matrix.arch }}.deb" Package Version Architecture Depends
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  linux-riscv64:
+    name: Linux riscv64
+    needs: check
+    # Cross-compiled on amd64. Ubuntu 22.04 never got some riscv64 security updates its amd64 side
+    # has, so the two cannot be installed side by side there; 24.04 can. The binaries then need
+    # glibc 2.39, and package.sh writes that into the deb.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cross toolchain and packaging tools
+        run: |
+          sudo .github/scripts/riscv64-cross.sh
+          .github/scripts/install-nfpm.sh amd64
+      - uses: ./.github/actions/build-setup
+        with:
+          version: ${{ needs.check.outputs.version }}
+          date: ${{ needs.check.outputs.date }}
+          override: ${{ needs.check.outputs.override }}
+          targets: riscv64gc-unknown-linux-gnu
+          cache-key: linux-riscv64
+      # No AppImage: appimagetool has no riscv64 build to pin.
+      - name: Build and package (deb, rpm, tar.gz)
+        env:
+          CROSS_ARCH: riscv64
+          CROSS_TARGET: riscv64gc-unknown-linux-gnu
+          CROSS_COMPILE: riscv64-linux-gnu-
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          PKG_CONFIG_SYSROOT_DIR: /
+          PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          # package.sh runs the CLI once through qemu.
+          EMULATOR: qemu-riscv64
+          QEMU_LD_PREFIX: /usr/riscv64-linux-gnu
+        run: packaging/linux/package.sh --formats "deb rpm tar"
+      - name: Show the deb
+        run: dpkg-deb --field "dist/release/sshcraft-$SSHCRAFT_VERSION-linux-riscv64.deb" Package Version Architecture Depends
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-riscv64
+          path: dist/release/*
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak ${{ matrix.arch }}
+    needs: [check, linux]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    env:
+      SSHCRAFT_VERSION: ${{ needs.check.outputs.version }}
+      SSHCRAFT_BUILD_DATE: ${{ needs.check.outputs.date }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/linux
+      # elfutils: flatpak-builder strips with eu-strip, which is only a Recommends. Ubuntu 24.04
+      # keeps unprivileged user namespaces from bubblewrap unless AppArmor is told otherwise.
+      - name: Flatpak tools
+        run: |
+          .github/scripts/apt-install.sh flatpak flatpak-builder elfutils librsvg2-common
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build and try the bundle
+        run: packaging/linux/flatpak-bundle.sh "dist/linux/sshcraft-$SSHCRAFT_VERSION-linux-${{ matrix.arch }}.tar.gz"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-flatpak-${{ matrix.arch }}
+          path: dist/release/*.flatpak
+          if-no-files-found: error
+
+  arch:
+    name: Arch Linux ${{ matrix.arch }}
+    needs: [check, linux]
+    # The package repacks the tarball, nothing is compiled, so one x86_64 runner packs both.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      # makepkg runs in this image; pinned, so a release does not pick up a new one unseen.
+      ARCH_IMAGE: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/linux
+      - name: Build the package with makepkg
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
+            packaging/linux/arch/package.sh "dist/linux/sshcraft-$VERSION-linux-${{ matrix.arch }}.tar.gz" dist/release
+      # On x86_64 the package is also installed with its dependencies from the Arch repositories,
+      # which catches a dependency name Arch does not know.
+      - name: Check the package
+        run: |
+          pkg="sshcraft-$VERSION-linux-${{ matrix.arch }}.pkg.tar.zst"
+          if [ "${{ matrix.arch }}" = x86_64 ]; then
+            docker run --rm -v "$PWD/dist/release:/pkg:ro" "$ARCH_IMAGE" bash -euc \
+              "pacman -Syu --noconfirm >/dev/null && pacman -U --noconfirm /pkg/$pkg >/dev/null && pacman -Qi de.musiker15.sshcraft && sshcraft-cli --version"
+          else
+            docker run --rm -v "$PWD/dist/release:/pkg:ro" "$ARCH_IMAGE" pacman -Qip "/pkg/$pkg"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-arch-${{ matrix.arch }}
+          path: dist/release/*.pkg.tar.zst
+          if-no-files-found: error
+
+  freebsd:
+    needs: check
+    uses: ./.github/workflows/freebsd-package.yml
     with:
-      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
-      app-name: sshcraft
-      app-title: SSHCraft
-      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
-      version: ${{ inputs.version }}
-      # SSHCraft has no web build: SSH needs TCP.
-      has-web: false
-      # The sync server as a Linux program (packaging/server/package.sh).
-      has-server: true
-    secrets:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-      AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-      AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
-      LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+      version: ${{ needs.check.outputs.version }}
+      override: ${{ needs.check.outputs.override == 'true' }}
+      date: ${{ needs.check.outputs.date }}
+
+  server:
+    name: Server Linux ${{ matrix.arch }}
+    needs: check
+    # The same glibc floor as the app.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm }
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/build-setup
+        with:
+          version: ${{ needs.check.outputs.version }}
+          date: ${{ needs.check.outputs.date }}
+          override: ${{ needs.check.outputs.override }}
+          fonts: "false"
+          cache-key: server-${{ matrix.arch }}
+      - name: Build and package (tar.gz)
+        run: packaging/server/package.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-server-${{ matrix.arch }}
+          path: dist/release/sshcraft-server-*.tar.gz
+          if-no-files-found: error
+
+  android:
+    name: Android
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: ${{ needs.check.outputs.dry-run != 'true' && 'release' || '' }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/build-setup
+        with:
+          version: ${{ needs.check.outputs.version }}
+          date: ${{ needs.check.outputs.date }}
+          override: ${{ needs.check.outputs.override }}
+          fonts: "false"
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+          cache-key: android
+      - name: Android platform
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" > /dev/null
+      # A dry run signs with the throwaway debug key cargo xtask android makes. A real run needs
+      # the release key: an APK signed with any other key cannot update an installed SSHCraft.
+      - name: Release key
+        if: needs.check.outputs.dry-run != 'true'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD are not set in the release environment (docs/releasing.md)"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          printf '%s' "$PASSWORD" > "$RUNNER_TEMP/release.pass"
+          echo "SSHCRAFT_ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE=$RUNNER_TEMP/release.pass" >> "$GITHUB_ENV"
+      # One APK per processor: arm64 (most devices), armv7 (older 32-bit ones), x86_64
+      # (Chromebooks, x86 tablets).
+      - name: Build the APKs
+        run: |
+          for abi in arm64 armv7 x86_64; do
+            cargo xtask android --abi "$abi"
+          done
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/release.pass"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-android
+          path: dist/android/*.apk
+          if-no-files-found: error
+
+  release:
+    name: Release files
+    needs: [check, windows, linux, linux-riscv64, flatpak, arch, freebsd, server, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ needs.check.outputs.draft == 'true' && 'release' || '' }}
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: dist/assemble
+          merge-multiple: true
+      - name: Signing tools
+        if: needs.check.outputs.draft == 'true'
+        run: .github/scripts/apt-install.sh rpm debsigs
+      # Every expected file, nothing else; signed when the key is there; SHA256SUMS.txt last.
+      - name: Check, sign and sum
+        env:
+          LINUX_SIGNING_KEY: ${{ needs.check.outputs.draft == 'true' && secrets.LINUX_SIGNING_KEY || '' }}
+        run: .github/scripts/assemble-release.sh dist/assemble "$VERSION"
+      - name: Keep the files of the dry run
+        if: needs.check.outputs.draft != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sshcraft-${{ needs.check.outputs.version }}-all
+          path: dist/assemble/*
+          if-no-files-found: error
+      # Creates the draft, or replaces the files of an earlier draft of this version. The workflow
+      # never publishes: a maintainer does, after checking it.
+      - name: Draft release
+        if: needs.check.outputs.draft == 'true'
+        working-directory: dist/assemble
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
+        run: |
+          tag="v$VERSION"
+          title="SSHCraft v$VERSION"
+          if draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$draft" != true ]; then
+              echo "::error::$tag was published while this run was building; nothing changed"
+              exit 1
+            fi
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
+              while IFS= read -r asset; do gh release delete-asset "$tag" "$asset" --repo "$GITHUB_REPOSITORY" --yes; done
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft --title "$title" --target "$GITHUB_SHA" --prerelease="$PRERELEASE"
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" -- *
+          else
+            prerelease=()
+            if [ "$PRERELEASE" = true ]; then prerelease=(--prerelease); fi
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --title "$title" --target "$GITHUB_SHA" \
+              --generate-notes "${prerelease[@]}" -- *
+          fi
+          {
+            echo "Draft **$title** at \`${GITHUB_SHA::9}\`:"
+            echo
+            sed 's/^/    /' SHA256SUMS.txt
+          } >> "$GITHUB_STEP_SUMMARY"

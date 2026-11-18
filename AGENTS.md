@@ -209,7 +209,7 @@ Each has a test where it can have one.
 - `cargo xtask android --check` runs clippy for Android, `cargo xtask android [--debug]
   [--install]` builds the APK; both need the Android SDK and NDK ([docs/android.md](docs/android.md)).
   CI runs `--check` on every pull request; the APK itself is built only for a release
-  (`android-release.yml`), so try a change to `apps/android` in the emulator before pushing it.
+  (`release.yml`), so try a change to `apps/android` in the emulator before pushing it.
 - Packages and releases: [`docs/releasing.md`](docs/releasing.md). `cargo xtask version [set X.Y.Z]`
   prints or sets the one version of the workspace; `cargo xtask sbom` and `cargo xtask stores`
   make a release's bill of materials and store entries. Never start a release or push to `release`
@@ -246,6 +246,11 @@ and [`docs/architecture.md`](docs/architecture.md). Update the affected docs whe
 - A change to CI may go into the pull request that needs it. Say so in its description.
 - Third-party actions are pinned to a commit SHA with the version in a comment.
 - `server-postgres.yml` runs the server's storage contract tests against a PostgreSQL service.
+- `release.yml` builds every package of a release (Android and Arch included, macOS not) and, on
+  a push to `release`, a draft release; a run by hand is a dry run ([docs/releasing.md](docs/releasing.md)).
+  FreeBSD builds in a VM through `freebsd-package.yml`, which `freebsd.yml` also runs for pull
+  requests that change the FreeBSD packaging. The files a release must have are listed in
+  `.github/scripts/assemble-release.sh`.
 
 New workspace crates include `publish = false` and `[lints] workspace = true` (`fido` excepted,
 see "Never crash"), and production crate roots declare the `deny` attribute before their modules.

@@ -7,8 +7,8 @@
 #
 # Usage: packaging/freebsd/package.sh [--skip-build]
 #
-# Runs on FreeBSD itself (CI: .github/workflows/freebsd.yml, in a FreeBSD VM). Needs cargo and
-# the build deps listed in that workflow. Runtime deps on the user's system: libxkbcommon,
+# Runs on FreeBSD itself (CI: .github/workflows/freebsd-package.yml, in a FreeBSD VM). Needs
+# cargo and the build deps listed in that workflow. Runtime deps on the user's system: libxkbcommon,
 # wayland or libX11/libXcursor/libXrandr/libXi, mesa-libs or vulkan-loader, dbus,
 # gtk3 and a Secret Service (gnome-keyring or KWallet) for the keyring.
 set -euo pipefail

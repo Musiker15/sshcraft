@@ -1,0 +1,77 @@
+name: SSHCraft build setup
+description: >-
+  What every release build of SSHCraft needs before its packaging script: the build variables,
+  craft-fonts, Rust with the targets of the job, a cargo cache, and the version override of a test
+  run. Runs after the checkout of the repository.
+
+inputs:
+  version:
+    description: "The release version (from the check job)"
+    required: true
+  date:
+    description: "The build date, YYYY-MM-DD (from the check job)"
+    required: true
+  override:
+    description: "'true' when the version came from the workflow input and has to be written to Cargo.toml"
+    required: false
+    default: "false"
+  fonts:
+    description: "'true' to build with craft-fonts (the app); the server and Android do without"
+    required: false
+    default: "true"
+  targets:
+    description: "Rust targets to add, comma-separated"
+    required: false
+    default: ""
+  cache-key:
+    description: "Name of this job's cargo cache"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # packaging/env.sh and package.ps1 read these, so every package carries the same version,
+    # date and commit whatever job builds it.
+    - name: Build variables
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        DATE: ${{ inputs.date }}
+      run: |
+        [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad version '$VERSION'"; exit 1; }
+        [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "::error::bad date '$DATE'"; exit 1; }
+        {
+          echo "SSHCRAFT_VERSION=$VERSION"
+          echo "SSHCRAFT_BUILD_DATE=$DATE"
+          echo "SSHCRAFT_BUILD_SHA=$GITHUB_SHA"
+        } >> "$GITHUB_ENV"
+    # The fonts of the Craft family (OFL), at the commit gate.yml pins too.
+    - name: Check out craft-fonts
+      if: inputs.fonts == 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: storytold/craft-fonts
+        ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+        path: craft-fonts
+        persist-credentials: false
+    - name: Build with craft-fonts
+      if: inputs.fonts == 'true'
+      shell: bash
+      run: |
+        echo "CRAFT_FONTS_DIR=$GITHUB_WORKSPACE/craft-fonts" >> "$GITHUB_ENV"
+        echo "CRAFT_FONTS_REQUIRED=1" >> "$GITHUB_ENV"
+    # The action also installs rustup where an image has none (windows-11-arm).
+    - name: Rust
+      uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
+      with:
+        toolchain: stable
+        targets: ${{ inputs.targets }}
+    - uses: step-security/rust-cache@851174d9a2fdc03e0896e02844dcc61d81dd7851 # v2.9.1
+      with:
+        shared-key: release-${{ inputs.cache-key }}
+    - name: Version override
+      if: inputs.override == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: cargo xtask version set "$VERSION"
