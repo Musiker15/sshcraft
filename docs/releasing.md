@@ -92,8 +92,9 @@ run on `main`, which builds everything but macOS without signing:
 gh workflow run release.yml --ref main -f dry-run=true           # wait until it is green
 gh run download <run-id> --dir dist/draft                        # every release-* artifact
 cd dist/draft && find . -type f -exec mv {} . \; && find . -type d -empty -delete
-cargo xtask android                                               # from the workspace root, with the release key
-cp dist/android/sshcraft-<v>-android-arm64.apk dist/draft/
+# from the workspace root, with the release key
+for abi in arm64 armv7 x86_64; do cargo xtask android --abi "$abi"; done
+cp dist/android/sshcraft-<v>-android-*.apk dist/draft/
 cd dist/draft && sha256sum -- * > SHA256SUMS.txt && cd -
 cargo xtask sbom dist/draft/sshcraft-<v>.cdx.json
 gh release create v<v> --draft --target <commit> --title "SSHCraft v<v>" --generate-notes dist/draft/*
@@ -123,7 +124,7 @@ signed with that same key, or Android refuses the update. The APK is added after
 | Linux x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
 | Flatpak x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
 | FreeBSD 15 x86_64, aarch64 | `sshcraft-<v>-freebsd-<arch>.tar.gz` |
-| Android 13+ tablets and phones, arm64 | `sshcraft-<v>-android-arm64.apk`, from `android-release.yml` or built locally ([android.md](android.md)) |
+| Android 13+ tablets and phones: arm64, armv7 (older 32-bit devices), x86_64 (Chromebooks, x86 tablets) | `sshcraft-<v>-android-<abi>.apk` (abi: arm64, armv7, x86_64), from `android-release.yml` or built locally with `cargo xtask android --abi <abi>` ([android.md](android.md)) |
 | Sync server, Linux x86_64 and aarch64 | `sshcraft-server-<v>-linux-<arch>.tar.gz`: the program, a systemd unit and an example environment file ([server.md](server.md#install-the-program)) |
 
 SSHCraft has no web build: SSH needs TCP.

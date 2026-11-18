@@ -921,6 +921,10 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Set up a fingerprint, face or screen lock on this device to use the app lock." => {
             "Richte auf diesem Gerät Fingerabdruck, Gesicht oder eine Bildschirmsperre ein, um die App-Sperre zu nutzen."
         }
+        "1 session open" => "1 Sitzung offen",
+        "{count} sessions open" => "{count} Sitzungen offen",
+        "Open sessions" => "Offene Sitzungen",
+        "Messages" => "Meldungen",
         "Stored keys" => "Gespeicherte Schlüssel",
         "No identities yet." => "Noch keine Identitäten.",
         "Where do you want to connect?" => "Wohin möchtest du dich verbinden?",
