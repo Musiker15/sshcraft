@@ -26,6 +26,7 @@ of the rebuild, which left the tree with R7 and are in the history at
 | 2026-11-15 | The agent link runs engine commands only; window input and screenshots exist only on `--control`. |
 | 2026-11-15 | `sshcraft-cli` never opens the data; with the app closed, `mcp --when-closed launch` starts it. |
 | 2026-11-15 | `ui.inspect` reports the app's state, not a widget list: the AccessKit tree is not reachable from the frame. |
+| 2026-11-18 | `ui.inspect` lists the widgets after all: an egui plugin keeps the AccessKit tree of each finished frame, so the list is that of the frame on the screen. It gives names and places, never a field's value. |
 | 2026-11-15 | A tab is a set of up to 16 panes; a connection lands in the pane it was asked from. Questions name their tab through a task-local session id. |
 | 2026-11-15 | The terminal stream wakes the window; nothing polls for output. |
 | 2026-11-15 | History and suggestions follow the bytes the window sends and the cursor's line at the first key; any edit key makes a line no history. |
