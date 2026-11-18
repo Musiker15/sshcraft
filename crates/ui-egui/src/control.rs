@@ -21,6 +21,10 @@ const MAX_TEXT: usize = 4096;
 pub const MAX_QUEUED: usize = 64;
 /// The most clicks one `ui.click` makes.
 const MAX_COUNT: u64 = 8;
+/// The most widgets `ui.inspect` lists.
+const MAX_WIDGETS: usize = 2000;
+/// The longest label `ui.inspect` gives for a widget, in characters.
+const MAX_LABEL: usize = 200;
 
 /// One request and where its answer goes.
 pub struct ControlRequest {
@@ -74,17 +78,90 @@ pub struct Control {
     next: u64,
     /// Frames begun (calls of the raw-input hook).
     takes: u64,
+    /// The widgets of the last finished frame, kept by [`WidgetTree`].
+    widgets: Arc<Mutex<Vec<Value>>>,
 }
 
 impl Control {
     pub fn new(queue: ControlQueue) -> Self {
-        Self { queue, frames: VecDeque::new(), waiting: Vec::new(), ready: Vec::new(), next: 1, takes: 0 }
+        Self { queue, frames: VecDeque::new(), waiting: Vec::new(), ready: Vec::new(), next: 1, takes: 0, widgets: Arc::default() }
     }
 
     /// Whether request `owner` still has someone waiting for it.
     fn wanted(&self, owner: u64) -> bool {
         self.waiting.iter().any(|(o, reply)| *o == owner && !reply.is_closed())
     }
+}
+
+/// Keeps the widgets of each finished frame for `ui.inspect`. egui builds its AccessKit tree only
+/// when the frame ends, after the control channel has answered, so the list `ui.inspect` gives is
+/// the one of the frame before: the frame whose picture is on the screen.
+struct WidgetTree {
+    widgets: Arc<Mutex<Vec<Value>>>,
+}
+
+impl egui::Plugin for WidgetTree {
+    fn debug_name(&self) -> &'static str {
+        "sshcraft_control_widgets"
+    }
+
+    fn setup(&mut self, ctx: &egui::Context) {
+        ctx.enable_accesskit();
+    }
+
+    fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+        if let Some(update) = &output.platform_output.accesskit_update {
+            let list = widgets_of(update);
+            *self.widgets.lock().unwrap_or_else(PoisonError::into_inner) = list;
+        }
+    }
+}
+
+/// The widgets in `update` a script can find and click: every node with a place on the screen and
+/// a label or a click or focus action, top to bottom and left to right. A field labelled by a
+/// widget of its own (`labelled_by`) gets that widget's text. Only names: the value of a node is
+/// read for a plain label alone (egui keeps a label's text there), never for a field, so a typed
+/// password never reaches the channel.
+fn widgets_of(update: &egui::accesskit::TreeUpdate) -> Vec<Value> {
+    use egui::accesskit::{Action, Node, NodeId, Role};
+    let by_id: std::collections::HashMap<NodeId, &Node> = update.nodes.iter().map(|(id, node)| (*id, node)).collect();
+    let name = |node: &Node| -> Option<String> {
+        let text = node.label().or_else(|| if node.role() == Role::Label { node.value() } else { None })?;
+        (!text.is_empty()).then(|| text.to_owned())
+    };
+    let label_of = |node: &Node| -> String {
+        let text = name(node)
+            .unwrap_or_else(|| node.labelled_by().iter().filter_map(|id| by_id.get(id)).filter_map(|n| name(n)).collect::<Vec<_>>().join(" "));
+        text.chars().filter(|c| !c.is_control()).take(MAX_LABEL).collect()
+    };
+    let mut found: Vec<(f64, f64, Value)> = update
+        .nodes
+        .iter()
+        .filter_map(|(id, node)| {
+            let bounds = node.bounds()?;
+            let label = label_of(node);
+            let acts = node.supports_action(Action::Click) || node.supports_action(Action::Focus);
+            if label.is_empty() && !acts || node.is_hidden() {
+                return None;
+            }
+            let mut widget = json!({
+                "role": format!("{:?}", node.role()),
+                "label": label,
+                "x": bounds.x0,
+                "y": bounds.y0,
+                "width": bounds.width(),
+                "height": bounds.height(),
+                "enabled": !node.is_disabled(),
+                "focused": *id == update.focus,
+            });
+            if let (Some(toggled), Some(map)) = (node.toggled(), widget.as_object_mut()) {
+                map.insert("checked".into(), json!(matches!(toggled, egui::accesskit::Toggled::True)));
+            }
+            Some((bounds.y0, bounds.x0, widget))
+        })
+        .collect();
+    found.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    found.into_iter().take(MAX_WIDGETS).map(|(_, _, w)| w).collect()
 }
 
 fn object<'a>(params: &'a Value, allowed: &[&str]) -> Result<&'a Map<String, Value>, String> {
@@ -197,6 +274,7 @@ fn inspect(app: &SshcraftApp, ctx: &egui::Context) -> Value {
         "notices": app.toasts.texts(),
         "window": { "width": rect.width(), "height": rect.height() },
         "dialogOpen": crate::forms::shape(&app.ui) != crate::forms::shape(&crate::state::UiState::default()),
+        "widgets": app.control.as_ref().map(|c| c.widgets.lock().unwrap_or_else(PoisonError::into_inner).clone()).unwrap_or_default(),
     })
 }
 
@@ -308,6 +386,8 @@ fn input_frames(method: &str, params: &Value) -> Option<Result<Vec<Vec<Event>>, 
 /// Answers the queued requests; called every frame while the control channel is on.
 pub fn process(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(control) = app.control.as_mut() else { return };
+    // A screen reader that goes away turns the tree off; `ui.inspect` still needs it.
+    ctx.enable_accesskit();
     // Input that took effect in a frame that has ended: its answer goes now.
     let takes = control.takes;
     let (done, later): (Vec<_>, Vec<_>) = std::mem::take(&mut control.ready).into_iter().partition(|(_, at)| *at < takes);
@@ -396,7 +476,9 @@ impl SshcraftApp {
     /// window's frames.
     pub fn enable_control(&mut self, ctx: &egui::Context) -> ControlQueue {
         let queue = ControlQueue::new(ctx.clone());
-        self.control = Some(Control::new(queue.clone()));
+        let control = Control::new(queue.clone());
+        ctx.add_plugin(WidgetTree { widgets: control.widgets.clone() });
+        self.control = Some(control);
         queue
     }
 

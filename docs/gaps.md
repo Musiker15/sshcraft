@@ -7,7 +7,6 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | Rank | Gap | Where it is planned |
 |---|---|---|
 | 1 | A new mark in the log viewer is placed by line breaks: with long wrapped lines above it, it lands a few lines higher than seen | later |
-| 2 | `ui.inspect` of the control channel lists no widgets (the AccessKit tree is built after the frame); scripts click by coordinates from a screenshot | later |
 | 2b | `ssh://` links do not reach SSHCraft on macOS: macOS hands links over as Apple Events, which winit does not pass on, so no handler is registered there | later, needs a Mac to try |
 | 2c | No portable mode: the vault's master key lives in the system keyring, so a copy on a USB stick needs a passphrase unlock before the engine starts | later |
 | 2f | No images in the terminal (Sixel, Kitty, iTerm2) and no file transfer through the terminal (ZMODEM, trzsz); files go over SFTP once S1 is there | not planned for now |
