@@ -178,23 +178,26 @@ impl HostForm {
 /// The password from a password manager: a manager and a reference, checked as typed.
 fn password_ref_field(ui: &mut Ui, reference: &mut Option<SecretRef>) {
     let mut on = reference.is_some();
-    ui.horizontal(|ui| {
-        ui.label("");
+    ui.horizontal_wrapped(|ui| {
         if ui.checkbox(&mut on, tr("From a password manager")).changed() {
             *reference = on.then(|| SecretRef { manager: Manager::OnePassword, reference: String::new() });
         }
     });
     let Some(r) = reference.as_mut() else { return };
-    ui.horizontal(|ui| {
-        ui.label("");
+    ui.horizontal_wrapped(|ui| {
         egui::ComboBox::from_id_salt("sshcraft-secret-manager").selected_text(r.manager.label()).show_ui(ui, |ui| {
             for m in [Manager::ProtonPass, Manager::OnePassword, Manager::Bitwarden, Manager::KeePassXc] {
                 ui.selectable_value(&mut r.manager, m, m.label());
             }
         });
         let label = ui.label(tr("Reference"));
-        ui.add(egui::TextEdit::singleline(&mut r.reference).hint_text(r.manager.example()).font(egui::TextStyle::Monospace).desired_width(260.0))
-            .labelled_by(label.id);
+        ui.add(
+            egui::TextEdit::singleline(&mut r.reference)
+                .hint_text(r.manager.example())
+                .font(egui::TextStyle::Monospace)
+                .desired_width(crate::widgets::fit(ui, 260.0)),
+        )
+        .labelled_by(label.id);
     });
     if !r.reference.is_empty()
         && let Err(e) = r.check()
@@ -263,7 +266,7 @@ fn parse_port(text: &str) -> Result<Option<u16>, String> {
 fn optional_text(ui: &mut Ui, label: &str, value: &mut Option<String>, hint: Option<String>) {
     ui.label(label);
     let mut text = value.clone().unwrap_or_default();
-    let mut edit = egui::TextEdit::singleline(&mut text).desired_width(280.0);
+    let mut edit = egui::TextEdit::singleline(&mut text).desired_width(crate::widgets::fit(ui, 280.0));
     if let Some(hint) = hint {
         edit = edit.hint_text(hint);
     }
@@ -282,7 +285,7 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     use sshcraft_model::appearance::{MAX_BADGE_CHARS, THEMES};
     let mut a = value.clone().unwrap_or_default();
     ui.label(tr("Tab colour"));
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let mut own = a.color.is_some();
         if ui.checkbox(&mut own, tr("Own colour")).changed() {
             a.color = own.then_some([0x3f, 0x8f, 0xd2]);
@@ -297,7 +300,15 @@ fn appearance(ui: &mut Ui, value: &mut Option<sshcraft_model::appearance::Appear
     ui.end_row();
     ui.label(tr("Badge"));
     let mut badge = a.badge.clone().unwrap_or_default();
-    if ui.add(egui::TextEdit::singleline(&mut badge).char_limit(MAX_BADGE_CHARS).hint_text(tr("e.g. PROD")).desired_width(120.0)).changed() {
+    if ui
+        .add(
+            egui::TextEdit::singleline(&mut badge)
+                .char_limit(MAX_BADGE_CHARS)
+                .hint_text(tr("e.g. PROD"))
+                .desired_width(crate::widgets::fit(ui, 120.0)),
+        )
+        .changed()
+    {
         a.badge = (!badge.is_empty()).then_some(badge);
     }
     ui.end_row();
@@ -404,7 +415,7 @@ fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft
     use sshcraft_model::container::{Container, Runtime, Shell, check};
     ui.label(tr("Container"));
     ui.vertical(|ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let mut runtime = value.as_ref().map(|c| c.runtime);
             let shown = match runtime {
                 None => tr("No"),
@@ -428,7 +439,7 @@ fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft
                 c.namespace = None;
                 app.ui.container_names = None;
             }
-            ui.add(egui::TextEdit::singleline(&mut c.name).hint_text(tr("name")).desired_width(140.0).char_limit(253));
+            ui.add(egui::TextEdit::singleline(&mut c.name).hint_text(tr("name")).desired_width(crate::widgets::fit(ui, 140.0)).char_limit(253));
             if let Some(id) = host
                 && ui.small_button(tr("List")).on_hover_text(tr("Ask the host which containers run there")).clicked()
             {
@@ -460,10 +471,13 @@ fn container_row(app: &mut SshcraftApp, ui: &mut Ui, value: &mut Option<sshcraft
             }
         });
         let Some(c) = value.as_mut() else { return };
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if c.runtime == Runtime::Kubectl {
                 let mut ns = c.namespace.clone().unwrap_or_default();
-                if ui.add(egui::TextEdit::singleline(&mut ns).hint_text(tr("namespace")).desired_width(120.0).char_limit(253)).changed() {
+                if ui
+                    .add(egui::TextEdit::singleline(&mut ns).hint_text(tr("namespace")).desired_width(crate::widgets::fit(ui, 120.0)).char_limit(253))
+                    .changed()
+                {
                     c.namespace = (!ns.trim().is_empty()).then(|| ns.trim().to_string());
                 }
             }
@@ -496,7 +510,7 @@ fn container_error_text(e: &sshcraft_model::container::ContainerError) -> &'stat
 fn protocol_row(ui: &mut Ui, value: &mut Option<sshcraft_model::model::Protocol>) {
     use sshcraft_model::model::Protocol;
     ui.label(tr("Protocol"));
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let mut chosen = value.unwrap_or_default();
         ui.radio_value(&mut chosen, Protocol::Ssh, "SSH");
         ui.radio_value(&mut chosen, Protocol::Telnet, "Telnet");
@@ -515,7 +529,7 @@ fn protocol_row(ui: &mut Ui, value: &mut Option<sshcraft_model::model::Protocol>
 fn persistence_row(ui: &mut Ui, value: &mut Option<sshcraft_model::persist::Persistence>) {
     use sshcraft_model::persist::{Persistence, Tool, check};
     ui.label(tr("Keep the session"));
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let mut tool = value.as_ref().map(|p| p.tool);
         let shown = match tool {
             None => tr("No"),
@@ -534,7 +548,7 @@ fn persistence_row(ui: &mut Ui, value: &mut Option<sshcraft_model::persist::Pers
             Some(tool) => {
                 let p = value.get_or_insert_with(|| Persistence { tool, name: "sshcraft".into() });
                 p.tool = tool;
-                ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(140.0).char_limit(64))
+                ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(crate::widgets::fit(ui, 140.0)).char_limit(64))
                     .on_hover_text(tr("Every connect attaches to this session again, also after the connection dropped."));
                 if check(&p.name).is_err() {
                     ui.label(
@@ -577,13 +591,16 @@ fn steps_editor(ui: &mut Ui, title: &str, which: &str, owner: Option<HostId>, va
     let mut remove = None;
     for (i, step) in steps.iter_mut().enumerate() {
         let id = egui::Id::unique("sshcraft-step").with((which, owner, i));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             match step {
                 ConnectStep::WakeOnLan { mac, broadcast, wait_secs, .. } => {
                     ui.label(tr("Wake-on-LAN"));
-                    ui.add(egui::TextEdit::singleline(mac).hint_text("aa:bb:cc:dd:ee:ff").desired_width(140.0));
+                    ui.add(egui::TextEdit::singleline(mac).hint_text("aa:bb:cc:dd:ee:ff").desired_width(crate::widgets::fit(ui, 140.0)));
                     let mut address = broadcast.clone().unwrap_or_default();
-                    if ui.add(egui::TextEdit::singleline(&mut address).hint_text("255.255.255.255").desired_width(110.0)).changed() {
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut address).hint_text("255.255.255.255").desired_width(crate::widgets::fit(ui, 110.0)))
+                        .changed()
+                    {
                         *broadcast = (!address.trim().is_empty()).then(|| address.trim().to_string());
                     }
                     ui.label(tr("then wait"));
@@ -593,7 +610,10 @@ fn steps_editor(ui: &mut Ui, title: &str, which: &str, owner: Option<HostId>, va
                     ui.label(tr("Knock on ports"));
                     let joined = ports.iter().map(u16::to_string).collect::<Vec<_>>().join(", ");
                     let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or(joined);
-                    if ui.add(egui::TextEdit::singleline(&mut text).hint_text("7000, 8000, 9000").desired_width(160.0)).changed() {
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut text).hint_text("7000, 8000, 9000").desired_width(crate::widgets::fit(ui, 160.0)))
+                        .changed()
+                    {
                         *ports = text.split([',', ' ']).filter(|p| !p.is_empty()).filter_map(|p| p.parse().ok()).collect();
                     }
                     ui.data_mut(|d| d.insert_temp(id, text));
@@ -611,7 +631,7 @@ fn steps_editor(ui: &mut Ui, title: &str, which: &str, owner: Option<HostId>, va
                             egui::TextEdit::singleline(&mut line)
                                 .hint_text("wg-quick up office")
                                 .font(egui::TextStyle::Monospace)
-                                .desired_width(220.0),
+                                .desired_width(crate::widgets::fit(ui, 220.0)),
                         )
                         .changed();
                     if edited && let Ok(words) = proxy_command::split(&line) {
@@ -631,7 +651,7 @@ fn steps_editor(ui: &mut Ui, title: &str, which: &str, owner: Option<HostId>, va
         steps.remove(i);
     }
     if steps.len() < MAX_STEPS {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.small_button(tr("Add Wake-on-LAN")).clicked() {
                 steps.push(ConnectStep::WakeOnLan { mac: String::new(), broadcast: None, port: None, wait_secs: 30 });
             }
@@ -662,11 +682,11 @@ fn login_script_editor(ui: &mut Ui, value: &mut Option<Vec<LoginStep>>, opened: 
     let steps = value.get_or_insert_with(Vec::new);
     let mut remove = None;
     for (i, step) in steps.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(tr("Wait for"));
-            ui.add(egui::TextEdit::singleline(&mut step.expect).char_limit(MAX_EXPECT_CHARS).desired_width(140.0));
+            ui.add(egui::TextEdit::singleline(&mut step.expect).char_limit(MAX_EXPECT_CHARS).desired_width(crate::widgets::fit(ui, 140.0)));
             ui.label(tr("send"));
-            ui.add(egui::TextEdit::singleline(&mut step.send).char_limit(MAX_SEND_CHARS).desired_width(200.0));
+            ui.add(egui::TextEdit::singleline(&mut step.send).char_limit(MAX_SEND_CHARS).desired_width(crate::widgets::fit(ui, 200.0)));
             if ui.small_button("×").on_hover_text(tr("Remove")).clicked() {
                 remove = Some(i);
             }
@@ -700,7 +720,7 @@ fn tri_state(ui: &mut Ui, label: &str, value: &mut Option<bool>, inherited: &Fro
         }
         None => tr("Inherit").to_string(),
     };
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.radio_value(value, None, inherit);
         ui.radio_value(value, Some(true), tr("On"));
         ui.radio_value(value, Some(false), tr("Off"));
@@ -722,7 +742,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
     egui::Grid::new("sshcraft-settings").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(ui, |ui| {
         optional_text(ui, tr("Address"), &mut s.address, from_hint(&inherited.address));
         ui.label(tr("Port"));
-        let mut edit = egui::TextEdit::singleline(port).desired_width(80.0);
+        let mut edit = egui::TextEdit::singleline(port).desired_width(crate::widgets::fit(ui, 80.0));
         if let Some(hint) = from_hint(&inherited.port) {
             edit = edit.hint_text(hint);
         }
@@ -740,7 +760,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
             },
             |k| key_label(app, k),
         );
-        egui::ComboBox::from_id_salt("sshcraft-key").selected_text(shown).width(280.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("sshcraft-key").selected_text(shown).width(crate::widgets::fit(ui, 280.0)).show_ui(ui, |ui| {
             ui.selectable_value(&mut s.key, None, tr("Inherit or none"));
             for key in &app.data.keys {
                 if let Ok(uuid) = uuid::Uuid::parse_str(&key.id) {
@@ -756,7 +776,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
             .identity
             .and_then(|id| app.data.identities.iter().find(|i| i.id == id.0.to_string()))
             .map_or_else(|| tr("None").to_string(), |i| visible(&i.name));
-        egui::ComboBox::from_id_salt("sshcraft-identity").selected_text(identity).width(280.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("sshcraft-identity").selected_text(identity).width(crate::widgets::fit(ui, 280.0)).show_ui(ui, |ui| {
             ui.selectable_value(&mut s.identity, None, tr("None"));
             for i in &app.data.identities {
                 if let Ok(uuid) = uuid::Uuid::parse_str(&i.id) {
@@ -793,7 +813,7 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                 Some(Proxy::Command { .. }) => 4,
             };
             let mut chosen = kind;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.radio_value(&mut chosen, 0, tr("Inherit"));
                 ui.radio_value(&mut chosen, 1, tr("Direct"));
                 ui.radio_value(&mut chosen, 2, "HTTP");
@@ -811,8 +831,8 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
                 };
             }
             if let Some(Proxy::Http(e) | Proxy::Socks5(e)) = &mut s.proxy {
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut e.address).hint_text(tr("Proxy address")).desired_width(180.0));
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut e.address).hint_text(tr("Proxy address")).desired_width(crate::widgets::fit(ui, 180.0)));
                     ui.add(egui::DragValue::new(&mut e.port).range(1..=65535));
                 });
             }
@@ -831,9 +851,9 @@ fn settings_editor(ui: &mut Ui, app: &SshcraftApp, s: &mut ConnectionSettings, p
         ui.vertical(|ui| {
             let mut remove = None;
             for (i, var) in s.env.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut var.name).hint_text(tr("Name")).desired_width(120.0));
-                    ui.add(egui::TextEdit::singleline(&mut var.value).hint_text(tr("Value")).desired_width(150.0));
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut var.name).hint_text(tr("Name")).desired_width(crate::widgets::fit(ui, 120.0)));
+                    ui.add(egui::TextEdit::singleline(&mut var.value).hint_text(tr("Value")).desired_width(crate::widgets::fit(ui, 150.0)));
                     if ui.small_button("×").on_hover_text(tr("Remove")).clicked() {
                         remove = Some(i);
                     }
@@ -863,8 +883,13 @@ fn proxy_command_field(ui: &mut Ui, argv: &mut Vec<String>, host: Option<HostId>
     let edit = ui
         .horizontal(|ui| {
             let label = ui.label(tr("Proxy command"));
-            ui.add(egui::TextEdit::singleline(&mut line).hint_text("ssh -W %h:%p bastion").font(egui::TextStyle::Monospace).desired_width(320.0))
-                .labelled_by(label.id)
+            ui.add(
+                egui::TextEdit::singleline(&mut line)
+                    .hint_text("ssh -W %h:%p bastion")
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(crate::widgets::fit(ui, 320.0)),
+            )
+            .labelled_by(label.id)
         })
         .inner;
     let parsed = proxy_command::split(&line);
@@ -894,7 +919,7 @@ fn proxy_command_field(ui: &mut Ui, argv: &mut Vec<String>, host: Option<HostId>
 
 /// The secret for one-time codes (TOTP), as an authenticator app gets it.
 fn totp_field(ui: &mut Ui, secret: &mut String, has_totp: bool, remove: &mut bool) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tr("One-time codes"));
         let hint = if has_totp { tr("Stored; type to replace") } else { tr("TOTP secret or otpauth:// link") };
         crate::widgets::secret_field(ui, secret, egui::Id::unique("sshcraft-form-totp"), true, hint, 220.0);
@@ -908,7 +933,7 @@ fn totp_field(ui: &mut Ui, secret: &mut String, has_totp: bool, remove: &mut boo
 }
 
 fn password_field(ui: &mut Ui, password: &mut String, has_password: bool, remove: &mut bool) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tr("Password"));
         let hint = if has_password { tr("Stored; type to replace") } else { tr("None stored") };
         crate::widgets::secret_field(ui, password, egui::Id::unique("sshcraft-form-password"), true, hint, 220.0);
@@ -956,8 +981,9 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut save = false;
     let title = if form.editing { tr("Edit host") } else { tr("New host") };
     let field_scroll = app.field_paste.scroll;
-    let modal = egui::Modal::new(egui::Id::unique(title)).show(ctx, |ui| {
-        ui.set_width(540.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique(title)).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 540.0));
         crate::widgets::buttons::title(ui, title);
         egui::ScrollArea::vertical().max_height(form_height(ui.ctx())).min_scrolled_height(form_height(ui.ctx())).auto_shrink([false, false]).show(
             ui,
@@ -965,17 +991,20 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                 crate::field_paste::scroll_into_view(ui, field_scroll);
                 egui::Grid::new("sshcraft-host").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(ui, |ui| {
                     ui.label(tr("Name"));
-                    ui.add(egui::TextEdit::singleline(&mut form.host.name).desired_width(280.0));
+                    ui.add(egui::TextEdit::singleline(&mut form.host.name).desired_width(crate::widgets::fit(ui, 280.0)));
                     ui.end_row();
                     ui.label(tr("Group"));
                     let targets = group_targets(&groups, None);
                     let current =
                         targets.iter().find(|(id, _)| *id == form.host.group_id).map_or_else(|| tr("Top level").to_string(), |(_, p)| p.clone());
-                    egui::ComboBox::from_id_salt("sshcraft-host-group").selected_text(current).width(280.0).show_ui(ui, |ui| {
-                        for (id, path) in &targets {
-                            ui.selectable_value(&mut form.host.group_id, *id, path);
-                        }
-                    });
+                    egui::ComboBox::from_id_salt("sshcraft-host-group").selected_text(current).width(crate::widgets::fit(ui, 280.0)).show_ui(
+                        ui,
+                        |ui| {
+                            for (id, path) in &targets {
+                                ui.selectable_value(&mut form.host.group_id, *id, path);
+                            }
+                        },
+                    );
                     ui.end_row();
                     ui.label(tr("System"));
                     let os = OSES.iter().find(|(o, _)| *o == form.host.os).map_or("", |(_, l)| *l);
@@ -986,7 +1015,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
                     });
                     ui.end_row();
                     ui.label(tr("Tags"));
-                    ui.add(egui::TextEdit::singleline(&mut form.tags).hint_text(tr("comma separated")).desired_width(280.0));
+                    ui.add(egui::TextEdit::singleline(&mut form.tags).hint_text(tr("comma separated")).desired_width(crate::widgets::fit(ui, 280.0)));
                     ui.end_row();
                 });
                 ui.separator();
@@ -1019,7 +1048,7 @@ pub fn show_host(app: &mut SshcraftApp, ctx: &egui::Context) {
         if let Some(error) = &form.error {
             ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             save = ui.add_enabled(!busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if busy {
                 ui.spinner();
@@ -1104,8 +1133,9 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
     let mut save = false;
     let title = if form.editing { tr("Edit group") } else { tr("New group") };
     let field_scroll = app.field_paste.scroll;
-    let modal = egui::Modal::new(egui::Id::unique(title)).show(ctx, |ui| {
-        ui.set_width(540.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique(title)).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 540.0));
         crate::widgets::buttons::title(ui, title);
         egui::ScrollArea::vertical().max_height(form_height(ui.ctx())).min_scrolled_height(form_height(ui.ctx())).auto_shrink([false, false]).show(
             ui,
@@ -1113,20 +1143,23 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
                 crate::field_paste::scroll_into_view(ui, field_scroll);
                 egui::Grid::new("sshcraft-group").num_columns(2).spacing([12.0, 8.0]).min_col_width(130.0).show(ui, |ui| {
                     ui.label(tr("Name"));
-                    ui.add(egui::TextEdit::singleline(&mut form.group.name).desired_width(280.0));
+                    ui.add(egui::TextEdit::singleline(&mut form.group.name).desired_width(crate::widgets::fit(ui, 280.0)));
                     ui.end_row();
                     ui.label(tr("Inside"));
                     let targets = group_targets(&groups, Some(form.group.id));
                     let current =
                         targets.iter().find(|(id, _)| *id == form.group.parent_id).map_or_else(|| tr("Top level").to_string(), |(_, p)| p.clone());
-                    egui::ComboBox::from_id_salt("sshcraft-group-parent").selected_text(current).width(280.0).show_ui(ui, |ui| {
-                        for (id, path) in &targets {
-                            ui.selectable_value(&mut form.group.parent_id, *id, path);
-                        }
-                    });
+                    egui::ComboBox::from_id_salt("sshcraft-group-parent").selected_text(current).width(crate::widgets::fit(ui, 280.0)).show_ui(
+                        ui,
+                        |ui| {
+                            for (id, path) in &targets {
+                                ui.selectable_value(&mut form.group.parent_id, *id, path);
+                            }
+                        },
+                    );
                     ui.end_row();
                     ui.label(tr("Tags"));
-                    ui.add(egui::TextEdit::singleline(&mut form.tags).hint_text(tr("comma separated")).desired_width(280.0));
+                    ui.add(egui::TextEdit::singleline(&mut form.tags).hint_text(tr("comma separated")).desired_width(crate::widgets::fit(ui, 280.0)));
                     ui.end_row();
                 });
                 ui.separator();
@@ -1148,7 +1181,7 @@ pub fn show_group(app: &mut SshcraftApp, ctx: &egui::Context) {
         if let Some(error) = &form.error {
             ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             save = ui.add_enabled(!busy, crate::widgets::buttons::main_action(tr("Save"))).clicked();
             if busy {
                 ui.spinner();

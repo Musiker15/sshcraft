@@ -169,14 +169,15 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         KeyDialog::Passphrase { .. } => tr("Save the passphrase"),
         KeyDialog::Certificate { .. } => tr("Attach a certificate"),
     };
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-key-dialog")).show(ctx, |ui| {
-        ui.set_width(480.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-key-dialog")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 480.0));
         crate::widgets::buttons::title(ui, title);
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-key-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| match &mut dialog {
             KeyDialog::Generate(form) => {
                 ui.label(tr("Name"));
-                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0));
+                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
                 ui.end_row();
                 ui.label(tr("Type"));
                 egui::ComboBox::from_id_salt("sshcraft-key-type").selected_text(form.kind.label()).show_ui(ui, |ui| {
@@ -192,12 +193,18 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             KeyDialog::Import(form) => {
                 ui.label(tr("Name"));
-                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0));
+                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
                 ui.end_row();
                 ui.label(tr("Private key"));
                 fixed_height(ui, "sshcraft-import-text", |ui| {
                     let id = egui::Id::unique("sshcraft-private-key");
-                    ui.add(egui::TextEdit::multiline(&mut form.text).id(id).desired_rows(6).desired_width(280.0).font(egui::TextStyle::Monospace));
+                    ui.add(
+                        egui::TextEdit::multiline(&mut form.text)
+                            .id(id)
+                            .desired_rows(6)
+                            .desired_width(crate::widgets::fit(ui, 280.0))
+                            .font(egui::TextStyle::Monospace),
+                    );
                     crate::widgets::forget_undo(ui.ctx(), id);
                 });
                 ui.end_row();
@@ -217,7 +224,7 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
             KeyDialog::Security(form) => {
                 ui.label(tr("Name"));
-                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0));
+                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
                 ui.end_row();
                 ui.label(tr("Where"));
                 ui.horizontal_wrapped(|ui| {
@@ -243,7 +250,12 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             KeyDialog::Certificate { text, .. } => {
                 ui.label(tr("Certificate"));
                 fixed_height(ui, "sshcraft-certificate-text", |ui| {
-                    ui.add(egui::TextEdit::multiline(text).desired_rows(4).desired_width(280.0).font(egui::TextStyle::Monospace));
+                    ui.add(
+                        egui::TextEdit::multiline(text)
+                            .desired_rows(4)
+                            .desired_width(crate::widgets::fit(ui, 280.0))
+                            .font(egui::TextStyle::Monospace),
+                    );
                 });
                 ui.end_row();
             }
@@ -301,16 +313,17 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let busy = app.forms.busy();
     let mut keep = true;
     let mut submit = false;
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-identity-dialog")).show(ctx, |ui| {
-        ui.set_width(480.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-identity-dialog")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 480.0));
         crate::widgets::buttons::title(ui, if form.id.is_some() { tr("Edit identity") } else { tr("New identity") });
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-identity-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| {
             ui.label(tr("Name"));
-            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(280.0));
+            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
             ui.end_row();
             ui.label(tr("User"));
-            ui.add(egui::TextEdit::singleline(&mut form.username).desired_width(280.0));
+            ui.add(egui::TextEdit::singleline(&mut form.username).desired_width(crate::widgets::fit(ui, 280.0)));
             ui.end_row();
             ui.label(tr("Key"));
             let shown = form
@@ -318,7 +331,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 .as_ref()
                 .and_then(|id| app.data.keys.iter().find(|k| &k.id == id))
                 .map_or_else(|| tr("None").to_string(), |k| visible(&k.name));
-            egui::ComboBox::from_id_salt("sshcraft-identity-key").selected_text(shown).width(280.0).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("sshcraft-identity-key").selected_text(shown).width(crate::widgets::fit(ui, 280.0)).show_ui(ui, |ui| {
                 ui.selectable_value(&mut form.key, None, tr("None"));
                 for k in &app.data.keys {
                     ui.selectable_value(&mut form.key, Some(k.id.clone()), visible(&k.name));
@@ -449,7 +462,8 @@ fn key_name(app: &SshcraftApp, id: &str) -> String {
 
 fn confirm_delete(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some((id, name)) = app.ui.key_confirm.clone() else { return };
-    egui::Modal::new(egui::Id::unique("sshcraft-key-confirm")).show(ctx, |ui| {
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-key-confirm")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
         ui.set_max_width(420.0);
         ui.label(trf("Delete the key {name}? Hosts that use it can no longer sign in with it.", &[("name", &visible(&name))]));
         ui.horizontal_wrapped(|ui| {

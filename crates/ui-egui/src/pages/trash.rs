@@ -124,7 +124,8 @@ pub fn versions_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(dialog) = app.ui.versions.clone() else { return };
     let mut keep = true;
     let mut restore = None;
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-versions")).show(ctx, |ui| {
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-versions")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
         ui.set_max_width(460.0);
         crate::widgets::buttons::title(ui, trf("Earlier versions of {name}", &[("name", &visible(&dialog.name))]));
         ui.add_space(6.0);

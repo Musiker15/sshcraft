@@ -127,6 +127,10 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
 
 /// A page's title: 28 points, as on the Hosts page.
 pub fn page_title(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    // On a phone the bar at the top already names the page.
+    if crate::shell::layout_for(ui.ctx().content_rect().width()) == crate::shell::Layout::Narrow {
+        return ui.allocate_response(vec2(0.0, 0.0), Sense::hover());
+    }
     let response = heading(ui, text.as_ref(), 28.0);
     ui.add_space(6.0);
     response

@@ -260,18 +260,22 @@ pub fn show_import(app: &mut SshcraftApp, ctx: &egui::Context) {
     let tokens = Tokens::get(ctx);
     let busy = app.forms.busy();
     let (mut keep, mut choose, mut run_preview, mut run_apply) = (true, false, false, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-import")).show(ctx, |ui| {
-        ui.set_width(560.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-import")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 560.0));
         crate::widgets::buttons::title(ui, tr("Import from another program"));
         ui.add_space(8.0);
-        egui::ComboBox::from_id_salt("sshcraft-import-source").selected_text(import.source.label()).width(320.0).show_ui(ui, |ui| {
-            for kind in ImportSourceKind::ALL {
-                if ui.selectable_value(&mut import.source, kind, kind.label()).changed() {
-                    import.path = None;
-                    import.step = ImportStep::Choose;
+        egui::ComboBox::from_id_salt("sshcraft-import-source").selected_text(import.source.label()).width(crate::widgets::fit(ui, 320.0)).show_ui(
+            ui,
+            |ui| {
+                for kind in ImportSourceKind::ALL {
+                    if ui.selectable_value(&mut import.source, kind, kind.label()).changed() {
+                        import.path = None;
+                        import.step = ImportStep::Choose;
+                    }
                 }
-            }
-        });
+            },
+        );
         if let Some(folder) = import.source.needs() {
             ui.horizontal(|ui| {
                 choose = ui.button(if folder { tr("Choose folder") } else { tr("Choose file") }).clicked();
@@ -346,8 +350,9 @@ pub fn show_export(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut export) = app.ui.export.take() else { return };
     let groups: Vec<sshcraft_model::model::Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
     let (mut keep, mut go) = (true, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-export")).show(ctx, |ui| {
-        ui.set_width(440.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-export")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 440.0));
         crate::widgets::buttons::title(ui, tr("Export hosts"));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -356,7 +361,7 @@ pub fn show_export(app: &mut SshcraftApp, ctx: &egui::Context) {
         });
         let targets = group_targets(&groups, None);
         let current = targets.iter().find(|(id, _)| *id == export.group).map_or_else(|| tr("Everything").to_string(), |(_, p)| p.clone());
-        egui::ComboBox::from_id_salt("sshcraft-export-group").selected_text(current).width(320.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("sshcraft-export-group").selected_text(current).width(crate::widgets::fit(ui, 320.0)).show_ui(ui, |ui| {
             for (id, path) in &targets {
                 let label = if id.is_none() { tr("Everything").to_string() } else { path.clone() };
                 ui.selectable_value(&mut export.group, *id, label);

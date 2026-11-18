@@ -243,8 +243,9 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let tokens = Tokens::get(ctx);
     let mut answer = None;
     let mut show_tab = None;
-    egui::Modal::new(egui::Id::unique("sshcraft-prompt")).show(ctx, |ui| {
-        ui.set_width(520.0);
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-prompt")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 520.0));
         if let Some((index, title)) = &asking {
             ui.horizontal(|ui| {
                 let number = (index + 1).to_string();

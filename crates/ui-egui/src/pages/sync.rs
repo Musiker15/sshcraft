@@ -272,7 +272,7 @@ pub fn dialogs(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 fn field(ui: &mut Ui, label: &str, value: &mut String) {
     ui.label(label);
-    ui.add(egui::TextEdit::singleline(value).desired_width(300.0).char_limit(500));
+    ui.add(egui::TextEdit::singleline(value).desired_width(crate::widgets::fit(ui, 300.0)).char_limit(500));
     ui.end_row();
 }
 
@@ -280,8 +280,9 @@ fn create_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.sync.create.take() else { return };
     let busy = app.forms.busy();
     let (mut keep, mut go) = (true, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-create-account")).show(ctx, |ui| {
-        ui.set_width(520.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-create-account")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 520.0));
         crate::widgets::buttons::title(ui, tr("Create account"));
         egui::Grid::new("sshcraft-create").num_columns(2).min_col_width(130.0).show(ui, |ui| {
             field(ui, tr("Server name"), &mut form.server_name);
@@ -340,8 +341,9 @@ fn join_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.sync.join.take() else { return };
     let busy = app.forms.busy();
     let (mut keep, mut go) = (true, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-join-account")).show(ctx, |ui| {
-        ui.set_width(520.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-join-account")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 520.0));
         crate::widgets::buttons::title(ui, tr("Join an account"));
         egui::Grid::new("sshcraft-join").num_columns(2).min_col_width(130.0).show(ui, |ui| {
             field(ui, tr("Server name"), &mut form.server_name);
@@ -395,8 +397,9 @@ fn key_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let key: &str = &created.key;
     let tokens = Tokens::get(ctx);
     let mut close = false;
-    egui::Modal::new(egui::Id::unique("sshcraft-account-key-shown")).show(ctx, |ui| {
-        ui.set_width(520.0);
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-account-key-shown")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 520.0));
         crate::widgets::buttons::title(ui, tr("Your account key"));
         ui.label(tr("Keep it in your password manager now. SSHCraft does not store it and shows it only this once. Every new device needs it."));
         ui.add_space(6.0);
@@ -417,8 +420,9 @@ fn devices_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let (Some(devices), Some(server)) = (app.ui.sync.devices.clone(), app.ui.sync.devices_of.clone()) else { return };
     let tokens = Tokens::get(ctx);
     let (mut close, mut revoke) = (false, None);
-    egui::Modal::new(egui::Id::unique("sshcraft-devices")).show(ctx, |ui| {
-        ui.set_width(560.0);
+    crate::widgets::modal(ctx, egui::Id::unique("sshcraft-devices")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 560.0));
         crate::widgets::buttons::title(ui, tr("Devices"));
         egui::Grid::new("sshcraft-device-list").num_columns(4).spacing([12.0, 6.0]).show(ui, |ui| {
             for d in &devices {
@@ -486,8 +490,9 @@ fn move_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
     let Some(mut form) = app.ui.sync.moving.take() else { return };
     let servers: Vec<(String, String)> = app.data.servers.iter().map(|s| (text(s, "id"), text(s, "name"))).collect();
     let (mut keep, mut go) = (true, false);
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-move")).show(ctx, |ui| {
-        ui.set_width(420.0);
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-move")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
+        ui.set_width(crate::widgets::fit(ui, 420.0));
         crate::widgets::buttons::title(ui, trf("Move {name}", &[("name", &visible(&form.name))]));
         if let Some(note) = &form.note {
             ui.label(note);

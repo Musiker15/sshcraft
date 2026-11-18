@@ -26,6 +26,11 @@ pub fn title_bar_pref(settings: &sshcraft_engine::settings::EngineSettings) -> T
 
 /// Whether the window needs the strip: menus in the window, or a frame the app draws.
 fn strip_needed(app: &SshcraftApp) -> bool {
+    // A touch screen has no menu bar: "Commands" in the bar or sidebar opens the palette, which
+    // holds the same commands.
+    if app.form == crate::app::Form::Tablet {
+        return false;
+    }
     !crate::menus::native(app) || !matches!(app.window_frame, Frame::Native)
 }
 

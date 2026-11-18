@@ -225,7 +225,8 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
     let font = egui::FontId::monospace(13.0);
     let mut action = None;
     let size = ctx.content_rect().size();
-    let modal = egui::Modal::new(egui::Id::unique("sshcraft-log-viewer")).show(ctx, |ui| {
+    let modal = crate::widgets::modal(ctx, egui::Id::unique("sshcraft-log-viewer")).show(ctx, |ui| {
+        crate::widgets::fit_dialog(ui);
         ui.set_width((size.x - 120.0).max(400.0));
         ui.horizontal(|ui| {
             crate::widgets::buttons::title(ui, tr("Session log"));
@@ -242,7 +243,9 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
             }
         });
         ui.horizontal(|ui| {
-            let field = ui.add(egui::TextEdit::singleline(&mut viewer.search).hint_text(tr("Search in this log")).desired_width(260.0));
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut viewer.search).hint_text(tr("Search in this log")).desired_width(crate::widgets::fit(ui, 260.0)),
+            );
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             let text = viewer.search.trim().to_string();
             let ready = !text.is_empty();
@@ -261,7 +264,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         }
         if let Some(comment) = viewer.comment.as_mut() {
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::multiline(comment).desired_rows(2).desired_width(400.0).char_limit(MAX_COMMENT));
+                ui.add(egui::TextEdit::multiline(comment).desired_rows(2).desired_width(crate::widgets::fit(ui, 400.0)).char_limit(MAX_COMMENT));
                 if ui.add_enabled(!comment.trim().is_empty(), egui::Button::new(tr("Add comment"))).clicked() {
                     action = Some(ViewerAction::Comment);
                 }
@@ -269,7 +272,7 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         }
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(220.0);
+                ui.set_width(crate::widgets::fit(ui, 220.0));
                 ui.label(egui::RichText::new(tr("Marks")).strong());
                 for (i, mark) in viewer.marks.iter().enumerate() {
                     ui.horizontal(|ui| {
