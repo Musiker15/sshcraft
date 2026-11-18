@@ -214,30 +214,36 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         crate::field_paste::scroll_into_view(ui, field_scroll);
         for package in order {
             let title = if package.is_empty() { tr("Without package").to_string() } else { visible(&package) };
-            ui.label(egui::RichText::new(title).strong());
             let mut rows = packages.remove(&package).unwrap_or_default();
             rows.sort_by_key(|s| s.name.to_lowercase());
-            for row in rows {
-                ui.horizontal_wrapped(|ui| {
-                    elided_label(ui, &row.name, 220.0, tokens.text, FontId::proportional(14.0));
-                    let first = row.content.lines().next().unwrap_or_default();
-                    elided_label(ui, first, 320.0, tokens.text_dim, FontId::monospace(12.0));
-                    if ui.button(tr("Run")).clicked() {
-                        action = Some((row.clone(), RowAction::Run));
+            crate::widgets::buttons::card(
+                ui,
+                Some(&title),
+                &mut (),
+                |_, _| {},
+                |ui, _| {
+                    for row in rows {
+                        crate::widgets::buttons::list_row(ui, |ui| {
+                            elided_label(ui, &row.name, 220.0, tokens.text, FontId::proportional(14.0));
+                            let first = row.content.lines().next().unwrap_or_default();
+                            elided_label(ui, first, 320.0, tokens.text_dim, FontId::monospace(12.0));
+                            if ui.button(tr("Run")).clicked() {
+                                action = Some((row.clone(), RowAction::Run));
+                            }
+                            if ui.button(tr("Edit")).clicked() {
+                                action = Some((row.clone(), RowAction::Edit));
+                            }
+                            if ui.button(tr("Delete")).clicked() {
+                                action = Some((row.clone(), RowAction::Delete));
+                            }
+                            let mut on_bar = pinned(app, &row.id);
+                            if ui.checkbox(&mut on_bar, tr("On the bar")).changed() {
+                                action = Some((row.clone(), RowAction::Pin));
+                            }
+                        });
                     }
-                    if ui.button(tr("Edit")).clicked() {
-                        action = Some((row.clone(), RowAction::Edit));
-                    }
-                    if ui.button(tr("Delete")).clicked() {
-                        action = Some((row.clone(), RowAction::Delete));
-                    }
-                    let mut on_bar = pinned(app, &row.id);
-                    if ui.checkbox(&mut on_bar, tr("On the bar")).changed() {
-                        action = Some((row.clone(), RowAction::Pin));
-                    }
-                });
-            }
-            ui.add_space(8.0);
+                },
+            );
         }
     });
     match action {
