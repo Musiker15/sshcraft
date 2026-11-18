@@ -81,6 +81,15 @@ async fn ui(port: u16, token_file: &Path, action: &UiCommand, as_json: bool) -> 
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Without any argument: the help, and a good end. Package managers (winget's check among
+    // them) start a newly installed program that way and count an error code as a broken
+    // install; a wrong argument still ends as a usage error.
+    if std::env::args_os().len() <= 1 {
+        use clap::CommandFactory;
+        let shown = cli::Cli::command().print_help();
+        println!();
+        return if shown.is_ok() { ExitCode::SUCCESS } else { ExitCode::from(EXIT_USAGE) };
+    }
     let args = cli::Cli::parse();
     if !valid_agent_name(&args.agent) {
         eprintln!("--agent: 1 to 64 printable characters");

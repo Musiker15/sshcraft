@@ -1,13 +1,15 @@
 # Android
 
-SSHCraft runs on Android tablets and phones with Android 13 or newer (arm64). It is the same app as on the
+SSHCraft runs on Android tablets and phones with Android 13 or newer (arm64, armv7 or x86_64). It is the same app as on the
 desktop, in a form made for a touch screen. There is no Play Store listing: the APK is attached to
 the GitHub releases and installed by hand.
 
 ## Install
 
-1. Download `sshcraft-<version>-android-arm64.apk` from the
-   [releases](https://github.com/Musiker15/sshcraft/releases) onto the tablet.
+1. Download the APK for your device from the
+   [releases](https://github.com/Musiker15/sshcraft/releases): `sshcraft-<version>-android-arm64.apk`
+   for nearly every phone and tablet, `-armv7.apk` for an older device with a 32-bit processor,
+   `-x86_64.apk` for a Chromebook or an x86 tablet.
 2. Open it. Android asks once whether the browser or file manager may install apps; allow it
    for that app.
 3. Start SSHCraft from the launcher.
@@ -67,14 +69,17 @@ the bar puts the selection on Android's clipboard.
   session log and `known_hosts` files work as on the desktop, in any place the picker reaches
   (the device, a cloud drive). A folder cannot be picked.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
-- No desktop notifications, no dropdown window, no desktop shortcuts, no X11 forwarding, no
-  FIDO keys and no screen reader support yet.
+- No dropdown window, no desktop shortcuts, no X11 forwarding, no FIDO keys and no screen reader
+  support yet.
 - A word the keyboard is still composing appears only once the keyboard commits it.
 - The sync server's certificate is checked against Mozilla's list of public authorities, not
   Android's own store, so a server with a certificate from a private or user-installed authority
   is not trusted on Android.
-- When Android sends SSHCraft to the background it may cut the network. Sessions reconnect
-  when you come back ([connections.md](connections.md)).
+- While sessions are open, a notification ("2 sessions open") keeps SSHCraft and its network
+  running in the background; Android stops a backgrounded app's network otherwise. It goes away
+  with the last session. Android asks once whether SSHCraft may show notifications.
+- The app's messages (a long command ended, a message from a server) come as notifications,
+  while SSHCraft is on screen or just went to the background.
 
 The open points are in [gaps.md](gaps.md).
 

@@ -42,6 +42,8 @@ struct Tablet {
     owner: Option<(egui::Id, u64)>,
     /// When to show the keyboard again after another field took it.
     reshow: Option<std::time::Instant>,
+    /// The number of open sessions told to the activity last (crate::background).
+    sessions: usize,
     /// Calls into MainActivity that failed, each said once.
     reported: Vec<String>,
 }
@@ -66,6 +68,15 @@ impl Tablet {
 impl eframe::App for Tablet {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.app.frame(ui);
+        // While sessions are open, a foreground service keeps them and their network running in
+        // the background; told only when the number changes.
+        let open = sshcraft_ui_egui::notify::open_sessions(&self.app);
+        if open != self.sessions {
+            match crate::background::sessions(open) {
+                Ok(()) => self.sessions = open,
+                Err(e) => log::warn!("the session service could not be told: {e}"),
+            }
+        }
         // What the app copied goes on the system clipboard; egui's own clipboard on Android
         // reaches no other app.
         let copied: Vec<String> = ui.ctx().output(|o| {
@@ -270,6 +281,7 @@ fn run(android: AndroidApp) {
             let mut app = SshcraftApp::new(session, &cc.egui_ctx);
             app.form = Form::Tablet;
             app.dialogs.set_picker(Arc::new(crate::files::SystemPicker));
+            app.notifier = Box::new(crate::background::Notices);
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);
             Ok(Box::new(Tablet {
@@ -283,6 +295,7 @@ fn run(android: AndroidApp) {
                 last_ime: None,
                 owner: None,
                 reshow: None,
+                sessions: 0,
                 reported: Vec::new(),
             }))
         }),

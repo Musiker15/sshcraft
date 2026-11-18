@@ -20,7 +20,8 @@ pub struct Desktop;
 impl Notifier for Desktop {
     #[cfg(target_os = "android")]
     fn notify(&self, _title: &str, _body: &str) {
-        // Android notifications need the activity's Java side; M1 shows none (docs/gaps.md).
+        // Android puts its own notifier in place (apps/android, background.rs): notifications
+        // there need the activity's Java side.
     }
 
     #[cfg(not(target_os = "android"))]
@@ -78,4 +79,32 @@ impl RateLimit {
 /// `after_secs` (0 turns this off) and the user was not looking at it.
 pub fn command_worth_it(after_secs: u32, elapsed: Duration, watched: bool) -> bool {
     after_secs > 0 && !watched && elapsed >= Duration::from_secs(u64::from(after_secs))
+}
+
+/// How many sessions are open: those not ended. Android keeps the app running in the background
+/// while there are any.
+pub fn open_sessions(app: &crate::app::SshcraftApp) -> usize {
+    app.terminals.values().filter(|t| !matches!(t.status, Some(sshcraft_engine::SessionStatus::Ended { .. }))).count()
+}
+
+/// The text of the notification that keeps open sessions running on Android; None with none
+/// open (the service stops then).
+pub fn sessions_notice(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some(crate::i18n::tr("1 session open").to_string()),
+        n => Some(crate::i18n::trf("{count} sessions open", &[("count", &n.to_string())])),
+    }
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::sessions_notice;
+
+    #[test]
+    fn the_notice_counts_the_open_sessions() {
+        assert_eq!(sessions_notice(0), None, "no service without sessions");
+        assert_eq!(sessions_notice(1).as_deref(), Some("1 session open"));
+        assert_eq!(sessions_notice(3).as_deref(), Some("3 sessions open"));
+    }
 }

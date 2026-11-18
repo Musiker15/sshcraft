@@ -27,11 +27,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
       - name: Android platform
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" > /dev/null
       - name: Build the APK
-        run: cargo xtask android
+        # One APK per processor: arm64 (most devices), armv7 (older 32-bit ones), x86_64
+        # (Chromebooks, x86 tablets).
+        run: |
+          for abi in arm64 armv7 x86_64; do
+            cargo xtask android --abi "$abi"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: android-test-apk
@@ -50,7 +55,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
       - name: Android platform
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" > /dev/null
       # Every APK of a release must carry the same key, or Android refuses the update. Without the
@@ -70,7 +75,12 @@ jobs:
           echo "SSHCRAFT_ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           echo "SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE=$RUNNER_TEMP/release.pass" >> "$GITHUB_ENV"
       - name: Build the APK
-        run: cargo xtask android
+        # One APK per processor: arm64 (most devices), armv7 (older 32-bit ones), x86_64
+        # (Chromebooks, x86 tablets).
+        run: |
+          for abi in arm64 armv7 x86_64; do
+            cargo xtask android --abi "$abi"
+          done
       - name: Remove the key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/release.pass"
