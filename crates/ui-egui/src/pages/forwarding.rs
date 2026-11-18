@@ -173,37 +173,51 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
     let field_scroll = app.field_paste.scroll;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         crate::field_paste::scroll_into_view(ui, field_scroll);
-        egui::Grid::new("sshcraft-forwards").num_columns(5).min_col_width(80.0).spacing([14.0, 8.0]).show(ui, |ui| {
-            for host in &hosts {
-                for rule in &host.forwards {
-                    let label = if rule.name.is_empty() { ssh_option(rule) } else { rule.name.clone() };
-                    if elided_label(ui, &label, 200.0, tokens.text, FontId::proportional(14.0)).double_clicked() {
-                        action = Some((host.id, rule.clone(), RuleAction::Toggle));
-                    }
-                    ui.label(egui::RichText::new(visible(&host.name)).color(tokens.text_dim));
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(visible(&ssh_option(rule))).monospace());
-                        if !loopback(&rule.bind_address) {
-                            ui.label(egui::RichText::new(tr("Reachable from other machines")).color(tokens.warning));
+        if !hosts.is_empty() {
+            crate::widgets::buttons::card(
+                ui,
+                None,
+                &mut (),
+                |_, _| {},
+                |ui, _| {
+                    egui::Grid::new("sshcraft-forwards").num_columns(5).min_col_width(80.0).spacing([14.0, 8.0]).show(ui, |ui| {
+                        for host in &hosts {
+                            for rule in &host.forwards {
+                                let label = if rule.name.is_empty() { ssh_option(rule) } else { rule.name.clone() };
+                                if elided_label(ui, &label, 200.0, tokens.text, FontId::proportional(14.0)).double_clicked() {
+                                    action = Some((host.id, rule.clone(), RuleAction::Toggle));
+                                }
+                                ui.label(egui::RichText::new(visible(&host.name)).color(tokens.text_dim));
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(visible(&ssh_option(rule))).monospace());
+                                    if !loopback(&rule.bind_address) {
+                                        ui.label(egui::RichText::new(tr("Reachable from other machines")).color(tokens.warning));
+                                    }
+                                });
+                                ui.label(state_text(state(app, rule.id)));
+                                ui.horizontal_wrapped(|ui| {
+                                    let on = running(app, rule.id);
+                                    if ui.button(if on { tr("Stop") } else { tr("Start") }).clicked() {
+                                        action = Some((host.id, rule.clone(), RuleAction::Toggle));
+                                    }
+                                    if ui
+                                        .add_enabled(!on, egui::Button::new(tr("Edit")))
+                                        .on_disabled_hover_text(tr("Stop the rule to change it."))
+                                        .clicked()
+                                    {
+                                        action = Some((host.id, rule.clone(), RuleAction::Edit));
+                                    }
+                                    if ui.button(tr("Delete")).clicked() {
+                                        action = Some((host.id, rule.clone(), RuleAction::Delete));
+                                    }
+                                });
+                                ui.end_row();
+                            }
                         }
                     });
-                    ui.label(state_text(state(app, rule.id)));
-                    ui.horizontal_wrapped(|ui| {
-                        let on = running(app, rule.id);
-                        if ui.button(if on { tr("Stop") } else { tr("Start") }).clicked() {
-                            action = Some((host.id, rule.clone(), RuleAction::Toggle));
-                        }
-                        if ui.add_enabled(!on, egui::Button::new(tr("Edit"))).on_disabled_hover_text(tr("Stop the rule to change it.")).clicked() {
-                            action = Some((host.id, rule.clone(), RuleAction::Edit));
-                        }
-                        if ui.button(tr("Delete")).clicked() {
-                            action = Some((host.id, rule.clone(), RuleAction::Delete));
-                        }
-                    });
-                    ui.end_row();
-                }
-            }
-        });
+                },
+            );
+        }
         orphans(app, ui, &hosts);
     });
     if let Some((host, rule, what)) = action {
