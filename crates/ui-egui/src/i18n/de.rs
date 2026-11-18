@@ -912,6 +912,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SFTP comes with S1" => "SFTP kommt mit S1",
         "More" => "Mehr",
         "Commands" => "Befehle",
+        "Stored keys" => "Gespeicherte Schlüssel",
+        "No identities yet." => "Noch keine Identitäten.",
         "Where do you want to connect?" => "Wohin möchtest du dich verbinden?",
         "Recently connected" => "Zuletzt verbunden",
         "Without a group" => "Ohne Gruppe",

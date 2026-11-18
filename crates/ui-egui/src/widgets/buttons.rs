@@ -145,3 +145,54 @@ pub fn title(ui: &mut Ui, text: impl AsRef<str>) -> Response {
 pub fn main_action(label: &str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(label.to_string()).color(egui::Color32::WHITE)).fill(crate::theme::Tokens::dark().accent)
 }
+
+/// A section of a page as a card, like the group cards of the Hosts page: a title with its
+/// buttons on the first line (`header`, may be empty), then `body`. Both get `data` in turn (the
+/// app, usually), so each may change it.
+pub fn card<T, R>(
+    ui: &mut Ui,
+    title: Option<&str>,
+    data: &mut T,
+    header: impl FnOnce(&mut Ui, &mut T),
+    body: impl FnOnce(&mut Ui, &mut T) -> R,
+) -> R {
+    let tokens = Tokens::get(ui.ctx());
+    let inner = egui::Frame::new()
+        .fill(tokens.panel)
+        .stroke(Stroke::new(1.0, tokens.separator))
+        .corner_radius(16)
+        .inner_margin(16.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            // A card without a title has no header line; its body starts at the top.
+            if let Some(title) = title {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    heading(ui, title, 17.0);
+                    ui.add_space(6.0);
+                    header(ui, data);
+                });
+                ui.add_space(10.0);
+            }
+            body(ui, data)
+        })
+        .inner;
+    ui.add_space(14.0);
+    inner
+}
+
+/// One entry of a list in a card: a row with room around it that lights up under the pointer.
+pub fn list_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let tokens = Tokens::get(ui.ctx());
+    // The highlight goes under the row once its size is known.
+    let behind = ui.painter().add(egui::Shape::Noop);
+    let shown = egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.set_min_height(26.0);
+        ui.horizontal_wrapped(add).inner
+    });
+    if ui.rect_contains_pointer(shown.response.rect) {
+        ui.painter().set(behind, egui::Shape::rect_filled(shown.response.rect, 10.0, tokens.row_hover));
+    }
+    shown.inner
+}
