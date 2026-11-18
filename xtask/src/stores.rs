@@ -4,7 +4,8 @@
 //! The templates live in `packaging/winget/` and `packaging/homebrew/`. `{{version}}` is the
 //! workspace version; `{{sha256:<file>}}` is that file's line in `SHA256SUMS.txt`. A template
 //! naming a file the checksums do not list is an error, so a manifest never points at an artifact
-//! the release does not have. Default output: `dist/stores/`. Submitting the results to the
+//! the release does not have. A store whose platform the release has no file for at all (the
+//! Homebrew cask in a release without macOS packages) is left out with a note. Default output: `dist/stores/`. Submitting the results to the
 //! stores is the maintainer's step (docs/releasing.md, "Stores").
 
 use std::collections::BTreeMap;
@@ -17,6 +18,16 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("packaging/winget/MSKScripts.SSHCraft.locale.en-US.yaml", "winget/MSKScripts.SSHCraft.locale.en-US.yaml"),
     ("packaging/homebrew/sshcraft.rb", "homebrew/sshcraft.rb"),
 ];
+
+/// The part of a file name that marks the platform a template's store is for.
+fn platform_of(template: &str) -> &'static str {
+    if template.starts_with("packaging/homebrew/") { "-macos-" } else { "-windows-" }
+}
+
+/// The templates for the stores whose platform the release has files for.
+pub fn templates_for(sums: &BTreeMap<String, String>) -> Vec<(&'static str, &'static str)> {
+    TEMPLATES.iter().copied().filter(|(template, _)| sums.keys().any(|file| file.contains(platform_of(template)))).collect()
+}
 
 /// The largest checksum file read; a real one has a few dozen lines.
 const MAX_SUMS: u64 = 1 << 20;
@@ -35,7 +46,11 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     let manifest = std::fs::read_to_string(root.join("Cargo.toml")).map_err(|e| format!("Cargo.toml: {e}"))?;
     let version = crate::version::read(&manifest)?;
     stable(&version)?;
-    for (template, target) in TEMPLATES {
+    let chosen = templates_for(&sums);
+    for (template, _) in TEMPLATES.iter().filter(|t| !chosen.contains(t)) {
+        println!("{template}: left out, the release has no {} files", platform_of(template).trim_matches('-'));
+    }
+    for (template, target) in chosen {
         let text = std::fs::read_to_string(root.join(template)).map_err(|e| format!("{template}: {e}"))?;
         let filled = render(&text, &version, &sums).map_err(|e| format!("{template}: {e}"))?;
         let path = out.join(target);
@@ -141,6 +156,28 @@ mod tests {
         assert!(parse_sums(&format!("{A}  a.msi\n{B}  a.msi")).is_err(), "twice");
         assert!(parse_sums("no-space-here").is_err());
         assert_eq!(parse_sums(&format!("{}  a.msi\r\n\n", A.to_uppercase())).unwrap()["a.msi"], A);
+    }
+
+    /// A release without macOS packages gets the winget manifests and no Homebrew cask; a
+    /// release with Windows packages but one of them missing is still an error, not a skip.
+    #[test]
+    fn a_store_whose_platform_the_release_lacks_is_left_out() {
+        let windows_only = parse_sums(&format!(
+            "{A}  sshcraft-1.0.0-windows-x64.msi
+{B}  sshcraft-1.0.0-windows-arm64.msi
+"
+        ))
+        .unwrap();
+        let chosen: Vec<&str> = templates_for(&windows_only).iter().map(|(t, _)| *t).collect();
+        assert!(chosen.iter().all(|t| t.starts_with("packaging/winget/")), "{chosen:?}");
+        assert_eq!(chosen.len(), 3);
+        assert_eq!(templates_for(&sums()).len(), TEMPLATES.len(), "both platforms: every store");
+        let half = parse_sums(&format!(
+            "{A}  sshcraft-1.0.0-windows-x64.msi
+"
+        ))
+        .unwrap();
+        assert_eq!(templates_for(&half).len(), 3, "Windows is there, so winget is rendered and its missing arm64 MSI fails");
     }
 
     /// Every template renders with checksums for the artifacts the release workflow builds, and
