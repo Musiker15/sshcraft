@@ -1,13 +1,13 @@
 name: Packaging lint
 
-# Lints the workflows and packaging scripts (actionlint, shellcheck and the family's checks), and
+# Lints the workflows and packaging files (actionlint, shellcheck, XML, desktop entry, AppStream), and
 # checks the Windows installation policy on fixture packages without a Rust build.
 on:
   push:
     branches: [main, release]
-    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
+    paths: [".github/**", "packaging/**", "assets/app-icon/**"]
   pull_request:
-    paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
+    paths: [".github/**", "packaging/**", "assets/app-icon/**"]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,70 @@ concurrency:
 
 jobs:
   lint:
-    uses: storytold/craft-common-actions/.github/workflows/packaging-lint.yml@main
+    name: workflows and packaging files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      # sha256 of actionlint_1.7.12_linux_amd64.tar.gz from its GitHub release.
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tools
+        run: |
+          .github/scripts/apt-install.sh shellcheck desktop-file-utils appstream libxml2-utils python3-yaml
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --proto '=https' -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+      - name: actionlint
+        run: '"$RUNNER_TEMP/actionlint" -color'
+      - name: shellcheck
+        run: find packaging .github/scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck
+      - name: PowerShell parses
+        shell: pwsh
+        run: |
+          foreach ($f in Get-ChildItem packaging/windows/*.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Output "::error file=$($f.Name)::$_" }; exit 1 }
+            Write-Output "ok $($f.Name)"
+          }
+      - name: XML, the installer's GUIDs and icons
+        run: |
+          xmllint --noout packaging/windows/*.wxs packaging/macos/*.plist* packaging/linux/*.xml*
+          if grep -oE '<Icon Id="[^"]*"' packaging/windows/*.wxs | grep -vE '\.(ico|exe)"$'; then
+            echo "::error::an Icon Id must end in .ico or .exe"; exit 1
+          fi
+          dups=$(grep -ohiE '(UpgradeCode|Guid)="[0-9A-F-]{36}"' packaging/windows/*.wxs | cut -d'"' -f2 | sort -f | uniq -di)
+          if [ -n "$dups" ]; then echo "::error::a GUID is used twice: $dups"; exit 1; fi
+      - name: Desktop entry and AppStream
+        run: |
+          for desktop in packaging/linux/*.desktop; do desktop-file-validate "$desktop"; done
+          for metainfo in packaging/linux/*.metainfo.xml.in; do
+            out="$RUNNER_TEMP/$(basename "$metainfo" .in)"
+            sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' "$metainfo" > "$out"
+            appstreamcli validate --no-net --explain "$out"
+          done
+      - name: The two Flatpak manifests agree
+        shell: python3 {0}
+        run: |
+          import glob, yaml
+          source = [f for f in glob.glob("packaging/linux/flatpak/*.yml") if not f.endswith(".bundle.yml")]
+          bundle = glob.glob("packaging/linux/flatpak/*.bundle.yml")
+          if source and bundle:
+              a, b = (yaml.safe_load(open(f, encoding="utf-8")) for f in (source[0], bundle[0]))
+              for key in ("runtime", "runtime-version", "sdk", "finish-args"):
+                  if key in a and key in b:
+                      assert a[key] == b[key], f"the Flatpak manifests disagree on {key}"
+          print("Flatpak manifests agree")
 
   windows-install-policy:
     timeout-minutes: 10

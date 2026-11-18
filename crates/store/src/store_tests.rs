@@ -167,6 +167,17 @@ fn recent_hosts_newest_first_and_limited() {
 }
 
 #[test]
+fn recent_hosts_carry_when_they_were_connected() {
+    let store = Store::open_in_memory().unwrap();
+    let (a, b) = (host("a", None), host("b", None));
+    store.upsert_host(&a).unwrap();
+    store.upsert_host(&b).unwrap();
+    store.touch_recent(a.id, 1_000).unwrap();
+    store.touch_recent(b.id, 2_000).unwrap();
+    assert_eq!(store.recent_hosts_with_times(5).unwrap(), vec![(b.id, 2_000), (a.id, 1_000)]);
+}
+
+#[test]
 fn touch_recent_twice_keeps_one_row() {
     let store = Store::open_in_memory().unwrap();
     let (a, b) = (host("a", None), host("b", None));

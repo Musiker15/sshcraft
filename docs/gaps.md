@@ -13,7 +13,7 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 2g | No Kerberos (GSSAPI) sign-in: the SSH library has no GSSAPI, and adding it means binding the system's Kerberos libraries on every platform | not planned for now |
 | 2h | No smart cards or hardware tokens through PKCS#11: loading a PKCS#11 module calls C code from a library the user names, which needs `unsafe` outside `crates/fido`; FIDO2 security keys work | not planned for now |
 | 2d | No secure keyboard entry on macOS: it needs `EnableSecureEventInput`, reachable only through `unsafe` outside `crates/fido`, and a Mac to try | later |
-| 3 | The Windows x64 MSI is tried by hand (installs and runs); the Linux packages, the Flatpak sandbox and the CLI on `PATH` are not yet | later |
+| 3 | The Windows x64 MSI and the x86_64 Linux packages are tried by hand (the .deb on Debian 13 and Ubuntu 24.04, the .rpm on Fedora, the Arch package, the AppImage and the tarball, in containers under Xvfb: installed, `sshcraft-cli` on `PATH`, the window opens); the Flatpak sandbox is not yet. The Arch package lists `libxcursor`, `libxi` and `libxrandr` only as optional, and without libXcursor the window cannot open in an X11 session: the package comes from the shared `arch-package` action | later; the Arch list needs the shared workflows |
 | 4a | FreeBSD: the last output of a local shell that ends at once (a `sh -c` command) can be lost; an interactive shell is not affected | later |
 | 6 | The app lock needs Windows Hello: Touch ID on macOS (through a safe wrapper such as `robius-authentication`) and a way on Linux and FreeBSD are not there yet | later, needs a Mac to try |
 | 7 | No SFTP | S1 |
@@ -21,5 +21,4 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 9 | The output of a command cannot be folded: the emulator's grid cannot hide lines; jumping, the gutter and copying the output are there | later |
 | 10 | Shell integration is not set up on connect: every way found either leaves files on the server or replaces how the login shell starts; [terminal.md](terminal.md#shell-integration) has the lines to add by hand | later |
 | 2i | Android: no screen reader support (accesskit needs GameActivity) | M2 |
-| 2k | No Android build checks a pull request: `android-release.yml` builds the APK for a release and by hand, but the shared CI has no Android SDK | needs the shared workflows |
 | 8 | No server image in a registry: the shared release workflow pushes none, so the image is built from `packaging/docker/Dockerfile` | needs the shared workflow |
