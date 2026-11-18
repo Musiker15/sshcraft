@@ -93,14 +93,22 @@ pub fn agent_section(app: &mut SshcraftApp, ui: &mut Ui) {
         load_agent_keys(app);
     }
     let tokens = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        crate::widgets::buttons::title(ui, tr("In the SSH agent"));
-        ui.add_space(16.0);
-        if ui.add_enabled(!app.ui.agent_keys.loading, egui::Button::new(tr("Refresh"))).clicked() {
-            load_agent_keys(app);
-        }
-    });
-    ui.add_space(8.0);
+    let loading = app.ui.agent_keys.loading;
+    let mut refresh = false;
+    crate::widgets::buttons::card(
+        ui,
+        Some(tr("In the SSH agent")),
+        app,
+        |ui, _| refresh = ui.add_enabled(!loading, egui::Button::new(tr("Refresh"))).clicked(),
+        |ui, app| agent_keys(app, ui, &tokens),
+    );
+    if refresh {
+        load_agent_keys(app);
+    }
+}
+
+/// The keys the agent holds, or why there are none.
+fn agent_keys(app: &mut SshcraftApp, ui: &mut Ui, tokens: &Tokens) {
     let mut copy = None;
     match &app.ui.agent_keys.loaded {
         None => {

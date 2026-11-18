@@ -918,6 +918,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "{n} h ago" => "vor {n} Std.",
         "yesterday" => "gestern",
         "{n} days ago" => "vor {n} Tagen",
+        "Stored keys" => "Gespeicherte Schlüssel",
+        "No identities yet." => "Noch keine Identitäten.",
         "Where do you want to connect?" => "Wohin möchtest du dich verbinden?",
         "Recently connected" => "Zuletzt verbunden",
         "Without a group" => "Ohne Gruppe",

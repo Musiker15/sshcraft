@@ -406,7 +406,7 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 fn key_row(app: &mut SshcraftApp, ui: &mut Ui, key: &KeyRow) {
     let tokens = Tokens::get(ui.ctx());
-    ui.horizontal_wrapped(|ui| {
+    crate::widgets::buttons::list_row(ui, |ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
         draw(ui.painter(), Icon::Key, icon, tokens.accent);
         let response = elided_label(ui, &key.name, 220.0, tokens.text, FontId::proportional(14.0));
@@ -500,78 +500,95 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
             }),
         );
     }
-    ui.horizontal_wrapped(|ui| {
-        crate::widgets::buttons::page_title(ui, tr("Keys"));
-        ui.add_space(16.0);
-        if ui.button(tr("Generate key")).clicked() {
-            app.ui.key_dialog = Some(KeyDialog::Generate(GenerateForm { name: String::new(), kind: KeyType::Ed25519, passphrase: String::new() }));
-        }
-        if ui.button(tr("Import key")).clicked() {
-            app.ui.key_dialog =
-                Some(KeyDialog::Import(ImportForm { name: String::new(), text: String::new(), passphrase: String::new(), save_passphrase: true }));
-        }
-        // pass-cli is a desktop program.
-        if app.form == crate::app::Form::Desktop && ui.button(tr("Import from Proton Pass")).clicked() {
-            crate::pages::key_sources::open_passcli(app);
-        }
-        if let Some(support) = app.data.security
-            && (support.fido2 || support.hello)
-            && ui.button(tr("Security key")).clicked()
-        {
-            app.ui.key_dialog =
-                Some(KeyDialog::Security(SecurityForm { name: String::new(), hello: !support.fido2, ed25519: false, verify_user: true }));
-        }
-    });
+    crate::widgets::buttons::page_title(ui, tr("Keys"));
     ui.add_space(8.0);
     let keys = app.data.keys.clone();
-    if keys.is_empty() {
-        ui.label(egui::RichText::new(tr("No keys yet.")).color(tokens.text_dim));
-    }
-    for key in &keys {
-        key_row(app, ui, key);
-    }
-    ui.add_space(20.0);
-    crate::pages::key_sources::agent_section(app, ui);
-    ui.add_space(20.0);
-    ui.horizontal_wrapped(|ui| {
-        crate::widgets::buttons::title(ui, tr("Identities"));
-        ui.add_space(16.0);
-        if ui.button(tr("New identity")).clicked() {
-            app.ui.identity_form = Some(IdentityForm::default());
-        }
-    });
-    ui.add_space(8.0);
     let identities = app.data.identities.clone();
-    for identity in &identities {
-        ui.horizontal_wrapped(|ui| {
-            let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-            draw(ui.painter(), Icon::Identity, icon, tokens.text_dim);
-            let response = elided_label(ui, &identity.name, 220.0, tokens.text, FontId::proportional(14.0));
-            if let Some(user) = &identity.username {
-                ui.label(egui::RichText::new(visible(user)).color(tokens.text_dim));
-            }
-            let id = identity.id.clone();
-            let identity = identity.clone();
-            response.context_menu(|ui| {
-                if ui.button(tr("Edit")).clicked() {
-                    let key = identity.key.as_ref().and_then(|k| k.get("id")).and_then(Value::as_str).map(str::to_string);
-                    app.ui.identity_form = Some(IdentityForm {
-                        id: Some(id.clone()),
-                        name: identity.name.clone(),
-                        username: identity.username.clone().unwrap_or_default(),
-                        key,
-                        has_password: identity.has_password,
-                        ..IdentityForm::default()
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        crate::widgets::buttons::card(
+            ui,
+            Some(tr("Stored keys")),
+            app,
+            |ui, app| {
+                if ui.button(tr("Generate key")).clicked() {
+                    app.ui.key_dialog =
+                        Some(KeyDialog::Generate(GenerateForm { name: String::new(), kind: KeyType::Ed25519, passphrase: String::new() }));
+                }
+                if ui.button(tr("Import key")).clicked() {
+                    app.ui.key_dialog = Some(KeyDialog::Import(ImportForm {
+                        name: String::new(),
+                        text: String::new(),
+                        passphrase: String::new(),
+                        save_passphrase: true,
+                    }));
+                }
+                // pass-cli is a desktop program.
+                if app.form == crate::app::Form::Desktop && ui.button(tr("Import from Proton Pass")).clicked() {
+                    crate::pages::key_sources::open_passcli(app);
+                }
+                if let Some(support) = app.data.security
+                    && (support.fido2 || support.hello)
+                    && ui.button(tr("Security key")).clicked()
+                {
+                    app.ui.key_dialog =
+                        Some(KeyDialog::Security(SecurityForm { name: String::new(), hello: !support.fido2, ed25519: false, verify_user: true }));
+                }
+            },
+            |ui, app| {
+                if keys.is_empty() {
+                    ui.label(egui::RichText::new(tr("No keys yet.")).color(tokens.text_dim));
+                }
+                for key in &keys {
+                    key_row(app, ui, key);
+                }
+            },
+        );
+        crate::pages::key_sources::agent_section(app, ui);
+        crate::widgets::buttons::card(
+            ui,
+            Some(tr("Identities")),
+            app,
+            |ui, app| {
+                if ui.button(tr("New identity")).clicked() {
+                    app.ui.identity_form = Some(IdentityForm::default());
+                }
+            },
+            |ui, app| {
+                if identities.is_empty() {
+                    ui.label(egui::RichText::new(tr("No identities yet.")).color(tokens.text_dim));
+                }
+                for identity in &identities {
+                    crate::widgets::buttons::list_row(ui, |ui| {
+                        let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                        draw(ui.painter(), Icon::Identity, icon, tokens.text_dim);
+                        let response = elided_label(ui, &identity.name, 220.0, tokens.text, FontId::proportional(14.0));
+                        if let Some(user) = &identity.username {
+                            ui.label(egui::RichText::new(visible(user)).color(tokens.text_dim));
+                        }
+                        let id = identity.id.clone();
+                        let identity = identity.clone();
+                        response.context_menu(|ui| {
+                            if ui.button(tr("Edit")).clicked() {
+                                let key = identity.key.as_ref().and_then(|k| k.get("id")).and_then(Value::as_str).map(str::to_string);
+                                app.ui.identity_form = Some(IdentityForm {
+                                    id: Some(id.clone()),
+                                    name: identity.name.clone(),
+                                    username: identity.username.clone().unwrap_or_default(),
+                                    key,
+                                    has_password: identity.has_password,
+                                    ..IdentityForm::default()
+                                });
+                            }
+                            if ui.button(tr("Delete")).clicked() {
+                                app.run_reported("identity.delete", json!({ "id": id }));
+                            }
+                        });
                     });
                 }
-                if ui.button(tr("Delete")).clicked() {
-                    app.run_reported("identity.delete", json!({ "id": id }));
-                }
-            });
-        });
-    }
-    ui.add_space(20.0);
-    crate::pages::known_hosts::section(app, ui);
+            },
+        );
+        crate::pages::known_hosts::section(app, ui);
+    });
     let ctx = ui.ctx().clone();
     dialog(app, &ctx);
     identity_dialog(app, &ctx);
