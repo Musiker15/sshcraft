@@ -17,7 +17,7 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 2d | No secure keyboard entry on macOS: it needs `EnableSecureEventInput`, reachable only through `unsafe` outside `crates/fido`, and a Mac to try | later |
 | 3 | The Windows x64 MSI is tried by hand (installs and runs); the Linux packages, the Flatpak sandbox and the CLI on `PATH` are not yet | later |
 | 4a | FreeBSD: the last output of a local shell that ends at once (a `sh -c` command) can be lost; an interactive shell is not affected | later |
-| 6 | The app lock needs Windows Hello: Touch ID on macOS (through a safe wrapper such as `robius-authentication`) and a way on Linux and FreeBSD are not there yet | later, needs a Mac to try |
+| 6 | The app lock needs Windows Hello or, on Android, the fingerprint, face or screen lock: Touch ID on macOS (through a safe wrapper such as `robius-authentication`) and a way on Linux and FreeBSD are not there yet | later, needs a Mac to try |
 | 7 | No SFTP | S1 |
 | 7a | Releases are unsigned on Windows and have no macOS packages: there is no certificate or Apple account, and the shared release workflow cannot leave a platform out or unsigned, so a release is assembled by hand from a dry run ([releasing.md](releasing.md#unsigned-releases)) | needs the shared workflow |
 | 9 | The output of a command cannot be folded: the emulator's grid cannot hide lines; jumping, the gutter and copying the output are there | later |

@@ -912,6 +912,15 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SFTP comes with S1" => "SFTP kommt mit S1",
         "More" => "Mehr",
         "Commands" => "Befehle",
+        "Sessions keep running. Unlock with your fingerprint, face or screen lock to see them." => {
+            "Sitzungen laufen weiter. Entsperre mit Fingerabdruck, Gesicht oder Bildschirmsperre, um sie zu sehen."
+        }
+        "0 never locks. Unlocking asks for your fingerprint, face or screen lock, and keys and passwords ask again." => {
+            "0 sperrt nie. Zum Entsperren fragt das Gerät nach Fingerabdruck, Gesicht oder Bildschirmsperre, und Schlüssel und Passwörter fragen erneut."
+        }
+        "Set up a fingerprint, face or screen lock on this device to use the app lock." => {
+            "Richte auf diesem Gerät Fingerabdruck, Gesicht oder eine Bildschirmsperre ein, um die App-Sperre zu nutzen."
+        }
         "Where do you want to connect?" => "Wohin möchtest du dich verbinden?",
         "Recently connected" => "Zuletzt verbunden",
         "Without a group" => "Ohne Gruppe",

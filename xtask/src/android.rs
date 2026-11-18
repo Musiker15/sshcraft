@@ -205,6 +205,8 @@ pub fn manifest(version: &str, code: u32) -> String {
     <uses-sdk android:minSdkVersion="{MIN_SDK}" android:targetSdkVersion="{TARGET_SDK}" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The app lock and the first key after it: the system's biometric prompt (src/biometric.rs). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
         android:label="SSHCraft"
         android:icon="@mipmap/ic_launcher"

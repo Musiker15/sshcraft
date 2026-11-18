@@ -151,15 +151,21 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.add_space(12.0);
     ui.label(egui::RichText::new(tr("App lock")).strong());
     let mut minutes = app.data.settings.general.lock_after_minutes;
-    ui.add_enabled_ui(crate::lock::supported(), |ui| {
+    let available = app.lock_available;
+    let tablet = app.form == crate::app::Form::Tablet;
+    ui.add_enabled_ui(available, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Lock after"));
             ui.add(egui::DragValue::new(&mut minutes).range(sshcraft_engine::settings::LOCK_MINUTES).suffix(tr(" minutes without input")));
         });
     });
     ui.label(
-        egui::RichText::new(if crate::lock::supported() {
+        egui::RichText::new(if available && tablet {
+            tr("0 never locks. Unlocking asks for your fingerprint, face or screen lock, and keys and passwords ask again.")
+        } else if available {
             tr("0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again.")
+        } else if tablet {
+            tr("Set up a fingerprint, face or screen lock on this device to use the app lock.")
         } else {
             tr("Not on this system yet: unlocking needs Windows Hello.")
         })

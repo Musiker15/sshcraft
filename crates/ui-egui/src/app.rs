@@ -33,6 +33,9 @@ pub type PasteSource = std::sync::Arc<dyn Fn() -> Option<String> + Send + Sync>;
 pub struct SshcraftApp {
     /// Desktop unless the app sets otherwise; never changes while the window is open.
     pub form: Form,
+    /// Whether the user's presence can unlock the app here: Windows Hello on Windows, the
+    /// fingerprint, face or screen lock on an Android device that has one (set by the app).
+    pub lock_available: bool,
     /// Ctrl and Alt held on the tablet's key bar.
     pub key_bar: crate::terminal::key_bar::KeyBar,
     /// Where the key bar's Paste reads from; nothing is pasted without one.
@@ -133,6 +136,7 @@ impl SshcraftApp {
             link: crate::link::LinkWatch::default(),
             dropdown_hidden: false,
             form: Form::Desktop,
+            lock_available: crate::lock::supported(),
             key_bar: crate::terminal::key_bar::KeyBar::default(),
             paste_source: None,
             key_bar_session: None,

@@ -3,21 +3,10 @@
 use std::sync::Arc;
 
 use sshcraft_engine::{Session, SessionConfig};
-use sshcraft_fido::presence::{Presence, UserPresence};
 use sshcraft_ui_egui::SshcraftApp;
 use sshcraft_ui_egui::app::Form;
 use sshcraft_ui_egui::i18n::tr;
 use winit::platform::android::activity::AndroidApp;
-
-/// Android has no Windows Hello; the engine asks nothing of it.
-struct NoPresence;
-
-#[async_trait::async_trait]
-impl UserPresence for NoPresence {
-    async fn verify(&self, _reason: &str) -> Presence {
-        Presence::Unavailable
-    }
-}
 
 /// The system clipboard's text, if there is any.
 fn clipboard_text() -> Option<String> {
@@ -253,7 +242,7 @@ fn run(android: AndroidApp) {
     let Some(data_dir) = android.internal_data_path() else {
         return show_problem(&android, tr("SSHCraft could not open its data.").to_string());
     };
-    let mut config = SessionConfig::for_app(data_dir.clone(), runtime.handle().clone(), Arc::new(NoPresence), None);
+    let mut config = SessionConfig::for_app(data_dir.clone(), runtime.handle().clone(), Arc::new(crate::biometric::Biometric), None);
     config.settings = crate::settings_location(&data_dir);
     let (session, vault) = {
         let _inside = runtime.enter();
@@ -269,6 +258,8 @@ fn run(android: AndroidApp) {
         Box::new(move |cc| {
             let mut app = SshcraftApp::new(session, &cc.egui_ctx);
             app.form = Form::Tablet;
+            // The app lock is offered where the device can confirm the user.
+            app.lock_available = crate::biometric::available();
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);
             Ok(Box::new(Tablet {
