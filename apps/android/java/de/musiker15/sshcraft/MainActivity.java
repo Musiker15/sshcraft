@@ -27,11 +27,15 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * on-screen keyboard. NativeActivity's own view has none, so a keyboard can only send it single
  * key presses, and text it commits at once (a paste from its clipboard, a swiped word, an
  * umlaut) is lost. Here the keyboard writes into {@link InputView}; Rust takes the text with
- * {@link #takeText} every frame and shows or hides the keyboard with {@link #keyboard}. Built
+ * {@link #takeText} every frame (and the word the keyboard is still composing, so it shows) and shows or hides the keyboard with {@link #keyboard}. Built
  * into classes.dex by {@code cargo xtask android}.
  */
 public class MainActivity extends NativeActivity {
-    /** Text the keyboard committed, one entry per commit, until Rust takes it. */
+    /**
+     * What the keyboard sent, in order, until Rust takes it: "C" and text it committed, or "P"
+     * and the word it is composing (empty: the word went away). Rust reads it in
+     * {@code Composer} (src/lib.rs).
+     */
     private static final ConcurrentLinkedQueue<String> COMMITTED = new ConcurrentLinkedQueue<>();
 
     /** At most this many characters wait; a keyboard cannot flood the app. */
@@ -122,7 +126,7 @@ public class MainActivity extends NativeActivity {
         return pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48;
     }
 
-    /** The oldest text the keyboard committed, or null when there is none. */
+    /** The oldest entry of {@link #COMMITTED}, or null when there is none. */
     public static String takeText() {
         return COMMITTED.poll();
     }
@@ -156,12 +160,21 @@ public class MainActivity extends NativeActivity {
         if (text == null || text.length() == 0) {
             return;
         }
+        send("C" + text);
+    }
+
+    /** The word being composed, shown where it will go; an empty one takes it away. */
+    static void composing(CharSequence text) {
+        send("P" + (text == null ? "" : text));
+    }
+
+    private static void send(String entry) {
         int waiting = 0;
         for (String s : COMMITTED) {
             waiting += s.length();
         }
-        if (waiting + text.length() <= MAX_WAITING) {
-            COMMITTED.offer(text.toString());
+        if (waiting + entry.length() <= MAX_WAITING) {
+            COMMITTED.offer(entry);
         }
     }
 
@@ -198,21 +211,31 @@ public class MainActivity extends NativeActivity {
 
         @Override
         public boolean commitText(CharSequence text, int newCursorPosition) {
+            boolean was = !composing.isEmpty();
             composing = "";
             commit(text);
+            if (was && (text == null || text.length() == 0)) {
+                composing("");
+            }
             getEditable().clear();
             return true;
         }
 
         @Override
         public boolean setComposingText(CharSequence text, int newCursorPosition) {
-            composing = text == null ? "" : text.toString();
+            String now = text == null ? "" : text.toString();
+            if (!now.equals(composing)) {
+                composing = now;
+                composing(now);
+            }
             return true;
         }
 
         @Override
         public boolean finishComposingText() {
-            commit(composing);
+            if (!composing.isEmpty()) {
+                commit(composing);
+            }
             composing = "";
             getEditable().clear();
             return true;

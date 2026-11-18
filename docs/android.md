@@ -69,7 +69,8 @@ the bar puts the selection on Android's clipboard.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
 - No dropdown window, no desktop shortcuts, no X11 forwarding, no FIDO keys and no screen reader
   support yet.
-- A word the keyboard is still composing appears only once the keyboard commits it.
+- A word the keyboard is still composing shows where it will go, in the terminal and in a field,
+  and the keyboard's choice replaces it.
 - The sync server's certificate is checked against Mozilla's list of public authorities, not
   Android's own store, so a server with a certificate from a private or user-installed authority
   is not trusted on Android.

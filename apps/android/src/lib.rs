@@ -100,6 +100,53 @@ pub fn committed(text: String) -> egui::Event {
     }
 }
 
+/// The longest word shown while the keyboard composes it, in characters.
+pub const MAX_PREEDIT: usize = 1024;
+
+/// Turns what the keyboard sent, in order, into egui's events. `MainActivity` marks each entry:
+/// `P` and the word the keyboard is still composing (empty: it went away), `C` and text it
+/// committed. A composed word shows where it will go (egui's IME preedit) and its commit replaces
+/// it; text committed without one is typed or pasted as [`committed`] says.
+#[derive(Debug, Default)]
+pub struct Composer {
+    /// A word is shown as being composed.
+    composing: bool,
+}
+
+impl Composer {
+    pub fn events(&mut self, entry: String) -> Vec<egui::Event> {
+        let mut chars = entry.chars();
+        let kind = chars.next();
+        let text: String = chars.collect();
+        match kind {
+            Some('P') => {
+                let text: String = text.chars().take(MAX_PREEDIT).collect();
+                if text.is_empty() && !self.composing {
+                    return Vec::new();
+                }
+                self.composing = !text.is_empty();
+                vec![egui::Event::Ime(egui::ImeEvent::Preedit { text, active_range_chars: None })]
+            }
+            Some('C') => {
+                let was = std::mem::take(&mut self.composing);
+                if text.is_empty() {
+                    return Vec::new();
+                }
+                if was && !text.contains(['\n', '\r']) {
+                    return vec![egui::Event::Ime(egui::ImeEvent::Commit(text))];
+                }
+                let mut out = Vec::new();
+                if was {
+                    out.push(egui::Event::Ime(egui::ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
+                }
+                out.push(committed(text));
+                out
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
 /// What a hardware keyboard's clipboard key does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClipboardKey {
@@ -234,6 +281,45 @@ mod tests {
         assert_eq!(committed("ssh-ed25519 AAAA".into()), Event::Paste("ssh-ed25519 AAAA".into()));
         assert_eq!(committed("\r".into()), Event::Paste(String::from("\r")), "a line break is never typed as text");
         assert_eq!(committed("a\r\nb".into()), Event::Paste("a\nb".into()));
+    }
+
+    fn preedit(text: &str) -> Event {
+        Event::Ime(egui::ImeEvent::Preedit { text: text.into(), active_range_chars: None })
+    }
+
+    #[test]
+    fn a_word_being_composed_is_shown_and_then_committed() {
+        let mut keys = Composer::default();
+        assert_eq!(keys.events("Ph".into()), vec![preedit("h")]);
+        assert_eq!(keys.events("Phel".into()), vec![preedit("hel")]);
+        assert_eq!(keys.events("Chello".into()), vec![Event::Ime(egui::ImeEvent::Commit("hello".into()))], "the commit replaces what was shown");
+        assert_eq!(keys.events("Ca".into()), vec![Event::Text("a".into())], "after the word, a letter is typed as before");
+    }
+
+    #[test]
+    fn a_word_deleted_while_composed_leaves_nothing() {
+        let mut keys = Composer::default();
+        assert_eq!(keys.events("Pa".into()), vec![preedit("a")]);
+        assert_eq!(keys.events("P".into()), vec![preedit("")], "the shown word goes away");
+        assert_eq!(keys.events("P".into()), Vec::<Event>::new(), "nothing is being composed, so nothing to clear");
+        assert_eq!(keys.events("C".into()), Vec::<Event>::new());
+    }
+
+    #[test]
+    fn a_composed_line_break_ends_the_word_and_goes_as_a_paste() {
+        let mut keys = Composer::default();
+        keys.events("Pls".into());
+        assert_eq!(keys.events("Cls\n".into()), vec![preedit(""), Event::Paste("ls\n".into())]);
+    }
+
+    #[test]
+    fn keyboard_entries_are_bounded_and_unknown_ones_dropped() {
+        let mut keys = Composer::default();
+        let long = format!("P{}", "x".repeat(MAX_PREEDIT + 50));
+        let shown = keys.events(long);
+        assert!(matches!(&shown[..], [Event::Ime(egui::ImeEvent::Preedit { text, .. })] if text.chars().count() == MAX_PREEDIT));
+        assert_eq!(Composer::default().events("Xabc".into()), Vec::<Event>::new());
+        assert_eq!(Composer::default().events(String::new()), Vec::<Event>::new());
     }
 
     fn key(key: Key, modifiers: Modifiers) -> Event {
