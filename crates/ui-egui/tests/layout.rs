@@ -1,6 +1,7 @@
 //! The window picks one of three layouts by its width: a sidebar with names, a rail of symbols,
 //! or (a phone held upright) a bar at the top whose menu button folds the sidebar out over the page.
 
+use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -10,6 +11,11 @@ use sshcraft_ui_egui::state::Page;
 use sshcraft_ui_egui::testing::app_harness;
 
 type H = Harness<'static, SshcraftApp>;
+
+/// The name beside the logo. Only the label counts: on macOS the app menu is called SSHCraft too.
+fn wordmark(h: &H) -> usize {
+    h.query_all_by_role_and_label(Role::Label, "SSHCraft").count()
+}
 
 fn sized(dir: &std::path::Path, width: f32) -> (H, sshcraft_engine::Session) {
     let (mut h, session) = app_harness(dir);
@@ -67,7 +73,7 @@ fn a_medium_window_shows_a_rail() {
     let (h, _session) = sized(dir.path(), 820.0);
     let button = h.get_by_label("Port forwarding").rect();
     assert!(button.width() <= 76.0, "a symbol, not a row with the name: {button:?}");
-    assert!(h.query_by_label("SSHCraft").is_none(), "no names beside the logo");
+    assert_eq!(wordmark(&h), 0, "no names beside the logo");
     assert!(h.query_by_label("Menu").is_none(), "no menu button");
 }
 
@@ -75,7 +81,7 @@ fn a_medium_window_shows_a_rail() {
 fn a_wide_window_shows_the_logo_and_names() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _session) = sized(dir.path(), 1200.0);
-    assert!(h.query_by_label("SSHCraft").is_some());
+    assert_eq!(wordmark(&h), 1, "the name beside the logo");
 }
 
 #[test]
