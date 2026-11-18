@@ -93,6 +93,8 @@ struct Records {
     exec_keep_open: std::sync::atomic::AtomicBool,
     /// Input that makes an open `exec` channel answer: (text in the input, answer), each once.
     exec_replies: Mutex<Vec<(String, String)>>,
+    /// Input of `exec` channels not yet matched by a reply: a command may come in two packets.
+    exec_pending: Mutex<String>,
     /// The protocol and cookie of the last `x11-req`.
     x11_request: Mutex<Option<(String, String)>>,
     /// Sent in X11 setups instead of the requested cookie.
@@ -637,17 +639,22 @@ impl server::Handler for Handler {
     async fn data(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
         if self.execs.contains(&channel) {
             self.records.exec_input.lock().unwrap().extend_from_slice(data);
-            let text = String::from_utf8_lossy(data).into_owned();
+            let mut pending = self.records.exec_pending.lock().unwrap();
+            pending.push_str(&String::from_utf8_lossy(data));
             let mut replies = self.records.exec_replies.lock().unwrap();
-            // Several commands may come in one packet: each is answered, in the order they came.
+            // Several commands may come in one packet, and one command in two: each is answered
+            // once its trigger is complete, in the order they came.
             let mut due: Vec<(usize, String)> = Vec::new();
-            replies.retain(|(trigger, answer)| match text.find(trigger.as_str()) {
+            let mut used = 0;
+            replies.retain(|(trigger, answer)| match pending.find(trigger.as_str()) {
                 Some(at) => {
                     due.push((at, answer.clone()));
+                    used = used.max(at + trigger.len());
                     false
                 }
                 None => true,
             });
+            pending.drain(..used);
             due.sort_by_key(|(at, _)| *at);
             for (_, answer) in due {
                 session.data(channel, answer.into_bytes())?;

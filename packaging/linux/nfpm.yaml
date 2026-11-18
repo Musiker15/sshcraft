@@ -29,7 +29,8 @@ description: |-
 overrides:
   deb:
     depends:
-      - libc6 (>= 2.35)
+      # package.sh puts in the newest glibc version the binaries need.
+      - libc6 (>= ${GLIBC_FLOOR})
       - libgcc-s1
       - libxkbcommon0
       # winit loads it for an X11 session; without it the window panics at start.

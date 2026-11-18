@@ -231,3 +231,26 @@ async fn shell_writer_runs_exec_beside_the_shell() {
     }
     assert_eq!(server.received_exec_input(), b"/tmp\n");
 }
+
+/// tmux reads its commands as a stream, not as packets: a command that reaches the test server
+/// in two packets is still answered (the tmux tests waited forever when one was split).
+#[tokio::test]
+async fn an_exec_command_split_over_two_packets_is_answered() {
+    let (server, k) = setup().await;
+    server.set_exec_output("ready\n");
+    server.set_exec_keep_open(true);
+    server.set_exec_replies(vec![("list-windows".to_owned(), "windows-answer\n".to_owned())]);
+    let session = connect(params(server.port, k), Verifier::new(true), Arc::new(NoPrompter)).await.unwrap();
+    let mut shell = session.open_terminal(80, 24, "xterm-256color", Some("tmux -CC")).await.unwrap();
+    let (ready, _) = collect_until(&mut shell, |b| b.windows(5).any(|w| w == b"ready")).await;
+    assert!(String::from_utf8_lossy(&ready).contains("ready"));
+    shell.write(b"list-win").await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while server.received_exec_input() != b"list-win" && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(server.received_exec_input(), b"list-win", "the first half arrived on its own");
+    shell.write(b"dows\n").await.unwrap();
+    let (out, _) = collect_until(&mut shell, |b| String::from_utf8_lossy(b).contains("windows-answer")).await;
+    assert!(String::from_utf8_lossy(&out).contains("windows-answer"), "answered: {:?}", String::from_utf8_lossy(&out));
+}

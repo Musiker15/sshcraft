@@ -13,7 +13,7 @@ on FreeBSD in a VM, has the integrated title bar and menus of the Craft apps, th
 craft-fonts, and packages for every platform ([releasing.md](releasing.md)). F1 (connection and
 configuration), F2 (sign-in and data safety) and the first release (V1, v0.1.0 on 2026-11-16)
 are done. v0.1.0 has packages for Windows, Linux and FreeBSD and the sync server, unsigned and
-without macOS ([releasing.md](releasing.md#unsigned-releases), gap 7a); winget and Flathub
+without macOS ([releasing.md](releasing.md#what-gets-built), gap 7a); winget and Flathub
 submissions follow. Next is S1 (SFTP).
 
 ## The rebuild

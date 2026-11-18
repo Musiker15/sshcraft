@@ -149,7 +149,8 @@ mod tests {
     fn the_shipped_templates_render() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let v = "1.0.0";
-        // What the shared release workflow builds for these stores: Windows x64 and arm64, macOS universal.
+        // The files the store templates name: Windows x64 and arm64, and the macOS DMG Homebrew would
+        // take once a release has one.
         let files = ["windows-x64.msi", "windows-arm64.msi", "macos-universal.dmg"];
         let text: String = files.iter().map(|f| format!("{A}  sshcraft-{v}-{f}\n")).collect();
         let sums = parse_sums(&text).unwrap();

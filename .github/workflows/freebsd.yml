@@ -1,26 +1,29 @@
 name: FreeBSD
 
-# The gate on FreeBSD in a VM (shared workflow), and the package check: on the release branch,
-# when the FreeBSD packaging changes, and by hand.
+# Runs the tests on FreeBSD and builds its package when the FreeBSD packaging changes, so a
+# broken package.sh shows up in the pull request and not on release day. Pull requests build
+# x86_64 only (the aarch64 cross build takes much longer); a run by hand builds both. The release
+# builds the packages through the same reusable workflow, freebsd-package.yml.
 on:
-  push:
-    branches: [release]
   pull_request:
     paths:
       - .github/workflows/freebsd.yml
+      - .github/workflows/freebsd-package.yml
+      - .github/scripts/freebsd-aarch64-cross.sh
       - packaging/freebsd/**
       - packaging/env.sh
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: freebsd-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
-  freebsd:
-    uses: storytold/craft-common-actions/.github/workflows/freebsd.yml@main
+  package:
+    uses: ./.github/workflows/freebsd-package.yml
     with:
-      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+      architectures: ${{ github.event_name == 'pull_request' && '["x86_64"]' || '["x86_64","aarch64"]' }}
+      test: true

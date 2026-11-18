@@ -91,7 +91,7 @@ The open points are in [gaps.md](gaps.md).
 
 The APK is built on a desktop with the Android SDK, the NDK and a JDK (javac and d8 build the
 small Java part in `apps/android/java`). CI runs clippy for Android on every pull request
-(`cargo xtask android --check`); the APK is built here, or by `android-release.yml` for a release.
+(`cargo xtask android --check`); the APK is built here, or by `release.yml` for a release.
 
 1. Install the SDK command-line tools, then `platform-tools`, `platforms;android-36`,
    `build-tools;37.0.0` and an NDK (30 or newer) with `sdkmanager`.

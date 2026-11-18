@@ -1,9 +1,14 @@
 # Releasing SSHCraft
 
 A push to the `release` branch runs [`.github/workflows/release.yml`](../.github/workflows/release.yml).
-It calls the shared release workflow of the Craft apps, which builds the packages of every
-platform and creates or updates a **draft** GitHub release named `SSHCraft v<version>`. Nobody
-sees a draft until a maintainer publishes it. Nothing here runs on a schedule.
+It builds the packages of every platform, checks that none is missing, and creates or updates a
+**draft** GitHub release named `SSHCraft v<version>` with all of them, `SHA256SUMS.txt` and the
+SBOM. Nobody sees a draft until a maintainer publishes it; the workflow never publishes. Nothing
+here runs on a schedule.
+
+SSHCraft has its own release workflow, not the shared one of the Craft apps
+([decisions.md](decisions.md), 2026-11-18): that one could not leave out macOS, ship Windows
+unsigned, build Android or fix the Arch package's dependencies.
 
 Names: the app is **SSHCraft** wherever people read it; files, binaries and ids are lowercase
 (`sshcraft-<version>-<platform>-<arch>.<ext>`, `de.musiker15.sshcraft`).
@@ -11,10 +16,11 @@ Names: the app is **SSHCraft** wherever people read it; files, binaries and ids 
 | Value | Where |
 |---|---|
 | Binaries `sshcraft` and `sshcraft-cli` | every script and workflow |
-| App id `de.musiker15.sshcraft` (also the keyring service and the data folder) | `packaging/macos/Info.plist.in`, `packaging/linux/*`, the Flatpak manifests |
+| App id `de.musiker15.sshcraft` (also the keyring service, the data folder and the Arch package name) | `packaging/macos/Info.plist.in`, `packaging/linux/*`, the Flatpak manifests |
 | WiX upgrade code `E577A976-EE1A-4C98-96B7-D3A2EBE306CB`, fixed forever | `packaging/windows/sshcraft.wxs`, `install-policy.json` |
 | Icon | `assets/app-icon/`, rendered by `packaging/icons.sh` |
-| craft-fonts pin | `craft-fonts-ref` in `ci.yml`, `freebsd.yml` and `release.yml` |
+| craft-fonts pin | `gate.yml`, `freebsd-package.yml` and `.github/actions/build-setup/action.yml` |
+| The files a release must have | `.github/scripts/assemble-release.sh` |
 
 ## One-time setup (Moritz)
 
@@ -22,21 +28,17 @@ These need the repository's settings and secrets, so only the owner sets them up
 
 1. **Branch `release`**, created from `main`, with branch protection: no force push, no deletion.
 2. **Environment `release`** (Settings, Environments), limited to the branch `release`. The
-   signing jobs and the draft release run in it, and only the `release` branch may use it.
-3. **Secrets** in that environment. On the `release` branch the shared workflow refuses to build
-   Windows without a certificate or Azure Trusted Signing, and macOS without the Apple secrets;
-   it has no switch to leave a platform out or unsigned. Without them, see
-   [Unsigned releases](#unsigned-releases). `LINUX_SIGNING_KEY` is optional: without it the
-   Linux packages are unsigned.
+   Windows and Android builds and the draft release run in it, and only the `release` branch may
+   use it.
+3. **Secrets** in that environment. Only the Android key is required; without the others the
+   files are built unsigned and the run says so in a warning.
 
    | Secret | For |
    |---|---|
-   | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` | macOS signing (Developer ID Application, as base64 .p12) |
-   | `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID` | macOS notarization |
-   | `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` | Windows signing with a .pfx |
-   | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE` | Windows signing with Azure Trusted Signing instead |
-   | `LINUX_SIGNING_KEY` | the GPG signature of the rpm packages and the Flatpak bundle |
-   | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` | the Android release key (the keystore as base64, key alias `sshcraft`) for [`android-release.yml`](../.github/workflows/android-release.yml) |
+   | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` | the Android release key (the keystore as base64, key alias `sshcraft`). **Required**: a real run stops without it, since an APK signed with any other key cannot update an installed SSHCraft |
+   | `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` | Windows signing with a .pfx (optional) |
+   | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE` | Windows signing with Azure Trusted Signing instead (optional) |
+   | `LINUX_SIGNING_KEY` | an OpenPGP secret key without passphrase that signs the rpm and deb packages, the Arch packages (`.sig`) and `SHA256SUMS.txt` (`.asc`), published as `sshcraft-signing-key.asc` (optional) |
 
 The maintainer field of the deb and rpm packages says `SSHCraft maintainers`;
 `SSHCRAFT_MAINTAINER` (`Name <address>`) in the environment of `packaging/linux/package.sh`
@@ -52,86 +54,62 @@ changes it.
    cargo xtask version set 0.2.0    # or 0.2.0-rc.1; updates Cargo.toml and Cargo.lock
    ```
 
-2. **Merge `main` into `release`** (or fast-forward it) and push. The workflow starts by itself.
-3. **Wait for the draft.** Notarization and the FreeBSD VM take longest. The draft
-   `SSHCraft v0.2.0` then has every artifact and `SHA256SUMS.txt`, its notes generated from the
-   merged pull requests.
-4. **Check it.** Install a package or two and go through the hand-test list of the last pull
-   requests. A `::warning::` in a job summary means the Linux key was missing and those
-   packages are unsigned.
-5. **Attach the SBOM** to the draft before publishing it:
-
-   ```sh
-   cargo xtask sbom                  # dist/release/sshcraft-0.2.0.cdx.json
-   gh release upload v0.2.0 dist/release/sshcraft-0.2.0.cdx.json
-   ```
-
-   It is CycloneDX 1.6 and lists every crate in the shipped programs on any platform, with
-   version, licence and package URL; dev-dependencies stay out. The shared release workflow does
-   not make one yet, so this is a step by hand.
+2. **Try it as a dry run** (below) and wait until it is green.
+3. **Merge `main` into `release`** (or fast-forward it) and push. The workflow starts by itself.
+   It stops at once if that version is already published.
+4. **Wait for the draft.** The FreeBSD VM takes longest. The draft `SSHCraft v0.2.0` then has
+   every file, `SHA256SUMS.txt` and the SBOM `sshcraft-0.2.0.cdx.json`, its notes generated from
+   the merged pull requests.
+5. **Check it.** Install a package or two and go through the hand-test list of the last pull
+   requests. Windows is unsigned unless a certificate is set up, and there are no macOS
+   packages; the release notes should say so.
 6. **Publish** the draft. Publishing creates the tag `v0.2.0`; a version with a suffix
    (`-rc.1`) is marked as a pre-release.
 7. **Update the stores** (below).
 
-Pushing to `release` again before publishing rebuilds the same draft. After publishing, the
-workflow refuses to touch that version again: set a new one first.
+Pushing to `release` again before publishing builds the draft anew and replaces its files. A
+published version is never touched again: set a new one first.
 
-**Test runs:** Actions, Release, Run workflow runs the pipeline by hand, as a dry run by default
-(no signing, no draft). The optional `version` input overrides `Cargo.toml` for that run only. A
-run by hand with dry run off asks for the `release` environment, so from any branch but `release`
-its signing jobs stop there.
-
-## Unsigned releases
-
-SSHCraft has no Windows certificate and no Apple developer account, so the pipeline above stops
-on the `release` branch. Until the shared workflow can leave a platform out or unsigned (that
-needs a change in `storytold/craft-common-actions`), a release is put together by hand from a dry
-run on `main`, which builds everything but macOS without signing:
+**Dry runs** build everything without signing and without a draft, from any branch:
 
 ```sh
-gh workflow run release.yml --ref main -f dry-run=true           # wait until it is green
-gh run download <run-id> --dir dist/draft                        # every release-* artifact
-cd dist/draft && find . -type f -exec mv {} . \; && find . -type d -empty -delete
-# from the workspace root, with the release key
-for abi in arm64 armv7 x86_64; do cargo xtask android --abi "$abi"; done
-cp dist/android/sshcraft-<v>-android-*.apk dist/draft/
-cd dist/draft && sha256sum -- * > SHA256SUMS.txt && cd -
-cargo xtask sbom dist/draft/sshcraft-<v>.cdx.json
-gh release create v<v> --draft --target <commit> --title "SSHCraft v<v>" --generate-notes dist/draft/*
+gh workflow run release.yml --ref main -f dry-run=true             # Cargo.toml's version
+gh workflow run release.yml --ref main -f version=0.4.0-rc.1       # or another one, for this run only
 ```
 
-The draft then has no macOS packages and nothing signed but the APK, which the release notes
-should say. The maintainer checks and publishes it as above.
-
-**Android.** The shared workflow has no Android SDK, so SSHCraft builds the APK in a job of its
-own, [`android-release.yml`](../.github/workflows/android-release.yml). A push to `release` signs
-it with the release key from the `release` environment, waits for the draft of that version (at
-most an hour) and attaches the APK; it stops when the two secrets are missing rather than sign with
-another key. A run by hand builds a test APK with a throwaway debug key and keeps it as the
-artifact `android-test-apk`. For an unsigned release put together by hand, the APK comes from the
-artifact `android-apk` of that job or is built locally with `cargo xtask android`
-([android.md](android.md)), with `SSHCRAFT_ANDROID_KEYSTORE` and
-`SSHCRAFT_ANDROID_KEYSTORE_PASS_FILE` naming the release key. Every APK of a release must be
-signed with that same key, or Android refuses the update. The APK is added after the draft's
-`SHA256SUMS.txt` was made; add its line when you attach it by hand.
+The last job collects all files with `SHA256SUMS.txt` into the artifact `sshcraft-<v>-all`
+(`gh run download <run-id> --name sshcraft-<v>-all`). The APKs of a dry run carry a throwaway
+debug key, so they install only where no SSHCraft from a release is. A run by hand with dry run
+off asks for the `release` environment, so from any branch but `release` its Windows and Android
+jobs stop there, and it never makes a draft.
 
 ## What gets built
 
-| Platform | Artifacts |
-|---|---|
-| macOS 11+ (Apple silicon and Intel) | `sshcraft-<v>-macos-universal.dmg`, `sshcraft-cli-<v>-macos-universal.zip` |
-| Windows 10+ x64, ARM64 | `sshcraft-<v>-windows-<arch>.msi`, `sshcraft-<v>-windows-<arch>-portable.zip` |
-| Linux x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
-| Flatpak x86_64, aarch64 | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
-| FreeBSD 15 x86_64, aarch64 | `sshcraft-<v>-freebsd-<arch>.tar.gz` |
-| Android 13+ tablets and phones: arm64, armv7 (older 32-bit devices), x86_64 (Chromebooks, x86 tablets) | `sshcraft-<v>-android-<abi>.apk` (abi: arm64, armv7, x86_64), from `android-release.yml` or built locally with `cargo xtask android --abi <abi>` ([android.md](android.md)) |
-| Sync server, Linux x86_64 and aarch64 | `sshcraft-server-<v>-linux-<arch>.tar.gz`: the program, a systemd unit and an example environment file ([server.md](server.md#install-the-program)) |
+| Platform | Job | Artifacts |
+|---|---|---|
+| Windows 10+ x64, ARM64 | `windows` | `sshcraft-<v>-windows-<arch>.msi`, `sshcraft-<v>-windows-<arch>-portable.zip`; each MSI is installed, run and removed on its own architecture |
+| Linux x86_64, aarch64 (glibc 2.35+, built on Ubuntu 22.04) | `linux` | `sshcraft-<v>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` |
+| Linux riscv64 (glibc 2.39+, cross-built on Ubuntu 24.04) | `linux-riscv64` | `sshcraft-<v>-linux-riscv64.{deb,rpm,tar.gz}` |
+| Flatpak x86_64, aarch64 | `flatpak` | `sshcraft-<v>-linux-<arch>.flatpak`, repackaging the Linux tarball |
+| Arch Linux x86_64, aarch64 | `arch` | `sshcraft-<v>-linux-<arch>.pkg.tar.zst`, repackaging the Linux tarball |
+| FreeBSD 15 x86_64, aarch64 | `freebsd` | `sshcraft-<v>-freebsd-<arch>.tar.gz` |
+| Android 13+ tablets and phones: arm64, armv7 (older 32-bit devices), x86_64 (Chromebooks, x86 tablets) | `android` | `sshcraft-<v>-android-<abi>.apk`, also built locally with `cargo xtask android --abi <abi>` ([android.md](android.md)) |
+| Sync server, Linux x86_64 and aarch64 | `server` | `sshcraft-server-<v>-linux-<arch>.tar.gz`: the program, a systemd unit and an example environment file ([server.md](server.md#install-the-program)) |
+| All | `check`, `release` | `sshcraft-<v>.cdx.json` (CycloneDX 1.6 SBOM from `cargo xtask sbom`), `SHA256SUMS.txt` |
+
+Before any build, the `check` job refuses git dependencies from anywhere but
+`github.com/storytold`, a cargo configuration that replaces or patches a source, and a
+`Cargo.lock` that does not match the manifests. The SBOM lists every crate in the shipped
+programs on any platform, with version, licence and package URL; dev-dependencies stay out.
+
+**macOS** is not built: there is no Apple developer account. The scripts are there
+(`packaging/macos/`); a `macos` job would go into `release.yml` beside `windows`, and its files
+into the list in `assemble-release.sh`.
 
 SSHCraft has no web build: SSH needs TCP.
 
 **The server's Docker image** is built from [`packaging/docker/Dockerfile`](../packaging/docker/Dockerfile)
-by whoever runs it ([server.md](server.md#start)). The shared release workflow pushes no server
-image to a registry; a published image needs that workflow first, since CI here stays shared.
+by whoever runs it ([server.md](server.md#start)). The release pushes no image to a registry.
 
 ## Stores
 
@@ -167,15 +145,23 @@ maintainer's step, never an automatic one:
 - **Linux:** [`packaging/linux/package.sh`](../packaging/linux/package.sh) stages one file tree
   (binaries, desktop entry, AppStream metadata, icons, licences) and makes the tarball, the deb
   and rpm with nfpm, and the AppImage with a pinned appimagetool. `--formats "deb rpm tar"`
-  skips the AppImage.
+  skips the AppImage. The deb asks for the newest glibc version the binaries use, read from them
+  with `readelf`, so it always matches the machine they were built on.
 - **Flatpak:** [`packaging/linux/flatpak-bundle.sh`](../packaging/linux/flatpak-bundle.sh) wraps
   the tarball. The sandbox has the network, the Secret Service and `~/.ssh` (written only when the
   user saves a linked host back); serial ports and the host's own shell stay outside it.
+- **Arch Linux:** [`packaging/linux/arch/package.sh`](../packaging/linux/arch/package.sh) writes
+  a PKGBUILD for the tarball and runs makepkg as an unprivileged user in an Arch Linux container.
+  It depends on everything the window needs on X11 (libx11, libxcursor, libxi, libxrandr,
+  libxkbcommon-x11) besides libxkbcommon and the Vulkan loader; Wayland and the GPU drivers are
+  optional. The package keeps the name `de.musiker15.sshcraft`, so `pacman -U` upgrades 0.3.0.
 - **FreeBSD:** [`packaging/freebsd/package.sh`](../packaging/freebsd/package.sh) runs in a
-  FreeBSD VM ([`freebsd.yml`](../.github/workflows/freebsd.yml)).
+  FreeBSD VM ([`freebsd-package.yml`](../.github/workflows/freebsd-package.yml)); aarch64 is
+  cross-compiled in the x86_64 guest. [`freebsd.yml`](../.github/workflows/freebsd.yml) builds the
+  x86_64 package in pull requests that change the FreeBSD packaging.
 - **Sync server:** [`packaging/server/package.sh`](../packaging/server/package.sh) builds
   `sshcraft-server` and packs it with the licences, `docs/server.md`, `sshcraft-server.service`
-  and `sshcraft-server.env.example`; `has-server` in `release.yml` turns the job on.
+  and `sshcraft-server.env.example`.
 
 Builds with `CRAFT_FONTS_DIR` embed craft-fonts' interface faces, and every package carries their
 licences (`OFL-<family>.txt`) next to `NOTICE` and `ATTRIBUTION.md`.
