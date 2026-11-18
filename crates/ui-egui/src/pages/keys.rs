@@ -412,6 +412,15 @@ fn key_row(app: &mut SshcraftApp, ui: &mut Ui, key: &KeyRow) {
         let response = elided_label(ui, &key.name, 220.0, tokens.text, FontId::proportional(14.0));
         ui.label(egui::RichText::new(visible(&key.algorithm)).color(tokens.text_dim));
         ui.label(egui::RichText::new(kind_label(key)).color(tokens.text_dim));
+        // Where the key lives: the sync server's name, or this device only.
+        let server =
+            key.location.as_deref().and_then(|id| app.data.servers.iter().find(|s| s.get("id").and_then(serde_json::Value::as_str) == Some(id)));
+        let place = match (&key.location, server) {
+            (Some(_), Some(s)) => visible(s.get("name").and_then(serde_json::Value::as_str).unwrap_or_default()),
+            (Some(_), None) => tr("Sync server").to_string(),
+            (None, _) => tr("This device only").to_string(),
+        };
+        ui.label(egui::RichText::new(place).color(if key.location.is_some() { tokens.accent } else { tokens.text_dim }));
         ui.label(egui::RichText::new(visible(&key.fingerprint)).font(FontId::monospace(12.0)).color(tokens.text_dim));
         if key.certificate.is_some() {
             ui.label(egui::RichText::new(tr("certificate")).color(tokens.success));
