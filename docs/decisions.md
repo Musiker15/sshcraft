@@ -8,6 +8,7 @@ of the rebuild, which left the tree with R7 and are in the history at
 
 | Date | Decision |
 |---|---|
+| 2026-11-18 | SSHCraft keeps its own CI and release workflows instead of calling storytold/craft-common-actions, an exception to house rule 11 decided by the maintainer: the shared ones could not be changed for SSHCraft. They are written here, not copied, since that repository has no licence. |
 | 2026-11-17 | Android runs the egui interface in a NativeActivity, and the APK is put together by `cargo xtask android` from the SDK's tools, without Gradle or Kotlin. A NativeActivity loses text a keyboard commits at once (its clipboard, swiped words), so `MainActivity` adds a text connection in a small Java class that only hands the text to Rust (decided with Moritz after the first test on his tablet). GameActivity (screen readers) waits for M2. The master key is kept by keyring-core's Android store, encrypted with a Keystore key; app data is excluded from Android backup. HTTPS uses Mozilla's roots there, since the platform verifier needs Java. |
 | 2026-11-15 | A password reference is used for an address only after it was allowed on this device, like a proxy command; copies in a share never carry one. |
 | 2026-11-15 | A TOTP secret is a sealed password row and follows the rules of passwords; a stored password no longer answers a question for a one-time code. |

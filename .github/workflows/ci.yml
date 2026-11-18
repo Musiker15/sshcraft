@@ -1,7 +1,11 @@
 name: CI
 
-# Quality gates for every push to main and every pull request (`cargo xtask ci`), through the
-# shared gate workflow of the Craft apps in craft-common-actions.
+# The gate of every pull request and of main: `cargo xtask ci` (fmt, clippy, tests, layers, assets,
+# deny, wasm) on Linux and Windows, and on macOS too for main and for a pull request labelled
+# `full-ci`. A second job runs clippy for Android, which the desktop gate cannot.
+#
+# SSHCraft keeps its own workflows instead of the shared ones of storytold/craft-common-actions
+# (docs/decisions.md, 2026-11-18), so they can be changed here.
 on:
   push:
     branches: [main]
@@ -11,27 +15,45 @@ on:
 permissions:
   contents: read
 
-# A newer push to a PR branch cancels its older run; every push to main runs to the end.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A workflow of its own so the required checks keep their names: gate / gate (<os>).
   gate:
-    # Tracks @main so suite-wide CI fixes reach every app without a PR in each repository.
-    uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
+    uses: ./.github/workflows/gate.yml
     with:
-      # Ubuntu and Windows on every run. macOS (whose minutes count ten times on a private
-      # repository) on pushes to main and on pull requests labelled full-ci. FreeBSD has its own
-      # workflow.
       os: >-
         ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci'))
         && '["ubuntu-24.04","windows-latest","macos-latest"]' || '["ubuntu-24.04","windows-latest"]' }}
-      packages: >-
-        pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
-        libgtk-3-dev libfontconfig1-dev libfreetype-dev libudev-dev libdbus-1-dev mesa-vulkan-drivers
-      # The suite's craft-fonts commit, as in release.yml and freebsd.yml, so the gate tests the
-      # fonts that ship.
-      craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
-      tools: cargo-nextest@0.9.152,cargo-deny@0.20.2
-      targets: wasm32-unknown-unknown
+
+  android:
+    name: android (clippy)
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_RETRY: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update \
+            --component clippy --target aarch64-linux-android
+          rustup default stable
+      - name: Android platform
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" > /dev/null
+      - uses: step-security/rust-cache@851174d9a2fdc03e0896e02844dcc61d81dd7851 # v2.9.1
+        with:
+          shared-key: android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy for Android
+        run: cargo xtask android --check
