@@ -1,13 +1,15 @@
 # Android
 
-SSHCraft runs on Android tablets and phones with Android 13 or newer (arm64). It is the same app as on the
+SSHCraft runs on Android tablets and phones with Android 13 or newer (arm64, armv7 or x86_64). It is the same app as on the
 desktop, in a form made for a touch screen. There is no Play Store listing: the APK is attached to
 the GitHub releases and installed by hand.
 
 ## Install
 
-1. Download `sshcraft-<version>-android-arm64.apk` from the
-   [releases](https://github.com/Musiker15/sshcraft/releases) onto the tablet.
+1. Download the APK for your device from the
+   [releases](https://github.com/Musiker15/sshcraft/releases): `sshcraft-<version>-android-arm64.apk`
+   for nearly every phone and tablet, `-armv7.apk` for an older device with a 32-bit processor,
+   `-x86_64.apk` for a Chromebook or an x86 tablet.
 2. Open it. Android asks once whether the browser or file manager may install apps; allow it
    for that app.
 3. Start SSHCraft from the launcher.
