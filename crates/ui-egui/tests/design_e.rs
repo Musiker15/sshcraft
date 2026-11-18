@@ -224,3 +224,23 @@ fn the_hello_switch_is_in_the_general_settings_and_saves() {
         h.run_steps(1);
     }
 }
+
+#[test]
+fn the_key_list_says_where_each_key_lives() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Keys;
+    h.run_steps(4);
+    let app = h.state_mut();
+    app.data.servers = vec![json!({ "id": "srv-1", "name": "home", "status": { "state": "idle" } })];
+    app.data.keys = vec![
+        sshcraft_ui_egui::data::KeyRow { id: "k1".into(), name: "synced".into(), location: Some("srv-1".into()), ..Default::default() },
+        sshcraft_ui_egui::data::KeyRow { id: "k2".into(), name: "local".into(), ..Default::default() },
+    ];
+    h.run_steps(3);
+    let synced = h.get_by_label("synced").rect();
+    let local = h.get_by_label("local").rect();
+    let at = |label: &str, row: egui::Rect| h.query_all_by_label(label).any(|n| (n.rect().center().y - row.center().y).abs() < 10.0);
+    assert!(at("home", synced), "the synced key names its server");
+    assert!(at("This device only", local), "the local key says it stays here");
+}
