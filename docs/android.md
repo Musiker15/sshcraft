@@ -57,6 +57,9 @@ the bar puts the selection on Android's clipboard.
 
 ## What is different from the desktop
 
+- The app lock and the first stored key or password after a start ask for the fingerprint, face or
+  screen lock, where Windows Hello asks on the desktop. Without a screen lock on the device the
+  app lock is not offered.
 - On a narrow screen (a phone, or a tablet held upright) the pages sit under a top bar, and its
   menu button opens the list of pages. Wider screens show a rail of symbols on the left, and from
   1000 points the sidebar with the page names.
