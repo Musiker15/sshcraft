@@ -47,7 +47,8 @@ pub(crate) fn with_activity<T>(f: impl FnOnce(&mut Env, &JObject) -> jni::errors
     .map_err(|e| e.to_string())
 }
 
-/// What the keyboard committed since the last frame, oldest first.
+/// What the keyboard sent since the last frame, oldest first: each entry marked as
+/// [`crate::Composer`] reads it.
 pub fn take_text() -> Result<Vec<String>, String> {
     with_activity(|env, activity| {
         let class = env.get_object_class(activity)?;
