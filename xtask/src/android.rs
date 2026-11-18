@@ -241,6 +241,8 @@ pub fn manifest(version: &str, code: u32) -> String {
     <uses-sdk android:minSdkVersion="{MIN_SDK}" android:targetSdkVersion="{TARGET_SDK}" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The app lock and the first key after it: the system's biometric prompt (src/biometric.rs). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Sessions stay open in the background: a foreground service with its notification
          (SessionService), and the app's own notifications. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
