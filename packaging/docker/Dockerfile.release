@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# The image of a release, built from the server binaries that release ships
+# (.github/workflows/server-image.yml). The build context is a folder with
+# bin/linux-amd64/sshcraft-server and bin/linux-arm64/sshcraft-server. Nothing runs on the target
+# platform, so a build for both needs no emulation. The result matches packaging/docker/Dockerfile:
+# same base, same user, same volume, port and health check.
+ARG DEBIAN_VERSION=13.7
+
+# The user and its data folder, made on the machine that builds and copied over.
+FROM --platform=$BUILDPLATFORM debian:${DEBIAN_VERSION}-slim AS user
+RUN useradd --system --uid 10001 --home-dir /data sshcraft \
+    && mkdir /data
+
+FROM debian:${DEBIAN_VERSION}-slim
+ARG TARGETOS
+ARG TARGETARCH
+COPY --from=user /etc/passwd /etc/group /etc/
+COPY --from=user --chown=sshcraft /data /data
+COPY --chmod=755 bin/${TARGETOS}-${TARGETARCH}/sshcraft-server /usr/local/bin/sshcraft-server
+USER sshcraft
+VOLUME /data
+ENV SSHCRAFT_DATABASE_URL=sqlite:///data/sshcraft.db \
+    SSHCRAFT_LISTEN=0.0.0.0:8470
+EXPOSE 8470
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD ["sshcraft-server", "health"]
+ENTRYPOINT ["sshcraft-server"]
+CMD ["serve"]

@@ -1,0 +1,127 @@
+name: Server image
+
+# Pushes the sync server's image ghcr.io/<owner>/sshcraft-server when a release is published. The
+# image is built from the server binaries that release ships, checked against its SHA256SUMS.txt
+# (packaging/docker/Dockerfile.release), for linux/amd64 and linux/arm64. Tags: the version, and
+# `latest` for a stable release. A draft never gets an image: nobody has checked it yet.
+#
+# A run by hand builds the image of a published release and pushes it only when asked, for a
+# release published before this workflow existed or a push that failed.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release, e.g. v0.3.1"
+        type: string
+        required: true
+      push:
+        description: "Push to ghcr.io (otherwise build only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-image-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build and push
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      PUSH: ${{ github.event_name == 'release' || inputs.push }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The release and its server binaries
+        id: release
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::not a release tag: $TAG"; exit 1
+          fi
+          version="${TAG#v}"
+          state="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"')"
+          read -r draft prerelease <<< "$state"
+          if [ "$draft" = true ]; then
+            echo "::error::$TAG is a draft; the image follows the published release"; exit 1
+          fi
+          download="$RUNNER_TEMP/download"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$download" \
+            --pattern SHA256SUMS.txt --pattern "sshcraft-server-$version-linux-*.tar.gz"
+          # Exactly the two server archives, each with its line in the release's checksums.
+          (
+            cd "$download"
+            grep -E "^[0-9a-f]{64} [ *]sshcraft-server-$version-linux-(x86_64|aarch64)\.tar\.gz$" SHA256SUMS.txt > server.sums
+            if [ "$(wc -l < server.sums)" -ne 2 ]; then
+              echo "::error::SHA256SUMS.txt of $TAG does not list both server archives"; exit 1
+            fi
+            sha256sum -c server.sums
+          )
+          context="$RUNNER_TEMP/context"
+          for pair in x86_64:amd64 aarch64:arm64; do
+            arch="${pair%%:*}"
+            platform="${pair##*:}"
+            mkdir -p "$RUNNER_TEMP/unpack/$arch"
+            tar -xzf "$download/sshcraft-server-$version-linux-$arch.tar.gz" -C "$RUNNER_TEMP/unpack/$arch"
+            install -D -m 755 "$RUNNER_TEMP/unpack/$arch/sshcraft-server-$version-linux-$arch/sshcraft-server" \
+              "$context/bin/linux-$platform/sshcraft-server"
+          done
+          "$context/bin/linux-amd64/sshcraft-server" --version | grep -F "$version"
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "context=$context"
+            echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/sshcraft-server"
+          } >> "$GITHUB_OUTPUT"
+      - name: Log in to ghcr.io
+        if: env.PUSH == 'true'
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build (and push)
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          CONTEXT: ${{ steps.release.outputs.context }}
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          source="https://github.com/$GITHUB_REPOSITORY"
+          args=(
+            --platform "linux/amd64,linux/arm64"
+            --file packaging/docker/Dockerfile.release
+            --tag "$IMAGE:$VERSION"
+            --label "org.opencontainers.image.source=$source"
+            --label "org.opencontainers.image.version=$VERSION"
+            --label "org.opencontainers.image.licenses=MIT OR Apache-2.0"
+            --label "org.opencontainers.image.description=SSHCraft sync server"
+            --annotation "index:org.opencontainers.image.source=$source"
+            --annotation "index:org.opencontainers.image.description=SSHCraft sync server"
+          )
+          if [ "$PRERELEASE" != true ]; then args+=(--tag "$IMAGE:latest"); fi
+          if [ "$PUSH" = true ]; then args+=(--push); fi
+          docker buildx create --use --name sshcraft-image
+          docker buildx build "${args[@]}" "$CONTEXT"
+      - name: The pushed image runs
+        if: env.PUSH == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+          docker run --rm --platform linux/amd64 "$IMAGE:$VERSION" --version | grep -F "$VERSION"
+      - name: Log out
+        if: always()
+        run: docker logout ghcr.io || true

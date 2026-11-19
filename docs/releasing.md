@@ -108,8 +108,21 @@ into the list in `assemble-release.sh`.
 
 SSHCraft has no web build: SSH needs TCP.
 
-**The server's Docker image** is built from [`packaging/docker/Dockerfile`](../packaging/docker/Dockerfile)
-by whoever runs it ([server.md](server.md#start)). The release pushes no image to a registry.
+**The server's Docker image** goes to `ghcr.io/musiker15/sshcraft-server` when a release is
+published: [`server-image.yml`](../.github/workflows/server-image.yml) takes the two server archives
+of that release, checks them against its `SHA256SUMS.txt` and builds the image for linux/amd64 and
+linux/arm64 from [`Dockerfile.release`](../packaging/docker/Dockerfile.release). It is tagged with
+the version, and `latest` for a stable release; a draft gets no image. For a release published
+before the workflow existed, or a push that failed:
+
+```sh
+gh workflow run server-image.yml -f tag=v0.3.1              # builds only
+gh workflow run server-image.yml -f tag=v0.3.1 -f push=true # and pushes
+```
+
+After the first push, check on the package page that the image is public and linked to the
+repository. [`packaging/docker/Dockerfile`](../packaging/docker/Dockerfile) still builds the same
+image from source ([server.md](server.md#start)).
 
 ## Stores
 

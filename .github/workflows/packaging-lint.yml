@@ -83,6 +83,14 @@ jobs:
                   if key in a and key in b:
                       assert a[key] == b[key], f"the Flatpak manifests disagree on {key}"
           print("Flatpak manifests agree")
+      # The release image and the one built from source are meant to be the same image.
+      - name: The two Dockerfiles use the same Debian
+        run: |
+          versions=$(grep -h '^ARG DEBIAN_VERSION=' packaging/docker/Dockerfile packaging/docker/Dockerfile.release | sort -u)
+          if [ "$(printf '%s\n' "$versions" | wc -l)" -ne 1 ]; then
+            echo "::error::the Dockerfiles pin different Debian versions: $versions"; exit 1
+          fi
+          echo "both use $versions"
 
   windows-install-policy:
     timeout-minutes: 10
