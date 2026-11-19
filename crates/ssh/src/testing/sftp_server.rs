@@ -110,6 +110,10 @@ impl russh_sftp::server::Handler for SftpServer {
         if let Some(mode) = attrs.permissions {
             self.records.modes.lock().unwrap().insert(Self::canonical(&path), mode);
         }
+        if let Some(mtime) = attrs.mtime {
+            let file = std::fs::File::options().write(true).open(&local).map_err(|e| code(&e))?;
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::from(mtime))).map_err(|e| code(&e))?;
+        }
         Ok(Self::ok(id))
     }
 

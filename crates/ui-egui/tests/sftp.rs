@@ -88,3 +88,22 @@ fn copy_to_sends_the_selection_into_another_panes_folder() {
     let copied = root.path().join("target/on-the-server.txt");
     wait(&mut h, "the file was not copied", |_| std::fs::read(&copied).is_ok_and(|d| d == b"hi"));
 }
+
+/// "Sync folders…" sends what is new in the folder shown here into the folder shown on the host.
+#[test]
+fn sync_sends_the_newer_files_of_this_folder_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session, _server, root) = opened(dir.path());
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(local.path().join("from-here.txt"), b"new").unwrap();
+    let pane = h.state_mut().sftp.values_mut().next().unwrap();
+    pane.local.path = local.path().to_string_lossy().into_owned();
+    pane.local.selected.clear();
+    h.run_steps(2);
+    h.get_by_label("Sync folders…").click();
+    h.run_steps(6);
+    h.get_by_label("Upload newer files").click();
+    let sent = root.path().join("from-here.txt");
+    wait(&mut h, "the file was not sent", |_| std::fs::read(&sent).is_ok_and(|d| d == b"new"));
+    assert_eq!(std::fs::read(root.path().join("on-the-server.txt")).unwrap(), b"hi", "nothing there is touched");
+}

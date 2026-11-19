@@ -583,3 +583,106 @@ async fn closing_the_source_mid_file_leaves_no_part() {
     assert!(!root.path().join("big.bin").exists());
     no_parts(root.path());
 }
+
+fn set_mtime(path: &std::path::Path, secs: u64) {
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)).unwrap();
+}
+
+fn mtime(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).unwrap().modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+async fn sync(f: &Fixture, local: &std::path::Path, remote: &str, direction: &str) -> Value {
+    let started = run(f, "sftp.sync", json!({ "id": f.id, "local": local, "remote": remote, "direction": direction })).await.unwrap();
+    let job = ended(f, &started["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    job
+}
+
+/// Syncing a folder up sends what is missing or newer here into the folder there (not into a
+/// folder of the same name), keeps the times, leaves what is newer there and deletes nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn syncing_up_sends_only_newer_files_and_deletes_nothing() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    let site = local.path().join("site");
+    std::fs::create_dir_all(site.join("css")).unwrap();
+    std::fs::write(site.join("index.html"), b"v1").unwrap();
+    std::fs::write(site.join("css/main.css"), b"body{}").unwrap();
+    set_mtime(&site.join("index.html"), 1_700_000_000);
+    set_mtime(&site.join("css/main.css"), 1_700_000_000);
+    let www = f.root.path().join("www");
+    std::fs::create_dir(&www).unwrap();
+    std::fs::write(www.join("only-there.txt"), b"stays").unwrap();
+
+    let job = sync(&f, &site, "/www", "upload").await;
+    assert_eq!((job["files_done"].as_u64(), job["skipped"].as_u64()), (Some(2), Some(0)), "{job}");
+    assert_eq!(std::fs::read(www.join("index.html")).unwrap(), b"v1");
+    assert_eq!(std::fs::read(www.join("css/main.css")).unwrap(), b"body{}");
+    assert!(!www.join("site").exists(), "the folder's contents go into the folder there");
+    assert_eq!(mtime(&www.join("index.html")), 1_700_000_000, "the time goes with the file");
+
+    let again = sync(&f, &site, "/www", "upload").await;
+    assert_eq!((again["files_done"].as_u64(), again["skipped"].as_u64()), (Some(0), Some(2)), "nothing changed: {again}");
+
+    std::fs::write(site.join("index.html"), b"v2").unwrap();
+    set_mtime(&site.join("index.html"), 1_700_000_100);
+    std::fs::write(www.join("css/main.css"), b"edited there").unwrap();
+    set_mtime(&www.join("css/main.css"), 1_800_000_000);
+    let third = sync(&f, &site, "/www", "upload").await;
+    assert_eq!((third["files_done"].as_u64(), third["skipped"].as_u64()), (Some(1), Some(1)), "{third}");
+    assert_eq!(std::fs::read(www.join("index.html")).unwrap(), b"v2");
+    assert_eq!(std::fs::read(www.join("css/main.css")).unwrap(), b"edited there", "newer there stays");
+    assert_eq!(std::fs::read(www.join("only-there.txt")).unwrap(), b"stays");
+    no_parts(f.root.path());
+}
+
+/// Syncing down is the same the other way: newer files from there come here, with their time.
+#[tokio::test(flavor = "multi_thread")]
+async fn syncing_down_brings_newer_files_here() {
+    let f = fixture().await;
+    let www = f.root.path().join("www");
+    std::fs::create_dir_all(www.join("logs")).unwrap();
+    std::fs::write(www.join("app.conf"), b"port=1").unwrap();
+    std::fs::write(www.join("logs/today.log"), b"line").unwrap();
+    set_mtime(&www.join("app.conf"), 1_700_000_000);
+    set_mtime(&www.join("logs/today.log"), 1_700_000_000);
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(local.path().join("mine.txt"), b"stays").unwrap();
+
+    let job = sync(&f, local.path(), "/www", "download").await;
+    assert_eq!((job["files_done"].as_u64(), job["skipped"].as_u64()), (Some(2), Some(0)), "{job}");
+    assert_eq!(std::fs::read(local.path().join("logs/today.log")).unwrap(), b"line");
+    assert!(!local.path().join("www").exists());
+    assert_eq!(mtime(&local.path().join("app.conf")), 1_700_000_000);
+
+    std::fs::write(local.path().join("app.conf"), b"port=2 (here)").unwrap();
+    set_mtime(&local.path().join("app.conf"), 1_800_000_000);
+    std::fs::write(www.join("logs/today.log"), b"line\nline").unwrap();
+    set_mtime(&www.join("logs/today.log"), 1_700_000_100);
+    let again = sync(&f, local.path(), "/www", "download").await;
+    assert_eq!((again["files_done"].as_u64(), again["skipped"].as_u64()), (Some(1), Some(1)), "{again}");
+    assert_eq!(std::fs::read(local.path().join("app.conf")).unwrap(), b"port=2 (here)");
+    assert_eq!(std::fs::read(local.path().join("logs/today.log")).unwrap(), b"line\nline");
+    assert_eq!(std::fs::read(local.path().join("mine.txt")).unwrap(), b"stays");
+    no_parts(local.path());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_needs_two_folders() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    let file = local.path().join("a.txt");
+    std::fs::write(&file, b"a").unwrap();
+    std::fs::create_dir(f.root.path().join("www")).unwrap();
+    let err = run(&f, "sftp.sync", json!({ "id": f.id, "local": file, "remote": "/www", "direction": "upload" })).await.unwrap_err();
+    assert_eq!(code(err), ErrorCode::NotFound);
+    assert!(run(&f, "sftp.sync", json!({ "id": f.id, "local": "rel", "remote": "/www", "direction": "upload" })).await.is_err());
+    assert!(run(&f, "sftp.sync", json!({ "id": f.id, "local": local.path(), "remote": "/www", "direction": "copy" })).await.is_err());
+    // A remote path that is no folder ends the job.
+    let started = run(&f, "sftp.sync", json!({ "id": f.id, "local": local.path(), "remote": "/missing", "direction": "upload" })).await.unwrap();
+    let job = ended(&f, &started["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "failed", "{job}");
+    assert!(!f.root.path().join("missing").exists(), "nothing is made on the server");
+}

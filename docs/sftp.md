@@ -65,7 +65,8 @@ When a name is already in the target folder, the pane asks before it starts:
 - **Keep both** gives the new one a free name, `name (2).ext`.
 - **Replace** overwrites.
 
-A program that calls the commands passes the rule itself. Without one, the files are skipped.
+A program that calls the commands passes the rule itself: `skip`, `rename`, `overwrite`, or
+`newer`, which replaces only an older file (what a sync uses). Without one, the files are skipped.
 
 ## Copying from server to server
 
@@ -78,6 +79,25 @@ Nothing runs on either server, and neither server needs to reach the other. A co
 same rules as an upload: part files, the question when a name is taken, *Try again* after a lost
 connection. Names from the first server go to the second only if they are plain names. The job
 shows in the transfers of both panes. Closing either pane stops it, and its part is deleted.
+
+## Syncing two folders
+
+**Sync folders…** on this computer's side brings the folder shown here and the folder shown on
+the host up to date, one way at a time:
+
+- **Upload newer files** sends what is in the folder here into the folder on the host.
+- **Download newer files** brings what is in the folder on the host into the folder here.
+
+The contents go into the other folder, including subfolders, not into a new folder of the same
+name. A file is sent only when it is missing at the target or older there. A file that changed
+at the target since the last sync stays as it is. Nothing is deleted on either side, so a file
+removed here stays on the host. A file that is sent takes its source's modification time, so the
+next sync sees the two as the same. The job counts files that were already the same as skipped.
+
+A sync follows the rules of a transfer: part files, *Try again* after a lost connection, names
+from the server checked before they become a local path. The folder on the host must exist; the
+sync makes none. Without a local side (Android) there is no sync. A program passes the rule
+`newer` itself to `sftp.upload`, `sftp.download` or `sftp.copy` to get the same comparison.
 
 ## What is refused, and why
 
@@ -105,7 +125,7 @@ SFTP speaks only the protocol, on its own channel. No name ever goes into a comm
 
 The commands are `sftp.open`, `sftp.close`, `sftp.list`, `sftp.local_list`, `sftp.mkdir`,
 `sftp.rename`, `sftp.chmod`, `sftp.count`, `sftp.delete`, `sftp.upload`, `sftp.download`,
-`sftp.copy`, `sftp.download_file`, `sftp.transfers`, `sftp.cancel`, `sftp.clear_transfers`,
+`sftp.copy`, `sftp.sync`, `sftp.download_file`, `sftp.transfers`, `sftp.cancel`, `sftp.clear_transfers`,
 `sftp.retry` and `sftp.reconnect`. Their parameters are in the palette's
 command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engine event
 `TransferStatus`. Agents have no access to any of them.
@@ -115,4 +135,4 @@ command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engin
 Some things are not there yet ([gaps.md](gaps.md)):
 
 - opening or editing a file in another program, since opening a downloaded file can run it;
-- syncing a folder.
+- a sync in both directions at once, or one that deletes what is gone from the source.

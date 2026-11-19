@@ -109,6 +109,7 @@ sftp.open
 sftp.reconnect
 sftp.rename
 sftp.retry
+sftp.sync
 sftp.transfers
 sftp.upload
 share.confirm_recipient

@@ -222,6 +222,15 @@ impl SftpClient {
         Ok(())
     }
 
+    /// Sets the modification (and access) time of `path` to `mtime`, seconds since 1970; a time
+    /// the protocol cannot carry (past 2106) is refused.
+    pub async fn set_modified(&self, path: &str, mtime: u64) -> Result<(), SftpError> {
+        let secs = u32::try_from(mtime).map_err(|_| SftpError::Protocol("a time past 2106".into()))?;
+        let attrs = FileAttributes { atime: Some(secs), mtime: Some(secs), ..FileAttributes::empty() };
+        self.raw.setstat(path, attrs).await?;
+        Ok(())
+    }
+
     /// Opens `path` for reading.
     pub async fn open_read(&self, path: &str) -> Result<RemoteFile, SftpError> {
         let handle = self.raw.open(path, OpenFlags::READ, FileAttributes::empty()).await?.handle;
