@@ -24,7 +24,7 @@ layering: a crate depends only on lower layers, and nothing below L6 depends on 
 | L3 | `sync` | Client side of sync: accounts, devices, areas, shares, live updates |
 | L3 | `server-lib` | The sync server: routes, state, SQLite and PostgreSQL storage, operator commands |
 | L4 | `fido` | FIDO2 security keys and Windows Hello; the one crate that may use `unsafe` |
-| L5 | `engine` | The session: every action as a command, the agent gate, terminal sessions, forwarding, recording, settings |
+| L5 | `engine` | The session: every action as a command, the agent gate, terminal sessions, forwarding, SFTP, recording, settings |
 | L6 | `ui-egui` | The egui interface; so far the terminal: layout and painting, the widget, the output pump |
 | exempt | `apps/sshcraft-server` | The sync server program |
 | exempt | `apps/android` | The Android app: `android_main`, the tablet form, Android's clipboard and insets |

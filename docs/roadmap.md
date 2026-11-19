@@ -14,7 +14,7 @@ craft-fonts, and packages for every platform ([releasing.md](releasing.md)). F1 
 configuration), F2 (sign-in and data safety) and the first release (V1, v0.1.0 on 2026-11-16)
 are done. v0.1.0 has packages for Windows, Linux and FreeBSD and the sync server, unsigned and
 without macOS ([releasing.md](releasing.md#what-gets-built), gap 7a); winget and Flathub
-submissions follow. Next is S1 (SFTP).
+submissions follow. S1 (SFTP) is done ([sftp.md](sftp.md)).
 
 ## The rebuild
 
@@ -46,5 +46,6 @@ submissions follow. Next is S1 (SFTP).
 | Step | Result |
 |---|---|
 | M1 | Android tablets (13+, arm64): the egui interface in a NativeActivity with a key bar, touch scrolling and Android's clipboard; the master key in the Android Keystore; sync; the APK built and signed by `cargo xtask android` ([android.md](android.md)) |
+| S1 | SFTP: an SFTP tab per host with this computer and the host side by side (one at a time under 700 points, the host alone on Android); folders, rename, permissions, delete after counting; uploads and downloads with a queue, progress, cancel and part files; names from the server checked before they become a local path ([sftp.md](sftp.md)) |
 
-M2 (GameActivity, phones, notifications), M3 (iOS and iPadOS), S1 (SFTP). A database client follows as a separate sister app.
+M2 (GameActivity, phones, notifications), M3 (iOS and iPadOS). A database client follows as a separate sister app.

@@ -10,8 +10,8 @@ programs and go out again. Sync and sharing of all this are described in [sync.m
 The Hosts page opens on an overview: the hosts you connected to last, then the hosts in no group
 (at most twelve, *Show all* lists the rest), then a card for every top-level group with its first
 eight hosts and the number of its subgroups. A click on a group's name opens the group. Every host
-has an **SSH** button that connects right away; **SFTP** is there but stays disabled until the file
-browser lands. The button with three dots beside the search holds import, export and the choice
+has an **SSH** button that connects right away and an **SFTP** button that opens its files
+([sftp.md](sftp.md)). The button with three dots beside the search holds import, export and the choice
 between list and grid. Searching, picking a tag or a dynamic group, or opening a group switches to the list
 (or the grid), and the path above it leads back.
 

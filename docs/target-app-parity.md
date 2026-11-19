@@ -35,5 +35,5 @@ with other clients, with sources, is the German
 | Sharing | team plans | free on the own server |
 | AI agents | AI features in the app | MCP and command line with rights per action |
 | Platforms | Windows, macOS, Linux | Windows, Linux, FreeBSD since v0.1.0 (unsigned); macOS builds, not released yet |
-| SFTP | yes | S1, after the first release |
+| SFTP | yes | yes (S1): this computer and the host side by side, transfers with progress, drag between the sides; no editing in another program yet |
 | Mobile | yes | Android tablets since M1 (sideloaded APK); phones M2, iOS and iPadOS M3 |

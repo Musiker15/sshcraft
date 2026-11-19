@@ -50,6 +50,7 @@ cargo run -p sshcraft-server -- serve --public-origin https://sync.example.org
 | Keys: types, passphrase, certificates, authorized_keys, FIDO2, Windows Hello | [docs/keys.md](docs/keys.md) |
 | Workspaces, broadcast, templates and terminal settings | [docs/workspaces.md](docs/workspaces.md) |
 | Port forwarding: local, remote, SOCKS | [docs/forwarding.md](docs/forwarding.md) |
+| SFTP: files of a host, transfers | [docs/sftp.md](docs/sftp.md) |
 | Snippets, history and completion | [docs/snippets.md](docs/snippets.md) |
 | Session logs | [docs/session-logs.md](docs/session-logs.md) |
 | AI agents | [docs/agents.md](docs/agents.md) |
