@@ -436,3 +436,15 @@ async fn a_download_into_a_given_file_overwrites_it() {
     assert_eq!(std::fs::read(&target).unwrap(), data, "a failure before anything was read leaves the file alone");
     assert!(run(&f, "sftp.download_file", json!({ "id": f.id, "remote": "/remote.bin", "local_file": "relative" })).await.is_err());
 }
+
+/// The job of an upload under a name of its own is shown under that name, not the file's.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_under_a_name_is_shown_under_it() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(local.path().join("121"), b"x").unwrap();
+    let up =
+        run(&f, "sftp.upload", json!({ "id": f.id, "local": [local.path().join("121")], "remote_dir": "/", "name": "Notiz.txt" })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["label"], "Notiz.txt");
+}

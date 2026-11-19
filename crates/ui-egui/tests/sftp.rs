@@ -52,3 +52,12 @@ fn after_a_lost_connection_the_pane_connects_again() {
     h.get_by_label("Reconnect").click();
     wait(&mut h, "the pane did not connect again", |app| app.sftp.values().all(|v| !v.lost && !v.remote.entries.is_empty()));
 }
+
+/// An open SFTP pane counts as an open session, so Android keeps the connection while the
+/// system's file picker sends the app to the background.
+#[test]
+fn an_sftp_pane_counts_as_an_open_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _session, _server, _root) = opened(dir.path());
+    assert_eq!(sshcraft_ui_egui::notify::open_sessions(h.state()), 1);
+}

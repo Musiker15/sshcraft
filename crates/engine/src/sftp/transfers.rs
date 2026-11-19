@@ -248,8 +248,9 @@ impl Transfers {
 
     fn add(&self, sftp: SftpId, request: Request, conflict: Conflict, completed: HashSet<String>) -> Arc<Job> {
         let (direction, label) = match &request {
-            Request::Upload { local, .. } => {
-                (Direction::Upload, label_of(local.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()), local.len()))
+            Request::Upload { local, name, .. } => {
+                let first = name.clone().or_else(|| local.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()));
+                (Direction::Upload, label_of(first, local.len()))
             }
             Request::Download { remote, .. } => (Direction::Download, label_of(remote.first().and_then(|p| names::remote_name(p)), remote.len())),
             Request::DownloadFile { remote, .. } => (Direction::Download, label_of(names::remote_name(remote), 1)),

@@ -3,7 +3,11 @@
 The **SFTP** button of a host opens its files in a tab of their own. On the left you see this
 computer, on the right the host. Below them are the transfers. If the window is narrower than
 700 points, only one side shows at a time and two chips switch between them. On Android only the
-host's side is there, because the app cannot browse the device's folders.
+host's side is there, because the app cannot browse the device's folders. There **Upload** picks a
+file through the system's picker and sends it into the shown folder under its own name, beside
+anything of that name, and **Download** (one file selected) asks the picker where it goes. An open
+SFTP tab keeps the app running in the background like a terminal does, so the connection holds
+while the picker is open.
 
 ## Opening
 
@@ -100,4 +104,3 @@ Some things are not there yet ([gaps.md](gaps.md)):
 - opening or editing a file in another program, since opening a downloaded file can run it;
 - syncing a folder;
 - copying from server to server;
-- uploading and downloading on Android.

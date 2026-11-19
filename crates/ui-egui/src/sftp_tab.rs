@@ -257,7 +257,8 @@ fn error_text(e: &sshcraft_engine::EngineError) -> String {
                 ErrorCode::NameInvalid => tr("That name cannot be used."),
                 ErrorCode::TooManyFiles => tr("Too many files or folders for one go."),
                 ErrorCode::Network => tr("The connection was lost."),
-                _ => return visible(&e.to_string()),
+                ErrorCode::SftpFailed => tr("The server refused."),
+                _ => return detail.as_deref().map_or_else(|| visible(&format!("{code:?}")), visible),
             };
             match detail {
                 Some(d) if !d.is_empty() => format!("{text} ({})", visible(d)),
@@ -784,6 +785,12 @@ fn transfer_row(ui: &mut Ui, t: &Value, actions: &mut Vec<Action>) {
             ui.painter().rect_filled(bar, 2.0, tokens.field);
             let share = if total == 0 { if state == "done" { 1.0 } else { 0.0 } } else { (done as f32 / total as f32).clamp(0.0, 1.0) };
             ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * share, bar.height())), 2.0, tokens.accent);
+            // Why a file failed: the first reason, the rest on hover.
+            if let Some(errors) = t["errors"].as_array().filter(|e| !e.is_empty()) {
+                let first = visible(errors[0].as_str().unwrap_or_default());
+                let all: Vec<String> = errors.iter().filter_map(Value::as_str).map(visible).collect();
+                crate::widgets::elided_label(ui, &first, width, tokens.warning, FontId::proportional(12.0)).on_hover_text(all.join("\n"));
+            }
         });
         let unfinished = matches!(state, "failed" | "cancelled") || (state == "done" && t["errors"].as_array().is_some_and(|e| !e.is_empty()));
         if matches!(state, "queued" | "running") {

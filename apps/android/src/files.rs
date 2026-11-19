@@ -1,6 +1,9 @@
 //! The system's file picker for the app's file dialogs (`file_dialogs::picked`): `MainActivity`
-//! opens it and answers with a path to the picked file that stays valid for a while
-//! (`/proc/self/fd/<n>`), so imports, exports and backups read and write as on the desktop.
+//! opens it and answers with a path that stays valid for a while, so imports, exports, backups and
+//! SFTP read and write as on the desktop. A file to read comes as a copy in the app's cache (Android
+//! does not let the app open a document again by its descriptor's path); a file to write is a file
+//! in the cache, which the activity copies into the created document each time it is closed. The
+//! document's name comes along, since neither path has it.
 
 use jni::objects::{JString, JValue};
 use jni::{jni_sig, jni_str};
