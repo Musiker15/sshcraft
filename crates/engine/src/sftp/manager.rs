@@ -144,6 +144,20 @@ impl SftpManager {
         self.transfers.download(id, open, remote, local_dir, conflict)
     }
 
+    /// Starts copying files and folders of session `from` into a folder of session `to`.
+    pub fn copy(
+        &self,
+        from: SftpId,
+        remote: Vec<String>,
+        to: SftpId,
+        remote_dir: String,
+        conflict: super::transfers::Conflict,
+    ) -> Result<super::transfers::TransferId, SftpFailure> {
+        let source = self.get(from)?;
+        let open = self.get(to)?;
+        self.transfers.copy((from, source), (to, open), remote, remote_dir, conflict)
+    }
+
     /// Connects to `host` and starts SFTP; gives the id and the home folder.
     pub async fn open(&self, host: HostId) -> Result<(SftpId, String), SftpFailure> {
         let (open, home) = self.connect(host).await?;
@@ -170,9 +184,10 @@ impl SftpManager {
 
     /// Starts transfer `transfer` again on its session's current connection.
     pub fn retry(&self, transfer: super::transfers::TransferId) -> Result<super::transfers::TransferId, SftpFailure> {
-        let id = self.transfers.sftp_of(transfer).ok_or((ErrorCode::NotFound, Some(format!("transfer {transfer}"))))?;
+        let (id, source) = self.transfers.sftp_of(transfer).ok_or((ErrorCode::NotFound, Some(format!("transfer {transfer}"))))?;
         let open = self.get(id)?;
-        self.transfers.retry(transfer, open)
+        let source = source.map(|s| self.get(s)).transpose()?;
+        self.transfers.retry(transfer, open, source)
     }
 
     async fn connect(&self, host: HostId) -> Result<(Open, String), SftpFailure> {

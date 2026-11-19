@@ -97,6 +97,7 @@ sftp.cancel
 sftp.chmod
 sftp.clear_transfers
 sftp.close
+sftp.copy
 sftp.count
 sftp.delete
 sftp.download
