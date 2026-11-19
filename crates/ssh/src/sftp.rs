@@ -48,9 +48,17 @@ impl From<RawError> for SftpError {
             },
             RawError::IO(message) => SftpError::Lost(bounded(&message)),
             RawError::Timeout => SftpError::Timeout,
-            // russh-sftp says this when the channel under the session is gone: the connection
-            // went away, which a retry can go on from, not a server that misbehaves.
-            RawError::UnexpectedBehavior(message) if message == "session closed" => SftpError::Lost(message),
+            // russh-sftp says these when the channel under the session is gone (or a request's
+            // answer can no longer come): the connection went away, which a retry can go on
+            // from, not a server that misbehaves.
+            RawError::UnexpectedBehavior(message)
+                if message == "session closed"
+                    || message == "sender dropped"
+                    || message.starts_with("SendError:")
+                    || message.starts_with("RecvError:") =>
+            {
+                SftpError::Lost(bounded(&message))
+            }
             RawError::Limited(message) | RawError::UnexpectedBehavior(message) => SftpError::Protocol(bounded(&message)),
             RawError::UnexpectedPacket => SftpError::Protocol("unexpected packet".into()),
         }
@@ -283,7 +291,9 @@ mod tests {
 
     #[test]
     fn a_closed_session_is_a_lost_connection() {
-        assert!(matches!(SftpError::from(RawError::UnexpectedBehavior("session closed".into())), SftpError::Lost(_)));
+        for closed in ["session closed", "sender dropped", "SendError: channel closed", "RecvError: channel closed"] {
+            assert!(matches!(SftpError::from(RawError::UnexpectedBehavior(closed.into())), SftpError::Lost(_)), "{closed}");
+        }
         assert!(matches!(SftpError::from(RawError::UnexpectedBehavior("odd".into())), SftpError::Protocol(_)));
     }
 

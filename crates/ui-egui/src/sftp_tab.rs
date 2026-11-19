@@ -1,6 +1,7 @@
 //! The SFTP pane (S1): this computer on the left, the host on the right, transfers below. Under
 //! [`TWO_SIDES_FROM`] points one side shows at a time, with a switch. On Android only the host's
-//! side is there: the app cannot browse the device's folders.
+//! side is there: the app cannot browse the device's folders. "Copy to…" sends the host's
+//! selection into the folder another open pane shows (from server to server).
 //!
 //! Everything it does goes through the engine's `sftp.*` commands; names from the server are
 //! shown through [`crate::widgets::visible`], so an escape sequence in one cannot do anything.
@@ -115,6 +116,11 @@ pub enum Dialog {
         paths: Vec<String>,
         count: Option<Value>,
     },
+    /// Which other pane's folder the selection is copied into.
+    CopyTo {
+        items: Vec<String>,
+        names: Vec<String>,
+    },
     /// Some names are already in the target folder.
     Conflict {
         transfer: PendingTransfer,
@@ -122,11 +128,40 @@ pub enum Dialog {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferKind {
+    Upload,
+    Download,
+    /// Into the remote folder of pane `to`, from server to server.
+    Copy {
+        to: u64,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingTransfer {
-    pub upload: bool,
+    pub kind: TransferKind,
     pub items: Vec<String>,
     pub target: String,
+}
+
+impl PendingTransfer {
+    fn command(&self) -> &'static str {
+        match self.kind {
+            TransferKind::Upload => "sftp.upload",
+            TransferKind::Download => "sftp.download",
+            TransferKind::Copy { .. } => "sftp.copy",
+        }
+    }
+}
+
+/// Another open pane, as a target for "Copy to…": its id, host name, shown folder and names.
+#[derive(Debug, Clone)]
+pub struct OtherPane {
+    pub id: u64,
+    pub name: String,
+    pub path: String,
+    pub names: BTreeSet<String>,
 }
 
 /// The state of one SFTP pane.
@@ -266,6 +301,10 @@ fn error_text(e: &sshcraft_engine::EngineError) -> String {
                     .to_string();
                 }
                 ErrorCode::HostKeyRejected => tr("The host key was not accepted."),
+                ErrorCode::PasswordRejected => tr("The password was not accepted."),
+                ErrorCode::SignInFailed => tr("Sign-in failed."),
+                ErrorCode::SignInCancelled => tr("Sign-in was cancelled."),
+                ErrorCode::Timeout => tr("The server did not answer in time."),
                 _ => return detail.as_deref().map_or_else(|| visible(&format!("{code:?}")), visible),
             };
             match detail {
@@ -354,7 +393,20 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: u64) {
         ui.centered_and_justified(|ui| ui.label(tr("These files are closed.")));
         return;
     };
-    let transfers: Vec<Value> = app.transfers.values().filter(|t| t["sftp"].as_u64() == Some(id)).cloned().collect();
+    // A copy shows in the pane it writes to and in the one it reads from.
+    let transfers: Vec<Value> =
+        app.transfers.values().filter(|t| t["sftp"].as_u64() == Some(id) || t["source"].as_u64() == Some(id)).cloned().collect();
+    let others: Vec<OtherPane> = app
+        .sftp
+        .values()
+        .filter(|v| !v.lost && !v.remote.path.is_empty())
+        .map(|v| OtherPane {
+            id: v.id,
+            name: v.name.clone(),
+            path: v.remote.path.clone(),
+            names: v.remote.entries.iter().map(|e| e.name.clone()).collect(),
+        })
+        .collect();
     let mut actions = Vec::new();
     let tokens = Tokens::get(ui.ctx());
     egui::Frame::new().fill(tokens.bg).inner_margin(12.0).show(ui, |ui| {
@@ -366,9 +418,9 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: u64) {
         if both {
             let half = (width - 12.0) / 2.0;
             ui.horizontal_top(|ui| {
-                side_panel(ui, &mut view, SideKind::Local, vec2(half, height), &mut actions);
+                side_panel(ui, &mut view, SideKind::Local, vec2(half, height), !others.is_empty(), &mut actions);
                 ui.add_space(12.0);
-                side_panel(ui, &mut view, SideKind::Remote, vec2(half, height), &mut actions);
+                side_panel(ui, &mut view, SideKind::Remote, vec2(half, height), !others.is_empty(), &mut actions);
             });
         } else {
             if LOCAL_SIDE {
@@ -384,21 +436,21 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: u64) {
             }
             let kind = if LOCAL_SIDE { view.narrow } else { SideKind::Remote };
             let height = (height - if LOCAL_SIDE { 38.0 } else { 0.0 }).max(160.0);
-            side_panel(ui, &mut view, kind, vec2(width, height), &mut actions);
+            side_panel(ui, &mut view, kind, vec2(width, height), !others.is_empty(), &mut actions);
         }
         if !transfers.is_empty() {
             ui.add_space(10.0);
             transfer_strip(ui, &transfers, &mut actions);
         }
     });
-    dialog(ui.ctx(), &mut view, &mut actions);
+    dialog(ui.ctx(), &mut view, &others, &mut actions);
     app.sftp.insert(id, view);
     for action in actions {
         act(app, id, action);
     }
 }
 
-fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2, actions: &mut Vec<Action>) {
+fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2, other_panes: bool, actions: &mut Vec<Action>) {
     let tokens = Tokens::get(ui.ctx());
     let has_other = LOCAL_SIDE;
     let other_path = match kind {
@@ -479,6 +531,11 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
                 {
                     actions.push(Action::PickDownload { remote: child_path(kind, &side.path, &file.name), name: file.name.clone() });
                 }
+            }
+            // From server to server: into the folder another open pane shows.
+            if kind == SideKind::Remote && other_panes && !selected.is_empty() && ghost(ui, tr("Copy to…"), BUTTON).clicked() {
+                let items = selected.iter().map(|n| child_path(kind, &side.path, n)).collect();
+                actions.push(Action::Ask(Dialog::CopyTo { items, names: selected.clone() }));
             }
             if kind == SideKind::Remote {
                 if square(ui, Icon::Plus, tr("New folder"), BUTTON, false).clicked() {
@@ -583,7 +640,8 @@ fn view_id_salt(kind: SideKind) -> &'static str {
 /// A transfer of `items` (named `names`) from side `from` into `target`; asks first when a name
 /// is taken there.
 fn transfer_action(from: SideKind, items: Vec<String>, names: &[String], target: String, taken_there: &BTreeSet<String>) -> Action {
-    let transfer = PendingTransfer { upload: from == SideKind::Local, items, target };
+    let kind = if from == SideKind::Local { TransferKind::Upload } else { TransferKind::Download };
+    let transfer = PendingTransfer { kind, items, target };
     let taken: Vec<String> = names.iter().filter(|n| taken_there.contains(*n)).cloned().collect();
     if taken.is_empty() { Action::Transfer(transfer) } else { Action::Ask(Dialog::Conflict { transfer, taken }) }
 }
@@ -756,7 +814,11 @@ fn transfer_row(ui: &mut Ui, t: &Value, actions: &mut Vec<Action>) {
     let state = t["state"]["kind"].as_str().unwrap_or_default();
     let done = t["bytes_done"].as_u64().unwrap_or(0);
     let total = t["bytes_total"].as_u64().unwrap_or(0);
-    let upload = t["direction"] == "upload";
+    let icon = match t["direction"].as_str() {
+        Some("upload") => Icon::Upload,
+        Some("copy") => Icon::Forward,
+        _ => Icon::Save,
+    };
     let label = visible(t["label"].as_str().unwrap_or_default());
     let (text, color) = match state {
         "queued" => (tr("waiting").to_string(), tokens.text_dim),
@@ -777,12 +839,7 @@ fn transfer_row(ui: &mut Ui, t: &Value, actions: &mut Vec<Action>) {
     };
     ui.horizontal(|ui| {
         ui.set_min_height(40.0);
-        draw(
-            ui.painter(),
-            if upload { Icon::Upload } else { Icon::Save },
-            Rect::from_min_size(ui.cursor().min + vec2(0.0, 10.0), vec2(18.0, 18.0)),
-            tokens.text_dim,
-        );
+        draw(ui.painter(), icon, Rect::from_min_size(ui.cursor().min + vec2(0.0, 10.0), vec2(18.0, 18.0)), tokens.text_dim);
         ui.add_space(26.0);
         ui.vertical(|ui| {
             let width = (ui.available_width() - 48.0).max(60.0);
@@ -820,7 +877,7 @@ fn transfer_row(ui: &mut Ui, t: &Value, actions: &mut Vec<Action>) {
 
 // ---- Dialogs ---------------------------------------------------------------------------------
 
-fn dialog(ctx: &egui::Context, view: &mut SftpView, actions: &mut Vec<Action>) {
+fn dialog(ctx: &egui::Context, view: &mut SftpView, others: &[OtherPane], actions: &mut Vec<Action>) {
     let Some(current) = view.dialog.clone() else { return };
     let remote_dir = view.remote.path.clone();
     let mut close = false;
@@ -902,6 +959,31 @@ fn dialog(ctx: &egui::Context, view: &mut SftpView, actions: &mut Vec<Action>) {
                     close = true;
                 }
             }
+            Dialog::CopyTo { items, names } => {
+                crate::widgets::buttons::title(ui, tr("Copy to…"));
+                ui.add_space(4.0);
+                ui.colored_label(Tokens::get(ui.ctx()).text_dim, tr("Into the folder another open host's files show:"));
+                ui.add_space(8.0);
+                let targets: Vec<&OtherPane> = others.iter().filter(|o| o.id != view.id).collect();
+                if targets.is_empty() {
+                    ui.label(tr("Open the files of another host first."));
+                }
+                for other in targets {
+                    // A deep folder would push the button past the dialog; its end says most.
+                    let label = format!("{}: {}", visible(&other.name), short_path(&visible(&other.path), 48));
+                    if ghost(ui, &label, BUTTON).clicked() {
+                        let transfer =
+                            PendingTransfer { kind: TransferKind::Copy { to: other.id }, items: items.clone(), target: other.path.clone() };
+                        let taken: Vec<String> = names.iter().filter(|n| other.names.contains(*n)).cloned().collect();
+                        actions.push(if taken.is_empty() { Action::Transfer(transfer) } else { Action::Ask(Dialog::Conflict { transfer, taken }) });
+                        close = true;
+                    }
+                }
+                ui.add_space(12.0);
+                if ghost(ui, tr("Cancel"), BUTTON).clicked() {
+                    close = true;
+                }
+            }
             Dialog::Conflict { transfer, taken } => {
                 crate::widgets::buttons::title(ui, tr("Already there"));
                 ui.add_space(8.0);
@@ -916,10 +998,7 @@ fn dialog(ctx: &egui::Context, view: &mut SftpView, actions: &mut Vec<Action>) {
                     ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                     for (label, conflict) in [(tr("Skip"), "skip"), (tr("Keep both"), "rename"), (tr("Replace"), "overwrite")] {
                         if ghost(ui, label, BUTTON).clicked() {
-                            actions.push(Action::Run(
-                                if transfer.upload { "sftp.upload" } else { "sftp.download" },
-                                transfer_params(view.id, &transfer, conflict),
-                            ));
+                            actions.push(Action::Run(transfer.command(), transfer_params(view.id, &transfer, conflict)));
                             close = true;
                         }
                     }
@@ -935,6 +1014,16 @@ fn dialog(ctx: &egui::Context, view: &mut SftpView, actions: &mut Vec<Action>) {
     }
 }
 
+/// `path` at most `max` characters long: a longer one keeps its end, after "…".
+fn short_path(path: &str, max: usize) -> String {
+    let count = path.chars().count();
+    if count <= max {
+        return path.to_owned();
+    }
+    let tail: String = path.chars().skip(count - max.saturating_sub(1)).collect();
+    format!("…{tail}")
+}
+
 /// Cancel and the action, as the pane's own buttons; the action only when `ready`.
 fn buttons(ui: &mut Ui, action: &str, ready: bool) -> (bool, bool) {
     let mut out = (false, false);
@@ -947,10 +1036,10 @@ fn buttons(ui: &mut Ui, action: &str, ready: bool) -> (bool, bool) {
 }
 
 fn transfer_params(id: u64, t: &PendingTransfer, conflict: &str) -> Value {
-    if t.upload {
-        json!({ "id": id, "local": t.items, "remote_dir": t.target, "conflict": conflict })
-    } else {
-        json!({ "id": id, "remote": t.items, "local_dir": t.target, "conflict": conflict })
+    match t.kind {
+        TransferKind::Upload => json!({ "id": id, "local": t.items, "remote_dir": t.target, "conflict": conflict }),
+        TransferKind::Download => json!({ "id": id, "remote": t.items, "local_dir": t.target, "conflict": conflict }),
+        TransferKind::Copy { to } => json!({ "from": id, "remote": t.items, "to": to, "remote_dir": t.target, "conflict": conflict }),
     }
 }
 
@@ -992,10 +1081,7 @@ fn act(app: &mut SshcraftApp, id: u64, action: Action) {
                 }
             }),
         ),
-        Action::Transfer(t) => {
-            let command = if t.upload { "sftp.upload" } else { "sftp.download" };
-            run_and_refresh(app, id, command, transfer_params(id, &t, "skip"));
-        }
+        Action::Transfer(t) => run_and_refresh(app, id, t.command(), transfer_params(id, &t, "skip")),
         Action::Run(command, params) => run_and_refresh(app, id, command, params),
         Action::Cancel(transfer) => app.run_reported("sftp.cancel", json!({ "transfer": transfer })),
         Action::PickUpload => {
@@ -1049,7 +1135,7 @@ fn run_and_refresh(app: &mut SshcraftApp, id: u64, command: &'static str, params
         params,
         Box::new(move |app, result| match result {
             Ok(_) => {
-                if !matches!(command, "sftp.upload" | "sftp.download") {
+                if !matches!(command, "sftp.upload" | "sftp.download" | "sftp.copy") {
                     let path = app.sftp.get(&id).map(|v| v.remote.path.clone()).unwrap_or_default();
                     list(app, id, SideKind::Remote, path);
                 }
@@ -1065,7 +1151,8 @@ pub fn on_transfer(app: &mut SshcraftApp, view: Value) {
     let ended = !matches!(view["state"]["kind"].as_str(), Some("queued" | "running"));
     let was_open = app.transfers.get(&id).is_some_and(|t| matches!(t["state"]["kind"].as_str(), Some("queued" | "running")));
     let sftp = view["sftp"].as_u64();
-    let upload = view["direction"] == "upload";
+    // An upload and a copy wrote to the remote side of pane `sftp`, a download to its local side.
+    let upload = view["direction"] != "download";
     // A job that ended because the connection went away: the pane offers to connect again.
     if view["state"]["kind"] == "failed"
         && matches!(view["state"]["code"].as_str(), Some("network" | "timeout"))
@@ -1119,6 +1206,34 @@ pub type Known = BTreeMap<u64, Value>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Codes from signing in read as sentences, never as the code's own name.
+    #[test]
+    fn sign_in_failures_read_as_sentences() {
+        use sshcraft_engine::{EngineError, ErrorCode};
+        for code in [ErrorCode::PasswordRejected, ErrorCode::SignInFailed, ErrorCode::SignInCancelled, ErrorCode::Timeout] {
+            let text = error_text(&EngineError::Failed { code, detail: None });
+            assert!(text.ends_with('.') && !text.contains(&format!("{code:?}")), "{code:?}: {text}");
+        }
+    }
+
+    /// A long path keeps its end, where the folder's own name is.
+    #[test]
+    fn a_long_path_is_cut_at_its_start() {
+        assert_eq!(short_path("/srv/www", 40), "/srv/www");
+        let long = format!("/{}/ziel", "a".repeat(100));
+        let short = short_path(&long, 20);
+        assert_eq!(short.chars().count(), 20);
+        assert!(short.starts_with('…') && short.ends_with("/ziel"));
+    }
+
+    /// A copy reads from this pane's session and writes into the other pane's folder.
+    #[test]
+    fn a_copy_goes_from_this_pane_into_the_other() {
+        let t = PendingTransfer { kind: TransferKind::Copy { to: 7 }, items: vec!["/a".into()], target: "/in".into() };
+        assert_eq!(t.command(), "sftp.copy");
+        assert_eq!(transfer_params(3, &t, "skip"), json!({ "from": 3, "remote": ["/a"], "to": 7, "remote_dir": "/in", "conflict": "skip" }));
+    }
 
     fn entry(name: &str, kind: &str, size: u64) -> Entry {
         Entry { name: name.into(), kind: kind.into(), size, modified: None, permissions: None }

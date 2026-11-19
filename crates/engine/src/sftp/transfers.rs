@@ -1,4 +1,4 @@
-//! Uploads and downloads: one job per request, files one after another, each file read or
+//! Uploads, downloads and copies from server to server: one job per request, files one after another, each file read or
 //! written in [`WINDOW`] requests at once. A file is written under its part name and renamed when
 //! complete; a cancelled or failed file's part is deleted, so nothing half-written stays behind.
 //! Only when the connection was lost does the part stay: [`Transfers::retry`] goes on from it.
@@ -38,6 +38,8 @@ pub type TransferId = u64;
 pub enum Direction {
     Upload,
     Download,
+    /// From one server to another (or within one).
+    Copy,
 }
 
 /// What to do when the target name is taken.
@@ -66,7 +68,10 @@ pub enum TransferState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TransferView {
     pub id: TransferId,
+    /// The session the job writes to (a download's reads from it).
     pub sftp: SftpId,
+    /// The session a copy reads from; none for an upload or a download.
+    pub source: Option<SftpId>,
     pub direction: Direction,
     /// The first item's name, for the list.
     pub label: String,
@@ -89,6 +94,7 @@ enum Request {
     Upload { local: Vec<PathBuf>, remote_dir: String, name: Option<String> },
     Download { remote: Vec<String>, local_dir: PathBuf },
     DownloadFile { remote: String, local_file: PathBuf },
+    Copy { source: SftpId, remote: Vec<String>, remote_dir: String },
 }
 
 struct Job {
@@ -97,7 +103,7 @@ struct Job {
     bytes: AtomicU64,
     request: Request,
     conflict: Conflict,
-    /// The sources (local paths of an upload, remote paths of a download) that are done, so a
+    /// The sources (local paths of an upload, remote paths of a download or copy) that are done, so a
     /// retry leaves them alone instead of sending them again (or beside, as `name (2)`).
     completed: Mutex<HashSet<String>>,
 }
@@ -190,14 +196,14 @@ impl Transfers {
         self.resumable.lock().unwrap_or_else(PoisonError::into_inner).remove(key)
     }
 
-    /// The session a job belongs to.
-    pub fn sftp_of(&self, id: TransferId) -> Option<SftpId> {
-        self.lock().iter().map(|j| j.view()).find(|v| v.id == id).map(|v| v.sftp)
+    /// The session a job belongs to, and the one a copy reads from.
+    pub fn sftp_of(&self, id: TransferId) -> Option<(SftpId, Option<SftpId>)> {
+        self.lock().iter().map(|j| j.view()).find(|v| v.id == id).map(|v| (v.sftp, v.source))
     }
 
     /// Starts job `id` again: one that failed, was cancelled, or ended with files that failed.
     /// Files it finished stay as they are; a part a lost connection left is continued.
-    pub(crate) fn retry(self: &Arc<Self>, id: TransferId, open: Arc<Open>) -> Result<TransferId, SftpFailure> {
+    pub(crate) fn retry(self: &Arc<Self>, id: TransferId, open: Arc<Open>, source: Option<Arc<Open>>) -> Result<TransferId, SftpFailure> {
         let job = self.lock().iter().find(|j| j.view().id == id).cloned().ok_or((ErrorCode::NotFound, Some(format!("transfer {id}"))))?;
         let view = job.view();
         let again = match &view.state {
@@ -209,7 +215,7 @@ impl Transfers {
             return Err((ErrorCode::NotSupported, Some("only a job that did not finish is tried again".into())));
         }
         let completed = job.completed.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        Ok(self.start(view.sftp, open, job.request.clone(), job.conflict, completed))
+        Ok(self.start(view.sftp, open, source, job.request.clone(), job.conflict, completed))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Arc<Job>>> {
@@ -234,9 +240,12 @@ impl Transfers {
         open
     }
 
-    /// Stops every job of a session (it is closing).
+    /// Stops every job of a session (it is closing), copies that read from it too.
     pub(crate) fn cancel_all(&self, sftp: SftpId) {
-        for job in self.lock().iter().filter(|j| j.view().sftp == sftp) {
+        for job in self.lock().iter().filter(|j| {
+            let view = j.view();
+            view.sftp == sftp || view.source == Some(sftp)
+        }) {
             job.cancel.store(true, Ordering::SeqCst);
         }
     }
@@ -254,11 +263,17 @@ impl Transfers {
             }
             Request::Download { remote, .. } => (Direction::Download, label_of(remote.first().and_then(|p| names::remote_name(p)), remote.len())),
             Request::DownloadFile { remote, .. } => (Direction::Download, label_of(names::remote_name(remote), 1)),
+            Request::Copy { remote, .. } => (Direction::Copy, label_of(remote.first().and_then(|p| names::remote_name(p)), remote.len())),
+        };
+        let source = match &request {
+            Request::Copy { source, .. } => Some(*source),
+            _ => None,
         };
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let view = TransferView {
             id,
             sftp,
+            source,
             direction,
             label,
             state: TransferState::Queued,
@@ -318,7 +333,7 @@ impl Transfers {
             }
             names::check_name(name).map_err(name_failure)?;
         }
-        Ok(self.start(sftp, open, Request::Upload { local, remote_dir, name }, conflict, HashSet::new()))
+        Ok(self.start(sftp, open, None, Request::Upload { local, remote_dir, name }, conflict, HashSet::new()))
     }
 
     /// Starts downloading the remote file `remote` into the existing local file `local_file`,
@@ -335,7 +350,7 @@ impl Transfers {
             return Err(name_failure(names::NameError::NotAbsolute));
         }
         let remote = names::normalize_remote(&remote).map_err(name_failure)?;
-        Ok(self.start(sftp, open, Request::DownloadFile { remote, local_file }, Conflict::Overwrite, HashSet::new()))
+        Ok(self.start(sftp, open, None, Request::DownloadFile { remote, local_file }, Conflict::Overwrite, HashSet::new()))
     }
 
     /// Starts downloading `remote` (files and folders) into the local folder `local_dir`.
@@ -354,10 +369,33 @@ impl Transfers {
             return Err((ErrorCode::NotFound, Some(local_dir.to_string_lossy().into_owned())));
         }
         let remote = remote.iter().map(|p| names::normalize_remote(p)).collect::<Result<Vec<_>, _>>().map_err(name_failure)?;
-        Ok(self.start(sftp, open, Request::Download { remote, local_dir }, conflict, HashSet::new()))
+        Ok(self.start(sftp, open, None, Request::Download { remote, local_dir }, conflict, HashSet::new()))
     }
 
-    fn start(self: &Arc<Self>, sftp: SftpId, open: Arc<Open>, request: Request, conflict: Conflict, completed: HashSet<String>) -> TransferId {
+    /// Starts copying `remote` (files and folders of session `from`) into the folder `remote_dir`
+    /// of session `to`. The data goes through this computer; nothing is run on either server.
+    pub(crate) fn copy(
+        self: &Arc<Self>,
+        (from, source): (SftpId, Arc<Open>),
+        (to, open): (SftpId, Arc<Open>),
+        remote: Vec<String>,
+        remote_dir: String,
+        conflict: Conflict,
+    ) -> Result<TransferId, SftpFailure> {
+        let remote_dir = names::normalize_remote(&remote_dir).map_err(name_failure)?;
+        let remote = remote.iter().map(|p| names::normalize_remote(p)).collect::<Result<Vec<_>, _>>().map_err(name_failure)?;
+        Ok(self.start(to, open, Some(source), Request::Copy { source: from, remote, remote_dir }, conflict, HashSet::new()))
+    }
+
+    fn start(
+        self: &Arc<Self>,
+        sftp: SftpId,
+        open: Arc<Open>,
+        source: Option<Arc<Open>>,
+        request: Request,
+        conflict: Conflict,
+        completed: HashSet<String>,
+    ) -> TransferId {
         let job = self.add(sftp, request.clone(), conflict, completed);
         let id = job.view().id;
         let this = self.clone();
@@ -370,6 +408,10 @@ impl Transfers {
                 Request::DownloadFile { remote, local_file } => {
                     this.run(&job, || download_to_file(&job, &open.client, remote, local_file, &this)).await
                 }
+                Request::Copy { remote, remote_dir, .. } => match &source {
+                    Some(from) => this.run(&job, || copy(&job, &from.client, &open.client, remote, remote_dir, conflict, &this)).await,
+                    None => Err(Stop::Failed((ErrorCode::Internal, Some("a copy without its source".into())))),
+                },
             };
             this.finish(&job, result);
         });
@@ -401,6 +443,15 @@ impl Transfers {
             }
         });
         self.report(job);
+    }
+}
+
+/// A file that failed after the job was cancelled stopped because of the cancel: closing a
+/// session makes its reads fail, and such a part must go, not wait for a retry.
+fn cancel_wins<T>(job: &Job, result: Result<T, Stop>) -> Result<T, Stop> {
+    match result {
+        Err(_) if job.cancelled() => Err(Stop::Cancelled),
+        other => other,
     }
 }
 
@@ -534,25 +585,7 @@ async fn upload(
         v.bytes_total = total;
     });
     let mut reporter = Reporter { transfers, job, last: Instant::now() };
-    let mut failed_dirs: Vec<String> = Vec::new();
-    for dir in &plan.dirs {
-        if job.cancelled() {
-            return Err(Stop::Cancelled);
-        }
-        match client.lstat(dir).await {
-            Ok(a) if a.kind == EntryKind::Dir => {}
-            Ok(_) => {
-                job.error(format!("{dir}: a file of that name is there"));
-                failed_dirs.push(dir.clone());
-            }
-            Err(_) => {
-                if let Err(e) = client.mkdir(dir).await {
-                    job.error(format!("{dir}: {e}"));
-                    failed_dirs.push(dir.clone());
-                }
-            }
-        }
-    }
+    let failed_dirs = make_remote_dirs(job, client, &plan.dirs).await?;
     let mut taken: HashMap<String, HashSet<String>> = HashMap::new();
     for (local, target, _) in &plan.files {
         if job.cancelled() {
@@ -562,7 +595,7 @@ async fn upload(
             continue;
         }
         let source = local.to_string_lossy().into_owned();
-        match upload_file(job, client, local, target, conflict, &mut taken, &mut reporter).await {
+        match upload_file(job, client, Source::Local(local), target, conflict, &mut taken, &mut reporter).await {
             Ok(true) => {
                 job.update(|v| v.files_done += 1);
                 job.complete(source);
@@ -580,6 +613,42 @@ async fn upload(
     Ok(())
 }
 
+/// Creates the remote folders `dirs` (parents first) where they are missing; gives the ones that
+/// could not be made, whose files are then left out.
+async fn make_remote_dirs(job: &Job, client: &SftpClient, dirs: &[String]) -> Result<Vec<String>, Stop> {
+    let mut failed: Vec<String> = Vec::new();
+    for dir in dirs {
+        if job.cancelled() {
+            return Err(Stop::Cancelled);
+        }
+        if failed.iter().any(|d| dir.starts_with(&format!("{d}/"))) {
+            continue;
+        }
+        match client.lstat(dir).await {
+            Ok(a) if a.kind == EntryKind::Dir => {}
+            Ok(_) => {
+                job.error(format!("{dir}: a file of that name is there"));
+                failed.push(dir.clone());
+            }
+            Err(_) => {
+                if let Err(e) = client.mkdir(dir).await {
+                    job.error(format!("{dir}: {e}"));
+                    failed.push(dir.clone());
+                }
+            }
+        }
+    }
+    Ok(failed)
+}
+
+/// Where a file written to a server comes from.
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Local(&'a Path),
+    /// A file on another session (a copy from server to server).
+    Remote(&'a SftpClient, &'a str),
+}
+
 /// The names in a remote folder, read once per folder for "keep both".
 async fn remote_names<'a>(
     client: &SftpClient,
@@ -593,11 +662,12 @@ async fn remote_names<'a>(
     taken.get_mut(dir).ok_or((ErrorCode::Internal, None))
 }
 
-/// Uploads one file; `Ok(false)` when it was skipped because the name is taken.
+/// Writes one file to the server (an upload, or a copy from another session); `Ok(false)` when
+/// it was skipped because the name is taken.
 async fn upload_file(
     job: &Job,
     client: &SftpClient,
-    local: &Path,
+    from: Source<'_>,
     target: &str,
     conflict: Conflict,
     taken: &mut HashMap<String, HashSet<String>>,
@@ -620,7 +690,10 @@ async fn upload_file(
     };
     let part = names::remote_join(&dir, &names::part_name(&name)).map_err(name_failure)?;
     let key = format!("r:{part}");
-    let local_size = tokio::fs::metadata(local).await.map(|m| m.len()).map_err(|e| (ErrorCode::Io, Some(e.to_string())))?;
+    let local_size = match from {
+        Source::Local(local) => tokio::fs::metadata(local).await.map(|m| m.len()).map_err(|e| (ErrorCode::Io, Some(e.to_string())))?,
+        Source::Remote(source, path) => source.stat(path).await.map(|a| a.size).map_err(sftp_failure)?,
+    };
     // A part this run left when the connection went away goes on where it stopped, if it is not
     // longer than the file; any other part is an earlier try's and goes.
     let resume = if reporter.transfers.take_resumable(&key) {
@@ -639,7 +712,17 @@ async fn upload_file(
         }
     };
     job.resumed(offset);
-    let sent = send(job, local, &file, reporter, offset).await;
+    let sent = match from {
+        Source::Local(local) => send(job, local, &file, reporter, offset).await,
+        Source::Remote(source, path) => match source.open_read(path).await {
+            Ok(input) => {
+                let piped = pipe(job, &input, &file, reporter, offset).await;
+                let _ = input.close().await;
+                piped
+            }
+            Err(e) => Err(Stop::Failed(sftp_failure(e))),
+        },
+    };
     let closed = file.close().await.map_err(sftp_failure);
     let result = match (sent, closed) {
         (Ok(()), Ok(())) => async {
@@ -654,6 +737,7 @@ async fn upload_file(
         (Err(stop), _) => Err(stop),
         (Ok(()), Err(e)) => Err(Stop::Failed(e)),
     };
+    let result = cancel_wins(job, result);
     match &result {
         Err(stop) if keeps_part(stop) => reporter.transfers.mark_resumable(key),
         Err(_) => {
@@ -703,19 +787,147 @@ async fn send(job: &Job, local: &Path, file: &RemoteFile, reporter: &mut Reporte
     }
 }
 
+/// Copies a file from one session to another, from `start` on: [`WINDOW`] reads at once, then
+/// their data written at the same offsets.
+async fn pipe(job: &Job, input: &RemoteFile, file: &RemoteFile, reporter: &mut Reporter<'_>, start: u64) -> Result<(), Stop> {
+    let mut pos = start;
+    loop {
+        if job.cancelled() {
+            return Err(Stop::Cancelled);
+        }
+        let reads = (0..WINDOW).map(|i| {
+            let at = pos.saturating_add(i * u64::from(CHUNK));
+            async move { (at, input.read_at(at, CHUNK).await) }
+        });
+        let mut chunks: Vec<(u64, Vec<u8>)> = Vec::new();
+        for (at, data) in futures::future::join_all(reads).await {
+            // After a short read the rest of this window starts too far; the next one starts
+            // where the data ends.
+            if at != pos {
+                break;
+            }
+            let data = data.map_err(sftp_failure)?;
+            if data.is_empty() {
+                break;
+            }
+            let len = data.len();
+            pos = pos.saturating_add(len as u64);
+            chunks.push((at, data));
+            if len < CHUNK as usize {
+                break;
+            }
+        }
+        // The first read of a window always starts at `pos`, so nothing read means the end.
+        if chunks.is_empty() {
+            return Ok(());
+        }
+        let sizes: u64 = chunks.iter().map(|(_, c)| c.len() as u64).sum();
+        let writes = chunks.into_iter().map(|(at, data)| file.write_at(at, data));
+        for result in futures::future::join_all(writes).await {
+            result.map_err(sftp_failure)?;
+        }
+        job.bytes.fetch_add(sizes, Ordering::Relaxed);
+        reporter.tick();
+    }
+}
+
+// ---- Copy from server to server -------------------------------------------------------------
+
+/// The target of a name from the source server: a plain name in the target folder.
+#[allow(clippy::ptr_arg)] // the shape of `Join<T>`
+fn remote_target(dir: &String, name: &str) -> Result<String, String> {
+    names::remote_join(dir, name).map_err(|e| e.to_string())
+}
+
+async fn copy(
+    job: &Job,
+    from: &SftpClient,
+    to: &SftpClient,
+    remote: Vec<String>,
+    remote_dir: String,
+    conflict: Conflict,
+    transfers: &Transfers,
+) -> Result<(), Stop> {
+    let mut plan = RemotePlan::<String>::default();
+    for path in remote {
+        if job.cancelled() {
+            return Err(Stop::Cancelled);
+        }
+        plan_remote(job, from, path, remote_dir.clone(), 0, &mut plan, remote_target).await?;
+    }
+    if job.cancelled() {
+        return Err(Stop::Cancelled);
+    }
+    plan.files.retain(|(source, _, _)| !job.is_completed(source));
+    let total: u64 = plan.files.iter().map(|(_, _, size)| *size).fold(0, u64::saturating_add);
+    job.update(|v| {
+        v.files_total = plan.files.len();
+        v.bytes_total = total;
+    });
+    let mut reporter = Reporter { transfers, job, last: Instant::now() };
+    let failed_dirs = make_remote_dirs(job, to, &plan.dirs).await?;
+    let mut taken: HashMap<String, HashSet<String>> = HashMap::new();
+    for (source, target, _) in &plan.files {
+        if job.cancelled() {
+            return Err(Stop::Cancelled);
+        }
+        if failed_dirs.iter().any(|d| target.starts_with(&format!("{d}/"))) {
+            continue;
+        }
+        match upload_file(job, to, Source::Remote(from, source), target, conflict, &mut taken, &mut reporter).await {
+            Ok(true) => {
+                job.update(|v| v.files_done += 1);
+                job.complete(source.clone());
+            }
+            Ok(false) => {
+                job.update(|v| v.skipped += 1);
+                job.complete(source.clone());
+            }
+            Err(Stop::Cancelled) => return Err(Stop::Cancelled),
+            Err(stop @ Stop::Failed(_)) if keeps_part(&stop) => return Err(stop),
+            Err(Stop::Failed((_, detail))) => job.error(format!("{source}: {}", detail.unwrap_or_default())),
+        }
+        reporter.tick();
+    }
+    Ok(())
+}
+
 // ---- Download -------------------------------------------------------------------------------
 
-/// A planned download: local folders to create (parents first) and files (remote path, local
-/// path, stated size).
-#[derive(Default)]
-struct DownloadPlan {
-    dirs: Vec<PathBuf>,
-    files: Vec<(String, PathBuf, u64)>,
+/// A planned download or copy: target folders to create (parents first) and files (remote path,
+/// target, stated size). The target is a local path for a download, a remote one for a copy.
+struct RemotePlan<T> {
+    dirs: Vec<T>,
+    files: Vec<(String, T, u64)>,
+}
+
+impl<T> Default for RemotePlan<T> {
+    fn default() -> Self {
+        RemotePlan { dirs: Vec::new(), files: Vec::new() }
+    }
+}
+
+/// Where a name from the server goes in a target folder; refuses a name that is not plain there.
+type Join<T> = fn(&T, &str) -> Result<T, String>;
+
+/// The target of a name from the server in a local folder: a plain name here.
+#[allow(clippy::ptr_arg)] // the shape of `Join<T>`
+fn local_target(dir: &PathBuf, name: &str) -> Result<PathBuf, String> {
+    names::check_local_name_here(name).map_err(|e| e.to_string())?;
+    Ok(dir.join(name))
 }
 
 type Plan<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SftpFailure>> + Send + 'a>>;
 
-fn plan_remote<'a>(job: &'a Job, client: &'a SftpClient, path: String, local_dir: PathBuf, depth: usize, plan: &'a mut DownloadPlan) -> Plan<'a> {
+fn plan_remote<'a, T: Clone + Send + Sync + 'a>(
+    job: &'a Job,
+    client: &'a SftpClient,
+    path: String,
+    target_dir: T,
+    depth: usize,
+    plan: &'a mut RemotePlan<T>,
+    join: Join<T>,
+) -> Plan<'a> {
     Box::pin(async move {
         if depth > MAX_DEPTH {
             return Err((ErrorCode::TooManyFiles, Some(format!("deeper than {MAX_DEPTH} folders"))));
@@ -727,12 +939,14 @@ fn plan_remote<'a>(job: &'a Job, client: &'a SftpClient, path: String, local_dir
             job.error(format!("{path}: has no name"));
             return Ok(());
         };
-        // The name becomes part of a local path: it must be a plain name here.
-        if let Err(e) = names::check_local_name_here(&name) {
-            job.error(format!("{path}: {e}"));
-            return Ok(());
-        }
-        let local = local_dir.join(&name);
+        // The name becomes part of a path on the target: it must be a plain name there.
+        let target = match join(&target_dir, &name) {
+            Ok(target) => target,
+            Err(e) => {
+                job.error(format!("{path}: {e}"));
+                return Ok(());
+            }
+        };
         let attrs = match client.lstat(&path).await {
             Ok(a) => a,
             Err(e) => {
@@ -753,15 +967,15 @@ fn plan_remote<'a>(job: &'a Job, client: &'a SftpClient, path: String, local_dir
         };
         match attrs.kind {
             EntryKind::Dir => {
-                plan.dirs.push(local.clone());
+                plan.dirs.push(target.clone());
                 for entry in walk_list(client, &path).await? {
                     match names::remote_join(&path, &entry.name) {
-                        Ok(child) => plan_remote(job, client, child, local.clone(), depth + 1, plan).await?,
+                        Ok(child) => plan_remote(job, client, child, target.clone(), depth + 1, plan, join).await?,
                         Err(e) => job.error(format!("{path}/{}: {e}", entry.name.chars().filter(|c| !c.is_control()).collect::<String>())),
                     }
                 }
             }
-            EntryKind::File => plan.files.push((path, local, attrs.size)),
+            EntryKind::File => plan.files.push((path, target, attrs.size)),
             _ => job.error(format!("{path}: not a file or folder")),
         }
         Ok(())
@@ -776,12 +990,15 @@ async fn download(
     conflict: Conflict,
     transfers: &Transfers,
 ) -> Result<(), Stop> {
-    let mut plan = DownloadPlan::default();
+    let mut plan = RemotePlan::<PathBuf>::default();
     for path in remote {
         if job.cancelled() {
             return Err(Stop::Cancelled);
         }
-        plan_remote(job, client, path, local_dir.clone(), 0, &mut plan).await?;
+        plan_remote(job, client, path, local_dir.clone(), 0, &mut plan, local_target).await?;
+    }
+    if job.cancelled() {
+        return Err(Stop::Cancelled);
     }
     plan.files.retain(|(remote, _, _)| !job.is_completed(remote));
     let total: u64 = plan.files.iter().map(|(_, _, size)| *size).fold(0, u64::saturating_add);
@@ -878,6 +1095,7 @@ async fn download_file(
     let flushed = out.flush().await.map_err(|e| Stop::Failed((ErrorCode::Io, Some(e.to_string()))));
     drop(out);
     let result = received.and(flushed).and_then(|()| std::fs::rename(&part, &target).map_err(|e| Stop::Failed((ErrorCode::Io, Some(e.to_string())))));
+    let result = cancel_wins(job, result);
     match &result {
         Err(stop) if keeps_part(stop) => reporter.transfers.mark_resumable(key),
         Err(_) => {

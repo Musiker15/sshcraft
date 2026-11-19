@@ -110,6 +110,8 @@ pub enum ErrorCode {
     DeviceBound,
     /// The user cancelled a sign-in question (password, code, passphrase).
     SignInCancelled,
+    /// The server turned down every way of signing in that was tried.
+    SignInFailed,
     InvalidTemplate,
     TooManyTemplates,
     /// Only `http` and `https` links are opened.

@@ -463,3 +463,123 @@ async fn a_changed_host_key_has_its_own_code() {
     let err = session.execute(Caller::User, "sftp.open", json!({ "host_id": host })).await.unwrap_err();
     assert_eq!(code(err), ErrorCode::HostKeyChanged);
 }
+
+/// A second server beside the fixture's, with its own folder, open as an SFTP session.
+async fn second(f: &Fixture) -> (sshcraft_ssh::testing::TestServer, tempfile::TempDir, u64) {
+    let auth = sshcraft_ssh::testing::TestAuth { quiet: true, ..Default::default() };
+    let (server, host) = crate::testing::test_host(&f.session, "second host", auth, true).await;
+    let root = tempfile::tempdir().unwrap();
+    server.serve_sftp(root.path());
+    let opened = run(f, "sftp.open", json!({ "host_id": host })).await.unwrap();
+    (server, root, opened["id"].as_u64().unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn copies_a_folder_tree_from_server_to_server() {
+    let f = fixture().await;
+    let (_server, root, to) = second(&f).await;
+    tree(f.root.path());
+    let copy = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/project"], "to": to, "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &copy["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!((job["direction"].as_str(), job["sftp"].as_u64(), job["source"].as_u64()), (Some("copy"), Some(to), Some(f.id)));
+    assert_eq!((job["files_done"].as_u64(), job["files_total"].as_u64()), (Some(2), Some(2)));
+    assert_eq!(job["bytes_done"], 300_010);
+    same_tree(f.root.path(), root.path());
+    no_parts(root.path());
+
+    // The default leaves a taken name alone; "keep both" puts the copy beside it.
+    std::fs::write(f.root.path().join("note.txt"), b"new").unwrap();
+    std::fs::write(root.path().join("note.txt"), b"old").unwrap();
+    let skip = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/note.txt"], "to": to, "remote_dir": "/" })).await.unwrap();
+    assert_eq!(ended(&f, &skip["transfer"]).await["skipped"], 1);
+    let keep =
+        run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/note.txt"], "to": to, "remote_dir": "/", "conflict": "rename" })).await.unwrap();
+    ended(&f, &keep["transfer"]).await;
+    assert_eq!(std::fs::read(root.path().join("note.txt")).unwrap(), b"old");
+    assert_eq!(std::fs::read(root.path().join("note (2).txt")).unwrap(), b"new");
+}
+
+/// A name from one server goes to the other only if it is a plain name; the rest still comes.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn hostile_names_are_not_copied() {
+    let f = fixture().await;
+    let (_server, root, to) = second(&f).await;
+    std::fs::create_dir(f.root.path().join("box")).unwrap();
+    std::fs::write(f.root.path().join("box/good"), b"ok").unwrap();
+    std::fs::write(f.root.path().join("box/esc\u{1b}[2J"), b"bad").unwrap();
+    let copy = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/box"], "to": to, "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &copy["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(job["errors"].as_array().unwrap().len(), 1, "{job}");
+    let names: Vec<String> =
+        std::fs::read_dir(root.path().join("box")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["good"]);
+}
+
+/// Closing the session a copy reads from stops it, and the target keeps no part.
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_the_source_stops_a_copy() {
+    let f = fixture().await;
+    let (_server, root, to) = second(&f).await;
+    std::fs::write(f.root.path().join("big.bin"), vec![7u8; 40 * 1024 * 1024]).unwrap();
+    let copy = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/big.bin"], "to": to, "remote_dir": "/" })).await.unwrap();
+    run(&f, "sftp.close", json!({ "id": f.id })).await.unwrap();
+    let job = ended(&f, &copy["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "cancelled", "{job}");
+    assert!(!root.path().join("big.bin").exists());
+    no_parts(root.path());
+}
+
+/// A cancelled copy can be tried again; it reads from its source session once more.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_copy_can_be_tried_again() {
+    let f = fixture().await;
+    let (_server, root, to) = second(&f).await;
+    let data = pattern(40 * 1024 * 1024);
+    std::fs::write(f.root.path().join("data.bin"), &data).unwrap();
+    let copy = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/data.bin"], "to": to, "remote_dir": "/" })).await.unwrap();
+    run(&f, "sftp.cancel", json!({ "transfer": copy["transfer"] })).await.unwrap();
+    assert_eq!(ended(&f, &copy["transfer"]).await["state"]["kind"], "cancelled");
+    let again = run(&f, "sftp.retry", json!({ "transfer": copy["transfer"] })).await.unwrap();
+    let job = ended(&f, &again["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(std::fs::read(root.path().join("data.bin")).unwrap(), data);
+    no_parts(root.path());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_copy_needs_both_sessions_and_some_paths() {
+    let f = fixture().await;
+    let err = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/x"], "to": 999, "remote_dir": "/" })).await.unwrap_err();
+    assert_eq!(code(err), ErrorCode::NotFound);
+    let err = run(&f, "sftp.copy", json!({ "from": 999, "remote": ["/x"], "to": f.id, "remote_dir": "/" })).await.unwrap_err();
+    assert_eq!(code(err), ErrorCode::NotFound);
+    assert!(run(&f, "sftp.copy", json!({ "from": f.id, "remote": [], "to": f.id, "remote_dir": "/" })).await.is_err());
+}
+
+/// Closing the source while a file is being written stops the copy too, and its part goes: the
+/// reads that fail after the close are the cancel, not a lost connection to go on from.
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_the_source_mid_file_leaves_no_part() {
+    let f = fixture().await;
+    let (_server, root, to) = second(&f).await;
+    std::fs::write(f.root.path().join("big.bin"), vec![7u8; 64 * 1024 * 1024]).unwrap();
+    let copy = run(&f, "sftp.copy", json!({ "from": f.id, "remote": ["/big.bin"], "to": to, "remote_dir": "/" })).await.unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let all = run(&f, "sftp.transfers", json!({})).await.unwrap();
+        let job = all.as_array().unwrap().iter().find(|j| j["id"] == copy["transfer"]).cloned().unwrap();
+        if job["bytes_done"].as_u64().unwrap_or(0) > 0 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline && job["state"]["kind"] != "done", "the copy did not start: {job}");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    run(&f, "sftp.close", json!({ "id": f.id })).await.unwrap();
+    let job = ended(&f, &copy["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "cancelled", "{job}");
+    assert!(!root.path().join("big.bin").exists());
+    no_parts(root.path());
+}

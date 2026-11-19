@@ -49,10 +49,16 @@ pub fn specs() -> Vec<CommandSpec> {
             "{ id, remote: [paths], local_dir: absolute, conflict?: skip | overwrite | rename } -> { transfer }",
             run_download,
         ),
+        command(
+            "sftp.copy",
+            "Copy files between hosts",
+            "{ from: id, remote: [paths], to: id, remote_dir, conflict?: skip | overwrite | rename } -> { transfer }",
+            run_copy,
+        ),
         query(
             "sftp.transfers",
             "List transfers",
-            "-> [{ id, sftp, direction, label, state, files_done, files_total, bytes_done, bytes_total, skipped, errors, resumed }]",
+            "-> [{ id, sftp, source, direction, label, state, files_done, files_total, bytes_done, bytes_total, skipped, errors, resumed }]",
             run_transfers,
         ),
         command("sftp.cancel", "Cancel a transfer", "{ transfer }", run_cancel),
@@ -274,6 +280,28 @@ struct DownloadParams {
     local_dir: std::path::PathBuf,
     #[serde(default)]
     conflict: Conflict,
+}
+
+#[derive(Deserialize)]
+struct CopyParams {
+    from: SftpId,
+    remote: Vec<String>,
+    to: SftpId,
+    remote_dir: String,
+    #[serde(default)]
+    conflict: Conflict,
+}
+
+fn run_copy(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let CopyParams { from, remote, to, remote_dir, conflict } = parse("sftp.copy", params)?;
+        if remote.is_empty() || remote.len() > MAX_PATHS {
+            return Err(CommandError::bad_params("sftp.copy", format!("remote: 1 to {MAX_PATHS}")));
+        }
+        let transfer = ctx.session.sftp().copy(from, remote, to, remote_dir, conflict).map_err(failed)?;
+        Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
 }
 
 #[derive(Deserialize)]

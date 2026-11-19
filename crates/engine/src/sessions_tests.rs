@@ -2751,3 +2751,10 @@ mod launch {
         assert!(!out.contains("echo new-text") && !out.contains("echo old-text"), "{out}");
     }
 }
+
+/// A sign-in the server turned down says so as its own code, not as a session error.
+#[test]
+fn a_failed_sign_in_has_its_own_code() {
+    assert_eq!(failure_code(Failure::End(EndReason::AuthFailed, None, None)).0, ErrorCode::SignInFailed);
+    assert_eq!(failure_code(Failure::End(EndReason::AuthFailed, Some(ErrorCode::PasswordRejected), None)).0, ErrorCode::PasswordRejected);
+}
