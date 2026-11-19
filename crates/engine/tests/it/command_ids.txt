@@ -104,7 +104,9 @@ sftp.list
 sftp.local_list
 sftp.mkdir
 sftp.open
+sftp.reconnect
 sftp.rename
+sftp.retry
 sftp.transfers
 sftp.upload
 share.confirm_recipient

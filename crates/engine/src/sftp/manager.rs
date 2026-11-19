@@ -138,6 +138,36 @@ impl SftpManager {
 
     /// Connects to `host` and starts SFTP; gives the id and the home folder.
     pub async fn open(&self, host: HostId) -> Result<(SftpId, String), SftpFailure> {
+        let (open, home) = self.connect(host).await?;
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        self.lock().insert(id, Arc::new(open));
+        Ok((id, home))
+    }
+
+    /// Connects session `id` again, after its connection went away; its id, its transfers'
+    /// parts and what the pane shows stay. Gives the home folder.
+    pub async fn reconnect(&self, id: SftpId) -> Result<String, SftpFailure> {
+        let host = self.get(id)?.host;
+        // A closed connection is not taken from the pool again, so this one is fresh.
+        let (open, home) = self.connect(host).await?;
+        let old = self.lock().insert(id, Arc::new(open));
+        if let Some(old) = old {
+            old.client.close();
+            if let Ok(old) = Arc::try_unwrap(old) {
+                crate::pool::release(old.connection).await;
+            }
+        }
+        Ok(home)
+    }
+
+    /// Starts transfer `transfer` again on its session's current connection.
+    pub fn retry(&self, transfer: super::transfers::TransferId) -> Result<super::transfers::TransferId, SftpFailure> {
+        let id = self.transfers.sftp_of(transfer).ok_or((ErrorCode::NotFound, Some(format!("transfer {transfer}"))))?;
+        let open = self.get(id)?;
+        self.transfers.retry(transfer, open)
+    }
+
+    async fn connect(&self, host: HostId) -> Result<(Open, String), SftpFailure> {
         let (connection, _) = connect_session(&self.ctx, host, &OpenedKeys::default(), true).await.map_err(failure_code)?;
         let client = match connection.sftp().await {
             Ok(client) => client,
@@ -154,9 +184,7 @@ impl SftpManager {
                 return Err(e);
             }
         };
-        let id = self.next.fetch_add(1, Ordering::SeqCst);
-        self.lock().insert(id, Arc::new(Open { host, connection, client }));
-        Ok((id, home))
+        Ok((Open { host, connection, client }, home))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<SftpId, Arc<Open>>> {

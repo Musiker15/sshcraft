@@ -52,12 +52,32 @@ pub fn specs() -> Vec<CommandSpec> {
         query(
             "sftp.transfers",
             "List transfers",
-            "-> [{ id, sftp, direction, label, state, files_done, files_total, bytes_done, bytes_total, skipped, errors }]",
+            "-> [{ id, sftp, direction, label, state, files_done, files_total, bytes_done, bytes_total, skipped, errors, resumed }]",
             run_transfers,
         ),
         command("sftp.cancel", "Cancel a transfer", "{ transfer }", run_cancel),
         command("sftp.clear_transfers", "Clear ended transfers", "{}", run_clear),
+        command("sftp.retry", "Try a transfer again", "{ transfer } -> { transfer }", run_retry),
+        command("sftp.reconnect", "Connect a host's files again", "{ id } -> { home }", run_reconnect),
     ]
+}
+
+fn run_retry(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let TransferParams { transfer } = parse("sftp.retry", params)?;
+        let transfer = ctx.session.sftp().retry(transfer).map_err(failed)?;
+        Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
+}
+
+fn run_reconnect(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let IdParams { id } = parse("sftp.reconnect", params)?;
+        let home = ctx.session.sftp().reconnect(id).await.map_err(failed)?;
+        Ok(json!({ "home": home }))
+    }
+    .boxed()
 }
 
 fn failed((code, detail): SftpFailure) -> CommandError {

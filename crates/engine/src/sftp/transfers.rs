@@ -1,6 +1,8 @@
 //! Uploads and downloads: one job per request, files one after another, each file read or
 //! written in [`WINDOW`] requests at once. A file is written under its part name and renamed when
 //! complete; a cancelled or failed file's part is deleted, so nothing half-written stays behind.
+//! Only when the connection was lost does the part stay: [`Transfers::retry`] goes on from it.
+//! A part is continued only if this run of SSHCraft left it, so a stale or foreign one never is.
 //! Progress goes out as [`crate::EngineEvent::TransferStatus`].
 
 use std::collections::{HashMap, HashSet};
@@ -77,12 +79,26 @@ pub struct TransferView {
     pub skipped: usize,
     /// What went wrong with single files (the job went on), at most [`MAX_ERRORS`].
     pub errors: Vec<String>,
+    /// Bytes taken over from parts an earlier try left, counted in `bytes_done`.
+    pub resumed: u64,
+}
+
+/// What a job was asked to do, kept so it can be tried again.
+#[derive(Debug, Clone)]
+enum Request {
+    Upload { local: Vec<PathBuf>, remote_dir: String },
+    Download { remote: Vec<String>, local_dir: PathBuf },
 }
 
 struct Job {
     view: Mutex<TransferView>,
     cancel: AtomicBool,
     bytes: AtomicU64,
+    request: Request,
+    conflict: Conflict,
+    /// The sources (local paths of an upload, remote paths of a download) that are done, so a
+    /// retry leaves them alone instead of sending them again (or beside, as `name (2)`).
+    completed: Mutex<HashSet<String>>,
 }
 
 impl Job {
@@ -107,6 +123,26 @@ impl Job {
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
+
+    fn is_completed(&self, source: &str) -> bool {
+        self.completed.lock().unwrap_or_else(PoisonError::into_inner).contains(source)
+    }
+
+    fn complete(&self, source: String) {
+        self.completed.lock().unwrap_or_else(PoisonError::into_inner).insert(source);
+    }
+
+    fn resumed(&self, bytes: u64) {
+        self.bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.update(|v| v.resumed = v.resumed.saturating_add(bytes));
+    }
+}
+
+/// Whether a file that stopped this way keeps its part: only when the connection went away
+/// (the user did not ask to stop, and the part can be continued). A cancel or any other failure
+/// deletes it.
+fn keeps_part(stop: &Stop) -> bool {
+    matches!(stop, Stop::Failed((ErrorCode::Network | ErrorCode::Timeout, _)))
 }
 
 /// The jobs of all SFTP sessions.
@@ -115,6 +151,9 @@ pub struct Transfers {
     next: AtomicU64,
     events: EventBus,
     running: Arc<tokio::sync::Semaphore>,
+    /// Parts a lost connection left, which a retry may continue: `r:<remote path>` for an
+    /// upload's, `l:<local path>` for a download's.
+    resumable: Mutex<HashSet<String>>,
 }
 
 /// Why a job or a file stopped.
@@ -131,7 +170,45 @@ impl From<SftpFailure> for Stop {
 
 impl Transfers {
     pub(crate) fn new(events: EventBus) -> Self {
-        Transfers { jobs: Mutex::new(Vec::new()), next: AtomicU64::new(1), events, running: Arc::new(tokio::sync::Semaphore::new(RUNNING)) }
+        Transfers {
+            jobs: Mutex::new(Vec::new()),
+            next: AtomicU64::new(1),
+            events,
+            running: Arc::new(tokio::sync::Semaphore::new(RUNNING)),
+            resumable: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Marks a part as left by a lost connection, so a retry may go on from it.
+    pub(crate) fn mark_resumable(&self, key: String) {
+        self.resumable.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
+    }
+
+    /// Whether the part `key` may be continued; it may only once.
+    fn take_resumable(&self, key: &str) -> bool {
+        self.resumable.lock().unwrap_or_else(PoisonError::into_inner).remove(key)
+    }
+
+    /// The session a job belongs to.
+    pub fn sftp_of(&self, id: TransferId) -> Option<SftpId> {
+        self.lock().iter().map(|j| j.view()).find(|v| v.id == id).map(|v| v.sftp)
+    }
+
+    /// Starts job `id` again: one that failed, was cancelled, or ended with files that failed.
+    /// Files it finished stay as they are; a part a lost connection left is continued.
+    pub(crate) fn retry(self: &Arc<Self>, id: TransferId, open: Arc<Open>) -> Result<TransferId, SftpFailure> {
+        let job = self.lock().iter().find(|j| j.view().id == id).cloned().ok_or((ErrorCode::NotFound, Some(format!("transfer {id}"))))?;
+        let view = job.view();
+        let again = match &view.state {
+            TransferState::Failed { .. } | TransferState::Cancelled => true,
+            TransferState::Done => !view.errors.is_empty(),
+            TransferState::Queued | TransferState::Running => false,
+        };
+        if !again {
+            return Err((ErrorCode::NotSupported, Some("only a job that did not finish is tried again".into())));
+        }
+        let completed = job.completed.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        Ok(self.start(view.sftp, open, job.request.clone(), job.conflict, completed))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Arc<Job>>> {
@@ -168,7 +245,13 @@ impl Transfers {
         self.lock().retain(|j| matches!(j.view().state, TransferState::Queued | TransferState::Running));
     }
 
-    fn add(&self, sftp: SftpId, direction: Direction, label: String) -> Arc<Job> {
+    fn add(&self, sftp: SftpId, request: Request, conflict: Conflict, completed: HashSet<String>) -> Arc<Job> {
+        let (direction, label) = match &request {
+            Request::Upload { local, .. } => {
+                (Direction::Upload, label_of(local.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()), local.len()))
+            }
+            Request::Download { remote, .. } => (Direction::Download, label_of(remote.first().and_then(|p| names::remote_name(p)), remote.len())),
+        };
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let view = TransferView {
             id,
@@ -182,8 +265,16 @@ impl Transfers {
             bytes_total: 0,
             skipped: 0,
             errors: Vec::new(),
+            resumed: 0,
         };
-        let job = Arc::new(Job { view: Mutex::new(view), cancel: AtomicBool::new(false), bytes: AtomicU64::new(0) });
+        let job = Arc::new(Job {
+            view: Mutex::new(view),
+            cancel: AtomicBool::new(false),
+            bytes: AtomicU64::new(0),
+            request,
+            conflict,
+            completed: Mutex::new(completed),
+        });
         let mut jobs = self.lock();
         // Old ended jobs make room.
         while jobs.len() >= MAX_ENDED {
@@ -215,15 +306,7 @@ impl Transfers {
         if local.iter().any(|p| !p.is_absolute()) {
             return Err(name_failure(names::NameError::NotAbsolute));
         }
-        let label = label_of(local.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()), local.len());
-        let job = self.add(sftp, Direction::Upload, label);
-        let id = job.view().id;
-        let this = self.clone();
-        tokio::spawn(async move {
-            let result = this.run(&job, || upload(&job, &open.client, local, remote_dir, conflict, &this)).await;
-            this.finish(&job, result);
-        });
-        Ok(id)
+        Ok(self.start(sftp, open, Request::Upload { local, remote_dir }, conflict, HashSet::new()))
     }
 
     /// Starts downloading `remote` (files and folders) into the local folder `local_dir`.
@@ -242,15 +325,21 @@ impl Transfers {
             return Err((ErrorCode::NotFound, Some(local_dir.to_string_lossy().into_owned())));
         }
         let remote = remote.iter().map(|p| names::normalize_remote(p)).collect::<Result<Vec<_>, _>>().map_err(name_failure)?;
-        let label = label_of(remote.first().and_then(|p| names::remote_name(p)), remote.len());
-        let job = self.add(sftp, Direction::Download, label);
+        Ok(self.start(sftp, open, Request::Download { remote, local_dir }, conflict, HashSet::new()))
+    }
+
+    fn start(self: &Arc<Self>, sftp: SftpId, open: Arc<Open>, request: Request, conflict: Conflict, completed: HashSet<String>) -> TransferId {
+        let job = self.add(sftp, request.clone(), conflict, completed);
         let id = job.view().id;
         let this = self.clone();
         tokio::spawn(async move {
-            let result = this.run(&job, || download(&job, &open.client, remote, local_dir, conflict, &this)).await;
+            let result = match request {
+                Request::Upload { local, remote_dir } => this.run(&job, || upload(&job, &open.client, local, remote_dir, conflict, &this)).await,
+                Request::Download { remote, local_dir } => this.run(&job, || download(&job, &open.client, remote, local_dir, conflict, &this)).await,
+            };
             this.finish(&job, result);
         });
-        Ok(id)
+        id
     }
 
     /// Waits for a free slot, then runs the job.
@@ -311,15 +400,15 @@ struct UploadPlan {
     files: Vec<(PathBuf, String, u64)>,
 }
 
-fn plan_upload(job: &Job, local: &[PathBuf], remote_dir: &str) -> Result<UploadPlan, SftpFailure> {
+fn plan_upload(errors: &mut Vec<String>, local: &[PathBuf], remote_dir: &str) -> Result<UploadPlan, SftpFailure> {
     let mut plan = UploadPlan::default();
     for path in local {
-        plan_local(job, path, remote_dir, 0, &mut plan)?;
+        plan_local(errors, path, remote_dir, 0, &mut plan)?;
     }
     Ok(plan)
 }
 
-fn plan_local(job: &Job, path: &Path, remote_dir: &str, depth: usize, plan: &mut UploadPlan) -> Result<(), SftpFailure> {
+fn plan_local(errors: &mut Vec<String>, path: &Path, remote_dir: &str, depth: usize, plan: &mut UploadPlan) -> Result<(), SftpFailure> {
     if depth > MAX_DEPTH {
         return Err((ErrorCode::TooManyFiles, Some(format!("deeper than {MAX_DEPTH} folders"))));
     }
@@ -328,18 +417,18 @@ fn plan_local(job: &Job, path: &Path, remote_dir: &str, depth: usize, plan: &mut
     }
     let shown = path.to_string_lossy().into_owned();
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        job.error(format!("{shown}: the name is not UTF-8"));
+        errors.push(format!("{shown}: the name is not UTF-8"));
         return Ok(());
     };
     let target = match names::remote_join(remote_dir, name) {
         Ok(t) => t,
         Err(e) => {
-            job.error(format!("{shown}: {e}"));
+            errors.push(format!("{shown}: {e}"));
             return Ok(());
         }
     };
     let Ok(meta) = std::fs::symlink_metadata(path) else {
-        job.error(format!("{shown}: cannot be read"));
+        errors.push(format!("{shown}: cannot be read"));
         return Ok(());
     };
     let meta = if meta.file_type().is_symlink() {
@@ -347,7 +436,7 @@ fn plan_local(job: &Job, path: &Path, remote_dir: &str, depth: usize, plan: &mut
         match std::fs::metadata(path) {
             Ok(m) if m.is_file() => m,
             _ => {
-                job.error(format!("{shown}: a link to a folder is not followed"));
+                errors.push(format!("{shown}: a link to a folder is not followed"));
                 return Ok(());
             }
         }
@@ -360,12 +449,12 @@ fn plan_local(job: &Job, path: &Path, remote_dir: &str, depth: usize, plan: &mut
             std::fs::read_dir(path).map_err(|e| (ErrorCode::Io, Some(format!("{shown}: {e}"))))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
         children.sort();
         for child in children {
-            plan_local(job, &child, &target, depth + 1, plan)?;
+            plan_local(errors, &child, &target, depth + 1, plan)?;
         }
     } else if meta.is_file() {
         plan.files.push((path.to_path_buf(), target, meta.len()));
     } else {
-        job.error(format!("{shown}: not a file or folder"));
+        errors.push(format!("{shown}: not a file or folder"));
     }
     Ok(())
 }
@@ -381,18 +470,21 @@ async fn upload(
     let plan = {
         let local = local.clone();
         let remote_dir = remote_dir.clone();
-        let probe = Arc::new(Job { view: Mutex::new(job.view()), cancel: AtomicBool::new(false), bytes: AtomicU64::new(0) });
-        let planned = {
-            let probe = probe.clone();
-            tokio::task::spawn_blocking(move || plan_upload(&probe, &local, &remote_dir))
-                .await
-                .map_err(|e| Stop::Failed((ErrorCode::Internal, Some(e.to_string()))))??
-        };
-        for e in probe.view().errors {
+        let (planned, errors) = tokio::task::spawn_blocking(move || {
+            let mut errors = Vec::new();
+            let planned = plan_upload(&mut errors, &local, &remote_dir);
+            (planned, errors)
+        })
+        .await
+        .map_err(|e| Stop::Failed((ErrorCode::Internal, Some(e.to_string()))))?;
+        for e in errors {
             job.error(e);
         }
-        planned
+        planned?
     };
+    // A retry leaves the files an earlier try finished.
+    let mut plan = plan;
+    plan.files.retain(|(local, _, _)| !job.is_completed(&local.to_string_lossy()));
     let total: u64 = plan.files.iter().map(|(_, _, size)| *size).fold(0, u64::saturating_add);
     job.update(|v| {
         v.files_total = plan.files.len();
@@ -426,11 +518,18 @@ async fn upload(
         if failed_dirs.iter().any(|d| target.starts_with(&format!("{d}/"))) {
             continue;
         }
+        let source = local.to_string_lossy().into_owned();
         match upload_file(job, client, local, target, conflict, &mut taken, &mut reporter).await {
-            Ok(true) => job.update(|v| v.files_done += 1),
-            Ok(false) => job.update(|v| v.skipped += 1),
+            Ok(true) => {
+                job.update(|v| v.files_done += 1);
+                job.complete(source);
+            }
+            Ok(false) => {
+                job.update(|v| v.skipped += 1);
+                job.complete(source);
+            }
             Err(Stop::Cancelled) => return Err(Stop::Cancelled),
-            Err(Stop::Failed((ErrorCode::Network, detail))) => return Err(Stop::Failed((ErrorCode::Network, detail))),
+            Err(stop @ Stop::Failed(_)) if keeps_part(&stop) => return Err(stop),
             Err(Stop::Failed((_, detail))) => job.error(format!("{target}: {}", detail.unwrap_or_default())),
         }
         reporter.tick();
@@ -477,10 +576,27 @@ async fn upload_file(
         }
     };
     let part = names::remote_join(&dir, &names::part_name(&name)).map_err(name_failure)?;
-    // A part of ours from an earlier try that did not finish.
-    let _ = client.remove(&part).await;
-    let file = client.create_new(&part).await.map_err(sftp_failure)?;
-    let sent = send(job, local, &file, reporter).await;
+    let key = format!("r:{part}");
+    let local_size = tokio::fs::metadata(local).await.map(|m| m.len()).map_err(|e| (ErrorCode::Io, Some(e.to_string())))?;
+    // A part this run left when the connection went away goes on where it stopped, if it is not
+    // longer than the file; any other part is an earlier try's and goes.
+    let resume = if reporter.transfers.take_resumable(&key) {
+        match client.lstat(&part).await {
+            Ok(a) if a.kind == EntryKind::File && a.size <= local_size => Some(a.size),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let (file, offset) = match resume {
+        Some(offset) => (client.open_write(&part).await.map_err(sftp_failure)?, offset),
+        None => {
+            let _ = client.remove(&part).await;
+            (client.create_new(&part).await.map_err(sftp_failure)?, 0)
+        }
+    };
+    job.resumed(offset);
+    let sent = send(job, local, &file, reporter, offset).await;
     let closed = file.close().await.map_err(sftp_failure);
     let result = match (sent, closed) {
         (Ok(()), Ok(())) => async {
@@ -495,15 +611,20 @@ async fn upload_file(
         (Err(stop), _) => Err(stop),
         (Ok(()), Err(e)) => Err(Stop::Failed(e)),
     };
-    if result.is_err() {
-        let _ = client.remove(&part).await;
+    match &result {
+        Err(stop) if keeps_part(stop) => reporter.transfers.mark_resumable(key),
+        Err(_) => {
+            let _ = client.remove(&part).await;
+        }
+        Ok(()) => {}
     }
     result.map(|()| true)
 }
 
-async fn send(job: &Job, local: &Path, file: &RemoteFile, reporter: &mut Reporter<'_>) -> Result<(), Stop> {
+async fn send(job: &Job, local: &Path, file: &RemoteFile, reporter: &mut Reporter<'_>, start: u64) -> Result<(), Stop> {
     let mut source = tokio::fs::File::open(local).await.map_err(|e| (ErrorCode::Io, Some(e.to_string())))?;
-    let mut offset = 0u64;
+    tokio::io::AsyncSeekExt::seek(&mut source, std::io::SeekFrom::Start(start)).await.map_err(|e| (ErrorCode::Io, Some(e.to_string())))?;
+    let mut offset = start;
     loop {
         if job.cancelled() {
             return Err(Stop::Cancelled);
@@ -619,6 +740,7 @@ async fn download(
         }
         plan_remote(job, client, path, local_dir.clone(), 0, &mut plan).await?;
     }
+    plan.files.retain(|(remote, _, _)| !job.is_completed(remote));
     let total: u64 = plan.files.iter().map(|(_, _, size)| *size).fold(0, u64::saturating_add);
     job.update(|v| {
         v.files_total = plan.files.len();
@@ -649,10 +771,16 @@ async fn download(
             continue;
         }
         match download_file(job, client, remote, local, conflict, &mut reporter).await {
-            Ok(true) => job.update(|v| v.files_done += 1),
-            Ok(false) => job.update(|v| v.skipped += 1),
+            Ok(true) => {
+                job.update(|v| v.files_done += 1);
+                job.complete(remote.clone());
+            }
+            Ok(false) => {
+                job.update(|v| v.skipped += 1);
+                job.complete(remote.clone());
+            }
             Err(Stop::Cancelled) => return Err(Stop::Cancelled),
-            Err(Stop::Failed((ErrorCode::Network, detail))) => return Err(Stop::Failed((ErrorCode::Network, detail))),
+            Err(stop @ Stop::Failed(_)) if keeps_part(&stop) => return Err(stop),
             Err(Stop::Failed((_, detail))) => job.error(format!("{remote}: {}", detail.unwrap_or_default())),
         }
         reporter.tick();
@@ -681,22 +809,44 @@ async fn download_file(
         }
     };
     let part = dir.join(names::part_name(&name));
-    let _ = std::fs::remove_file(&part);
-    let mut out = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&part).await.map_err(|e| (ErrorCode::Io, Some(e.to_string())))?;
+    let key = format!("l:{}", part.display());
+    let remote_size = client.stat(remote).await.map(|a| a.size).map_err(sftp_failure)?;
+    // As for uploads: only a part this run left is continued, and only if it is not longer.
+    let resume = if reporter.transfers.take_resumable(&key) {
+        match std::fs::symlink_metadata(&part) {
+            Ok(m) if m.is_file() && m.len() <= remote_size => Some(m.len()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let io = |e: std::io::Error| (ErrorCode::Io, Some(e.to_string()));
+    let (mut out, offset) = match resume {
+        Some(offset) => (tokio::fs::OpenOptions::new().append(true).open(&part).await.map_err(io)?, offset),
+        None => {
+            let _ = std::fs::remove_file(&part);
+            (tokio::fs::OpenOptions::new().write(true).create_new(true).open(&part).await.map_err(io)?, 0)
+        }
+    };
+    job.resumed(offset);
     let file = client.open_read(remote).await.map_err(sftp_failure)?;
-    let received = receive(job, &file, &mut out, reporter).await;
+    let received = receive(job, &file, &mut out, reporter, offset).await;
     let _ = file.close().await;
     let flushed = out.flush().await.map_err(|e| Stop::Failed((ErrorCode::Io, Some(e.to_string()))));
     drop(out);
     let result = received.and(flushed).and_then(|()| std::fs::rename(&part, &target).map_err(|e| Stop::Failed((ErrorCode::Io, Some(e.to_string())))));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&part);
+    match &result {
+        Err(stop) if keeps_part(stop) => reporter.transfers.mark_resumable(key),
+        Err(_) => {
+            let _ = std::fs::remove_file(&part);
+        }
+        Ok(()) => {}
     }
     result.map(|()| true)
 }
 
-async fn receive(job: &Job, file: &RemoteFile, out: &mut tokio::fs::File, reporter: &mut Reporter<'_>) -> Result<(), Stop> {
-    let mut pos = 0u64;
+async fn receive(job: &Job, file: &RemoteFile, out: &mut tokio::fs::File, reporter: &mut Reporter<'_>, start: u64) -> Result<(), Stop> {
+    let mut pos = start;
     loop {
         if job.cancelled() {
             return Err(Stop::Cancelled);
@@ -728,5 +878,20 @@ async fn receive(job: &Job, file: &RemoteFile, out: &mut tokio::fs::File, report
         if end {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Only a lost connection keeps a part; the user's cancel and every other failure delete it.
+    #[test]
+    fn only_a_lost_connection_keeps_a_part() {
+        assert!(keeps_part(&Stop::Failed((ErrorCode::Network, None))));
+        assert!(keeps_part(&Stop::Failed((ErrorCode::Timeout, None))));
+        assert!(!keeps_part(&Stop::Cancelled));
+        assert!(!keeps_part(&Stop::Failed((ErrorCode::SftpFailed, None))));
+        assert!(!keeps_part(&Stop::Failed((ErrorCode::PermissionDenied, None))));
     }
 }
