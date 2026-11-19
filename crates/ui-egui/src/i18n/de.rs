@@ -991,6 +991,14 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Skip" => "Überspringen",
         "Keep both" => "Beide behalten",
         "Copy to…" => "Kopieren nach…",
+        "Sync folders…" => "Ordner abgleichen…",
+        "Sync folders" => "Ordner abgleichen",
+        "Only files that are missing at the target or older there are sent. Nothing is deleted." => {
+            "Übertragen werden nur Dateien, die im Ziel fehlen oder dort älter sind. Gelöscht wird nichts."
+        }
+        "Here" => "Hier",
+        "Upload newer files" => "Neuere hochladen",
+        "Download newer files" => "Neuere herunterladen",
         "Into the folder another open host's files show:" => "In den Ordner, den die Dateien eines anderen offenen Hosts zeigen:",
         "Open the files of another host first." => "Öffne zuerst die Dateien eines anderen Hosts.",
         "Replace" => "Ersetzen",

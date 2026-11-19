@@ -1,5 +1,5 @@
-//! SFTP (S1): open a host's files, list, create folders, rename, change permissions, delete; the
-//! local side's listing for the pane beside it. Agents have no access (not in
+//! SFTP (S1): open a host's files, list, create folders, rename, change permissions, delete,
+//! transfer and sync folders one way; the local side's listing for the pane beside it. Agents have no access (not in
 //! `gate::access::access_for`).
 
 use futures::FutureExt;
@@ -40,20 +40,26 @@ pub fn specs() -> Vec<CommandSpec> {
         command(
             "sftp.upload",
             "Upload files",
-            "{ id, local: [absolute paths], remote_dir, conflict?: skip | overwrite | rename, name?: for one file } -> { transfer }",
+            "{ id, local: [absolute paths], remote_dir, conflict?: skip | overwrite | rename | newer, name?: for one file } -> { transfer }",
             run_upload,
         ),
         command(
             "sftp.download",
             "Download files",
-            "{ id, remote: [paths], local_dir: absolute, conflict?: skip | overwrite | rename } -> { transfer }",
+            "{ id, remote: [paths], local_dir: absolute, conflict?: skip | overwrite | rename | newer } -> { transfer }",
             run_download,
         ),
         command(
             "sftp.copy",
             "Copy files between hosts",
-            "{ from: id, remote: [paths], to: id, remote_dir, conflict?: skip | overwrite | rename } -> { transfer }",
+            "{ from: id, remote: [paths], to: id, remote_dir, conflict?: skip | overwrite | rename | newer } -> { transfer }",
             run_copy,
+        ),
+        command(
+            "sftp.sync",
+            "Sync a folder",
+            "{ id, local: absolute folder, remote: folder, direction: upload | download } -> { transfer }; only missing or newer files, nothing deleted",
+            run_sync,
         ),
         query(
             "sftp.transfers",
@@ -280,6 +286,31 @@ struct DownloadParams {
     local_dir: std::path::PathBuf,
     #[serde(default)]
     conflict: Conflict,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SyncDirection {
+    Upload,
+    Download,
+}
+
+#[derive(Deserialize)]
+struct SyncParams {
+    id: SftpId,
+    local: std::path::PathBuf,
+    remote: String,
+    direction: SyncDirection,
+}
+
+fn run_sync(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let SyncParams { id, local, remote, direction } = parse("sftp.sync", params)?;
+        let up = matches!(direction, SyncDirection::Upload);
+        let transfer = ctx.session.sftp().sync(id, local, remote, up).map_err(failed)?;
+        Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
 }
 
 #[derive(Deserialize)]

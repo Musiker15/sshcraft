@@ -144,6 +144,13 @@ impl SftpManager {
         self.transfers.download(id, open, remote, local_dir, conflict)
     }
 
+    /// Starts syncing the local folder `local` with the remote folder `remote`, one way: `up`
+    /// sends what is missing or newer here, otherwise it comes from there. Nothing is deleted.
+    pub fn sync(&self, id: SftpId, local: PathBuf, remote: String, up: bool) -> Result<super::transfers::TransferId, SftpFailure> {
+        let open = self.get(id)?;
+        self.transfers.sync(id, open, local, remote, up)
+    }
+
     /// Starts copying files and folders of session `from` into a folder of session `to`.
     pub fn copy(
         &self,

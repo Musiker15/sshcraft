@@ -1,7 +1,8 @@
 //! The SFTP pane (S1): this computer on the left, the host on the right, transfers below. Under
 //! [`TWO_SIDES_FROM`] points one side shows at a time, with a switch. On Android only the host's
 //! side is there: the app cannot browse the device's folders. "Copy to…" sends the host's
-//! selection into the folder another open pane shows (from server to server).
+//! selection into the folder another open pane shows (from server to server); "Sync folders…"
+//! brings the two folders shown up to date, one way, without deleting anything.
 //!
 //! Everything it does goes through the engine's `sftp.*` commands; names from the server are
 //! shown through [`crate::widgets::visible`], so an escape sequence in one cannot do anything.
@@ -125,6 +126,11 @@ pub enum Dialog {
     Conflict {
         transfer: PendingTransfer,
         taken: Vec<String>,
+    },
+    /// Which way the two folders shown are synced.
+    Sync {
+        local: String,
+        remote: String,
     },
 }
 
@@ -519,6 +525,10 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
                     let items = selected.iter().map(|n| child_path(kind, &side.path, n)).collect();
                     actions.push(transfer_action(kind, items, &selected, other_path.clone(), &other_names));
                 }
+            }
+            // Both folders shown, brought up to date one way.
+            if kind == SideKind::Local && has_other && ghost(ui, tr("Sync folders…"), BUTTON).clicked() {
+                actions.push(Action::Ask(Dialog::Sync { local: side.path.clone(), remote: other_path.clone() }));
             }
             // Without a local side (Android) files come and go through the system's picker.
             if kind == SideKind::Remote && !has_other {
@@ -984,6 +994,35 @@ fn dialog(ctx: &egui::Context, view: &mut SftpView, others: &[OtherPane], action
                     close = true;
                 }
             }
+            Dialog::Sync { local, remote } => {
+                crate::widgets::buttons::title(ui, tr("Sync folders"));
+                ui.add_space(4.0);
+                let tokens = Tokens::get(ui.ctx());
+                ui.colored_label(tokens.text_dim, tr("Only files that are missing at the target or older there are sent. Nothing is deleted."));
+                ui.add_space(8.0);
+                for (label, path) in [(tr("Here"), &local), (view.name.as_str(), &remote)] {
+                    ui.horizontal(|ui| {
+                        ui.label(visible(label));
+                        crate::widgets::elided_label(ui, &short_path(&visible(path), 56), 360.0, tokens.text_dim, FontId::monospace(13.0));
+                    });
+                }
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                    for (icon, label, direction) in
+                        [(Icon::Upload, tr("Upload newer files"), "upload"), (Icon::Save, tr("Download newer files"), "download")]
+                    {
+                        if primary(ui, Some(icon), label, BUTTON).clicked() {
+                            let params = json!({ "id": view.id, "local": local, "remote": remote, "direction": direction });
+                            actions.push(Action::Run("sftp.sync", params));
+                            close = true;
+                        }
+                    }
+                    if ghost(ui, tr("Cancel"), BUTTON).clicked() {
+                        close = true;
+                    }
+                });
+            }
             Dialog::Conflict { transfer, taken } => {
                 crate::widgets::buttons::title(ui, tr("Already there"));
                 ui.add_space(8.0);
@@ -1135,7 +1174,7 @@ fn run_and_refresh(app: &mut SshcraftApp, id: u64, command: &'static str, params
         params,
         Box::new(move |app, result| match result {
             Ok(_) => {
-                if !matches!(command, "sftp.upload" | "sftp.download" | "sftp.copy") {
+                if !matches!(command, "sftp.upload" | "sftp.download" | "sftp.copy" | "sftp.sync") {
                     let path = app.sftp.get(&id).map(|v| v.remote.path.clone()).unwrap_or_default();
                     list(app, id, SideKind::Remote, path);
                 }

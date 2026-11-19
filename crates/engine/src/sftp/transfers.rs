@@ -52,6 +52,9 @@ pub enum Conflict {
     Overwrite,
     /// Keep both: the new one gets a free name, `name (2).ext`.
     Rename,
+    /// Replace it only when the source is newer (see [`is_newer`]), and give the written file the
+    /// source's time: what a folder sync does.
+    Newer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -91,10 +94,27 @@ pub struct TransferView {
 /// What a job was asked to do, kept so it can be tried again.
 #[derive(Debug, Clone)]
 enum Request {
-    Upload { local: Vec<PathBuf>, remote_dir: String, name: Option<String> },
-    Download { remote: Vec<String>, local_dir: PathBuf },
-    DownloadFile { remote: String, local_file: PathBuf },
-    Copy { source: SftpId, remote: Vec<String>, remote_dir: String },
+    /// `contents`: a folder's contents go into the target folder, not the folder itself (a sync).
+    Upload {
+        local: Vec<PathBuf>,
+        remote_dir: String,
+        name: Option<String>,
+        contents: bool,
+    },
+    Download {
+        remote: Vec<String>,
+        local_dir: PathBuf,
+        contents: bool,
+    },
+    DownloadFile {
+        remote: String,
+        local_file: PathBuf,
+    },
+    Copy {
+        source: SftpId,
+        remote: Vec<String>,
+        remote_dir: String,
+    },
 }
 
 struct Job {
@@ -333,7 +353,7 @@ impl Transfers {
             }
             names::check_name(name).map_err(name_failure)?;
         }
-        Ok(self.start(sftp, open, None, Request::Upload { local, remote_dir, name }, conflict, HashSet::new()))
+        Ok(self.start(sftp, open, None, Request::Upload { local, remote_dir, name, contents: false }, conflict, HashSet::new()))
     }
 
     /// Starts downloading the remote file `remote` into the existing local file `local_file`,
@@ -369,7 +389,26 @@ impl Transfers {
             return Err((ErrorCode::NotFound, Some(local_dir.to_string_lossy().into_owned())));
         }
         let remote = remote.iter().map(|p| names::normalize_remote(p)).collect::<Result<Vec<_>, _>>().map_err(name_failure)?;
-        Ok(self.start(sftp, open, None, Request::Download { remote, local_dir }, conflict, HashSet::new()))
+        Ok(self.start(sftp, open, None, Request::Download { remote, local_dir, contents: false }, conflict, HashSet::new()))
+    }
+
+    /// Starts syncing the folder `local` with the folder `remote`: `up` sends what is missing or
+    /// newer here into `remote`, otherwise what is missing or newer there comes here. Nothing is
+    /// deleted on either side, and a file that is newer at the target stays as it is.
+    pub(crate) fn sync(self: &Arc<Self>, sftp: SftpId, open: Arc<Open>, local: PathBuf, remote: String, up: bool) -> Result<TransferId, SftpFailure> {
+        if !local.is_absolute() {
+            return Err(name_failure(names::NameError::NotAbsolute));
+        }
+        if !local.is_dir() {
+            return Err((ErrorCode::NotFound, Some(local.to_string_lossy().into_owned())));
+        }
+        let remote = names::normalize_remote(&remote).map_err(name_failure)?;
+        let request = if up {
+            Request::Upload { local: vec![local], remote_dir: remote, name: None, contents: true }
+        } else {
+            Request::Download { remote: vec![remote], local_dir: local, contents: true }
+        };
+        Ok(self.start(sftp, open, None, request, Conflict::Newer, HashSet::new()))
     }
 
     /// Starts copying `remote` (files and folders of session `from`) into the folder `remote_dir`
@@ -401,10 +440,12 @@ impl Transfers {
         let this = self.clone();
         tokio::spawn(async move {
             let result = match request {
-                Request::Upload { local, remote_dir, name } => {
-                    this.run(&job, || upload(&job, &open.client, local, remote_dir, conflict, name, &this)).await
+                Request::Upload { local, remote_dir, name, contents } => {
+                    this.run(&job, || upload(&job, &open.client, (local, contents), remote_dir, conflict, name, &this)).await
                 }
-                Request::Download { remote, local_dir } => this.run(&job, || download(&job, &open.client, remote, local_dir, conflict, &this)).await,
+                Request::Download { remote, local_dir, contents } => {
+                    this.run(&job, || download(&job, &open.client, (remote, contents), local_dir, conflict, &this)).await
+                }
                 Request::DownloadFile { remote, local_file } => {
                     this.run(&job, || download_to_file(&job, &open.client, remote, local_file, &this)).await
                 }
@@ -443,6 +484,21 @@ impl Transfers {
             }
         });
         self.report(job);
+    }
+}
+
+/// Seconds since 1970, for a time not before it.
+fn unix_secs(time: std::time::SystemTime) -> Option<u64> {
+    time.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs())
+}
+
+/// Whether a source file `(time, size)` replaces the target `(time, size)` in a sync. With both
+/// times known only a later source does, so a file changed at the target since stays; without
+/// them, a different size does.
+fn is_newer(source: (Option<u64>, u64), target: (Option<u64>, u64)) -> bool {
+    match (source.0, target.0) {
+        (Some(s), Some(t)) => s > t,
+        _ => source.1 != target.1,
     }
 }
 
@@ -485,12 +541,33 @@ struct UploadPlan {
     files: Vec<(PathBuf, String, u64)>,
 }
 
-fn plan_upload(errors: &mut Vec<String>, local: &[PathBuf], remote_dir: &str, name: Option<&str>) -> Result<UploadPlan, SftpFailure> {
+/// Plans `local` into `remote_dir`; with `contents`, each folder's contents instead of the folder.
+fn plan_upload(
+    errors: &mut Vec<String>,
+    (local, contents): (&[PathBuf], bool),
+    remote_dir: &str,
+    name: Option<&str>,
+) -> Result<UploadPlan, SftpFailure> {
     let mut plan = UploadPlan::default();
     for path in local {
-        plan_local(errors, path, remote_dir, name, 0, &mut plan)?;
+        if contents {
+            for child in local_children(path)? {
+                plan_local(errors, &child, remote_dir, None, 1, &mut plan)?;
+            }
+        } else {
+            plan_local(errors, path, remote_dir, name, 0, &mut plan)?;
+        }
     }
     Ok(plan)
+}
+
+/// The entries of the local folder `path`, sorted.
+fn local_children(path: &Path) -> Result<Vec<PathBuf>, SftpFailure> {
+    let shown = path.to_string_lossy();
+    let mut children: Vec<PathBuf> =
+        std::fs::read_dir(path).map_err(|e| (ErrorCode::Io, Some(format!("{shown}: {e}"))))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    children.sort();
+    Ok(children)
 }
 
 /// Plans `path` into `remote_dir`, under `as_name` when given (the top item only).
@@ -538,10 +615,7 @@ fn plan_local(
     };
     if meta.is_dir() {
         plan.dirs.push(target.clone());
-        let mut children: Vec<PathBuf> =
-            std::fs::read_dir(path).map_err(|e| (ErrorCode::Io, Some(format!("{shown}: {e}"))))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
-        children.sort();
-        for child in children {
+        for child in local_children(path)? {
             plan_local(errors, &child, &target, None, depth + 1, plan)?;
         }
     } else if meta.is_file() {
@@ -555,18 +629,22 @@ fn plan_local(
 async fn upload(
     job: &Job,
     client: &SftpClient,
-    local: Vec<PathBuf>,
+    (local, contents): (Vec<PathBuf>, bool),
     remote_dir: String,
     conflict: Conflict,
     name: Option<String>,
     transfers: &Transfers,
 ) -> Result<(), Stop> {
+    // A sync writes into the folder that is there; it makes none of its own.
+    if contents && !matches!(client.lstat(&remote_dir).await, Ok(a) if a.kind == EntryKind::Dir) {
+        return Err(Stop::Failed((ErrorCode::NotFound, Some(format!("{remote_dir}: no folder")))));
+    }
     let plan = {
         let local = local.clone();
         let remote_dir = remote_dir.clone();
         let (planned, errors) = tokio::task::spawn_blocking(move || {
             let mut errors = Vec::new();
-            let planned = plan_upload(&mut errors, &local, &remote_dir, name.as_deref());
+            let planned = plan_upload(&mut errors, (&local, contents), &remote_dir, name.as_deref());
             (planned, errors)
         })
         .await
@@ -675,12 +753,25 @@ async fn upload_file(
 ) -> Result<bool, Stop> {
     let dir = names::remote_parent(target).ok_or((ErrorCode::NameInvalid, None))?;
     let name = names::remote_name(target).ok_or((ErrorCode::NameInvalid, None))?;
-    let exists = client.lstat(target).await.is_ok();
-    let (target, replace) = match (exists, conflict) {
-        (false, _) => (target.to_owned(), false),
-        (true, Conflict::Skip) => return Ok(false),
-        (true, Conflict::Overwrite) => (target.to_owned(), true),
-        (true, Conflict::Rename) => {
+    let there = client.lstat(target).await.ok();
+    let (local_size, local_time) = match from {
+        Source::Local(local) => {
+            let meta = tokio::fs::metadata(local).await.map_err(|e| (ErrorCode::Io, Some(e.to_string())))?;
+            (meta.len(), meta.modified().ok().and_then(unix_secs))
+        }
+        Source::Remote(source, path) => source.stat(path).await.map(|a| (a.size, a.modified)).map_err(sftp_failure)?,
+    };
+    let (target, replace) = match (there, conflict) {
+        (None, _) => (target.to_owned(), false),
+        (Some(_), Conflict::Skip) => return Ok(false),
+        (Some(_), Conflict::Overwrite) => (target.to_owned(), true),
+        (Some(there), Conflict::Newer) => {
+            if !is_newer((local_time, local_size), (there.modified, there.size)) {
+                return Ok(false);
+            }
+            (target.to_owned(), true)
+        }
+        (Some(_), Conflict::Rename) => {
             let names = remote_names(client, &dir, taken).await?;
             names.insert(name.clone());
             let free = names::free_name(&name, |n| names.contains(n)).ok_or((ErrorCode::AlreadyExists, Some(target.to_owned())))?;
@@ -690,10 +781,6 @@ async fn upload_file(
     };
     let part = names::remote_join(&dir, &names::part_name(&name)).map_err(name_failure)?;
     let key = format!("r:{part}");
-    let local_size = match from {
-        Source::Local(local) => tokio::fs::metadata(local).await.map(|m| m.len()).map_err(|e| (ErrorCode::Io, Some(e.to_string())))?,
-        Source::Remote(source, path) => source.stat(path).await.map(|a| a.size).map_err(sftp_failure)?,
-    };
     // A part this run left when the connection went away goes on where it stopped, if it is not
     // longer than the file; any other part is an earlier try's and goes.
     let resume = if reporter.transfers.take_resumable(&key) {
@@ -730,6 +817,11 @@ async fn upload_file(
                 client.remove(&target).await.map_err(sftp_failure)?;
             }
             client.rename(&part, &target).await.map_err(sftp_failure)?;
+            if let (Conflict::Newer, Some(time)) = (conflict, local_time) {
+                // The file takes the source's time, so the next sync sees them alike. A server
+                // that refuses only makes that sync send the file once more.
+                let _ = client.set_modified(&target, time).await;
+            }
             Ok::<(), SftpFailure>(())
         }
         .await
@@ -985,7 +1077,7 @@ fn plan_remote<'a, T: Clone + Send + Sync + 'a>(
 async fn download(
     job: &Job,
     client: &SftpClient,
-    remote: Vec<String>,
+    (remote, contents): (Vec<String>, bool),
     local_dir: PathBuf,
     conflict: Conflict,
     transfers: &Transfers,
@@ -995,7 +1087,17 @@ async fn download(
         if job.cancelled() {
             return Err(Stop::Cancelled);
         }
-        plan_remote(job, client, path, local_dir.clone(), 0, &mut plan, local_target).await?;
+        if contents {
+            // A sync: the folder's contents come into `local_dir`.
+            for entry in walk_list(client, &path).await? {
+                match names::remote_join(&path, &entry.name) {
+                    Ok(child) => plan_remote(job, client, child, local_dir.clone(), 1, &mut plan, local_target).await?,
+                    Err(e) => job.error(format!("{path}/{}: {e}", entry.name.chars().filter(|c| !c.is_control()).collect::<String>())),
+                }
+            }
+        } else {
+            plan_remote(job, client, path, local_dir.clone(), 0, &mut plan, local_target).await?;
+        }
     }
     if job.cancelled() {
         return Err(Stop::Cancelled);
@@ -1058,11 +1160,18 @@ async fn download_file(
 ) -> Result<bool, Stop> {
     let dir = local.parent().ok_or((ErrorCode::NameInvalid, None))?;
     let name = local.file_name().and_then(|n| n.to_str()).ok_or((ErrorCode::NameInvalid, None))?.to_owned();
-    let exists = std::fs::symlink_metadata(local).is_ok();
-    let target = match (exists, conflict) {
-        (false, _) | (true, Conflict::Overwrite) => local.to_path_buf(),
-        (true, Conflict::Skip) => return Ok(false),
-        (true, Conflict::Rename) => {
+    let here = std::fs::symlink_metadata(local).ok();
+    let there = client.stat(remote).await.map_err(sftp_failure)?;
+    let target = match (here, conflict) {
+        (None, _) | (Some(_), Conflict::Overwrite) => local.to_path_buf(),
+        (Some(_), Conflict::Skip) => return Ok(false),
+        (Some(here), Conflict::Newer) => {
+            if !is_newer((there.modified, there.size), (here.modified().ok().and_then(unix_secs), here.len())) {
+                return Ok(false);
+            }
+            local.to_path_buf()
+        }
+        (Some(_), Conflict::Rename) => {
             let free = names::free_name(&name, |n| dir.join(n).symlink_metadata().is_ok())
                 .ok_or((ErrorCode::AlreadyExists, Some(local.display().to_string())))?;
             dir.join(free)
@@ -1070,7 +1179,7 @@ async fn download_file(
     };
     let part = dir.join(names::part_name(&name));
     let key = format!("l:{}", part.display());
-    let remote_size = client.stat(remote).await.map(|a| a.size).map_err(sftp_failure)?;
+    let remote_size = there.size;
     // As for uploads: only a part this run left is continued, and only if it is not longer.
     let resume = if reporter.transfers.take_resumable(&key) {
         match std::fs::symlink_metadata(&part) {
@@ -1095,6 +1204,12 @@ async fn download_file(
     let flushed = out.flush().await.map_err(|e| Stop::Failed((ErrorCode::Io, Some(e.to_string()))));
     drop(out);
     let result = received.and(flushed).and_then(|()| std::fs::rename(&part, &target).map_err(|e| Stop::Failed((ErrorCode::Io, Some(e.to_string())))));
+    if let (Ok(()), Conflict::Newer, Some(time)) = (&result, conflict, there.modified) {
+        // As for uploads: the file takes the source's time, so the next sync sees them alike.
+        if let Ok(file) = std::fs::File::options().write(true).open(&target) {
+            let _ = file.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(time));
+        }
+    }
     let result = cancel_wins(job, result);
     match &result {
         Err(stop) if keeps_part(stop) => reporter.transfers.mark_resumable(key),
@@ -1179,6 +1294,15 @@ mod tests {
     use super::*;
 
     /// Only a lost connection keeps a part; the user's cancel and every other failure delete it.
+    #[test]
+    fn only_a_later_source_replaces_a_file_in_a_sync() {
+        assert!(is_newer((Some(20), 5), (Some(10), 5)));
+        assert!(!is_newer((Some(10), 5), (Some(10), 9)), "the same time is the same file");
+        assert!(!is_newer((Some(10), 5), (Some(20), 9)), "changed at the target since: it stays");
+        assert!(is_newer((None, 5), (Some(20), 9)));
+        assert!(!is_newer((Some(20), 5), (None, 5)));
+    }
+
     #[test]
     fn only_a_lost_connection_keeps_a_part() {
         assert!(keeps_part(&Stop::Failed((ErrorCode::Network, None))));
