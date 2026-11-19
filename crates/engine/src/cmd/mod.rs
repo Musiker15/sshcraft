@@ -73,6 +73,7 @@ pub mod password;
 pub mod prompt;
 pub mod session;
 pub mod settings;
+pub mod sftp;
 pub mod share;
 pub mod snippet;
 pub mod sshconfig;
@@ -161,6 +162,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(trash::specs());
         specs.extend(backup::specs());
         specs.extend(connections::specs());
+        specs.extend(sftp::specs());
         #[cfg(test)]
         specs.extend(test_commands());
         for spec in &mut specs {

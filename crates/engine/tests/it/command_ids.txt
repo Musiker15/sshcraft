@@ -93,6 +93,15 @@ session.resources
 session.send
 settings.get
 settings.save
+sftp.chmod
+sftp.close
+sftp.count
+sftp.delete
+sftp.list
+sftp.local_list
+sftp.mkdir
+sftp.open
+sftp.rename
 share.confirm_recipient
 share.end
 share.find_recipient

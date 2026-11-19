@@ -134,6 +134,18 @@ pub enum ErrorCode {
     NotRecording,
     /// It took longer than allowed.
     Timeout,
+    /// The server offers no SFTP (the `sftp` subsystem was refused).
+    SftpUnavailable,
+    /// The server refused an SFTP request or answered something unexpected.
+    SftpFailed,
+    /// The server or this computer did not allow it.
+    PermissionDenied,
+    /// A file name or path that is not used: empty, `..`, a separator, reserved here, too long.
+    NameInvalid,
+    /// Something of that name is already there.
+    AlreadyExists,
+    /// More files, folders or folder levels than one operation handles.
+    TooManyFiles,
 }
 
 impl From<&ResolveError> for ErrorCode {

@@ -153,6 +153,8 @@ struct Inner {
     sessions: sessions::SessionManager,
     prompts: Arc<prompts::PromptRegistry<prompts::BusEmitter>>,
     agent_sessions: agent_sessions::AgentSessions,
+    /// Open SFTP sessions (S1).
+    sftp: sftp::SftpManager,
     /// Terminal streams of the user's sessions until the interface takes them.
     terminals: Mutex<HashMap<SessionId, TerminalStream>>,
     /// Called when a terminal stream gets output or a status (the window's repaint).
@@ -243,6 +245,7 @@ impl Session {
         // A host or rule that sync removed (or a share that ended) stops forwarding.
         let observer = sync::BusObserver { events: events.clone(), forwards: forwards.clone() };
         let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(observer));
+        let sftp = sftp::SftpManager::new(sessions.context());
         let inner = Inner {
             store,
             vault,
@@ -257,6 +260,7 @@ impl Session {
             sessions,
             prompts,
             agent_sessions: agent_sessions::AgentSessions::default(),
+            sftp,
             terminals: Mutex::new(HashMap::new()),
             terminal_waker: Mutex::new(None),
             background: Mutex::new(Vec::new()),
@@ -374,6 +378,10 @@ impl Session {
 
     pub(crate) fn agent_sessions(&self) -> &agent_sessions::AgentSessions {
         &self.0.agent_sessions
+    }
+
+    pub(crate) fn sftp(&self) -> &sftp::SftpManager {
+        &self.0.sftp
     }
 
     /// Closes a session of any caller and drops a stream nobody attached.

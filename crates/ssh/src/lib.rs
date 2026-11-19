@@ -704,8 +704,22 @@ impl Session {
     /// Opens an SFTP session on a channel of its own; it lives while the client and this
     /// connection do.
     pub async fn sftp(&self) -> Result<sftp::SftpClient, SshError> {
-        let channel = self.handle.channel_open_session().await.map_err(protocol)?;
+        let mut channel = self.handle.channel_open_session().await.map_err(protocol)?;
         channel.request_subsystem(true, "sftp").await.map_err(protocol)?;
+        // The answer to the request comes as a message on the channel; a server without SFTP
+        // says no here, and the protocol must not start on a channel nobody listens to.
+        let answer = async {
+            loop {
+                match channel.wait().await {
+                    Some(ChannelMsg::Success) => return Ok(()),
+                    Some(ChannelMsg::Failure) | Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                        return Err(SshError::Protocol("the server offers no SFTP".into()));
+                    }
+                    Some(_) => {}
+                }
+            }
+        };
+        tokio::time::timeout(EXEC_TIMEOUT, answer).await.map_err(|_| SshError::Timeout)??;
         sftp::SftpClient::start(channel.into_stream()).await.map_err(|e| SshError::Protocol(e.to_string()))
     }
 
