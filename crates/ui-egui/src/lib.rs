@@ -31,6 +31,7 @@ pub mod quick_connect;
 pub mod quit;
 pub mod runner;
 pub mod session_tab;
+pub mod sftp_tab;
 pub mod shell;
 pub mod state;
 pub mod status;

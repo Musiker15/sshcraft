@@ -1,6 +1,6 @@
 //! A host as a row (in lists, groups and "Without a group") and as a card ("Recently
 //! connected"): its state, name and address cut to fit, and a button for SSH and one for SFTP.
-//! SFTP is there but disabled until S1 brings it.
+//! SFTP opens the host's files (S1).
 
 use egui::{Align, FontId, Layout, Rect, Sense, Stroke, StrokeKind, Ui, vec2};
 use sshcraft_model::model::Group;
@@ -69,7 +69,7 @@ fn action(ui: &mut Ui, icon: Icon, label: &str, accent: bool, enabled: bool, siz
     if enabled {
         response.on_hover_text(label).clicked()
     } else {
-        response.on_hover_text(tr("SFTP comes with S1"));
+        response.on_hover_text(label);
         false
     }
 }
@@ -101,7 +101,7 @@ fn wide_button(ui: &mut Ui, icon: Option<Icon>, label: &str, filled: bool, enabl
     if enabled {
         response.clicked()
     } else {
-        response.on_hover_text(tr("SFTP comes with S1"));
+        response.on_hover_text(label);
         false
     }
 }
@@ -126,7 +126,9 @@ pub fn host_row(app: &mut SshcraftApp, ui: &mut Ui, pos: usize, row: &HostRow, a
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.add_space(8.0);
-        action(ui, Icon::Folder, tr("SFTP"), false, false, size, bordered);
+        if action(ui, Icon::Folder, tr("SFTP"), false, true, size, bordered) {
+            app.ui.connect_request = Some(ConnectRequest::Sftp(id));
+        }
         if action(ui, Icon::Prompt, tr("SSH"), true, true, size, bordered) {
             app.ui.connect_request = Some(ConnectRequest::Host(id));
         }
@@ -332,7 +334,9 @@ pub fn host_card(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, compact: boo
             if wide_button(ui, ssh, tr("SSH"), true, true, half) {
                 app.ui.connect_request = Some(ConnectRequest::Host(row.host.id));
             }
-            wide_button(ui, sftp, tr("SFTP"), false, false, half);
+            if wide_button(ui, sftp, tr("SFTP"), false, true, half) {
+                app.ui.connect_request = Some(ConnectRequest::Sftp(row.host.id));
+            }
         });
         if !compact && let Some(when) = last_connected(app, row) {
             ui.add_space(12.0);

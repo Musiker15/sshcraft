@@ -202,7 +202,7 @@ impl SessionTab {
 pub fn slot_dot(app: &SshcraftApp, slot: PaneSlot) -> Option<crate::status::Dot> {
     match slot {
         PaneSlot::Session { session } => app.terminals.get(&session).map(SessionTab::dot),
-        PaneSlot::New { .. } => None,
+        PaneSlot::New { .. } | PaneSlot::Sftp { .. } => None,
     }
 }
 
@@ -489,6 +489,7 @@ fn new_tab_slot(app: &SshcraftApp) -> Option<PaneSlot> {
 pub fn take_request(app: &mut SshcraftApp) {
     let Some(request) = app.ui.connect_request.take() else { return };
     match request {
+        ConnectRequest::Sftp(host) => crate::sftp_tab::open(app, host),
         ConnectRequest::Host(host) => {
             // A host the cached data does not have yet: fetch it, the tab takes its name then.
             if host_name(app, host).is_none() {

@@ -60,6 +60,10 @@ pub struct SshcraftApp {
     pub pastes: crate::terminal::compose::PasteHistory,
     /// The compiled highlights and triggers of the settings.
     pub patterns: crate::terminal::highlight::Patterns,
+    /// The open SFTP panes, by the engine's id.
+    pub sftp: std::collections::HashMap<u64, crate::sftp_tab::SftpView>,
+    /// The SFTP transfers the engine told of, by id.
+    pub transfers: crate::sftp_tab::Known,
     /// The terminals of the open session tabs.
     pub terminals: std::collections::HashMap<sshcraft_engine::SessionId, crate::session_tab::SessionTab>,
     /// The engine's open questions.
@@ -126,6 +130,8 @@ impl SshcraftApp {
             patterns: crate::terminal::highlight::Patterns::default(),
             pastes: crate::terminal::compose::PasteHistory::default(),
             terminals: std::collections::HashMap::new(),
+            sftp: std::collections::HashMap::new(),
+            transfers: crate::sftp_tab::Known::new(),
             // Questions asked before the window subscribed are fetched once.
             prompts: crate::prompts::Prompts::fetch_first(),
             term_font: None,
@@ -218,6 +224,11 @@ impl SshcraftApp {
                     }
                 }
                 Ok(EngineEvent::Ui(sshcraft_engine::UiRequest::OpenUrl { url })) => self.urls.push(url),
+                Ok(EngineEvent::TransferStatus(view)) => {
+                    if let Ok(view) = serde_json::to_value(&view) {
+                        crate::sftp_tab::on_transfer(self, view);
+                    }
+                }
                 Ok(_) => {}
                 // Events were lost: fetch everything again.
                 Err(TryRecvError::Lagged(_)) => {
@@ -273,8 +284,10 @@ impl SshcraftApp {
             self.close_tab_at(tab);
             return;
         }
-        if let Some(PaneSlot::Session { session }) = t.panes.remove(pane) {
-            crate::session_tab::close_session(self, session);
+        match t.panes.remove(pane) {
+            Some(PaneSlot::Session { session }) => crate::session_tab::close_session(self, session),
+            Some(PaneSlot::Sftp { id }) => crate::sftp_tab::close(self, id),
+            _ => {}
         }
     }
 
@@ -361,6 +374,9 @@ impl SshcraftApp {
         let sessions: Vec<_> = tab.panes.sessions().collect();
         for session in sessions {
             crate::session_tab::close_session(self, session);
+        }
+        for id in tab.panes.sftps().collect::<Vec<_>>() {
+            crate::sftp_tab::close(self, id);
         }
         self.ui.page = match self.ui.page {
             Page::Tab(shown) if shown == i => {
