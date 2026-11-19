@@ -146,6 +146,10 @@ pub enum ErrorCode {
     AlreadyExists,
     /// More files, folders or folder levels than one operation handles.
     TooManyFiles,
+    /// The server's host key is not the one stored for it: nothing connects.
+    HostKeyChanged,
+    /// The server's host key was not accepted when SSHCraft asked.
+    HostKeyRejected,
 }
 
 impl From<&ResolveError> for ErrorCode {

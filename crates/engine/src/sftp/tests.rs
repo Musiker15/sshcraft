@@ -448,3 +448,18 @@ async fn an_upload_under_a_name_is_shown_under_it() {
     let job = ended(&f, &up["transfer"]).await;
     assert_eq!(job["label"], "Notiz.txt");
 }
+
+/// A server whose host key changed says so by its own code, not as a session failure with two
+/// fingerprints nobody reads.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_changed_host_key_has_its_own_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = Session::open(SessionConfig::for_tests(dir.path())).unwrap().0;
+    let (server, host) = crate::testing::trusted_test_host(&session).await;
+    let root = tempfile::tempdir().unwrap();
+    server.serve_sftp(root.path());
+    session.store().remove_host_key("127.0.0.1", server.port, &server.host_fingerprint).unwrap();
+    crate::testing::set_known_host(&session, "127.0.0.1", server.port, "SHA256:other");
+    let err = session.execute(Caller::User, "sftp.open", json!({ "host_id": host })).await.unwrap_err();
+    assert_eq!(code(err), ErrorCode::HostKeyChanged);
+}

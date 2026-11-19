@@ -18,7 +18,7 @@ use crate::state::{Page, PaneSlot, Panes, TabState};
 use crate::theme::Tokens;
 use crate::widgets::buttons::{chip, ghost, primary, search, square};
 use crate::widgets::icons::{Icon, draw};
-use crate::widgets::visible;
+use crate::widgets::{one_line, visible};
 
 /// From this width both sides show beside each other.
 pub const TWO_SIDES_FROM: f32 = 700.0;
@@ -258,6 +258,14 @@ fn error_text(e: &sshcraft_engine::EngineError) -> String {
                 ErrorCode::TooManyFiles => tr("Too many files or folders for one go."),
                 ErrorCode::Network => tr("The connection was lost."),
                 ErrorCode::SftpFailed => tr("The server refused."),
+                // The fingerprints say nothing to most people; the explanation does.
+                ErrorCode::HostKeyChanged => {
+                    return tr(
+                        "The host key of this server changed. Someone may be listening in, or the server was set up again. SSHCraft does not connect; if the change is expected, forget the old key in the host's settings.",
+                    )
+                    .to_string();
+                }
+                ErrorCode::HostKeyRejected => tr("The host key was not accepted."),
                 _ => return detail.as_deref().map_or_else(|| visible(&format!("{code:?}")), visible),
             };
             match detail {
@@ -663,9 +671,10 @@ fn entry_row(ui: &mut Ui, entry: &Entry, selected: bool, kind: SideKind) -> egui
     let icon_color = if entry.is_dir() { tokens.accent } else { tokens.text_dim };
     draw(ui.painter(), icon, Rect::from_center_size(c.icon.center(), vec2(16.0, 16.0)), icon_color);
     let name = visible(&entry.name);
-    let galley = ui.painter().layout_no_wrap(name.clone(), FontId::proportional(14.0), tokens.text);
-    let clip = ui.painter().with_clip_rect(c.name.intersect(ui.clip_rect()));
-    clip.galley(pos2(c.name.left(), c.name.center().y - galley.size().y / 2.0), galley, tokens.text);
+    // Cut with "…" to the column (a phone leaves little room); the whole name is in the tooltip.
+    let galley = one_line(ui, &entry.name, c.name.width(), tokens.text, FontId::proportional(14.0));
+    let cut = galley.elided;
+    ui.painter().galley(pos2(c.name.left(), c.name.center().y - galley.size().y / 2.0), galley, tokens.text);
     if c.size.width() > 0.0 && !entry.is_dir() {
         ui.painter().text(
             pos2(c.size.right() - 8.0, c.size.center().y),
@@ -696,7 +705,7 @@ fn entry_row(ui: &mut Ui, entry: &Entry, selected: bool, kind: SideKind) -> egui
         );
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &name));
-    response
+    if cut { response.on_hover_text(name) } else { response }
 }
 
 /// `bytes` in the largest unit that keeps a number of at least 1.
