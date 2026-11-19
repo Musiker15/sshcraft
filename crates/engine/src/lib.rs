@@ -31,6 +31,7 @@ pub mod recording;
 pub mod secrets;
 pub mod sessions;
 pub mod settings;
+pub mod sftp;
 pub mod ssh_config;
 pub mod sync;
 pub mod terminal;
