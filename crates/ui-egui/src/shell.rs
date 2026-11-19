@@ -327,7 +327,7 @@ fn tab_bar(app: &mut SshcraftApp, ui: &mut Ui) {
                 egui::Frame::new().fill(if selected { tokens.panel } else { tokens.bg }).corner_radius(tokens.radius).inner_margin(vec2(8.0, 4.0));
             let shown = frame.show(ui, |ui| {
                 ui.set_max_width(MAX_TAB_WIDTH);
-                let icon = if tab.panes.sessions().next().is_some() { Icon::Terminal } else { Icon::Plus };
+                let icon = tab_icon(&tab.panes);
                 let (icon_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                 draw(ui.painter(), icon, icon_rect, tokens.text_dim);
                 if let Some(dot) = crate::status::Dot::most_urgent(tab.panes.panes.iter().filter_map(|s| crate::session_tab::slot_dot(app, *s))) {
@@ -540,5 +540,28 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui) {
         && app.ui.nav_open
     {
         drawer(app, &ui.ctx().clone(), top);
+    }
+}
+
+/// The icon of a tab: a terminal while it holds one, a folder for files, "+" for a new tab.
+pub fn tab_icon(panes: &crate::state::Panes) -> Icon {
+    if panes.sessions().next().is_some() {
+        Icon::Terminal
+    } else if panes.sftps().next().is_some() {
+        Icon::Folder
+    } else {
+        Icon::Plus
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{PaneSlot, Panes};
+
+    #[test]
+    fn a_tab_of_files_shows_a_folder() {
+        assert_eq!(tab_icon(&Panes::single(PaneSlot::Sftp { id: 1 })), Icon::Folder);
+        assert_eq!(tab_icon(&Panes::single(PaneSlot::New { id: 1 })), Icon::Plus);
     }
 }

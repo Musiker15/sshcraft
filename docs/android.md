@@ -69,8 +69,11 @@ the bar puts the selection on Android's clipboard.
   through sync.
 - No local terminal or serial port.
 - Files come through Android's own picker: importing hosts, exporting them, backups, saving a
-  session log and `known_hosts` files work as on the desktop, in any place the picker reaches
-  (the device, a cloud drive). A folder cannot be picked.
+  session log, `known_hosts` files and SFTP uploads and downloads work as on the desktop, in any
+  place the picker reaches (the device, a cloud drive). A folder cannot be picked. Android does
+  not let the app open a picked document again by its descriptor, so a file to read is copied
+  into the app's cache first, and a file to write is written there and copied into the document
+  each time the app closes it. Up to eight such copies stay in the cache.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
 - No dropdown window, no desktop shortcuts, no X11 forwarding, no FIDO keys and no screen reader
   support yet.

@@ -81,10 +81,12 @@ pub fn command_worth_it(after_secs: u32, elapsed: Duration, watched: bool) -> bo
     after_secs > 0 && !watched && elapsed >= Duration::from_secs(u64::from(after_secs))
 }
 
-/// How many sessions are open: those not ended. Android keeps the app running in the background
-/// while there are any.
+/// How many sessions are open: terminals not ended, and SFTP panes. Android keeps the app running
+/// in the background while there are any; an SFTP pane must count, since picking a file to
+/// upload sends the app to the background.
 pub fn open_sessions(app: &crate::app::SshcraftApp) -> usize {
-    app.terminals.values().filter(|t| !matches!(t.status, Some(sshcraft_engine::SessionStatus::Ended { .. }))).count()
+    let terminals = app.terminals.values().filter(|t| !matches!(t.status, Some(sshcraft_engine::SessionStatus::Ended { .. }))).count();
+    terminals + app.sftp.len()
 }
 
 /// The text of the notification that keeps open sessions running on Android; None with none

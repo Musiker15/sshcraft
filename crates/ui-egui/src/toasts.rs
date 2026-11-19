@@ -56,15 +56,22 @@ impl Toasts {
         }
         let tokens = crate::theme::Tokens::get(ctx);
         let mut close = None;
+        // At most 360 points, and never wider than the window between its 12 point margins (a
+        // phone): the text wraps instead of running off the screen.
+        let room = (ctx.content_rect().width() - 24.0 - 16.0).clamp(120.0, 360.0);
         egui::Area::new(egui::Id::unique("sshcraft-toasts")).anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0)).show(ctx, |ui| {
             for (i, toast) in self.items.iter().enumerate() {
                 let stroke = if toast.kind == ToastKind::Error { tokens.danger } else { tokens.separator };
                 egui::Frame::new().fill(tokens.panel).stroke(egui::Stroke::new(1.0, stroke)).inner_margin(8.0).corner_radius(tokens.radius).show(
                     ui,
                     |ui| {
-                        ui.set_max_width(360.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(&toast.text).color(tokens.text));
+                        ui.set_max_width(room);
+                        ui.horizontal_top(|ui| {
+                            // Beside the close button; a label wraps only in a column of its own.
+                            ui.vertical(|ui| {
+                                ui.set_max_width((room - 36.0).max(60.0));
+                                ui.add(egui::Label::new(egui::RichText::new(&toast.text).color(tokens.text)).wrap());
+                            });
                             if ui.small_button("×").on_hover_text(crate::i18n::tr("Close")).clicked() {
                                 close = Some(i);
                             }

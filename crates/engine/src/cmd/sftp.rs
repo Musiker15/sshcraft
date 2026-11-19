@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
         command(
             "sftp.upload",
             "Upload files",
-            "{ id, local: [absolute paths], remote_dir, conflict?: skip | overwrite | rename } -> { transfer }",
+            "{ id, local: [absolute paths], remote_dir, conflict?: skip | overwrite | rename, name?: for one file } -> { transfer }",
             run_upload,
         ),
         command(
@@ -57,9 +57,24 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         command("sftp.cancel", "Cancel a transfer", "{ transfer }", run_cancel),
         command("sftp.clear_transfers", "Clear ended transfers", "{}", run_clear),
+        command(
+            "sftp.download_file",
+            "Download into a file",
+            "{ id, remote: path of a file, local_file: an existing file, overwritten } -> { transfer }",
+            run_download_file,
+        ),
         command("sftp.retry", "Try a transfer again", "{ transfer } -> { transfer }", run_retry),
         command("sftp.reconnect", "Connect a host's files again", "{ id } -> { home }", run_reconnect),
     ]
+}
+
+fn run_download_file(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let DownloadFileParams { id, remote, local_file } = parse("sftp.download_file", params)?;
+        let transfer = ctx.session.sftp().download_file(id, remote, local_file).map_err(failed)?;
+        Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
 }
 
 fn run_retry(ctx: Ctx, params: Value) -> Out {
@@ -240,6 +255,16 @@ struct UploadParams {
     remote_dir: String,
     #[serde(default)]
     conflict: Conflict,
+    /// The name on the server, for one file whose own name says nothing (Android's picker).
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DownloadFileParams {
+    id: SftpId,
+    remote: String,
+    local_file: std::path::PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -258,11 +283,11 @@ struct TransferParams {
 
 fn run_upload(ctx: Ctx, params: Value) -> Out {
     async move {
-        let UploadParams { id, local, remote_dir, conflict } = parse("sftp.upload", params)?;
+        let UploadParams { id, local, remote_dir, conflict, name } = parse("sftp.upload", params)?;
         if local.is_empty() || local.len() > MAX_PATHS {
             return Err(CommandError::bad_params("sftp.upload", format!("local: 1 to {MAX_PATHS}")));
         }
-        let transfer = ctx.session.sftp().upload(id, local, remote_dir, conflict).map_err(failed)?;
+        let transfer = ctx.session.sftp().upload(id, local, remote_dir, conflict, name).map_err(failed)?;
         Ok(json!({ "transfer": transfer }))
     }
     .boxed()

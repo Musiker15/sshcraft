@@ -86,8 +86,9 @@ pub struct TransferView {
 /// What a job was asked to do, kept so it can be tried again.
 #[derive(Debug, Clone)]
 enum Request {
-    Upload { local: Vec<PathBuf>, remote_dir: String },
+    Upload { local: Vec<PathBuf>, remote_dir: String, name: Option<String> },
     Download { remote: Vec<String>, local_dir: PathBuf },
+    DownloadFile { remote: String, local_file: PathBuf },
 }
 
 struct Job {
@@ -247,10 +248,12 @@ impl Transfers {
 
     fn add(&self, sftp: SftpId, request: Request, conflict: Conflict, completed: HashSet<String>) -> Arc<Job> {
         let (direction, label) = match &request {
-            Request::Upload { local, .. } => {
-                (Direction::Upload, label_of(local.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()), local.len()))
+            Request::Upload { local, name, .. } => {
+                let first = name.clone().or_else(|| local.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()));
+                (Direction::Upload, label_of(first, local.len()))
             }
             Request::Download { remote, .. } => (Direction::Download, label_of(remote.first().and_then(|p| names::remote_name(p)), remote.len())),
+            Request::DownloadFile { remote, .. } => (Direction::Download, label_of(names::remote_name(remote), 1)),
         };
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let view = TransferView {
@@ -301,12 +304,38 @@ impl Transfers {
         local: Vec<PathBuf>,
         remote_dir: String,
         conflict: Conflict,
+        name: Option<String>,
     ) -> Result<TransferId, SftpFailure> {
         let remote_dir = names::normalize_remote(&remote_dir).map_err(name_failure)?;
         if local.iter().any(|p| !p.is_absolute()) {
             return Err(name_failure(names::NameError::NotAbsolute));
         }
-        Ok(self.start(sftp, open, Request::Upload { local, remote_dir }, conflict, HashSet::new()))
+        if let Some(name) = &name {
+            // A name of its own goes with one file only (the picker's file has a number for a
+            // name on Android), and it is checked like any name sent to the server.
+            if local.len() != 1 {
+                return Err((ErrorCode::NameInvalid, Some("a name goes with one file only".into())));
+            }
+            names::check_name(name).map_err(name_failure)?;
+        }
+        Ok(self.start(sftp, open, Request::Upload { local, remote_dir, name }, conflict, HashSet::new()))
+    }
+
+    /// Starts downloading the remote file `remote` into the existing local file `local_file`,
+    /// which it overwrites: a document the system's picker created (Android). There is no part
+    /// file, since such a file cannot be renamed; on failure it is cut back to nothing.
+    pub(crate) fn download_file(
+        self: &Arc<Self>,
+        sftp: SftpId,
+        open: Arc<Open>,
+        remote: String,
+        local_file: PathBuf,
+    ) -> Result<TransferId, SftpFailure> {
+        if !local_file.is_absolute() {
+            return Err(name_failure(names::NameError::NotAbsolute));
+        }
+        let remote = names::normalize_remote(&remote).map_err(name_failure)?;
+        Ok(self.start(sftp, open, Request::DownloadFile { remote, local_file }, Conflict::Overwrite, HashSet::new()))
     }
 
     /// Starts downloading `remote` (files and folders) into the local folder `local_dir`.
@@ -334,8 +363,13 @@ impl Transfers {
         let this = self.clone();
         tokio::spawn(async move {
             let result = match request {
-                Request::Upload { local, remote_dir } => this.run(&job, || upload(&job, &open.client, local, remote_dir, conflict, &this)).await,
+                Request::Upload { local, remote_dir, name } => {
+                    this.run(&job, || upload(&job, &open.client, local, remote_dir, conflict, name, &this)).await
+                }
                 Request::Download { remote, local_dir } => this.run(&job, || download(&job, &open.client, remote, local_dir, conflict, &this)).await,
+                Request::DownloadFile { remote, local_file } => {
+                    this.run(&job, || download_to_file(&job, &open.client, remote, local_file, &this)).await
+                }
             };
             this.finish(&job, result);
         });
@@ -400,15 +434,23 @@ struct UploadPlan {
     files: Vec<(PathBuf, String, u64)>,
 }
 
-fn plan_upload(errors: &mut Vec<String>, local: &[PathBuf], remote_dir: &str) -> Result<UploadPlan, SftpFailure> {
+fn plan_upload(errors: &mut Vec<String>, local: &[PathBuf], remote_dir: &str, name: Option<&str>) -> Result<UploadPlan, SftpFailure> {
     let mut plan = UploadPlan::default();
     for path in local {
-        plan_local(errors, path, remote_dir, 0, &mut plan)?;
+        plan_local(errors, path, remote_dir, name, 0, &mut plan)?;
     }
     Ok(plan)
 }
 
-fn plan_local(errors: &mut Vec<String>, path: &Path, remote_dir: &str, depth: usize, plan: &mut UploadPlan) -> Result<(), SftpFailure> {
+/// Plans `path` into `remote_dir`, under `as_name` when given (the top item only).
+fn plan_local(
+    errors: &mut Vec<String>,
+    path: &Path,
+    remote_dir: &str,
+    as_name: Option<&str>,
+    depth: usize,
+    plan: &mut UploadPlan,
+) -> Result<(), SftpFailure> {
     if depth > MAX_DEPTH {
         return Err((ErrorCode::TooManyFiles, Some(format!("deeper than {MAX_DEPTH} folders"))));
     }
@@ -416,7 +458,7 @@ fn plan_local(errors: &mut Vec<String>, path: &Path, remote_dir: &str, depth: us
         return Err((ErrorCode::TooManyFiles, Some(format!("more than {MAX_ITEMS} files and folders"))));
     }
     let shown = path.to_string_lossy().into_owned();
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+    let Some(name) = as_name.or_else(|| path.file_name().and_then(|n| n.to_str())) else {
         errors.push(format!("{shown}: the name is not UTF-8"));
         return Ok(());
     };
@@ -449,7 +491,7 @@ fn plan_local(errors: &mut Vec<String>, path: &Path, remote_dir: &str, depth: us
             std::fs::read_dir(path).map_err(|e| (ErrorCode::Io, Some(format!("{shown}: {e}"))))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
         children.sort();
         for child in children {
-            plan_local(errors, &child, &target, depth + 1, plan)?;
+            plan_local(errors, &child, &target, None, depth + 1, plan)?;
         }
     } else if meta.is_file() {
         plan.files.push((path.to_path_buf(), target, meta.len()));
@@ -465,6 +507,7 @@ async fn upload(
     local: Vec<PathBuf>,
     remote_dir: String,
     conflict: Conflict,
+    name: Option<String>,
     transfers: &Transfers,
 ) -> Result<(), Stop> {
     let plan = {
@@ -472,7 +515,7 @@ async fn upload(
         let remote_dir = remote_dir.clone();
         let (planned, errors) = tokio::task::spawn_blocking(move || {
             let mut errors = Vec::new();
-            let planned = plan_upload(&mut errors, &local, &remote_dir);
+            let planned = plan_upload(&mut errors, &local, &remote_dir, name.as_deref());
             (planned, errors)
         })
         .await
@@ -843,6 +886,38 @@ async fn download_file(
         Ok(()) => {}
     }
     result.map(|()| true)
+}
+
+/// One remote file into an existing local file, overwritten from the start; see
+/// [`Transfers::download_file`].
+async fn download_to_file(job: &Job, client: &SftpClient, remote: String, local_file: PathBuf, transfers: &Transfers) -> Result<(), Stop> {
+    let attrs = client.stat(&remote).await.map_err(sftp_failure)?;
+    if attrs.kind != EntryKind::File {
+        return Err(Stop::Failed((ErrorCode::NotSupported, Some(format!("{remote}: not a file")))));
+    }
+    job.update(|v| {
+        v.files_total = 1;
+        v.bytes_total = attrs.size;
+    });
+    let io = |e: std::io::Error| (ErrorCode::Io, Some(e.to_string()));
+    // The file is there already (the picker made it); it is neither created nor followed anew.
+    let mut out = tokio::fs::OpenOptions::new().write(true).truncate(true).open(&local_file).await.map_err(io)?;
+    let file = client.open_read(&remote).await.map_err(sftp_failure)?;
+    let mut reporter = Reporter { transfers, job, last: Instant::now() };
+    let received = receive(job, &file, &mut out, &mut reporter, 0).await;
+    let _ = file.close().await;
+    let result = match received {
+        Ok(()) => out.flush().await.map_err(|e| Stop::Failed(io(e))),
+        Err(stop) => Err(stop),
+    };
+    if result.is_err() {
+        // Half a file must not look like the whole one.
+        let _ = out.set_len(0).await;
+    } else {
+        job.update(|v| v.files_done = 1);
+        job.complete(remote);
+    }
+    result
 }
 
 async fn receive(job: &Job, file: &RemoteFile, out: &mut tokio::fs::File, reporter: &mut Reporter<'_>, start: u64) -> Result<(), Stop> {

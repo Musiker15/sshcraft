@@ -175,20 +175,42 @@ pub mod picked {
         }
     }
 
-    /// One answer of the activity, `id<TAB>path`; an empty path means cancelled. None for a line
-    /// that is not one.
-    pub fn parse_answer(line: &str) -> Option<(u64, Option<PathBuf>)> {
-        let (id, path) = line.split_once('\t')?;
+    /// What the picker handed back for one request.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Picked {
+        pub id: u64,
+        /// `None`: cancelled.
+        pub path: Option<PathBuf>,
+        /// The document's name as the picker showed it, when it said one; the path is only a
+        /// number. It comes from outside, so whoever uses it checks it.
+        pub name: Option<String>,
+    }
+
+    /// The longest name taken from the picker, in characters.
+    const MAX_NAME: usize = 255;
+
+    /// One answer of the activity, `id<TAB>path<TAB>name`; `id<TAB>` means cancelled, and the
+    /// name may be missing. None for a line that is not one.
+    pub fn parse_answer(line: &str) -> Option<Picked> {
+        let (id, rest) = line.split_once('\t')?;
         let id = id.trim().parse::<u64>().ok()?;
-        Some((id, (!path.is_empty()).then(|| PathBuf::from(path))))
+        let (path, name) = match rest.split_once('\t') {
+            Some((path, name)) => (path, Some(name)),
+            None => (rest, None),
+        };
+        let name = name.filter(|n| !n.is_empty()).map(|n| n.chars().take(MAX_NAME).collect());
+        Some(Picked { id, path: (!path.is_empty()).then(|| PathBuf::from(path)), name })
     }
 
     /// The system's picker. `ask` starts it for request `id`; `answers` hands back what was
-    /// picked since (`None`: cancelled).
+    /// picked since.
     pub trait Picker: Send + Sync {
         fn ask(&self, id: u64, dialog: &FileDialog) -> Result<(), String>;
-        fn answers(&self) -> Vec<(u64, Option<PathBuf>)>;
+        fn answers(&self) -> Vec<Picked>;
     }
+
+    /// The most picked names remembered.
+    const MAX_NAMES: usize = 32;
 
     pub struct Dialogs<T> {
         picker: Option<Arc<dyn Picker>>,
@@ -196,11 +218,18 @@ pub mod picked {
         answers: Vec<(T, Answer)>,
         next: u64,
         wake: Arc<dyn Fn() + Send + Sync>,
+        /// The names of the files picked lately, by the path they were handed over as.
+        names: Vec<(PathBuf, String)>,
     }
 
     impl<T> Dialogs<T> {
         pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
-            Self { picker: None, waiting: Vec::new(), answers: Vec::new(), next: 1, wake }
+            Self { picker: None, waiting: Vec::new(), answers: Vec::new(), next: 1, wake, names: Vec::new() }
+        }
+
+        /// The name the picker showed for the file it handed over as `path`.
+        pub fn picked_name(&self, path: &std::path::Path) -> Option<String> {
+            self.names.iter().rev().find(|(p, _)| p == path).map(|(_, n)| n.clone())
         }
 
         /// Puts the system's picker in place; without one every request is unavailable.
@@ -238,11 +267,19 @@ pub mod picked {
         /// waiting. An answer for no waiting request is dropped.
         pub fn take_answers(&mut self) -> Vec<(T, Answer)> {
             if let Some(picker) = &self.picker {
-                for (id, path) in picker.answers() {
+                for Picked { id, path, name } in picker.answers() {
                     if let Some(at) = self.waiting.iter().position(|(w, _)| *w == id) {
                         let (_, then) = self.waiting.remove(at);
                         let answer = match path {
-                            Some(path) => Answer::Paths(vec![path]),
+                            Some(path) => {
+                                if let Some(name) = name {
+                                    self.names.push((path.clone(), name));
+                                    if self.names.len() > MAX_NAMES {
+                                        self.names.remove(0);
+                                    }
+                                }
+                                Answer::Paths(vec![path])
+                            }
                             None => Answer::Cancelled,
                         };
                         self.answers.push((then, answer));
@@ -262,7 +299,7 @@ pub mod picked {
         #[derive(Default)]
         struct Fake {
             asked: Mutex<Vec<(u64, FileDialog)>>,
-            answers: Mutex<Vec<(u64, Option<PathBuf>)>>,
+            answers: Mutex<Vec<Picked>>,
         }
 
         impl Picker for Fake {
@@ -270,7 +307,7 @@ pub mod picked {
                 self.asked.lock().unwrap().push((id, dialog.clone()));
                 Ok(())
             }
-            fn answers(&self) -> Vec<(u64, Option<PathBuf>)> {
+            fn answers(&self) -> Vec<Picked> {
                 std::mem::take(&mut *self.answers.lock().unwrap())
             }
         }
@@ -286,15 +323,31 @@ pub mod picked {
             assert_eq!(asked.len(), 2);
             assert_eq!(asked[1].1.file_name.as_deref(), Some("hosts.json"));
             assert!(dialogs.take_answers().is_empty(), "nothing is picked yet");
-            fake.answers.lock().unwrap().extend([(asked[1].0, None), (asked[0].0, Some(PathBuf::from("/proc/self/fd/7"))), (99, None)]);
+            let fd = PathBuf::from("/proc/self/fd/7");
+            fake.answers.lock().unwrap().extend([
+                Picked { id: asked[1].0, path: None, name: None },
+                Picked { id: asked[0].0, path: Some(fd.clone()), name: Some("hosts.json".into()) },
+                Picked { id: 99, path: None, name: None },
+            ]);
             let answers = dialogs.take_answers();
-            assert_eq!(answers, vec![("export", Answer::Cancelled), ("import", Answer::Paths(vec![PathBuf::from("/proc/self/fd/7")]))]);
+            assert_eq!(answers, vec![("export", Answer::Cancelled), ("import", Answer::Paths(vec![fd.clone()]))]);
+            assert_eq!(dialogs.picked_name(&fd).as_deref(), Some("hosts.json"), "the name the picker showed");
+            assert_eq!(dialogs.picked_name(std::path::Path::new("/proc/self/fd/8")), None);
         }
 
         #[test]
         fn the_activitys_answers_and_media_types_are_read() {
-            assert_eq!(parse_answer("7\t/proc/self/fd/42"), Some((7, Some(PathBuf::from("/proc/self/fd/42")))));
-            assert_eq!(parse_answer("8\t"), Some((8, None)), "cancelled");
+            let fd = Some(PathBuf::from("/proc/self/fd/42"));
+            assert_eq!(parse_answer("7\t/proc/self/fd/42"), Some(Picked { id: 7, path: fd.clone(), name: None }));
+            assert_eq!(parse_answer("7\t/proc/self/fd/42\tBericht.pdf"), Some(Picked { id: 7, path: fd.clone(), name: Some("Bericht.pdf".into()) }));
+            assert_eq!(
+                parse_answer("7\t/proc/self/fd/42\ta\tb"),
+                Some(Picked { id: 7, path: fd.clone(), name: Some("a\tb".into()) }),
+                "the name is the rest"
+            );
+            let long = format!("7\t/p\t{}", "x".repeat(400));
+            assert_eq!(parse_answer(&long).and_then(|p| p.name).map(|n| n.chars().count()), Some(255));
+            assert_eq!(parse_answer("8\t"), Some(Picked { id: 8, path: None, name: None }), "cancelled");
             assert_eq!(parse_answer("garbage"), None);
             assert_eq!(parse_answer("x\t/p"), None);
             assert_eq!(mime_for(&["JSON".into()]), "application/json");

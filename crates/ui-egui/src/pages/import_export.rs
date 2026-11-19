@@ -121,6 +121,16 @@ pub enum DialogFor {
     Backup {
         restore: bool,
     },
+    /// A file to upload into the remote folder `dir` of SFTP pane `id` (Android).
+    SftpUpload {
+        id: u64,
+        dir: String,
+    },
+    /// The file the remote file `remote` of SFTP pane `id` goes into (Android).
+    SftpDownload {
+        id: u64,
+        remote: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -168,6 +178,8 @@ pub fn take_dialog_answers(app: &mut SshcraftApp) {
         match what {
             DialogFor::KnownHostsImport | DialogFor::KnownHostsExport => crate::pages::known_hosts::dialog_answer(app, &what, path),
             DialogFor::Backup { restore } => crate::pages::backup::dialog_answer(app, restore, path),
+            DialogFor::SftpUpload { id, dir } => crate::sftp_tab::picked_upload(app, id, dir, path),
+            DialogFor::SftpDownload { id, remote } => crate::sftp_tab::picked_download(app, id, remote, path),
             DialogFor::ImportSource => {
                 if let Some(import) = app.ui.import.as_mut() {
                     import.path = Some(path);

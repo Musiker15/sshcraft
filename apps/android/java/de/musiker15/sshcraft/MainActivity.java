@@ -4,7 +4,8 @@ import android.Manifest;
 import android.app.NativeActivity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.os.ParcelFileDescriptor;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,16 +49,13 @@ public class MainActivity extends NativeActivity {
 
     private InputView input;
 
-    /** Picked files as "id<TAB>path" (an empty path: cancelled), until Rust takes them. */
+    /** Picked files as "id<TAB>path<TAB>name" ("id<TAB>": cancelled), until Rust takes them. */
     private static final ConcurrentLinkedQueue<String> PICKED = new ConcurrentLinkedQueue<>();
 
     /** The open requests: the request code Android hands back, Rust's id and whether to write. */
     private final Map<Integer, long[]> picking = new HashMap<>();
 
-    /** Files picked lately stay open, so the path Rust got stays valid while it reads or writes. */
-    private final ArrayDeque<ParcelFileDescriptor> picked = new ArrayDeque<>();
-
-    /** At most this many picked files stay open; the oldest closes first. */
+    /** At most this many picked files are kept in the cache; the oldest goes first. */
     private static final int KEEP_OPEN = 8;
 
     private int nextCode = 1000;
@@ -94,28 +92,123 @@ public class MainActivity extends NativeActivity {
             return;
         }
         String path = "";
+        String name = "";
         if (result == RESULT_OK && data != null && data.getData() != null) {
-            try {
-                ParcelFileDescriptor fd = getContentResolver().openFileDescriptor(data.getData(), request[1] == 1 ? "rwt" : "r");
-                if (fd != null) {
-                    picked.addLast(fd);
-                    while (picked.size() > KEEP_OPEN) {
-                        try {
-                            picked.removeFirst().close();
-                        } catch (java.io.IOException ignored) {
-                            // Closing an old file can fail; it is gone either way.
-                        }
-                    }
-                    path = "/proc/self/fd/" + fd.getFd();
+            // The document's name as the picker shows it; the path below is only a number.
+            // Rust checks it like any name from outside.
+            try (Cursor cursor = getContentResolver().query(data.getData(), new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
+                    name = cursor.getString(0);
                 }
             } catch (Exception e) {
-                path = "";
+                name = "";
             }
+            if (request[1] == 0) {
+                // A file to read: Android lets the app open the document, but not open it again
+                // by its descriptor's path when it belongs to another app. A copy in the app's
+                // cache is a file Rust can read; it is made off the main thread.
+                final long id = request[0];
+                final String shown = name;
+                final android.net.Uri uri = data.getData();
+                new Thread(() -> PICKED.add(id + "\t" + copyToCache(code, uri) + "\t" + shown)).start();
+                return;
+            }
+            // A file to write: the app may not open the created document again by its
+            // descriptor's path either. Rust writes a file in the cache; each time it closes it,
+            // the file goes into the document (see SaveWatch).
+            path = saveWatch().add(code, data.getData());
         }
-        PICKED.add(request[0] + "\t" + path);
+        PICKED.add(request[0] + "\t" + path + (path.isEmpty() ? "" : "\t" + name));
     }
 
-    /** The oldest answer of the file picker as "id<TAB>path", or null when there is none. */
+    private SaveWatch saves;
+
+    private synchronized SaveWatch saveWatch() {
+        if (saves == null) {
+            saves = new SaveWatch(new java.io.File(getCacheDir(), "saving"));
+            saves.startWatching();
+        }
+        return saves;
+    }
+
+    /**
+     * Files Rust writes for created documents: when one is closed after writing, its content
+     * goes into its document. At most {@link #KEEP_OPEN} stay; the oldest goes first.
+     */
+    private final class SaveWatch extends android.os.FileObserver {
+        private final java.io.File dir;
+        private final Map<String, android.net.Uri> targets = new java.util.concurrent.ConcurrentHashMap<>();
+        private final ArrayDeque<String> order = new ArrayDeque<>();
+
+        SaveWatch(java.io.File dir) {
+            super(dir, CLOSE_WRITE);
+            this.dir = dir;
+            dir.mkdirs();
+        }
+
+        /** A file for the document {@code uri}; its path, or "" when it could not be made. */
+        synchronized String add(int code, android.net.Uri uri) {
+            java.io.File file = new java.io.File(dir, Integer.toString(code));
+            try {
+                if (!dir.isDirectory() || (!file.exists() && !file.createNewFile())) {
+                    return "";
+                }
+            } catch (java.io.IOException e) {
+                return "";
+            }
+            targets.put(file.getName(), uri);
+            order.addLast(file.getName());
+            while (order.size() > KEEP_OPEN) {
+                String old = order.removeFirst();
+                targets.remove(old);
+                new java.io.File(dir, old).delete();
+            }
+            return file.getAbsolutePath();
+        }
+
+        @Override
+        public void onEvent(int event, String name) {
+            android.net.Uri uri = name == null ? null : targets.get(name);
+            if (uri == null) {
+                return;
+            }
+            try (java.io.InputStream in = new java.io.FileInputStream(new java.io.File(dir, name));
+                    java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                if (out != null) {
+                    in.transferTo(out);
+                }
+            } catch (Exception e) {
+                // The document went away or cannot be written; Rust's file stays until it is old.
+            }
+        }
+    }
+
+    /** Copies made of picked files, oldest first; at most {@link #KEEP_OPEN} stay. */
+    private final ArrayDeque<java.io.File> copies = new ArrayDeque<>();
+
+    /** Copies the document {@code uri} into the app's cache; its path, or "" when it failed. */
+    private String copyToCache(int code, android.net.Uri uri) {
+        java.io.File dir = new java.io.File(getCacheDir(), "picked");
+        java.io.File copy = new java.io.File(dir, Integer.toString(code));
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null || (!dir.isDirectory() && !dir.mkdirs())) {
+                return "";
+            }
+            java.nio.file.Files.copy(in, copy.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            copy.delete();
+            return "";
+        }
+        synchronized (copies) {
+            copies.addLast(copy);
+            while (copies.size() > KEEP_OPEN) {
+                copies.removeFirst().delete();
+            }
+        }
+        return copy.getAbsolutePath();
+    }
+
+    /** The oldest answer of the file picker as "id<TAB>path<TAB>name", or null when there is none. */
     public static String takePicked() {
         return PICKED.poll();
     }

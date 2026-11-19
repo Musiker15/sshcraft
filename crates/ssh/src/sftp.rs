@@ -48,6 +48,9 @@ impl From<RawError> for SftpError {
             },
             RawError::IO(message) => SftpError::Lost(bounded(&message)),
             RawError::Timeout => SftpError::Timeout,
+            // russh-sftp says this when the channel under the session is gone: the connection
+            // went away, which a retry can go on from, not a server that misbehaves.
+            RawError::UnexpectedBehavior(message) if message == "session closed" => SftpError::Lost(message),
             RawError::Limited(message) | RawError::UnexpectedBehavior(message) => SftpError::Protocol(bounded(&message)),
             RawError::UnexpectedPacket => SftpError::Protocol("unexpected packet".into()),
         }
@@ -277,6 +280,12 @@ impl RemoteFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_closed_session_is_a_lost_connection() {
+        assert!(matches!(SftpError::from(RawError::UnexpectedBehavior("session closed".into())), SftpError::Lost(_)));
+        assert!(matches!(SftpError::from(RawError::UnexpectedBehavior("odd".into())), SftpError::Protocol(_)));
+    }
 
     #[test]
     fn server_messages_are_cut_and_cleaned() {

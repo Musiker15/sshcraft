@@ -1,12 +1,13 @@
 //! The system's file picker for the app's file dialogs (`file_dialogs::picked`): `MainActivity`
-//! opens it and answers with a path to the picked file that stays valid for a while
-//! (`/proc/self/fd/<n>`), so imports, exports and backups read and write as on the desktop.
-
-use std::path::PathBuf;
+//! opens it and answers with a path that stays valid for a while, so imports, exports, backups and
+//! SFTP read and write as on the desktop. A file to read comes as a copy in the app's cache (Android
+//! does not let the app open a document again by its descriptor's path); a file to write is a file
+//! in the cache, which the activity copies into the created document each time it is closed. The
+//! document's name comes along, since neither path has it.
 
 use jni::objects::{JString, JValue};
 use jni::{jni_sig, jni_str};
-use sshcraft_ui_egui::file_dialogs::picked::{FileDialog, Kind, Picker, mime_for, parse_answer};
+use sshcraft_ui_egui::file_dialogs::picked::{FileDialog, Kind, Picked, Picker, mime_for, parse_answer};
 
 /// At most this many answers are taken in one frame.
 const MAX_PER_FRAME: usize = 16;
@@ -33,7 +34,7 @@ impl Picker for SystemPicker {
         .map_err(|e| format!("pick: {e}"))
     }
 
-    fn answers(&self) -> Vec<(u64, Option<PathBuf>)> {
+    fn answers(&self) -> Vec<Picked> {
         let taken = crate::keyboard::with_activity(|env, activity| {
             let class = env.get_object_class(activity)?;
             let mut out = Vec::new();

@@ -998,6 +998,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "{files} files and {dirs} folders on the server are deleted. This cannot be undone." => {
             "{files} Dateien und {dirs} Ordner auf dem Server werden gelöscht. Das lässt sich nicht rückgängig machen."
         }
+        "The picker gave no name for the file." => "Die Dateiauswahl hat keinen Namen für die Datei genannt.",
+        "The server refused." => "Der Server hat abgelehnt.",
         _ => return None,
     })
 }

@@ -6,7 +6,7 @@ pub mod icons;
 pub mod logo;
 pub mod qr;
 
-pub use elided::{elided_label, forget_undo, secret_field, visible, visible_lines};
+pub use elided::{elided_label, forget_undo, one_line, secret_field, visible, visible_lines};
 
 /// `wanted` points, or less where the space is narrower (a phone): fixed field widths never push
 /// a form past the screen.

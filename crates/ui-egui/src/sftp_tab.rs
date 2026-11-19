@@ -18,7 +18,7 @@ use crate::state::{Page, PaneSlot, Panes, TabState};
 use crate::theme::Tokens;
 use crate::widgets::buttons::{chip, ghost, primary, search, square};
 use crate::widgets::icons::{Icon, draw};
-use crate::widgets::visible;
+use crate::widgets::{one_line, visible};
 
 /// From this width both sides show beside each other.
 pub const TWO_SIDES_FROM: f32 = 700.0;
@@ -179,6 +179,13 @@ enum Action {
     Run(&'static str, Value),
     Cancel(u64),
     Retry(u64),
+    /// Pick a file to upload into the shown folder (Android).
+    PickUpload,
+    /// Pick where a remote file goes (Android).
+    PickDownload {
+        remote: String,
+        name: String,
+    },
     Reconnect,
     ClearTransfers,
 }
@@ -250,7 +257,16 @@ fn error_text(e: &sshcraft_engine::EngineError) -> String {
                 ErrorCode::NameInvalid => tr("That name cannot be used."),
                 ErrorCode::TooManyFiles => tr("Too many files or folders for one go."),
                 ErrorCode::Network => tr("The connection was lost."),
-                _ => return visible(&e.to_string()),
+                ErrorCode::SftpFailed => tr("The server refused."),
+                // The fingerprints say nothing to most people; the explanation does.
+                ErrorCode::HostKeyChanged => {
+                    return tr(
+                        "The host key of this server changed. Someone may be listening in, or the server was set up again. SSHCraft does not connect; if the change is expected, forget the old key in the host's settings.",
+                    )
+                    .to_string();
+                }
+                ErrorCode::HostKeyRejected => tr("The host key was not accepted."),
+                _ => return detail.as_deref().map_or_else(|| visible(&format!("{code:?}")), visible),
             };
             match detail {
                 Some(d) if !d.is_empty() => format!("{text} ({})", visible(d)),
@@ -452,6 +468,18 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
                     actions.push(transfer_action(kind, items, &selected, other_path.clone(), &other_names));
                 }
             }
+            // Without a local side (Android) files come and go through the system's picker.
+            if kind == SideKind::Remote && !has_other {
+                if primary(ui, Some(Icon::Upload), tr("Upload"), BUTTON).clicked() {
+                    actions.push(Action::PickUpload);
+                }
+                let one_file = (selected.len() == 1).then(|| side.entries.iter().find(|e| e.name == selected[0] && e.kind == "file")).flatten();
+                if let Some(file) = one_file
+                    && ghost(ui, tr("Download"), BUTTON).clicked()
+                {
+                    actions.push(Action::PickDownload { remote: child_path(kind, &side.path, &file.name), name: file.name.clone() });
+                }
+            }
             if kind == SideKind::Remote {
                 if square(ui, Icon::Plus, tr("New folder"), BUTTON, false).clicked() {
                     actions.push(Action::Ask(Dialog::NewFolder { name: String::new() }));
@@ -643,9 +671,10 @@ fn entry_row(ui: &mut Ui, entry: &Entry, selected: bool, kind: SideKind) -> egui
     let icon_color = if entry.is_dir() { tokens.accent } else { tokens.text_dim };
     draw(ui.painter(), icon, Rect::from_center_size(c.icon.center(), vec2(16.0, 16.0)), icon_color);
     let name = visible(&entry.name);
-    let galley = ui.painter().layout_no_wrap(name.clone(), FontId::proportional(14.0), tokens.text);
-    let clip = ui.painter().with_clip_rect(c.name.intersect(ui.clip_rect()));
-    clip.galley(pos2(c.name.left(), c.name.center().y - galley.size().y / 2.0), galley, tokens.text);
+    // Cut with "…" to the column (a phone leaves little room); the whole name is in the tooltip.
+    let galley = one_line(ui, &entry.name, c.name.width(), tokens.text, FontId::proportional(14.0));
+    let cut = galley.elided;
+    ui.painter().galley(pos2(c.name.left(), c.name.center().y - galley.size().y / 2.0), galley, tokens.text);
     if c.size.width() > 0.0 && !entry.is_dir() {
         ui.painter().text(
             pos2(c.size.right() - 8.0, c.size.center().y),
@@ -676,7 +705,7 @@ fn entry_row(ui: &mut Ui, entry: &Entry, selected: bool, kind: SideKind) -> egui
         );
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &name));
-    response
+    if cut { response.on_hover_text(name) } else { response }
 }
 
 /// `bytes` in the largest unit that keeps a number of at least 1.
@@ -765,6 +794,12 @@ fn transfer_row(ui: &mut Ui, t: &Value, actions: &mut Vec<Action>) {
             ui.painter().rect_filled(bar, 2.0, tokens.field);
             let share = if total == 0 { if state == "done" { 1.0 } else { 0.0 } } else { (done as f32 / total as f32).clamp(0.0, 1.0) };
             ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * share, bar.height())), 2.0, tokens.accent);
+            // Why a file failed: the first reason, the rest on hover.
+            if let Some(errors) = t["errors"].as_array().filter(|e| !e.is_empty()) {
+                let first = visible(errors[0].as_str().unwrap_or_default());
+                let all: Vec<String> = errors.iter().filter_map(Value::as_str).map(visible).collect();
+                crate::widgets::elided_label(ui, &first, width, tokens.warning, FontId::proportional(12.0)).on_hover_text(all.join("\n"));
+            }
         });
         let unfinished = matches!(state, "failed" | "cancelled") || (state == "done" && t["errors"].as_array().is_some_and(|e| !e.is_empty()));
         if matches!(state, "queued" | "running") {
@@ -963,6 +998,15 @@ fn act(app: &mut SshcraftApp, id: u64, action: Action) {
         }
         Action::Run(command, params) => run_and_refresh(app, id, command, params),
         Action::Cancel(transfer) => app.run_reported("sftp.cancel", json!({ "transfer": transfer })),
+        Action::PickUpload => {
+            let dir = app.sftp.get(&id).map(|v| v.remote.path.clone()).unwrap_or_default();
+            let dialog = crate::file_dialogs::FileDialog::open().title(tr("Upload"));
+            app.dialogs.ask(dialog, crate::pages::import_export::DialogFor::SftpUpload { id, dir });
+        }
+        Action::PickDownload { remote, name } => {
+            let dialog = crate::file_dialogs::FileDialog::save().title(tr("Download")).file_name(visible(&name));
+            app.dialogs.ask(dialog, crate::pages::import_export::DialogFor::SftpDownload { id, remote });
+        }
         Action::Retry(transfer) => app.runner.run(
             "sftp.retry",
             json!({ "transfer": transfer }),
@@ -1040,10 +1084,33 @@ pub fn on_transfer(app: &mut SshcraftApp, view: Value) {
         && let Some(sftp) = sftp
     {
         let side = if upload { SideKind::Remote } else { SideKind::Local };
-        if let Some(path) = app.sftp.get_mut(&sftp).map(|v| v.side(side).path.clone()) {
+        // Without a local side (Android) a download has nothing here to read again.
+        if (side == SideKind::Remote || LOCAL_SIDE)
+            && let Some(path) = app.sftp.get_mut(&sftp).map(|v| v.side(side).path.clone())
+        {
             list(app, sftp, side, path);
         }
     }
+}
+
+/// The picker handed over the file to upload (Android): it goes into `dir` under the name the
+/// picker showed, beside anything of that name.
+pub fn picked_upload(app: &mut SshcraftApp, id: u64, dir: String, path: std::path::PathBuf) {
+    #[cfg(target_os = "android")]
+    let name = app.dialogs.picked_name(&path);
+    #[cfg(not(target_os = "android"))]
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let Some(name) = name else {
+        app.toasts.error(tr("The picker gave no name for the file."));
+        return;
+    };
+    let params = json!({ "id": id, "local": [path], "remote_dir": dir, "conflict": "rename", "name": name });
+    run_and_refresh(app, id, "sftp.upload", params);
+}
+
+/// The picker made the file to download into (Android).
+pub fn picked_download(app: &mut SshcraftApp, id: u64, remote: String, path: std::path::PathBuf) {
+    run_and_refresh(app, id, "sftp.download_file", json!({ "id": id, "remote": remote, "local_file": path }));
 }
 
 /// The transfers the app knows, by id.

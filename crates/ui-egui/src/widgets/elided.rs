@@ -49,15 +49,39 @@ pub fn visible_lines(text: &str) -> String {
     )
 }
 
+/// `text` made [`visible`] and laid out on one line at most `max_width` wide, cut with "…".
+pub fn one_line(ui: &Ui, text: &str, max_width: f32, color: Color32, font: FontId) -> std::sync::Arc<egui::Galley> {
+    let mut job = LayoutJob::single_section(visible(text), TextFormat::simple(font, color));
+    job.wrap = TextWrapping { max_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
 /// A one-line label at most `max_width` wide; returns its response (click sense).
 pub fn elided_label(ui: &mut Ui, text: &str, max_width: f32, color: Color32, font: FontId) -> Response {
     let shown = visible(text);
-    let mut job = LayoutJob::single_section(shown.clone(), TextFormat::simple(font, color));
-    job.wrap = TextWrapping { max_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let galley = one_line(ui, text, max_width, color, font);
     let cut = galley.elided;
     let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::click());
     ui.painter().galley(rect.min, galley, color);
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Label, true, text));
     if cut { response.on_hover_text(shown) } else { response }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_line_is_cut_with_an_ellipsis() {
+        let seen = std::rc::Rc::new(std::cell::Cell::new(None));
+        let out = seen.clone();
+        let mut harness = egui_kittest::Harness::new_ui(move |ui| {
+            let galley = one_line(ui, "backup-2026-11-19-mit-langem-namen.tar.gz", 120.0, Color32::WHITE, FontId::proportional(14.0));
+            out.set(Some((galley.elided, galley.size().x)));
+        });
+        harness.run();
+        let (cut, width) = seen.get().unwrap();
+        assert!(cut);
+        assert!(width <= 120.0);
+    }
 }

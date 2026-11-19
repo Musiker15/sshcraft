@@ -64,3 +64,15 @@ fn the_desktop_keeps_its_menu_bar() {
     h.run_steps(3);
     assert!(h.query_by_label("File").is_some());
 }
+
+/// A long message stays inside a phone's screen: it wraps instead of running off the edges.
+#[test]
+fn a_long_message_wraps_on_a_phone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = phone(dir.path());
+    let text = "The connection was lost. (could not connect: Disconnected) and then some more words";
+    h.state_mut().toasts.error(text);
+    h.run_steps(3);
+    let rect = h.get_by_label(text).rect();
+    assert!(rect.left() >= 0.0 && rect.right() <= 390.5, "the message runs off the screen: {rect:?}");
+}
