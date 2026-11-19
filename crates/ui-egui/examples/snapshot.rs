@@ -250,6 +250,11 @@ fn sample_sftp(app: &mut SshcraftApp) {
         json!({ "id": 2, "sftp": 1, "direction": "download", "label": "backup-2026-11.tar.gz", "state": { "kind": "done" },
                 "files_done": 1, "files_total": 1, "bytes_done": 48_211_456, "bytes_total": 48_211_456, "skipped": 0, "errors": [] }),
     );
+    app.transfers.insert(
+        3,
+        json!({ "id": 3, "sftp": 1, "direction": "upload", "label": "notes.md", "state": { "kind": "cancelled" },
+                "files_done": 0, "files_total": 1, "bytes_done": 4_096, "bytes_total": 12_288, "skipped": 0, "errors": [], "resumed": 0 }),
+    );
     app.ui.tabs.push(TabState {
         title: sshcraft_ui_egui::sftp_tab::tab_title("web-01"),
         panes: Panes::single(PaneSlot::Sftp { id: 1 }),

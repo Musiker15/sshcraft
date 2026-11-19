@@ -43,9 +43,17 @@ Files go one after another. Each file is read or written with 16 requests at onc
 jobs run at the same time while the rest wait. The strip under the sides shows each job with its
 progress. A running job can be cancelled, and *Clear finished* removes the jobs that ended.
 
-A file is first written as `.<name>.sshcraft-part` and renamed only when it is complete. A
-cancelled or failed file's part is deleted, so nothing half-written stays behind, on the server
-or here.
+A file is first written as `.<name>.sshcraft-part` and renamed only when it is complete. If you
+cancel, or a file fails for any other reason, its part is deleted, so nothing half-written stays
+behind, on the server or here.
+
+The one exception is a lost connection. Then the part stays, the host's side shows *Reconnect*,
+and the job gets *Try again*. Trying again leaves the files that already got there and continues
+the interrupted one from where its part ends. SSHCraft continues only a part it left itself
+during this run, and only one that is not longer than the file. Any other part, such as one from
+an earlier start of the app, is replaced, never written onto. A cancelled job, or one that ended
+with some files failed, can be tried again the same way: the files that made it are not sent
+twice.
 
 When a name is already in the target folder, the pane asks before it starts:
 
@@ -81,7 +89,7 @@ SFTP speaks only the protocol, on its own channel. No name ever goes into a comm
 
 The commands are `sftp.open`, `sftp.close`, `sftp.list`, `sftp.local_list`, `sftp.mkdir`,
 `sftp.rename`, `sftp.chmod`, `sftp.count`, `sftp.delete`, `sftp.upload`, `sftp.download`,
-`sftp.transfers`, `sftp.cancel` and `sftp.clear_transfers`. Their parameters are in the palette's
+`sftp.transfers`, `sftp.cancel`, `sftp.clear_transfers`, `sftp.retry` and `sftp.reconnect`. Their parameters are in the palette's
 command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engine event
 `TransferStatus`. Agents have no access to any of them.
 
@@ -90,7 +98,6 @@ command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engin
 Some things are not there yet ([gaps.md](gaps.md)):
 
 - opening or editing a file in another program, since opening a downloaded file can run it;
-- resuming a cancelled transfer;
 - syncing a folder;
 - copying from server to server;
 - uploading and downloading on Android.

@@ -141,6 +141,8 @@ pub struct SftpView {
     /// The side shown when only one fits.
     pub narrow: SideKind,
     pub dialog: Option<Dialog>,
+    /// The connection went away; the host's side offers to connect again.
+    pub lost: bool,
 }
 
 impl SftpView {
@@ -153,6 +155,7 @@ impl SftpView {
             local: Side { loading: LOCAL_SIDE, ..Side::default() },
             narrow: SideKind::Remote,
             dialog: None,
+            lost: false,
         }
     }
 
@@ -175,6 +178,8 @@ enum Action {
     Count(Vec<String>),
     Run(&'static str, Value),
     Cancel(u64),
+    Retry(u64),
+    Reconnect,
     ClearTransfers,
 }
 
@@ -287,10 +292,19 @@ fn list(app: &mut SshcraftApp, id: u64, side: SideKind, path: String) {
                     s.truncated = v["truncated"].as_bool().unwrap_or(false);
                     s.selected.retain(|n| s.entries.iter().any(|e| &e.name == n));
                 }
-                Err(e) => s.error = Some(error_text(&e)),
+                Err(e) => {
+                    s.error = Some(error_text(&e));
+                    view.lost |= lost_connection(&e);
+                }
             }
         }),
     );
+}
+
+/// Whether `e` says the connection went away (then the pane offers to connect again).
+fn lost_connection(e: &sshcraft_engine::EngineError) -> bool {
+    use sshcraft_engine::{EngineError, ErrorCode};
+    matches!(e, EngineError::Failed { code: ErrorCode::Network | ErrorCode::Timeout, .. })
 }
 
 /// The path of `name` in the folder `dir` on `side`.
@@ -383,6 +397,7 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
         SideKind::Local => tr("This computer").to_string(),
         SideKind::Remote => view.name.clone(),
     };
+    let lost = view.lost;
     let side = view.side(kind);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let frame = egui::Frame::new().fill(tokens.panel).stroke(Stroke::new(1.0, tokens.separator)).corner_radius(tokens.radius_card).inner_margin(12.0);
@@ -393,6 +408,12 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
         ui.set_max_size(size - vec2(24.0, 24.0));
         ui.horizontal(|ui| {
             crate::widgets::buttons::heading(ui, &visible(&heading), 16.0);
+            if kind == SideKind::Remote && lost {
+                ui.add_space(8.0);
+                if primary(ui, Some(Icon::Refresh), tr("Reconnect"), 28.0).clicked() {
+                    actions.push(Action::Reconnect);
+                }
+            }
         });
         ui.add_space(6.0);
         // The folder, and how to move.
@@ -745,10 +766,17 @@ fn transfer_row(ui: &mut Ui, t: &Value, actions: &mut Vec<Action>) {
             let share = if total == 0 { if state == "done" { 1.0 } else { 0.0 } } else { (done as f32 / total as f32).clamp(0.0, 1.0) };
             ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * share, bar.height())), 2.0, tokens.accent);
         });
+        let unfinished = matches!(state, "failed" | "cancelled") || (state == "done" && t["errors"].as_array().is_some_and(|e| !e.is_empty()));
         if matches!(state, "queued" | "running") {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if square(ui, Icon::Close, tr("Cancel"), 28.0, false).clicked() {
                     actions.push(Action::Cancel(id));
+                }
+            });
+        } else if unfinished {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ghost(ui, tr("Try again"), 28.0).clicked() {
+                    actions.push(Action::Retry(id));
                 }
             });
         }
@@ -935,6 +963,34 @@ fn act(app: &mut SshcraftApp, id: u64, action: Action) {
         }
         Action::Run(command, params) => run_and_refresh(app, id, command, params),
         Action::Cancel(transfer) => app.run_reported("sftp.cancel", json!({ "transfer": transfer })),
+        Action::Retry(transfer) => app.runner.run(
+            "sftp.retry",
+            json!({ "transfer": transfer }),
+            Box::new(move |app, result| {
+                if let Err(e) = result {
+                    if let Some(view) = app.sftp.get_mut(&id) {
+                        view.lost |= lost_connection(&e);
+                    }
+                    app.toasts.error(&error_text(&e));
+                }
+            }),
+        ),
+        Action::Reconnect => app.runner.run(
+            "sftp.reconnect",
+            json!({ "id": id }),
+            Box::new(move |app, result| match result {
+                Ok(_) => {
+                    let Some(view) = app.sftp.get_mut(&id) else { return };
+                    view.lost = false;
+                    let (remote, local) = (view.remote.path.clone(), view.local.path.clone());
+                    list(app, id, SideKind::Remote, remote);
+                    if LOCAL_SIDE {
+                        list(app, id, SideKind::Local, local);
+                    }
+                }
+                Err(e) => app.toasts.error(&error_text(&e)),
+            }),
+        ),
         Action::ClearTransfers => {
             app.transfers.retain(|_, t| matches!(t["state"]["kind"].as_str(), Some("queued" | "running")));
             app.run_reported("sftp.clear_transfers", json!({}));
@@ -966,6 +1022,13 @@ pub fn on_transfer(app: &mut SshcraftApp, view: Value) {
     let was_open = app.transfers.get(&id).is_some_and(|t| matches!(t["state"]["kind"].as_str(), Some("queued" | "running")));
     let sftp = view["sftp"].as_u64();
     let upload = view["direction"] == "upload";
+    // A job that ended because the connection went away: the pane offers to connect again.
+    if view["state"]["kind"] == "failed"
+        && matches!(view["state"]["code"].as_str(), Some("network" | "timeout"))
+        && let Some(pane) = sftp.and_then(|s| app.sftp.get_mut(&s))
+    {
+        pane.lost = true;
+    }
     app.transfers.insert(id, view);
     // At most this many kept for the strip.
     while app.transfers.len() > 50 {

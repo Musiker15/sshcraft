@@ -224,6 +224,13 @@ impl SftpClient {
         Ok(RemoteFile { raw: self.raw.clone(), handle })
     }
 
+    /// Opens an existing `path` for writing at offsets, without cutting it short: to go on with a
+    /// part a lost connection left.
+    pub async fn open_write(&self, path: &str) -> Result<RemoteFile, SftpError> {
+        let handle = self.raw.open(path, OpenFlags::WRITE, FileAttributes::empty()).await?.handle;
+        Ok(RemoteFile { raw: self.raw.clone(), handle })
+    }
+
     /// Ends the session; its channel closes.
     pub fn close(&self) {
         let _ = self.raw.close_session();

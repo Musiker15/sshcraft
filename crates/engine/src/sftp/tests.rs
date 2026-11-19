@@ -289,3 +289,105 @@ async fn transfers_need_absolute_local_paths() {
     assert!(run(&f, "sftp.download", json!({ "id": f.id, "remote": ["/x"], "local_dir": "rel" })).await.is_err());
     assert!(run(&f, "sftp.upload", json!({ "id": f.id, "local": [], "remote_dir": "/" })).await.is_err());
 }
+
+fn pattern(len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i % 241) as u8).collect()
+}
+
+/// A part a lost connection left goes on where it stopped: only the rest is sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_goes_on_from_the_part_a_lost_connection_left() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    let data = pattern(300_000);
+    std::fs::write(local.path().join("big.bin"), &data).unwrap();
+    std::fs::write(f.root.path().join(".big.bin.sshcraft-part"), &data[..100_000]).unwrap();
+    f.session.sftp().transfers().mark_resumable("r:/.big.bin.sshcraft-part".into());
+    let up = run(&f, "sftp.upload", json!({ "id": f.id, "local": [local.path().join("big.bin")], "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(job["resumed"], 100_000);
+    assert_eq!(job["bytes_done"], 300_000);
+    assert_eq!(std::fs::read(f.root.path().join("big.bin")).unwrap(), data);
+    no_parts(f.root.path());
+}
+
+/// A part this run did not leave (an older try's, or anyone's) is never continued: the file is
+/// sent whole, and what was in the part is gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_part_this_run_did_not_leave_is_never_continued() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    let data = pattern(200_000);
+    std::fs::write(local.path().join("f.bin"), &data).unwrap();
+    std::fs::write(f.root.path().join(".f.bin.sshcraft-part"), vec![0xEE; 120_000]).unwrap();
+    let up = run(&f, "sftp.upload", json!({ "id": f.id, "local": [local.path().join("f.bin")], "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["resumed"], 0, "{job}");
+    assert_eq!(std::fs::read(f.root.path().join("f.bin")).unwrap(), data);
+
+    // Marked, but longer than the file: not the same file, so it starts over too.
+    std::fs::remove_file(f.root.path().join("f.bin")).unwrap();
+    std::fs::write(f.root.path().join(".f.bin.sshcraft-part"), vec![0xEE; 250_000]).unwrap();
+    f.session.sftp().transfers().mark_resumable("r:/.f.bin.sshcraft-part".into());
+    let up = run(&f, "sftp.upload", json!({ "id": f.id, "local": [local.path().join("f.bin")], "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["resumed"], 0, "{job}");
+    assert_eq!(std::fs::read(f.root.path().join("f.bin")).unwrap(), data);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_download_goes_on_from_its_part() {
+    let f = fixture().await;
+    let data = pattern(250_000);
+    std::fs::write(f.root.path().join("log.txt"), &data).unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let part = local.path().join(".log.txt.sshcraft-part");
+    std::fs::write(&part, &data[..70_000]).unwrap();
+    f.session.sftp().transfers().mark_resumable(format!("l:{}", part.display()));
+    let down = run(&f, "sftp.download", json!({ "id": f.id, "remote": ["/log.txt"], "local_dir": local.path() })).await.unwrap();
+    let job = ended(&f, &down["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(job["resumed"], 70_000);
+    assert_eq!(std::fs::read(local.path().join("log.txt")).unwrap(), data);
+    no_parts(local.path());
+}
+
+/// A retry sends only what did not get there: a file the first try finished is not sent again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_leaves_the_files_that_got_there() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(local.path().join("a"), pattern(1_000)).unwrap();
+    std::fs::write(local.path().join("b"), pattern(2_000)).unwrap();
+    std::fs::create_dir_all(f.root.path().join("t/b")).unwrap();
+    // "b" cannot replace a folder of that name: the first try ends with one file failed.
+    let up = run(
+        &f,
+        "sftp.upload",
+        json!({ "id": f.id, "local": [local.path().join("a"), local.path().join("b")], "remote_dir": "/t", "conflict": "overwrite" }),
+    )
+    .await
+    .unwrap();
+    let first = ended(&f, &up["transfer"]).await;
+    assert_eq!((first["files_done"].as_u64(), first["errors"].as_array().map(Vec::len)), (Some(1), Some(1)), "{first}");
+    std::fs::remove_dir(f.root.path().join("t/b")).unwrap();
+    let again = run(&f, "sftp.retry", json!({ "transfer": up["transfer"] })).await.unwrap();
+    let second = ended(&f, &again["transfer"]).await;
+    assert_eq!(second["state"]["kind"], "done", "{second}");
+    assert_eq!((second["files_total"].as_u64(), second["bytes_done"].as_u64()), (Some(1), Some(2_000)), "only b goes: {second}");
+    assert_eq!(std::fs::read(f.root.path().join("t/b")).unwrap(), pattern(2_000));
+    let done = run(&f, "sftp.retry", json!({ "transfer": again["transfer"] })).await.unwrap_err();
+    assert_eq!(code(done), ErrorCode::NotSupported, "a finished job is not tried again");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_connects_again_and_keeps_its_id() {
+    let f = fixture().await;
+    std::fs::write(f.root.path().join("x"), b"1").unwrap();
+    let again = run(&f, "sftp.reconnect", json!({ "id": f.id })).await.unwrap();
+    assert_eq!(again["home"], "/");
+    let listing = run(&f, "sftp.list", json!({ "id": f.id, "path": "/" })).await.unwrap();
+    assert_eq!(names(&listing), ["x"]);
+    assert!(run(&f, "sftp.reconnect", json!({ "id": 999 })).await.is_err());
+}
