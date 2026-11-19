@@ -17,7 +17,7 @@ The ranked list of open work. Pick from the top. When work lands, remove or upda
 | 4a | FreeBSD: the last output of a local shell that ends at once (a `sh -c` command) can be lost; an interactive shell is not affected | later |
 | 6 | The app lock needs Windows Hello or, on Android, the fingerprint, face or screen lock: Touch ID on macOS (through a safe wrapper such as `robius-authentication`) and a way on Linux and FreeBSD are not there yet | later, needs a Mac to try |
 | 7 | SFTP opens no file in another program and edits none: opening a downloaded file can run it, so it needs its own design ([sftp.md](sftp.md#not-yet)) | later |
-| 7b | SFTP has no folder sync and no copy from server to server | later |
+| 7b | SFTP has no folder sync | later |
 | 7a | Releases are unsigned on Windows and have no macOS packages: there is no certificate or Apple account. SSHCraft's own release workflow builds Windows unsigned while no certificate is set up and leaves macOS out ([releasing.md](releasing.md#what-gets-built)) | later, needs a certificate and an Apple account |
 | 9 | The output of a command cannot be folded: the emulator's grid cannot hide lines; jumping, the gutter and copying the output are there | later |
 | 10 | Shell integration is not set up on connect: every way found either leaves files on the server or replaces how the login shell starts; [terminal.md](terminal.md#shell-integration) has the lines to add by hand | later |

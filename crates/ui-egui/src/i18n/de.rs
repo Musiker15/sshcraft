@@ -456,6 +456,8 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "The session ended." => "Die Sitzung ist beendet.",
         "The connection was lost." => "Die Verbindung ist abgebrochen.",
         "The host key was not accepted." => "Der Host-Schlüssel wurde nicht angenommen.",
+        "The password was not accepted." => "Das Passwort wurde nicht angenommen.",
+        "The server did not answer in time." => "Der Server hat nicht rechtzeitig geantwortet.",
         "The host key of this server changed. Someone may be listening in, or the server was set up again. SSHCraft does not connect; if the change is expected, forget the old key in the host's settings." => {
             "Der Host-Schlüssel dieses Servers hat sich geändert. Vielleicht hört jemand mit, oder der Server wurde neu eingerichtet. SSHCraft verbindet nicht; ist die Änderung erwartet, vergiss den alten Schlüssel in den Einstellungen des Hosts."
         }
@@ -988,6 +990,9 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Already there" => "Schon vorhanden",
         "Skip" => "Überspringen",
         "Keep both" => "Beide behalten",
+        "Copy to…" => "Kopieren nach…",
+        "Into the folder another open host's files show:" => "In den Ordner, den die Dateien eines anderen offenen Hosts zeigen:",
+        "Open the files of another host first." => "Öffne zuerst die Dateien eines anderen Hosts.",
         "Replace" => "Ersetzen",
         "{name} (files)" => "{name} (Dateien)",
         "Only the first {count} entries are shown." => "Nur die ersten {count} Einträge werden gezeigt.",

@@ -1179,6 +1179,7 @@ pub(crate) fn failure_code(f: Failure) -> (ErrorCode, Option<String>) {
         Failure::End(reason, code, detail) => (
             code.unwrap_or(match reason {
                 EndReason::AuthCancelled => ErrorCode::SignInCancelled,
+                EndReason::AuthFailed => ErrorCode::SignInFailed,
                 EndReason::HostKeyMismatch => ErrorCode::HostKeyChanged,
                 EndReason::HostKeyRejected => ErrorCode::HostKeyRejected,
                 _ => ErrorCode::Session,

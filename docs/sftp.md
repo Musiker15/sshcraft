@@ -67,6 +67,18 @@ When a name is already in the target folder, the pane asks before it starts:
 
 A program that calls the commands passes the rule itself. Without one, the files are skipped.
 
+## Copying from server to server
+
+With the files of two hosts open, each in its own tab or pane, select entries on one host's side
+and choose **Copy to…**. The dialog lists the other open hosts with the folder each one shows,
+and the copy goes into that folder. This works on Android too.
+
+The data goes through this computer: SSHCraft reads from one server and writes to the other.
+Nothing runs on either server, and neither server needs to reach the other. A copy follows the
+same rules as an upload: part files, the question when a name is taken, *Try again* after a lost
+connection. Names from the first server go to the second only if they are plain names. The job
+shows in the transfers of both panes. Closing either pane stops it, and its part is deleted.
+
 ## What is refused, and why
 
 SSHCraft treats everything the server sends as hostile:
@@ -93,7 +105,8 @@ SFTP speaks only the protocol, on its own channel. No name ever goes into a comm
 
 The commands are `sftp.open`, `sftp.close`, `sftp.list`, `sftp.local_list`, `sftp.mkdir`,
 `sftp.rename`, `sftp.chmod`, `sftp.count`, `sftp.delete`, `sftp.upload`, `sftp.download`,
-`sftp.transfers`, `sftp.cancel`, `sftp.clear_transfers`, `sftp.retry` and `sftp.reconnect`. Their parameters are in the palette's
+`sftp.copy`, `sftp.download_file`, `sftp.transfers`, `sftp.cancel`, `sftp.clear_transfers`,
+`sftp.retry` and `sftp.reconnect`. Their parameters are in the palette's
 command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engine event
 `TransferStatus`. Agents have no access to any of them.
 
@@ -102,5 +115,4 @@ command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engin
 Some things are not there yet ([gaps.md](gaps.md)):
 
 - opening or editing a file in another program, since opening a downloaded file can run it;
-- syncing a folder;
-- copying from server to server;
+- syncing a folder.

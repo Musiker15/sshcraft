@@ -61,3 +61,30 @@ fn an_sftp_pane_counts_as_an_open_session() {
     let (h, _session, _server, _root) = opened(dir.path());
     assert_eq!(sshcraft_ui_egui::notify::open_sessions(h.state()), 1);
 }
+
+/// Files go from one host's pane into the folder another pane shows, through "Copy to…".
+#[test]
+fn copy_to_sends_the_selection_into_another_panes_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session, _server, root) = opened(dir.path());
+    std::fs::create_dir(root.path().join("target")).unwrap();
+    let first = *h.state().sftp.keys().next().unwrap();
+    h.state_mut().ui.page = Page::Hosts;
+    h.run_steps(2);
+    h.get_by_label("SFTP").click();
+    wait(&mut h, "a second pane did not open", |app| app.sftp.len() == 2);
+    let second = *h.state().sftp.keys().find(|k| **k != first).unwrap();
+    wait(&mut h, "the second pane was not read", |app| app.sftp.get(&second).is_some_and(|v| !v.remote.loading));
+    // As if the second pane showed the empty folder "/target".
+    let pane = h.state_mut().sftp.get_mut(&second).unwrap();
+    pane.remote.path = "/target".into();
+    pane.remote.entries.clear();
+    h.state_mut().sftp.get_mut(&first).unwrap().remote.selected.insert("on-the-server.txt".into());
+    h.state_mut().ui.page = Page::Tab(0);
+    h.run_steps(2);
+    h.get_by_label("Copy to…").click();
+    h.run_steps(6);
+    h.get_by_label("test host: /target").click();
+    let copied = root.path().join("target/on-the-server.txt");
+    wait(&mut h, "the file was not copied", |_| std::fs::read(&copied).is_ok_and(|d| d == b"hi"));
+}
