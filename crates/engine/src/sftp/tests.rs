@@ -391,3 +391,48 @@ async fn a_session_connects_again_and_keeps_its_id() {
     assert_eq!(names(&listing), ["x"]);
     assert!(run(&f, "sftp.reconnect", json!({ "id": 999 })).await.is_err());
 }
+
+/// Android's picker hands over a file whose name is a number: the upload takes the name given,
+/// checked like any other.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_can_go_under_a_name_of_its_own() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(local.path().join("42"), b"the report").unwrap();
+    let file = local.path().join("42");
+    let up = run(&f, "sftp.upload", json!({ "id": f.id, "local": [file], "remote_dir": "/", "name": "Bericht März.pdf" })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(std::fs::read(f.root.path().join("Bericht März.pdf")).unwrap(), b"the report");
+    assert!(!f.root.path().join("42").exists());
+    for bad in ["../out", "a/b", ".."] {
+        let err = run(&f, "sftp.upload", json!({ "id": f.id, "local": [file], "remote_dir": "/", "name": bad })).await.unwrap_err();
+        assert_eq!(code(err), ErrorCode::NameInvalid, "{bad}");
+    }
+    let two = run(&f, "sftp.upload", json!({ "id": f.id, "local": [file, file], "remote_dir": "/", "name": "x" })).await.unwrap_err();
+    assert_eq!(code(two), ErrorCode::NameInvalid, "a name goes with one file only");
+}
+
+/// A download into a file the picker made overwrites it from the start, so nothing of what was
+/// in it before stays at its end.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_download_into_a_given_file_overwrites_it() {
+    let f = fixture().await;
+    let data = pattern(150_000);
+    std::fs::write(f.root.path().join("remote.bin"), &data).unwrap();
+    std::fs::create_dir(f.root.path().join("folder")).unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let target = local.path().join("17");
+    std::fs::write(&target, vec![0xAA; 400_000]).unwrap();
+    let down = run(&f, "sftp.download_file", json!({ "id": f.id, "remote": "/remote.bin", "local_file": target })).await.unwrap();
+    let job = ended(&f, &down["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(std::fs::read(&target).unwrap(), data);
+    no_parts(local.path());
+
+    let folder = run(&f, "sftp.download_file", json!({ "id": f.id, "remote": "/folder", "local_file": target })).await.unwrap();
+    let job = ended(&f, &folder["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "failed", "a folder is not a file: {job}");
+    assert_eq!(std::fs::read(&target).unwrap(), data, "a failure before anything was read leaves the file alone");
+    assert!(run(&f, "sftp.download_file", json!({ "id": f.id, "remote": "/remote.bin", "local_file": "relative" })).await.is_err());
+}

@@ -119,9 +119,17 @@ impl SftpManager {
         local: Vec<PathBuf>,
         remote_dir: String,
         conflict: super::transfers::Conflict,
+        name: Option<String>,
     ) -> Result<super::transfers::TransferId, SftpFailure> {
         let open = self.get(id)?;
-        self.transfers.upload(id, open, local, remote_dir, conflict)
+        self.transfers.upload(id, open, local, remote_dir, conflict, name)
+    }
+
+    /// Starts downloading one remote file into an existing local file (a document the system's
+    /// picker created).
+    pub fn download_file(&self, id: SftpId, remote: String, local_file: PathBuf) -> Result<super::transfers::TransferId, SftpFailure> {
+        let open = self.get(id)?;
+        self.transfers.download_file(id, open, remote, local_file)
     }
 
     /// Starts downloading remote files and folders into a local folder.

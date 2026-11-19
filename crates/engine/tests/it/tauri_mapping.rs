@@ -164,6 +164,7 @@ const NEW: &[&str] = &[
     "sftp.clear_transfers",
     "sftp.retry",
     "sftp.reconnect",
+    "sftp.download_file",
 ];
 
 #[test]
