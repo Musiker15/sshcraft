@@ -174,4 +174,4 @@ request, on macOS on `main` and for pull requests with the label `full-ci`, Free
 its files change. `cargo xtask linux` runs clippy and the tests in a Linux container from any
 machine. The packages (`packaging/`, adapted from gridcraft) and how a release is made are in
 [releasing.md](releasing.md). The sync server builds as a program and as a Docker image
-(`packaging/docker/Dockerfile`).
+(`packaging/docker/Dockerfile`); a published release pushes its image to ghcr.io.
