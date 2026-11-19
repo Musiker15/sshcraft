@@ -140,3 +140,18 @@ async fn missing_cwd_falls_back_to_home() {
     assert!(!text.contains("sshcraft-no-such-dir-xyz"), "{text:?}");
     assert_eq!(end, Disconnect::Exited(Some(0)));
 }
+
+/// A shell that prints and ends at once keeps its last output: on FreeBSD the terminal dropped
+/// what it still held once the shell's end closed it (docs/gaps.md, 4a). Several runs, since it
+/// depends on timing.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_shell_that_ends_at_once_keeps_its_last_output() {
+    let script = "i=0; while [ $i -lt 300 ]; do echo line$i; i=$((i+1)); done; echo sshcraft-last";
+    let cmd = ShellCommand { program: "sh".into(), args: vec!["-c".into(), script.into()], label: "burst".into() };
+    for run in 0..10 {
+        let (text, end) = run_to_end(&cmd, "xterm", None).await;
+        assert!(text.contains("sshcraft-last"), "run {run}: the last line is missing, got {} bytes", text.len());
+        assert_eq!(end, Disconnect::Exited(Some(0)));
+    }
+}
