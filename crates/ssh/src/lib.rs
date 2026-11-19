@@ -20,6 +20,7 @@ mod auth;
 pub mod authorized_keys;
 pub mod hostkeys;
 mod proxy;
+pub mod sftp;
 pub mod socks;
 mod tunnel;
 pub mod x11;
@@ -698,6 +699,14 @@ impl Session {
     /// Without a time limit: the caller decides how long to wait.
     pub async fn run(&self, command: &str, limit: usize) -> Result<RunOutput, SshError> {
         run_on(&self.handle, command, limit).await
+    }
+
+    /// Opens an SFTP session on a channel of its own; it lives while the client and this
+    /// connection do.
+    pub async fn sftp(&self) -> Result<sftp::SftpClient, SshError> {
+        let channel = self.handle.channel_open_session().await.map_err(protocol)?;
+        channel.request_subsystem(true, "sftp").await.map_err(protocol)?;
+        sftp::SftpClient::start(channel.into_stream()).await.map_err(|e| SshError::Protocol(e.to_string()))
     }
 
     /// Opens a shell with a terminal of type `term` (`TERM` on the server).

@@ -19,6 +19,8 @@ use russh::{MethodKind, MethodSet};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
+mod sftp_server;
+
 const FLOOD_LEN: usize = 5 * 1024 * 1024;
 /// What the test server answers to any command.
 pub const TEST_EXEC_OUTPUT: &str = "NAME=\"Debian\"\nID=debian\nLinux\n";
@@ -101,6 +103,9 @@ struct Records {
     x11_cookie: Mutex<Option<Vec<u8>>>,
     /// Whether the client took an X11 channel opened right after sign-in, before any request.
     x11_unasked: Mutex<Option<bool>>,
+    /// The folder the `sftp` subsystem serves; none: the subsystem is refused.
+    sftp_root: Mutex<Option<std::path::PathBuf>>,
+    sftp: Arc<sftp_server::SftpRecords>,
 }
 
 pub struct TestServer {
@@ -133,6 +138,16 @@ impl TestServer {
     /// Passwords and keyboard-interactive answers clients sent, in order.
     pub fn received_passwords(&self) -> Vec<String> {
         self.records.passwords.lock().unwrap().clone()
+    }
+
+    /// Serves `root` as the `sftp` subsystem: `/` on the wire is that folder.
+    pub fn serve_sftp(&self, root: &std::path::Path) {
+        *self.records.sftp_root.lock().unwrap() = Some(root.to_path_buf());
+    }
+
+    /// The mode a client last set on `path` (as sent on the wire, made canonical) over SFTP.
+    pub fn sftp_mode(&self, path: &str) -> Option<u32> {
+        self.records.sftp.modes.lock().unwrap().get(path).copied()
     }
 
     /// Answers every later `exec` with `output`.
@@ -293,6 +308,7 @@ impl server::Server for Factory {
             kbd_round: 0,
             sessions: std::collections::HashSet::new(),
             execs: std::collections::HashSet::new(),
+            opened: std::collections::HashMap::new(),
             listeners: Vec::new(),
         }
     }
@@ -308,6 +324,9 @@ struct Handler {
     sessions: std::collections::HashSet<ChannelId>,
     /// Channels that run a command: their bytes are its input.
     execs: std::collections::HashSet<ChannelId>,
+    /// Session channels until a shell, a command or a subsystem is asked for on them; the `sftp`
+    /// subsystem needs the channel itself.
+    opened: std::collections::HashMap<ChannelId, Channel<Msg>>,
     /// Listeners for `tcpip-forward`: (address, port, accept task).
     listeners: Vec<(String, u32, JoinHandle<()>)>,
 }
@@ -528,7 +547,22 @@ impl server::Handler for Handler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         self.sessions.insert(channel.id());
+        self.opened.insert(channel.id(), channel);
         reply.accept().await;
+        Ok(())
+    }
+
+    async fn subsystem_request(&mut self, channel: ChannelId, name: &str, session: &mut Session) -> Result<(), Self::Error> {
+        let root = self.records.sftp_root.lock().unwrap().clone();
+        match (name, root, self.opened.remove(&channel)) {
+            ("sftp", Some(root), Some(opened)) => {
+                self.sessions.remove(&channel);
+                session.channel_success(channel)?;
+                let server = sftp_server::SftpServer::new(root, self.records.sftp.clone());
+                russh_sftp::server::run(opened.into_stream(), server).await;
+            }
+            _ => session.channel_failure(channel)?,
+        }
         Ok(())
     }
 
@@ -593,10 +627,12 @@ impl server::Handler for Handler {
     }
 
     async fn shell_request(&mut self, channel: ChannelId, session: &mut Session) -> Result<(), Self::Error> {
+        self.opened.remove(&channel);
         session.channel_success(channel)
     }
 
     async fn exec_request(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
+        self.opened.remove(&channel);
         session.channel_success(channel)?;
         // A command's input is recorded, not echoed like a shell's.
         self.sessions.remove(&channel);
