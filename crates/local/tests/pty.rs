@@ -7,9 +7,7 @@ fn echo_command() -> ShellCommand {
     if cfg!(windows) {
         ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     } else {
-        // The shell stays a moment after the echo: FreeBSD drops what a terminal still holds when
-        // its shell ends at once (docs/gaps.md), and this test is about the output, not that.
-        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local; sleep 1".into()], label: "echo".into() }
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     }
 }
 
@@ -115,9 +113,7 @@ fn term_and_dir_command() -> ShellCommand {
     if cfg!(windows) {
         ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo %TERM% & cd".into()], label: "probe".into() }
     } else {
-        // The shell stays a moment after its output: on FreeBSD the last output of a shell that
-        // ends at once can be lost (docs/gaps.md, 4a), as in the echo test above.
-        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd; sleep 1".into()], label: "probe".into() }
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd".into()], label: "probe".into() }
     }
 }
 
@@ -139,4 +135,22 @@ async fn missing_cwd_falls_back_to_home() {
     let (text, end) = run_to_end(&term_and_dir_command(), "xterm", Some(&missing)).await;
     assert!(!text.contains("sshcraft-no-such-dir-xyz"), "{text:?}");
     assert_eq!(end, Disconnect::Exited(Some(0)));
+}
+
+/// A shell that prints and ends at once keeps its output. FreeBSD was once seen to drop the last
+/// output of such a shell; this guards it with the smallest case, one short line and the end, and
+/// a burst, several runs each, since it would depend on timing.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_shell_that_ends_at_once_keeps_its_last_output() {
+    let short = ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-last".into()], label: "short".into() };
+    let script = "i=0; while [ $i -lt 300 ]; do echo line$i; i=$((i+1)); done; echo sshcraft-last";
+    let burst = ShellCommand { program: "sh".into(), args: vec!["-c".into(), script.into()], label: "burst".into() };
+    for cmd in [&short, &burst] {
+        for run in 0..20 {
+            let (text, end) = run_to_end(cmd, "xterm", None).await;
+            assert!(text.contains("sshcraft-last"), "{} run {run}: the last line is missing, got {} bytes", cmd.label, text.len());
+            assert_eq!(end, Disconnect::Exited(Some(0)));
+        }
+    }
 }
