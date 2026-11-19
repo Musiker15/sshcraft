@@ -99,11 +99,41 @@ pub struct SftpManager {
     ctx: Arc<Context>,
     open: Mutex<HashMap<SftpId, Arc<Open>>>,
     next: AtomicU64,
+    transfers: Arc<super::transfers::Transfers>,
 }
 
 impl SftpManager {
-    pub(crate) fn new(ctx: Arc<Context>) -> Self {
-        SftpManager { ctx, open: Mutex::new(HashMap::new()), next: AtomicU64::new(1) }
+    pub(crate) fn new(ctx: Arc<Context>, events: crate::events::EventBus) -> Self {
+        SftpManager { ctx, open: Mutex::new(HashMap::new()), next: AtomicU64::new(1), transfers: Arc::new(super::transfers::Transfers::new(events)) }
+    }
+
+    /// The uploads and downloads of every session.
+    pub fn transfers(&self) -> &super::transfers::Transfers {
+        &self.transfers
+    }
+
+    /// Starts uploading local files and folders into a remote folder.
+    pub fn upload(
+        &self,
+        id: SftpId,
+        local: Vec<PathBuf>,
+        remote_dir: String,
+        conflict: super::transfers::Conflict,
+    ) -> Result<super::transfers::TransferId, SftpFailure> {
+        let open = self.get(id)?;
+        self.transfers.upload(id, open, local, remote_dir, conflict)
+    }
+
+    /// Starts downloading remote files and folders into a local folder.
+    pub fn download(
+        &self,
+        id: SftpId,
+        remote: Vec<String>,
+        local_dir: PathBuf,
+        conflict: super::transfers::Conflict,
+    ) -> Result<super::transfers::TransferId, SftpFailure> {
+        let open = self.get(id)?;
+        self.transfers.download(id, open, remote, local_dir, conflict)
     }
 
     /// Connects to `host` and starts SFTP; gives the id and the home folder.
@@ -147,6 +177,7 @@ impl SftpManager {
         let Some(open) = self.lock().remove(&id) else {
             return false;
         };
+        self.transfers.cancel_all(id);
         open.client.close();
         if let Ok(open) = Arc::try_unwrap(open) {
             crate::pool::release(open.connection).await;

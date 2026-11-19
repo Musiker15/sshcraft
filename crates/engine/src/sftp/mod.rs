@@ -2,6 +2,7 @@
 
 pub mod manager;
 pub mod names;
+pub mod transfers;
 
 pub use manager::{Count, EntryView, ListingView, SftpId, SftpManager};
 

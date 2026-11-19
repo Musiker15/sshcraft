@@ -120,11 +120,9 @@ async fn deleting_a_link_leaves_its_target() {
 async fn agents_have_no_access_to_sftp() {
     let f = fixture().await;
     let agent = Caller::Agent { name: AgentName::new("claude-code").unwrap(), via: Via::Mcp, conn: ConnId(1) };
-    for (id, params) in [
-        ("sftp.list", json!({ "id": f.id, "path": "/" })),
-        ("sftp.delete", json!({ "id": f.id, "paths": ["/x"] })),
-        ("sftp.local_list", json!({})),
-    ] {
+    for (id, params) in
+        [("sftp.list", json!({ "id": f.id, "path": "/" })), ("sftp.delete", json!({ "id": f.id, "paths": ["/x"] })), ("sftp.local_list", json!({}))]
+    {
         assert!(f.session.execute(agent.clone(), id, params).await.is_err(), "{id}");
     }
 }
@@ -149,4 +147,145 @@ async fn a_closed_session_is_gone() {
     run(&f, "sftp.close", json!({ "id": f.id })).await.unwrap();
     assert!(run(&f, "sftp.list", json!({ "id": f.id, "path": "/" })).await.is_err());
     assert!(run(&f, "sftp.close", json!({ "id": f.id })).await.is_err());
+}
+
+/// Waits until transfer `id` ended and gives its view.
+async fn ended(f: &Fixture, id: &Value) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let all = run(f, "sftp.transfers", json!({})).await.unwrap();
+        let job = all.as_array().unwrap().iter().find(|j| &j["id"] == id).cloned().unwrap();
+        let state = job["state"]["kind"].as_str().unwrap().to_owned();
+        if state != "queued" && state != "running" {
+            return job;
+        }
+        assert!(std::time::Instant::now() < deadline, "the transfer did not end: {job}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+fn tree(at: &std::path::Path) {
+    std::fs::create_dir_all(at.join("project/src")).unwrap();
+    std::fs::write(at.join("project/readme.md"), b"Hallo Welt").unwrap();
+    let big: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+    std::fs::write(at.join("project/src/data.bin"), &big).unwrap();
+}
+
+fn same_tree(a: &std::path::Path, b: &std::path::Path) {
+    assert_eq!(std::fs::read(a.join("project/readme.md")).unwrap(), std::fs::read(b.join("project/readme.md")).unwrap());
+    assert_eq!(std::fs::read(a.join("project/src/data.bin")).unwrap(), std::fs::read(b.join("project/src/data.bin")).unwrap());
+}
+
+fn no_parts(dir: &std::path::Path) {
+    for entry in walk(dir) {
+        assert!(!entry.to_string_lossy().ends_with(".sshcraft-part"), "left behind: {}", entry.display());
+    }
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        }
+        out.push(p);
+    }
+    out
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_and_downloads_a_folder_tree() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    tree(local.path());
+    let up = run(&f, "sftp.upload", json!({ "id": f.id, "local": [local.path().join("project")], "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!((job["files_done"].as_u64(), job["files_total"].as_u64()), (Some(2), Some(2)));
+    assert_eq!(job["bytes_done"], 300_010);
+    same_tree(local.path(), f.root.path());
+    no_parts(f.root.path());
+
+    let back = tempfile::tempdir().unwrap();
+    let down = run(&f, "sftp.download", json!({ "id": f.id, "remote": ["/project"], "local_dir": back.path() })).await.unwrap();
+    let job = ended(&f, &down["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    same_tree(f.root.path(), back.path());
+    no_parts(back.path());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_taken_name_is_skipped_overwritten_or_kept_beside() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    std::fs::write(local.path().join("note.txt"), b"new").unwrap();
+    let file = local.path().join("note.txt");
+    std::fs::write(f.root.path().join("note.txt"), b"old").unwrap();
+
+    let skip = run(&f, "sftp.upload", json!({ "id": f.id, "local": [file], "remote_dir": "/" })).await.unwrap();
+    let job = ended(&f, &skip["transfer"]).await;
+    assert_eq!(job["skipped"], 1, "skip is the default");
+    assert_eq!(std::fs::read(f.root.path().join("note.txt")).unwrap(), b"old");
+
+    let keep = run(&f, "sftp.upload", json!({ "id": f.id, "local": [file], "remote_dir": "/", "conflict": "rename" })).await.unwrap();
+    ended(&f, &keep["transfer"]).await;
+    assert_eq!(std::fs::read(f.root.path().join("note (2).txt")).unwrap(), b"new");
+    assert_eq!(std::fs::read(f.root.path().join("note.txt")).unwrap(), b"old");
+
+    let over = run(&f, "sftp.upload", json!({ "id": f.id, "local": [file], "remote_dir": "/", "conflict": "overwrite" })).await.unwrap();
+    ended(&f, &over["transfer"]).await;
+    assert_eq!(std::fs::read(f.root.path().join("note.txt")).unwrap(), b"new");
+
+    let down =
+        run(&f, "sftp.download", json!({ "id": f.id, "remote": ["/note (2).txt"], "local_dir": local.path(), "conflict": "rename" })).await.unwrap();
+    ended(&f, &down["transfer"]).await;
+    assert_eq!(std::fs::read(local.path().join("note (2).txt")).unwrap(), b"new");
+    no_parts(f.root.path());
+    no_parts(local.path());
+}
+
+/// A cancelled transfer leaves no part behind and is marked cancelled.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_upload_leaves_nothing_on_the_server() {
+    let f = fixture().await;
+    let local = tempfile::tempdir().unwrap();
+    let big = local.path().join("big.bin");
+    std::fs::write(&big, vec![7u8; 40 * 1024 * 1024]).unwrap();
+    let up = run(&f, "sftp.upload", json!({ "id": f.id, "local": [big], "remote_dir": "/" })).await.unwrap();
+    run(&f, "sftp.cancel", json!({ "transfer": up["transfer"] })).await.unwrap();
+    let job = ended(&f, &up["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "cancelled", "{job}");
+    assert!(!f.root.path().join("big.bin").exists());
+    no_parts(f.root.path());
+    assert!(run(&f, "sftp.cancel", json!({ "transfer": up["transfer"] })).await.is_err(), "an ended job cannot be cancelled");
+}
+
+/// Names from the server that are not plain names here never become local paths; the rest of
+/// the folder still comes.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn hostile_names_from_the_server_are_refused_on_download() {
+    let f = fixture().await;
+    std::fs::create_dir(f.root.path().join("box")).unwrap();
+    std::fs::write(f.root.path().join("box/good"), b"ok").unwrap();
+    std::fs::write(f.root.path().join(r"box/back\slash"), b"bad").unwrap();
+    std::fs::write(f.root.path().join("box/esc\u{1b}[2J"), b"bad").unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let down = run(&f, "sftp.download", json!({ "id": f.id, "remote": ["/box"], "local_dir": local.path() })).await.unwrap();
+    let job = ended(&f, &down["transfer"]).await;
+    assert_eq!(job["state"]["kind"], "done", "{job}");
+    assert_eq!(job["files_done"], 1);
+    assert_eq!(job["errors"].as_array().unwrap().len(), 2, "{job}");
+    let names: Vec<String> =
+        std::fs::read_dir(local.path().join("box")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["good"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn transfers_need_absolute_local_paths() {
+    let f = fixture().await;
+    assert!(run(&f, "sftp.upload", json!({ "id": f.id, "local": ["rel.txt"], "remote_dir": "/" })).await.is_err());
+    assert!(run(&f, "sftp.download", json!({ "id": f.id, "remote": ["/x"], "local_dir": "rel" })).await.is_err());
+    assert!(run(&f, "sftp.upload", json!({ "id": f.id, "local": [], "remote_dir": "/" })).await.is_err());
 }

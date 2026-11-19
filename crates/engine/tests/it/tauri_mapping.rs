@@ -157,6 +157,11 @@ const NEW: &[&str] = &[
     "sftp.chmod",
     "sftp.count",
     "sftp.delete",
+    "sftp.upload",
+    "sftp.download",
+    "sftp.transfers",
+    "sftp.cancel",
+    "sftp.clear_transfers",
 ];
 
 #[test]

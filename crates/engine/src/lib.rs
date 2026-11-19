@@ -245,7 +245,7 @@ impl Session {
         // A host or rule that sync removed (or a share that ended) stops forwarding.
         let observer = sync::BusObserver { events: events.clone(), forwards: forwards.clone() };
         let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(observer));
-        let sftp = sftp::SftpManager::new(sessions.context());
+        let sftp = sftp::SftpManager::new(sessions.context(), events.clone());
         let inner = Inner {
             store,
             vault,

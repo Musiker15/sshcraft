@@ -12,6 +12,7 @@ use crate::Ctx;
 use crate::error::ErrorCode;
 use crate::sftp::SftpId;
 use crate::sftp::manager::SftpFailure;
+use crate::sftp::transfers::Conflict;
 
 type Out = futures::future::BoxFuture<'static, Result<Value, CommandError>>;
 
@@ -36,6 +37,26 @@ pub fn specs() -> Vec<CommandSpec> {
         command("sftp.chmod", "Change remote permissions", "{ id, path, mode: 0..=0o7777 }", run_chmod),
         query("sftp.count", "Count remote files", "{ id, paths } -> { files, dirs, bytes }", run_count),
         command("sftp.delete", "Delete remote files", "{ id, paths } -> { deleted }", run_delete),
+        command(
+            "sftp.upload",
+            "Upload files",
+            "{ id, local: [absolute paths], remote_dir, conflict?: skip | overwrite | rename } -> { transfer }",
+            run_upload,
+        ),
+        command(
+            "sftp.download",
+            "Download files",
+            "{ id, remote: [paths], local_dir: absolute, conflict?: skip | overwrite | rename } -> { transfer }",
+            run_download,
+        ),
+        query(
+            "sftp.transfers",
+            "List transfers",
+            "-> [{ id, sftp, direction, label, state, files_done, files_total, bytes_done, bytes_total, skipped, errors }]",
+            run_transfers,
+        ),
+        command("sftp.cancel", "Cancel a transfer", "{ transfer }", run_cancel),
+        command("sftp.clear_transfers", "Clear ended transfers", "{}", run_clear),
     ]
 }
 
@@ -188,6 +209,76 @@ fn run_delete(ctx: Ctx, params: Value) -> Out {
         let PathsParams { id, paths } = paths("sftp.delete", params)?;
         let deleted = ctx.session.sftp().delete(id, &paths).await.map_err(failed)?;
         Ok(json!({ "deleted": deleted }))
+    }
+    .boxed()
+}
+
+#[derive(Deserialize)]
+struct UploadParams {
+    id: SftpId,
+    local: Vec<std::path::PathBuf>,
+    remote_dir: String,
+    #[serde(default)]
+    conflict: Conflict,
+}
+
+#[derive(Deserialize)]
+struct DownloadParams {
+    id: SftpId,
+    remote: Vec<String>,
+    local_dir: std::path::PathBuf,
+    #[serde(default)]
+    conflict: Conflict,
+}
+
+#[derive(Deserialize)]
+struct TransferParams {
+    transfer: crate::sftp::transfers::TransferId,
+}
+
+fn run_upload(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let UploadParams { id, local, remote_dir, conflict } = parse("sftp.upload", params)?;
+        if local.is_empty() || local.len() > MAX_PATHS {
+            return Err(CommandError::bad_params("sftp.upload", format!("local: 1 to {MAX_PATHS}")));
+        }
+        let transfer = ctx.session.sftp().upload(id, local, remote_dir, conflict).map_err(failed)?;
+        Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
+}
+
+fn run_download(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let DownloadParams { id, remote, local_dir, conflict } = parse("sftp.download", params)?;
+        if remote.is_empty() || remote.len() > MAX_PATHS {
+            return Err(CommandError::bad_params("sftp.download", format!("remote: 1 to {MAX_PATHS}")));
+        }
+        let transfer = ctx.session.sftp().download(id, remote, local_dir, conflict).map_err(failed)?;
+        Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
+}
+
+fn run_transfers(ctx: Ctx, _params: Value) -> Out {
+    async move { to_value(&ctx.session.sftp().transfers().list()) }.boxed()
+}
+
+fn run_cancel(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let TransferParams { transfer } = parse("sftp.cancel", params)?;
+        if !ctx.session.sftp().transfers().cancel(transfer) {
+            return Err(CommandError::NotFound(format!("transfer {transfer}")));
+        }
+        Ok(Value::Null)
+    }
+    .boxed()
+}
+
+fn run_clear(ctx: Ctx, _params: Value) -> Out {
+    async move {
+        ctx.session.sftp().transfers().clear_ended();
+        Ok(Value::Null)
     }
     .boxed()
 }
