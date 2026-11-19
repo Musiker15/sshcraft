@@ -7,9 +7,7 @@ fn echo_command() -> ShellCommand {
     if cfg!(windows) {
         ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     } else {
-        // The shell stays a moment after the echo: FreeBSD drops what a terminal still holds when
-        // its shell ends at once (docs/gaps.md), and this test is about the output, not that.
-        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local; sleep 1".into()], label: "echo".into() }
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo sshcraft-local".into()], label: "echo".into() }
     }
 }
 
@@ -115,9 +113,7 @@ fn term_and_dir_command() -> ShellCommand {
     if cfg!(windows) {
         ShellCommand { program: "cmd.exe".into(), args: vec!["/c".into(), "echo %TERM% & cd".into()], label: "probe".into() }
     } else {
-        // The shell stays a moment after its output: on FreeBSD the last output of a shell that
-        // ends at once can be lost (docs/gaps.md, 4a), as in the echo test above.
-        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd; sleep 1".into()], label: "probe".into() }
+        ShellCommand { program: "sh".into(), args: vec!["-c".into(), "echo $TERM; pwd".into()], label: "probe".into() }
     }
 }
 
@@ -141,9 +137,9 @@ async fn missing_cwd_falls_back_to_home() {
     assert_eq!(end, Disconnect::Exited(Some(0)));
 }
 
-/// A shell that prints and ends at once keeps its output: on FreeBSD the terminal dropped what
-/// it still held once the shell's end closed it (docs/gaps.md, 4a). The smallest case, one short
-/// line and the end, and a burst; several runs each, since it depends on timing.
+/// A shell that prints and ends at once keeps its output. FreeBSD was once seen to drop the last
+/// output of such a shell; this guards it with the smallest case, one short line and the end, and
+/// a burst, several runs each, since it would depend on timing.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_shell_that_ends_at_once_keeps_its_last_output() {
