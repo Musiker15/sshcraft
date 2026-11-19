@@ -30,6 +30,16 @@ pub enum Icon {
     Folder,
     /// Three dots: more actions.
     More,
+    /// A page with a folded corner: a file.
+    File,
+    /// An arrow up: the folder above.
+    Up,
+    /// A circle with an arrow: read again.
+    Refresh,
+    /// An arrow up out of a tray: send to the server.
+    Upload,
+    /// A bin: delete.
+    Trash,
 }
 
 /// Draws `icon` into `rect` (square works best) with lines of `color`.
@@ -162,6 +172,42 @@ pub fn draw(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             line(p(-0.8, 0.2), p(-0.8, 0.75));
             line(p(-0.8, 0.75), p(0.8, 0.75));
             line(p(0.8, 0.75), p(0.8, 0.2));
+        }
+        Icon::File => {
+            let points = vec![p(-0.6, -0.8), p(0.25, -0.8), p(0.6, -0.45), p(0.6, 0.8), p(-0.6, 0.8)];
+            painter.add(egui::Shape::closed_line(points, stroke));
+            painter.add(egui::Shape::line(vec![p(0.25, -0.8), p(0.25, -0.45), p(0.6, -0.45)], stroke));
+        }
+        Icon::Up => {
+            line(p(0.0, 0.75), p(0.0, -0.7));
+            line(p(-0.45, -0.25), p(0.0, -0.7));
+            line(p(0.45, -0.25), p(0.0, -0.7));
+        }
+        Icon::Refresh => {
+            let arc: Vec<Pos2> = (0..=20)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + i as f32 / 20.0 * std::f32::consts::PI * 1.6;
+                    p(0.65 * a.cos(), 0.65 * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::line(arc, stroke));
+            line(p(0.0, -0.65), p(-0.35, -0.95));
+            line(p(0.0, -0.65), p(-0.3, -0.35));
+        }
+        Icon::Upload => {
+            line(p(0.0, 0.3), p(0.0, -0.8));
+            line(p(-0.35, -0.45), p(0.0, -0.8));
+            line(p(0.35, -0.45), p(0.0, -0.8));
+            line(p(-0.8, 0.2), p(-0.8, 0.75));
+            line(p(-0.8, 0.75), p(0.8, 0.75));
+            line(p(0.8, 0.75), p(0.8, 0.2));
+        }
+        Icon::Trash => {
+            line(p(-0.75, -0.55), p(0.75, -0.55));
+            line(p(-0.25, -0.55), p(-0.2, -0.8));
+            line(p(-0.2, -0.8), p(0.2, -0.8));
+            line(p(0.2, -0.8), p(0.25, -0.55));
+            painter.add(egui::Shape::closed_line(vec![p(-0.55, -0.55), p(0.55, -0.55), p(0.42, 0.8), p(-0.42, 0.8)], stroke));
         }
         Icon::Detach => {
             painter.rect_stroke(Rect::from_min_max(p(-0.8, -0.3), p(0.3, 0.8)), 1.0, stroke, egui::StrokeKind::Inside);

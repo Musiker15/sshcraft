@@ -1,6 +1,6 @@
 # SSHCraft roadmap
 
-> **Last updated:** 2026-11-17 · **Stage:** v0.2.0 out; M1 (Android tablets) done
+> **Last updated:** 2026-11-19 · **Stage:** v0.3.1 out; S1 (SFTP) done
 
 SSHCraft reached its first feature set (sub-plans 1 to 15: hosts, keys, connections, workspaces,
 port forwarding, snippets, session logs, sync, sharing, AI agents) as a Tauri app, kept at the tag
@@ -21,7 +21,7 @@ detail is in [docs/roadmap.md](docs/roadmap.md), the open work in [docs/gaps.md]
 | V1 | First release v0.1.0: packages for Windows, Linux and FreeBSD, server program, SBOM; unsigned and without macOS for now | done |
 | M1 | Android tablets: the interface with a key bar, Keystore, sync, APK from `cargo xtask android` | done |
 | M2, M3 | Android phones and GameActivity; iOS and iPadOS | later |
-| S1 | SFTP | after V1 |
+| S1 | SFTP: this computer and the host side by side, transfers, folders, permissions | done |
 | F3 | Terminal comfort: shell integration, notifications, triggers, hints, compose, snippet placeholders, login scripts, program status | done |
 | F4 | Connections and organisation: shared connections, Wake-on-LAN and knocking, X11, Unix sockets, `ssh://` links, quick connect, bulk edit, reachability, desktop shortcuts, server load | done |
 | F5 | Persistent sessions: tmux and screen attached again on every connect, tmux windows as tabs, Telnet | done |

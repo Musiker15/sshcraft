@@ -48,6 +48,8 @@ pub enum EngineEvent {
     AgentLinkChanged,
     /// A port forwarding rule started, runs, reconnects, stopped or failed.
     ForwardStatus(crate::forwards::ForwardStatus),
+    /// An SFTP upload or download was queued, made progress or ended.
+    TransferStatus(crate::sftp::transfers::TransferView),
     /// Windows Hello is not set up: stored keys are used without the check.
     HelloUnavailable,
     SettingsChanged,

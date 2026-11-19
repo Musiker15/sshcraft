@@ -56,7 +56,15 @@ impl Panes {
     pub fn sessions(&self) -> impl Iterator<Item = SessionId> + '_ {
         self.panes.iter().filter_map(|p| match p {
             PaneSlot::Session { session } => Some(*session),
-            PaneSlot::New { .. } => None,
+            PaneSlot::New { .. } | PaneSlot::Sftp { .. } => None,
+        })
+    }
+
+    /// The SFTP panes' ids.
+    pub fn sftps(&self) -> impl Iterator<Item = u64> + '_ {
+        self.panes.iter().filter_map(|p| match p {
+            PaneSlot::Sftp { id } => Some(*id),
+            _ => None,
         })
     }
 
@@ -148,6 +156,7 @@ fn slot_title(app: &SshcraftApp, slot: PaneSlot) -> String {
     match slot {
         PaneSlot::New { .. } => tr("New pane").to_string(),
         PaneSlot::Session { session } => app.terminals.get(&session).map(|t| t.title.clone()).unwrap_or_default(),
+        PaneSlot::Sftp { id } => crate::sftp_tab::title(app, id),
     }
 }
 
@@ -291,6 +300,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, tab: usize) {
         match slot {
             PaneSlot::Session { session } => crate::session_tab::show(app, &mut child, session, focused),
             PaneSlot::New { .. } => crate::shell::new_tab_page(app, &mut child),
+            PaneSlot::Sftp { id } => crate::sftp_tab::show(app, &mut child, id),
         }
         let tokens = Tokens::get(ui.ctx());
         if panes.broadcast {

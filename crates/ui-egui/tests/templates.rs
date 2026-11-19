@@ -118,7 +118,7 @@ fn a_template_round_trips() {
         .iter()
         .filter_map(|p| match p {
             PaneSlot::Session { session } => h.state().terminals[session].host,
-            PaneSlot::New { .. } => None,
+            PaneSlot::New { .. } | PaneSlot::Sftp { .. } => None,
         })
         .collect();
     assert_eq!(opened, hosts, "the same hosts in the same places");

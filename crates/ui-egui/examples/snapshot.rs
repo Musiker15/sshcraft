@@ -121,6 +121,7 @@ fn sample_data(session: &Session) -> Result<(), String> {
 fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut page = Page::Hosts;
     let mut new_tab = false;
+    let mut sftp = false;
     let mut theme = "dark";
     let mut language = "en".to_string();
     let mut captions = None;
@@ -144,6 +145,7 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
                 Some("forwarding") => page = Page::Forwarding,
                 Some("logs") => page = Page::Logs,
                 Some("newtab") => new_tab = true,
+                Some("sftp") => sftp = true,
                 other => return Err(format!("unknown page {other:?}")),
             },
             "--dark" => theme = "dark",
@@ -179,6 +181,9 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     if new_tab {
         app.open_new_tab();
     }
+    if sftp {
+        sample_sftp(app);
+    }
     for _ in 0..40 {
         h.run_steps(1);
         std::thread::sleep(std::time::Duration::from_millis(15));
@@ -205,12 +210,60 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     image.save(out).map_err(|e| e.to_string())
 }
 
+/// An SFTP pane with sample folders on both sides and two transfers; no server behind it.
+fn sample_sftp(app: &mut SshcraftApp) {
+    use sshcraft_ui_egui::sftp_tab::{Entry, SftpView};
+    use sshcraft_ui_egui::state::{PaneSlot, Panes, TabState};
+    let entry = |name: &str, kind: &str, size: u64, modified: u64, permissions: u32| Entry {
+        name: name.into(),
+        kind: kind.into(),
+        size,
+        modified: Some(modified),
+        permissions: Some(permissions),
+    };
+    let mut view = SftpView::new(1, None, "web-01".into(), "/home/deploy".into());
+    view.remote.loading = false;
+    view.remote.entries = vec![
+        entry(".bashrc", "file", 3_771, 1_789_000_000, 0o644),
+        entry("app", "dir", 0, 1_793_100_000, 0o755),
+        entry("logs", "dir", 0, 1_793_400_000, 0o750),
+        entry("backup-2026-11.tar.gz", "file", 48_211_456, 1_793_300_000, 0o600),
+        entry("docker-compose.yml", "file", 2_114, 1_792_900_000, 0o644),
+        entry("README.md", "file", 4_096, 1_790_000_000, 0o644),
+    ];
+    view.remote.selected.insert("docker-compose.yml".into());
+    view.local.loading = false;
+    view.local.path = "/home/me/Projects".into();
+    view.local.entries = vec![
+        entry("sshcraft", "dir", 0, 1_793_500_000, 0o755),
+        entry("notes.md", "file", 12_288, 1_793_450_000, 0o644),
+        entry("deploy.sh", "file", 1_024, 1_793_000_000, 0o755),
+    ];
+    app.sftp.insert(1, view);
+    app.transfers.insert(
+        1,
+        json!({ "id": 1, "sftp": 1, "direction": "upload", "label": "sshcraft (+2)", "state": { "kind": "running" },
+                "files_done": 12, "files_total": 31, "bytes_done": 7_340_032, "bytes_total": 12_582_912, "skipped": 0, "errors": [] }),
+    );
+    app.transfers.insert(
+        2,
+        json!({ "id": 2, "sftp": 1, "direction": "download", "label": "backup-2026-11.tar.gz", "state": { "kind": "done" },
+                "files_done": 1, "files_total": 1, "bytes_done": 48_211_456, "bytes_total": 48_211_456, "skipped": 0, "errors": [] }),
+    );
+    app.ui.tabs.push(TabState {
+        title: sshcraft_ui_egui::sftp_tab::tab_title("web-01"),
+        panes: Panes::single(PaneSlot::Sftp { id: 1 }),
+        named: true,
+    });
+    app.ui.page = Page::Tab(app.ui.tabs.len() - 1);
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(out) = args.next() else {
         eprintln!("usage: snapshot <out.png> [colors|unicode|fullscreen]");
         eprintln!(
-            "       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic]"
+            "       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab|sftp [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic]"
         );
         return ExitCode::FAILURE;
     };

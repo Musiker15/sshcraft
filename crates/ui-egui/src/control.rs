@@ -243,6 +243,7 @@ fn inspect(app: &SshcraftApp, ctx: &egui::Context) -> Value {
                 .iter()
                 .map(|slot| match slot {
                     PaneSlot::New { .. } => json!({ "kind": "new" }),
+                    PaneSlot::Sftp { id } => json!({ "kind": "sftp", "id": id, "title": crate::sftp_tab::title(app, *id) }),
                     PaneSlot::Session { session } => {
                         let title = app.terminals.get(session).map(|s| s.title.clone()).unwrap_or_default();
                         json!({ "kind": "session", "session": session, "title": title })

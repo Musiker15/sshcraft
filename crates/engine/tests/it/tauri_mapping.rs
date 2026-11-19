@@ -147,6 +147,21 @@ const NEW: &[&str] = &[
     "app.unlock",
     "app.connections",
     "sync.sync_all",
+    // S1: SFTP.
+    "sftp.open",
+    "sftp.close",
+    "sftp.list",
+    "sftp.local_list",
+    "sftp.mkdir",
+    "sftp.rename",
+    "sftp.chmod",
+    "sftp.count",
+    "sftp.delete",
+    "sftp.upload",
+    "sftp.download",
+    "sftp.transfers",
+    "sftp.cancel",
+    "sftp.clear_transfers",
 ];
 
 #[test]

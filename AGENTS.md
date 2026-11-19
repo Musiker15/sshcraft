@@ -192,7 +192,7 @@ Each has a test where it can have one.
 - Without touching the real data: a local shell in the terminal with
   `cargo run -p sshcraft-ui-egui --example terminal_window`, and pictures without a window with
   `cargo run -p sshcraft-ui-egui --example snapshot -- out.png [colors|unicode|fullscreen]` (the
-  terminal) or `-- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab [--dark|--light] [--language en|de]`
+  terminal) or `-- out.png --page hosts|keys|snippets|forwarding|logs|settings|newtab|sftp [--dark|--light] [--language en|de]`
   (the whole window on sample data; `--captions windows|adwaita|breeze|generic` adds the app's own
   title bar with its window buttons, `--size WIDTHxHEIGHT` sets the window, `--tablet` the touch form). Both run an engine on a temp folder.
 - Interface tests run the app in egui_kittest on a test engine (`sshcraft_ui_egui::testing`,

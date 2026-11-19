@@ -27,6 +27,8 @@ pub enum PaneSlot {
     New { id: u64 },
     /// The terminal of an engine session.
     Session { session: sshcraft_engine::SessionId },
+    /// The files of a host over SFTP ([`crate::sftp_tab`]).
+    Sftp { id: u64 },
 }
 
 /// The panes of a tab: 1 to [`crate::panes::MAX_PANES`] in a near-square grid, or one large
@@ -155,6 +157,8 @@ pub struct UiState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectRequest {
     Host(sshcraft_model::model::HostId),
+    /// The host's files over SFTP.
+    Sftp(sshcraft_model::model::HostId),
     Local,
     Serial,
 }
