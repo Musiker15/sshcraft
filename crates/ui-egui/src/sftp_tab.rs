@@ -179,6 +179,13 @@ enum Action {
     Run(&'static str, Value),
     Cancel(u64),
     Retry(u64),
+    /// Pick a file to upload into the shown folder (Android).
+    PickUpload,
+    /// Pick where a remote file goes (Android).
+    PickDownload {
+        remote: String,
+        name: String,
+    },
     Reconnect,
     ClearTransfers,
 }
@@ -450,6 +457,18 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
                 if primary(ui, Some(icon), label, BUTTON).clicked() {
                     let items = selected.iter().map(|n| child_path(kind, &side.path, n)).collect();
                     actions.push(transfer_action(kind, items, &selected, other_path.clone(), &other_names));
+                }
+            }
+            // Without a local side (Android) files come and go through the system's picker.
+            if kind == SideKind::Remote && !has_other {
+                if primary(ui, Some(Icon::Upload), tr("Upload"), BUTTON).clicked() {
+                    actions.push(Action::PickUpload);
+                }
+                let one_file = (selected.len() == 1).then(|| side.entries.iter().find(|e| e.name == selected[0] && e.kind == "file")).flatten();
+                if let Some(file) = one_file
+                    && ghost(ui, tr("Download"), BUTTON).clicked()
+                {
+                    actions.push(Action::PickDownload { remote: child_path(kind, &side.path, &file.name), name: file.name.clone() });
                 }
             }
             if kind == SideKind::Remote {
@@ -963,6 +982,15 @@ fn act(app: &mut SshcraftApp, id: u64, action: Action) {
         }
         Action::Run(command, params) => run_and_refresh(app, id, command, params),
         Action::Cancel(transfer) => app.run_reported("sftp.cancel", json!({ "transfer": transfer })),
+        Action::PickUpload => {
+            let dir = app.sftp.get(&id).map(|v| v.remote.path.clone()).unwrap_or_default();
+            let dialog = crate::file_dialogs::FileDialog::open().title(tr("Upload"));
+            app.dialogs.ask(dialog, crate::pages::import_export::DialogFor::SftpUpload { id, dir });
+        }
+        Action::PickDownload { remote, name } => {
+            let dialog = crate::file_dialogs::FileDialog::save().title(tr("Download")).file_name(visible(&name));
+            app.dialogs.ask(dialog, crate::pages::import_export::DialogFor::SftpDownload { id, remote });
+        }
         Action::Retry(transfer) => app.runner.run(
             "sftp.retry",
             json!({ "transfer": transfer }),
@@ -1040,10 +1068,33 @@ pub fn on_transfer(app: &mut SshcraftApp, view: Value) {
         && let Some(sftp) = sftp
     {
         let side = if upload { SideKind::Remote } else { SideKind::Local };
-        if let Some(path) = app.sftp.get_mut(&sftp).map(|v| v.side(side).path.clone()) {
+        // Without a local side (Android) a download has nothing here to read again.
+        if (side == SideKind::Remote || LOCAL_SIDE)
+            && let Some(path) = app.sftp.get_mut(&sftp).map(|v| v.side(side).path.clone())
+        {
             list(app, sftp, side, path);
         }
     }
+}
+
+/// The picker handed over the file to upload (Android): it goes into `dir` under the name the
+/// picker showed, beside anything of that name.
+pub fn picked_upload(app: &mut SshcraftApp, id: u64, dir: String, path: std::path::PathBuf) {
+    #[cfg(target_os = "android")]
+    let name = app.dialogs.picked_name(&path);
+    #[cfg(not(target_os = "android"))]
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let Some(name) = name else {
+        app.toasts.error(tr("The picker gave no name for the file."));
+        return;
+    };
+    let params = json!({ "id": id, "local": [path], "remote_dir": dir, "conflict": "rename", "name": name });
+    run_and_refresh(app, id, "sftp.upload", params);
+}
+
+/// The picker made the file to download into (Android).
+pub fn picked_download(app: &mut SshcraftApp, id: u64, remote: String, path: std::path::PathBuf) {
+    run_and_refresh(app, id, "sftp.download_file", json!({ "id": id, "remote": remote, "local_file": path }));
 }
 
 /// The transfers the app knows, by id.

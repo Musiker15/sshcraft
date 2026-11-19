@@ -4,7 +4,9 @@ import android.Manifest;
 import android.app.NativeActivity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.database.Cursor;
 import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,7 +50,7 @@ public class MainActivity extends NativeActivity {
 
     private InputView input;
 
-    /** Picked files as "id<TAB>path" (an empty path: cancelled), until Rust takes them. */
+    /** Picked files as "id<TAB>path<TAB>name" ("id<TAB>": cancelled), until Rust takes them. */
     private static final ConcurrentLinkedQueue<String> PICKED = new ConcurrentLinkedQueue<>();
 
     /** The open requests: the request code Android hands back, Rust's id and whether to write. */
@@ -94,7 +96,17 @@ public class MainActivity extends NativeActivity {
             return;
         }
         String path = "";
+        String name = "";
         if (result == RESULT_OK && data != null && data.getData() != null) {
+            // The document's name as the picker shows it; the path below is only a number.
+            // Rust checks it like any name from outside.
+            try (Cursor cursor = getContentResolver().query(data.getData(), new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
+                    name = cursor.getString(0);
+                }
+            } catch (Exception e) {
+                name = "";
+            }
             try {
                 ParcelFileDescriptor fd = getContentResolver().openFileDescriptor(data.getData(), request[1] == 1 ? "rwt" : "r");
                 if (fd != null) {
@@ -112,10 +124,10 @@ public class MainActivity extends NativeActivity {
                 path = "";
             }
         }
-        PICKED.add(request[0] + "\t" + path);
+        PICKED.add(request[0] + "\t" + path + (path.isEmpty() ? "" : "\t" + name));
     }
 
-    /** The oldest answer of the file picker as "id<TAB>path", or null when there is none. */
+    /** The oldest answer of the file picker as "id<TAB>path<TAB>name", or null when there is none. */
     public static String takePicked() {
         return PICKED.poll();
     }
