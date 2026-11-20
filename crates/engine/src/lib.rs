@@ -50,6 +50,8 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use serde_json::Value;
+/// Portable mode's master key file, opened with a passphrase before the engine starts.
+pub use sshcraft_store::portable;
 use sshcraft_store::store::Store;
 use sshcraft_store::vault::{MasterKeyProvider, Vault};
 

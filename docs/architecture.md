@@ -160,6 +160,9 @@ reads `config.toml`.
 - Private keys and passwords are stored only as XChaCha20-Poly1305 ciphertext; the master key is
   in the operating system's credential store under `de.musiker15.sshcraft`. When it is missing
   while keys exist, no new one is created.
+- Portable mode: with a folder `sshcraft-data` beside the program the data lives in
+  `sshcraft-data/data`, and the master key in the file `master-key` there, sealed with a
+  passphrase that a small window asks for before the engine opens (`sshcraft_store::portable`).
 - Tests pin the folder, the service name and schema 14; older databases migrate on open.
 
 ## Sync

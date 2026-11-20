@@ -127,6 +127,7 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
     let mut captions = None;
     let mut size = egui::vec2(1200.0, 800.0);
     let mut tablet = false;
+    let mut unlock = None;
     let mut clicks = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -146,6 +147,7 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
                 Some("logs") => page = Page::Logs,
                 Some("newtab") => new_tab = true,
                 Some("sftp") => sftp = true,
+                Some(name @ ("unlock" | "unlock-new")) => unlock = Some(name == "unlock-new"),
                 other => return Err(format!("unknown page {other:?}")),
             },
             "--dark" => theme = "dark",
@@ -157,6 +159,9 @@ fn window(out: &str, mut args: impl Iterator<Item = String>) -> Result<(), Strin
             }
             other => return Err(format!("unknown argument {other}")),
         }
+    }
+    if let Some(first) = unlock {
+        return unlock_window(out, first, theme, &language);
     }
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let (mut h, session) = sshcraft_ui_egui::testing::app_harness_from(Harness::builder().wgpu(), dir.path());
@@ -264,12 +269,37 @@ fn sample_sftp(app: &mut SshcraftApp) {
     app.ui.page = Page::Tab(app.ui.tabs.len() - 1);
 }
 
+/// Portable mode's unlock window: `first` chooses a passphrase, otherwise one is asked.
+fn unlock_window(out: &str, first: bool, theme: &str, language: &str) -> Result<(), String> {
+    use sshcraft_engine::portable::PassphraseMasterKey;
+    use sshcraft_engine::settings::AppTheme;
+    use sshcraft_store::vault::MasterKeyProvider;
+    if language == "de" {
+        sshcraft_ui_egui::i18n::set_language(sshcraft_ui_egui::i18n::Lang::De);
+    }
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    if !first {
+        PassphraseMasterKey::open(dir.path(), "a long enough passphrase")
+            .and_then(|k| k.save(&[1; 32]).map_err(|e| sshcraft_engine::portable::PortableError::Io(e.to_string())))
+            .map_err(|e| e.to_string())?;
+    }
+    let theme = if theme == "light" { AppTheme::Light } else { AppTheme::Dark };
+    let unlock = sshcraft_ui_egui::unlock::Unlock::new(dir.path().to_path_buf()).with_theme(theme);
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(480.0, if first { 330.0 } else { 250.0 }))
+        .wgpu()
+        .build_ui_state(|ui, u: &mut sshcraft_ui_egui::unlock::Unlock| u.ui(ui), unlock);
+    h.run_steps(4);
+    let image = h.render().map_err(|e| e.to_string())?;
+    image.save(out).map_err(|e| e.to_string())
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let Some(out) = args.next() else {
         eprintln!("usage: snapshot <out.png> [colors|unicode|fullscreen]");
         eprintln!(
-            "       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab|sftp [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic]"
+            "       snapshot <out.png> --page hosts|keys|snippets|forwarding|logs|settings|newtab|sftp|unlock|unlock-new [--dark|--light] [--language en|de] [--captions windows|adwaita|breeze|generic]"
         );
         return ExitCode::FAILURE;
     };

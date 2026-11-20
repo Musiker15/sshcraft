@@ -143,6 +143,13 @@ opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
 
+# Argon2id with 64 MiB takes seconds unoptimized; backups and portable mode's key file use it.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 # The egui fork of the Craft family, at the revision craft-libs pins (craft-libs Cargo.toml).
 [patch.crates-io]
 ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }

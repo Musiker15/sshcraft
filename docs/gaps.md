@@ -1,13 +1,12 @@
 # Gaps
 
-> **Last updated:** 2026-11-19
+> **Last updated:** 2026-11-20
 
 The ranked list of open work. Pick from the top. When work lands, remove or update its row.
 
 | Rank | Gap | Where it is planned |
 |---|---|---|
 | 2b | `ssh://` links do not reach SSHCraft on macOS: macOS hands links over as Apple Events, which winit does not pass on, so no handler is registered there | later, needs a Mac to try |
-| 2c | No portable mode: the vault's master key lives in the system keyring, so a copy on a USB stick needs a passphrase unlock before the engine starts | later |
 | 2f | No images in the terminal (Sixel, Kitty, iTerm2) and no file transfer through the terminal (ZMODEM, trzsz); files go over SFTP | not planned for now |
 | 2e | No Mosh and no Eternal Terminal: both would need their own UDP or TCP protocol beside SSH and a server program; tmux sessions that stay cover a dropped connection | not planned for now |
 | 2g | No Kerberos (GSSAPI) sign-in: the SSH library has no GSSAPI, and adding it means binding the system's Kerberos libraries on every platform | not planned for now |

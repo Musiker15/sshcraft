@@ -41,6 +41,7 @@ pub mod testing;
 pub mod theme;
 pub mod tmux_mode;
 pub mod toasts;
+pub mod unlock;
 pub mod widgets;
 pub mod window;
 
