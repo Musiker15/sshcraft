@@ -124,6 +124,25 @@ It opens on any device, also after the system's keyring is gone. Keys bound to a
 Hello) cannot leave it and are left out. *Restore from backup* adds what is missing and changes
 nothing that is there; a wrong passphrase or a changed file adds nothing.
 
+## Portable mode
+
+A folder named `sshcraft-data` beside the program turns on portable mode, for a copy on a USB
+stick. SSHCraft then keeps its data in `sshcraft-data/data` instead of the user's profile, and the
+vault's master key in the file `master-key` there instead of the system keyring. A passphrase
+seals that file (Argon2id, XChaCha20-Poly1305). A small window asks for it before anything else
+opens, and the first start chooses it: at least 12 characters, typed twice. Without it nobody can
+read the keys and passwords in the folder, and a forgotten passphrase cannot be recovered.
+
+- The Windows ZIP becomes portable when you unpack it and create the folder `sshcraft-data` next
+  to `sshcraft.exe`. Without the folder it uses the data in the user's profile, as before.
+- To take your data along, make a backup in the installed SSHCraft and restore it in the portable
+  copy. Copying the data folder alone does not work, because its master key stays in that
+  computer's keyring.
+- The agent link's token and the hand-over between two starts stay in the user's profile on the
+  computer: a folder on a stick cannot be limited to its owner.
+- Keys bound to a device (Windows Hello) stay bound to the computer they were made on.
+- The passphrase cannot be changed yet.
+
 ## Export
 
 *Hosts → ⋯ → Export* (desktop only) writes everything, one place or one group with its subgroups:

@@ -7,9 +7,11 @@ mod control;
 mod dropdown;
 mod platform;
 
+use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
+use sshcraft_engine::portable::PassphraseMasterKey;
 use sshcraft_engine::{EngineError, Session, SessionConfig};
 use sshcraft_ui_egui::SshcraftApp;
 use sshcraft_ui_egui::i18n::{Lang, set_language, tr};
@@ -151,6 +153,38 @@ fn show_problem(text: String) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// Portable mode's unlock window before the engine opens.
+struct UnlockWindow {
+    unlock: sshcraft_ui_egui::unlock::Unlock,
+    opened: Arc<Mutex<Option<PassphraseMasterKey>>>,
+}
+
+impl eframe::App for UnlockWindow {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.unlock.ui(ui);
+        if self.unlock.done() {
+            *self.opened.lock().unwrap_or_else(PoisonError::into_inner) = self.unlock.opened.take();
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+}
+
+/// Asks for the passphrase of the portable data in `data_dir`; the master key once it opened,
+/// `None` when the window was closed or *Quit* chosen.
+fn unlock(data_dir: &Path) -> Result<Option<PassphraseMasterKey>, String> {
+    let opened = Arc::new(Mutex::new(None));
+    // The first start has a second field for the passphrase.
+    let height = if sshcraft_engine::portable::is_new(data_dir) { 330.0 } else { 250.0 };
+    let unlock = sshcraft_ui_egui::unlock::Unlock::new(data_dir.to_path_buf());
+    let window = UnlockWindow { unlock, opened: opened.clone() };
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_title("SSHCraft").with_inner_size([480.0, height]).with_resizable(false),
+        ..Default::default()
+    };
+    eframe::run_native("SSHCraft", options, Box::new(move |_| Ok(Box::new(window)))).map_err(|e| e.to_string())?;
+    Ok(opened.lock().unwrap_or_else(PoisonError::into_inner).take())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (args, open) = match control::take_open(&args) {
@@ -181,9 +215,31 @@ fn main() -> ExitCode {
             return show_problem(format!("{}\n\n{e}", tr("SSHCraft could not open its data.")));
         }
     };
+    // Portable mode: the data beside the program, its master key sealed with a passphrase that
+    // is asked before the engine opens. A running copy is found first, so nobody types the
+    // passphrase only to learn that SSHCraft runs already.
+    let portable_key = if sshcraft_platform::portable_root().is_some() {
+        set_language(system_language());
+        match sshcraft_platform::lock_data_dir(&data_dir) {
+            Ok(lock) => drop(lock),
+            Err(sshcraft_platform::PlatformError::DataInUse(_)) if open.as_ref().is_some_and(hand_over) => return ExitCode::SUCCESS,
+            Err(sshcraft_platform::PlatformError::DataInUse(_)) if open.is_none() && reveal_running() => return ExitCode::SUCCESS,
+            Err(e) => return show_problem(format!("{}\n\n{e}", tr("SSHCraft could not open its data."))),
+        }
+        match unlock(&data_dir) {
+            Ok(Some(key)) => Some(key),
+            Ok(None) => return ExitCode::SUCCESS,
+            Err(e) => return show_problem(format!("{}\n\n{e}", tr("SSHCraft could not start."))),
+        }
+    } else {
+        None
+    };
     let window = WindowHandle::default();
-    let config =
+    let mut config =
         SessionConfig::for_app(data_dir, runtime.handle().clone(), Arc::new(WindowPresence(window.clone())), platform::authenticator(window.clone()));
+    if let Some(key) = portable_key {
+        config.master_key = Box::new(key);
+    }
     let (session, vault) = {
         let _inside = runtime.enter();
         match Session::open(config) {

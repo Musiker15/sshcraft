@@ -163,8 +163,20 @@ impl SshcraftApp {
     /// Says at the start when the vault did not open (`OpenReport::vault`): keys and passwords
     /// are then unavailable, and the user should learn why before an action fails.
     pub fn report_vault(&mut self, vault: Result<(), sshcraft_engine::ErrorCode>) {
+        self.report_vault_for(vault, sshcraft_platform::portable_root().is_some());
+    }
+
+    /// [`Self::report_vault`] for a start in portable mode or not: in portable mode the master
+    /// key is a file beside the data, not an entry in the system keyring.
+    pub fn report_vault_for(&mut self, vault: Result<(), sshcraft_engine::ErrorCode>, portable: bool) {
         match vault {
             Ok(()) => {}
+            Err(sshcraft_engine::ErrorCode::MasterKeyMissing) if portable => self.toasts.error(tr(
+                "The master key file beside the data is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: put the file master-key back into the data folder or restore the folder from a backup.",
+            )),
+            Err(_) if portable => self.toasts.error(tr(
+                "The master key file beside the data could not be written, so keys and passwords are not available. Check that the folder is writable.",
+            )),
             Err(sshcraft_engine::ErrorCode::MasterKeyMissing) => self.toasts.error(tr(
                 "SSHCraft's entry in the system keyring is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: restore the keyring entry or the data folder from a backup.",
             )),
