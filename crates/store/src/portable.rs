@@ -13,7 +13,6 @@ use std::sync::{Mutex, PoisonError};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
-use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -100,8 +99,7 @@ impl PassphraseMasterKey {
         if passphrase.chars().count() < MIN_PASSPHRASE {
             return Err(PortableError::WeakPassphrase);
         }
-        let mut salt = [0u8; SALT_LEN];
-        rand::rng().fill(&mut salt[..]);
+        let salt: [u8; SALT_LEN] = rand::random();
         let wrapping = derive(passphrase, &salt, KDF_MEMORY_KIB, KDF_PASSES)?;
         Ok(Self { path, wrapping, salt, memory_kib: KDF_MEMORY_KIB, passes: KDF_PASSES, master: Mutex::new(None) })
     }
@@ -132,8 +130,7 @@ impl PassphraseMasterKey {
     }
 
     fn write(&self, key: &[u8; 32]) -> Result<(), PortableError> {
-        let mut nonce = [0u8; NONCE_LEN];
-        rand::rng().fill(&mut nonce[..]);
+        let nonce: [u8; NONCE_LEN] = rand::random();
         let aad = associated_data(self.memory_kib, self.passes);
         let sealed = XChaCha20Poly1305::new((&*self.wrapping).into())
             .encrypt(&XNonce::from(nonce), Payload { msg: key, aad: aad.as_bytes() })
