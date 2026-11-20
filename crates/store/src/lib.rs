@@ -6,6 +6,7 @@
 pub mod agent;
 pub mod backup;
 pub mod history;
+pub mod portable;
 pub mod session_log;
 pub mod snippets;
 pub mod store;

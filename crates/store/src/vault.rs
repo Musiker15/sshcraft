@@ -46,6 +46,9 @@ pub enum VaultError {
     NotFound,
     #[error("system credential store: {0}")]
     Keyring(String),
+    /// Portable mode's master key file could not be written.
+    #[error("master key file: {0}")]
+    KeyFile(String),
     #[error(transparent)]
     Store(#[from] StoreError),
 }

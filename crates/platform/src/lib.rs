@@ -27,7 +27,11 @@ pub enum PlatformError {
 
 /// The folder that holds `sshcraft.db`. It is the folder the Tauri version used, so a rebuilt
 /// app finds the data an earlier version wrote (on Windows `%APPDATA%\musiker15\SSHCraft\data`).
+/// In portable mode it is the `data` folder in [`portable_root`].
 pub fn data_dir() -> Result<PathBuf, PlatformError> {
+    if let Some(root) = portable_root() {
+        return Ok(portable_data_dir(&root));
+    }
     directories::ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION).map(|dirs| dirs.data_dir().to_path_buf()).ok_or(PlatformError::NoHome)
 }
 
@@ -40,6 +44,31 @@ pub fn config_dir() -> Result<PathBuf, PlatformError> {
         return Ok(PathBuf::from(dir));
     }
     directories::ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION).map(|dirs| dirs.config_dir().to_path_buf()).ok_or(PlatformError::NoHome)
+}
+
+/// The folder beside the program that turns on portable mode.
+pub const PORTABLE_FOLDER: &str = "sshcraft-data";
+
+/// Portable mode's folder: `sshcraft-data` beside the running program, when it exists. The data
+/// then lives in it and the vault's master key is sealed with a passphrase there instead of
+/// being kept in the system's credential store. Never on Android, where the app has no folder of
+/// its own beside it.
+pub fn portable_root() -> Option<PathBuf> {
+    if cfg!(target_os = "android") {
+        return None;
+    }
+    portable_root_beside(&std::env::current_exe().ok()?)
+}
+
+/// The portable folder beside the program `exe`, when it is a folder.
+pub fn portable_root_beside(exe: &std::path::Path) -> Option<PathBuf> {
+    let root = exe.parent()?.join(PORTABLE_FOLDER);
+    root.is_dir().then_some(root)
+}
+
+/// Where portable mode keeps the data inside `root`.
+pub fn portable_data_dir(root: &std::path::Path) -> PathBuf {
+    root.join("data")
 }
 
 /// The names the Tauri version used for its folders; changing one moves existing data away.
@@ -60,6 +89,25 @@ pub fn home_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::data_dir;
+
+    /// Only a folder named `sshcraft-data` beside the program turns portable mode on; a file of
+    /// that name, or the folder anywhere else, does not.
+    #[test]
+    fn portable_mode_needs_the_folder_beside_the_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("sshcraft.exe");
+        assert_eq!(super::portable_root_beside(&exe), None);
+        std::fs::write(dir.path().join("sshcraft-data"), b"").unwrap();
+        assert_eq!(super::portable_root_beside(&exe), None);
+        std::fs::remove_file(dir.path().join("sshcraft-data")).unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::create_dir(dir.path().join("sub").join("sshcraft-data")).unwrap();
+        assert_eq!(super::portable_root_beside(&exe), None);
+        std::fs::create_dir(dir.path().join("sshcraft-data")).unwrap();
+        let root = super::portable_root_beside(&exe).unwrap();
+        assert_eq!(root, dir.path().join("sshcraft-data"));
+        assert_eq!(super::portable_data_dir(&root), dir.path().join("sshcraft-data").join("data"));
+    }
     use directories::ProjectDirs;
 
     /// The rebuild must find the database the Tauri version wrote: same folder, same name.

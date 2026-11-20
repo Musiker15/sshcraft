@@ -308,6 +308,24 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Once per start, where polkit can ask. Off, anything running as your user can use the stored keys and passwords through SSHCraft without a question." => {
             "Einmal pro Start, wo polkit fragen kann. Aus kann alles, was unter deinem Benutzer läuft, die gespeicherten Schlüssel und Passwörter ohne Rückfrage über SSHCraft nutzen."
         }
+        "Choose a passphrase" => "Passphrase festlegen",
+        "Unlock SSHCraft" => "SSHCraft entsperren",
+        "This copy of SSHCraft keeps its data beside the program. The passphrase protects your keys and passwords there; without it nobody can open them, you neither." => {
+            "Diese Kopie von SSHCraft speichert ihre Daten neben dem Programm. Die Passphrase schützt dort deine Schlüssel und Passwörter. Ohne sie kann niemand sie öffnen, auch du nicht."
+        }
+        "This copy of SSHCraft keeps its data beside the program. Enter the passphrase to open it." => {
+            "Diese Kopie von SSHCraft speichert ihre Daten neben dem Programm. Gib die Passphrase ein, um sie zu öffnen."
+        }
+        "Opening…" => "Wird geöffnet …",
+        "The passphrase is wrong." => "Die Passphrase ist falsch.",
+        "The passphrase could not be checked." => "Die Passphrase konnte nicht geprüft werden.",
+        "The master key file beside the data is damaged." => "Die Datei mit dem Hauptschlüssel neben den Daten ist beschädigt.",
+        "The master key file beside the data is missing, so stored keys, passwords and logs cannot be read. Nothing was replaced: put the file master-key back into the data folder or restore the folder from a backup." => {
+            "Die Datei mit dem Hauptschlüssel neben den Daten fehlt, deshalb lassen sich gespeicherte Schlüssel, Passwörter und Protokolle nicht lesen. Ersetzt wurde nichts: Lege die Datei master-key zurück in den Datenordner oder stelle den Ordner aus einer Sicherung wieder her."
+        }
+        "The master key file beside the data could not be written, so keys and passwords are not available. Check that the folder is writable." => {
+            "Die Datei mit dem Hauptschlüssel neben den Daten konnte nicht geschrieben werden, deshalb sind Schlüssel und Passwörter nicht verfügbar. Prüfe, ob sich in den Ordner schreiben lässt."
+        }
         "Backup" => "Sicherung",
         "One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here." => {
             "Eine Datei mit deinen Hosts, Gruppen, Identitäten, Schlüsseln, Passwörtern, Snippets und Hostschlüsseln, verschlüsselt mit einer Passphrase. Beim Wiederherstellen kommt hinzu, was fehlt; was hier ist, bleibt unverändert."
