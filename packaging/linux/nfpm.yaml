@@ -52,6 +52,8 @@ overrides:
       - xdg-desktop-portal
       # A Secret Service for the keyring: GNOME Keyring or KWallet.
       - gnome-keyring | kwalletmanager
+      # Asks for the user's password before stored keys and to unlock the app lock.
+      - polkitd | policykit-1
   rpm:
     depends:
       - libxkbcommon
@@ -70,6 +72,7 @@ overrides:
       - libXrandr
       - mesa-vulkan-drivers
       - xdg-desktop-portal
+      - polkit
 
 contents:
   - src: ${STAGE}/usr/bin/sshcraft

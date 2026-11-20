@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- SSHCraft asks this action before it unlocks its window and before the first stored key or
+     password of a run (apps/sshcraft/src/polkit.rs). auth_self: the user's own password or
+     fingerprint, never an administrator's, and nothing is kept, so every question asks again. -->
+<policyconfig>
+  <vendor>SSHCraft</vendor>
+  <vendor_url>https://github.com/musiker15/sshcraft</vendor_url>
+  <action id="de.musiker15.sshcraft.unlock">
+    <description>Unlock SSHCraft and use its stored keys</description>
+    <description xml:lang="de">SSHCraft entsperren und seine gespeicherten Schlüssel nutzen</description>
+    <message>SSHCraft wants to make sure it is you before it shows your sessions or uses your stored keys and passwords.</message>
+    <message xml:lang="de">SSHCraft möchte sicher sein, dass du es bist, bevor es deine Sitzungen zeigt oder deine gespeicherten Schlüssel und Passwörter nutzt.</message>
+    <icon_name>de.musiker15.sshcraft</icon_name>
+    <defaults>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

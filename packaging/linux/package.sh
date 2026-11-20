@@ -61,6 +61,8 @@ install -Dm755 "$BIN/sshcraft" "$STAGE/usr/bin/sshcraft"
 install -Dm755 "$BIN/sshcraft-cli" "$STAGE/usr/bin/sshcraft-cli"
 "${CROSS_COMPILE:-}strip" "$STAGE/usr/bin/sshcraft" "$STAGE/usr/bin/sshcraft-cli" 2>/dev/null || true
 install -Dm644 "$HERE/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
+# polkit's action for the app lock and the question before stored keys (docs/security.md).
+install -Dm644 "$HERE/$APP_ID.policy" "$STAGE/usr/share/polkit-1/actions/$APP_ID.policy"
 mkdir -p "$STAGE/usr/share/metainfo"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$SSHCRAFT_BUILD_DATE/g" \
   "$HERE/$APP_ID.metainfo.xml.in" >"$STAGE/usr/share/metainfo/$APP_ID.metainfo.xml"

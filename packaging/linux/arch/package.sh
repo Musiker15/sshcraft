@@ -129,6 +129,7 @@ optdepends=(
   'vulkan-driver: draw through Vulkan'
   'xdg-desktop-portal: file dialogs'
   'org.freedesktop.secrets: keep keys and passwords in the desktop keyring'
+  'polkit: ask for your password before stored keys and to unlock the app lock'
 )
 provides=("sshcraft=$pkgver")
 conflicts=(sshcraft sshcraft-bin sshcraft-git)

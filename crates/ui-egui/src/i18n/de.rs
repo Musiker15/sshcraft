@@ -292,6 +292,22 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "Die Sitzungen laufen weiter. Entsperre mit Windows Hello, um sie zu sehen."
         }
         "Unlock" => "Entsperren",
+        "Sessions keep running. Unlock with your password or fingerprint to see them." => {
+            "Die Sitzungen laufen weiter. Entsperre mit deinem Passwort oder Fingerabdruck, um sie zu sehen."
+        }
+        "0 never locks. Unlocking asks for your password or fingerprint, and keys and passwords ask again." => {
+            "0 sperrt nie. Zum Entsperren fragt SSHCraft nach deinem Passwort oder Fingerabdruck, und Schlüssel und Passwörter fragen erneut."
+        }
+        "Not on this system yet." => "Auf diesem System noch nicht.",
+        "Needs polkit with SSHCraft's action, which the .deb, .rpm, Arch and FreeBSD packages install." => {
+            "Braucht polkit mit der Aktion von SSHCraft, die die Pakete für .deb, .rpm, Arch und FreeBSD installieren."
+        }
+        "Ask for your password or fingerprint before the first stored key or password" => {
+            "Vor dem ersten gespeicherten Schlüssel oder Passwort nach Passwort oder Fingerabdruck fragen"
+        }
+        "Once per start, where polkit can ask. Off, anything running as your user can use the stored keys and passwords through SSHCraft without a question." => {
+            "Einmal pro Start, wo polkit fragen kann. Aus kann alles, was unter deinem Benutzer läuft, die gespeicherten Schlüssel und Passwörter ohne Rückfrage über SSHCraft nutzen."
+        }
         "Choose a passphrase" => "Passphrase festlegen",
         "Unlock SSHCraft" => "SSHCraft entsperren",
         "This copy of SSHCraft keeps its data beside the program. The passphrase protects your keys and passwords there; without it nobody can open them, you neither." => {

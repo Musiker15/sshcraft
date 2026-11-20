@@ -1,4 +1,4 @@
-//! The state of the vault and of Windows Hello.
+//! The state of the vault and of Windows Hello (polkit on Linux and FreeBSD).
 
 use serde::Serialize;
 use serde_json::Value;
@@ -12,7 +12,7 @@ type Out = futures::future::BoxFuture<'static, Result<Value, CommandError>>;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         command("app.lock", "Lock the window", "none", run_lock),
-        command("app.unlock", "Unlock the window", "none; asks Windows Hello", run_unlock),
+        command("app.unlock", "Unlock the window", "none; asks Windows Hello (polkit on Linux and FreeBSD)", run_unlock),
         query("vault.status", "Vault status", "none", run_status),
         query("vault.hello", "Windows Hello status", "none", run_hello),
     ]

@@ -1,6 +1,7 @@
 //! The app lock: after `general.lock_after_minutes` without input the window shows only a lock
 //! screen (no terminal, no host, nothing for a screen reader or a screenshot) while sessions go
-//! on. Unlocking asks Windows Hello; the approval for keys and passwords is asked again too.
+//! on. Unlocking asks Windows Hello (polkit on Linux and FreeBSD); the approval for keys and
+//! passwords is asked again too.
 
 use std::time::{Duration, Instant};
 
@@ -24,7 +25,8 @@ impl Default for LockState {
 }
 
 /// Whether the desktop can unlock with the user's presence (Windows Hello); the app starts with
-/// this as `lock_available`, and Android sets its own. Elsewhere the lock is not offered yet.
+/// this as `lock_available`. Android sets its own, Linux and FreeBSD theirs from polkit. macOS
+/// does not offer the lock yet.
 pub fn supported() -> bool {
     cfg!(windows)
 }
@@ -71,7 +73,11 @@ pub fn show(app: &mut SshcraftApp, ui: &mut egui::Ui) {
             let how = if app.form == crate::app::Form::Tablet {
                 tr("Sessions keep running. Unlock with your fingerprint, face or screen lock to see them.")
             } else {
-                tr("Sessions keep running. Unlock with Windows Hello to see them.")
+                if cfg!(windows) {
+                    tr("Sessions keep running. Unlock with Windows Hello to see them.")
+                } else {
+                    tr("Sessions keep running. Unlock with your password or fingerprint to see them.")
+                }
             };
             ui.label(egui::RichText::new(how).color(tokens.text_dim));
             ui.add_space(12.0);

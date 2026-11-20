@@ -6,6 +6,7 @@
 mod control;
 mod dropdown;
 mod platform;
+mod polkit;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -16,7 +17,7 @@ use sshcraft_engine::{EngineError, Session, SessionConfig};
 use sshcraft_ui_egui::SshcraftApp;
 use sshcraft_ui_egui::i18n::{Lang, set_language, tr};
 
-use platform::{WindowHandle, WindowPresence};
+use platform::WindowHandle;
 
 /// How long closing the window waits for the engine's last tasks before the process ends.
 const SHUTDOWN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
@@ -153,6 +154,20 @@ fn show_problem(text: String) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// Who confirms it is the user: Windows Hello on Windows, polkit on Linux and FreeBSD, nobody
+/// yet on macOS.
+fn presence(window: &WindowHandle) -> Arc<dyn sshcraft_fido::presence::UserPresence> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = window;
+        Arc::new(polkit::Polkit)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        Arc::new(platform::WindowPresence(window.clone()))
+    }
+}
+
 /// Portable mode's unlock window before the engine opens.
 struct UnlockWindow {
     unlock: sshcraft_ui_egui::unlock::Unlock,
@@ -238,8 +253,7 @@ fn main() -> ExitCode {
         }
     }
     let window = WindowHandle::default();
-    let mut config =
-        SessionConfig::for_app(data_dir, runtime.handle().clone(), Arc::new(WindowPresence(window.clone())), platform::authenticator(window.clone()));
+    let mut config = SessionConfig::for_app(data_dir, runtime.handle().clone(), presence(&window), platform::authenticator(window.clone()));
     if let Some(provider) = portable_key {
         config.master_key = Box::new(provider);
     }
@@ -266,6 +280,11 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             window.take_from(cc);
             let mut app = SshcraftApp::new(session.clone(), &cc.egui_ctx);
+            // Linux and FreeBSD: the lock is offered where polkit knows SSHCraft's action.
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                app.lock_available = polkit::installed();
+            }
             app.window_frame = window_frame;
             app.report_vault(vault);
             app.handoff_dir = sshcraft_platform::config_dir().ok().map(|d| sshcraft_ui_egui::handoff::dir_in(&d));

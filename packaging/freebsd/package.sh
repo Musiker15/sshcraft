@@ -58,6 +58,8 @@ install -d "$TREE/bin" "$TREE/share/applications" "$TREE/share/metainfo" \
 install -m 755 "$BIN/sshcraft" "$BIN/sshcraft-cli" "$TREE/bin/"
 strip "$TREE/bin/sshcraft" "$TREE/bin/sshcraft-cli" 2>/dev/null || true
 install -m 644 "$LINUX/$APP_ID.desktop" "$TREE/share/applications/$APP_ID.desktop"
+install -d "$TREE/share/polkit-1/actions"
+install -m 644 "$LINUX/$APP_ID.policy" "$TREE/share/polkit-1/actions/$APP_ID.policy"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$SSHCRAFT_BUILD_DATE/g" \
   "$LINUX/$APP_ID.metainfo.xml.in" >"$TREE/share/metainfo/$APP_ID.metainfo.xml"
 cp -R "$ROOT/assets/app-icon/hicolor" "$TREE/share/icons/"

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 use sshcraft_fido::presence::{Presence, UserPresence};
 
 /// The main window's handle as an integer (`0` until the window exists).
@@ -13,6 +14,8 @@ use sshcraft_fido::presence::{Presence, UserPresence};
 pub struct WindowHandle(Arc<AtomicIsize>);
 
 impl WindowHandle {
+    // Linux and FreeBSD read it only for nothing: their sign-in is polkit, without a window handle.
+    #[cfg_attr(all(unix, not(target_os = "macos")), allow(dead_code))]
     pub fn get(&self) -> isize {
         self.0.load(Ordering::SeqCst)
     }
@@ -27,9 +30,11 @@ impl WindowHandle {
     }
 }
 
-/// Windows Hello, owned by the window once there is one.
+/// Windows Hello, owned by the window once there is one (Linux and FreeBSD ask polkit instead).
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 pub struct WindowPresence(pub WindowHandle);
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 #[async_trait::async_trait]
 impl UserPresence for WindowPresence {
     async fn verify(&self, reason: &str) -> Presence {
