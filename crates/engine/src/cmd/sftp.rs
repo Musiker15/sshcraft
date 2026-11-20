@@ -76,6 +76,26 @@ pub fn specs() -> Vec<CommandSpec> {
             run_download_file,
         ),
         command("sftp.retry", "Try a transfer again", "{ transfer } -> { transfer }", run_retry),
+        command(
+            "sftp.edit",
+            "Edit a file in the text editor",
+            "{ id, remote: path of a file } -> { edit, sftp, remote, name, local }; opens only in the text editor of the settings",
+            run_edit,
+        ),
+        query("sftp.edits", "List files open in the editor", "-> [{ edit, sftp, remote, name, local }]", run_edits),
+        command(
+            "sftp.edit_save",
+            "Send an edited file",
+            "{ edit, force: false } -> {}; without force a file changed on the server is left alone",
+            run_edit_save,
+        ),
+        command(
+            "sftp.edit_sync",
+            "Send what was saved in the editor",
+            "{} -> { uploaded: [edit], conflicts: [edit], failed: [{ edit, code, message }] }",
+            run_edit_sync,
+        ),
+        command("sftp.edit_stop", "Stop editing a file", "{ edit }; the copy here is deleted", run_edit_stop),
         command("sftp.reconnect", "Connect a host's files again", "{ id } -> { home }", run_reconnect),
     ]
 }
@@ -85,6 +105,65 @@ fn run_download_file(ctx: Ctx, params: Value) -> Out {
         let DownloadFileParams { id, remote, local_file } = parse("sftp.download_file", params)?;
         let transfer = ctx.session.sftp().download_file(id, remote, local_file).map_err(failed)?;
         Ok(json!({ "transfer": transfer }))
+    }
+    .boxed()
+}
+
+#[derive(Deserialize)]
+struct EditParams {
+    id: SftpId,
+    remote: String,
+}
+
+fn run_edit(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let EditParams { id, remote } = parse("sftp.edit", params)?;
+        let editor = ctx.session.settings().get().sftp.editor.clone();
+        let Some(editor) = editor else {
+            return Err(CommandError::Failed { code: ErrorCode::EditorMissing, detail: Some("no text editor is set".into()) });
+        };
+        let view = ctx.session.sftp().edit(id, &remote, std::path::Path::new(&editor)).await.map_err(failed)?;
+        to_value(&view)
+    }
+    .boxed()
+}
+
+fn run_edits(ctx: Ctx, _: Value) -> Out {
+    async move { to_value(&ctx.session.sftp().edits_open()) }.boxed()
+}
+
+#[derive(Deserialize)]
+struct EditSaveParams {
+    edit: crate::sftp::edits::EditId,
+    #[serde(default)]
+    force: bool,
+}
+
+fn run_edit_save(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let EditSaveParams { edit, force } = parse("sftp.edit_save", params)?;
+        ctx.session.sftp().save_edit(edit, force).await.map_err(failed)?;
+        Ok(json!({}))
+    }
+    .boxed()
+}
+
+fn run_edit_sync(ctx: Ctx, _: Value) -> Out {
+    async move { to_value(&ctx.session.sftp().sync_edits().await) }.boxed()
+}
+
+#[derive(Deserialize)]
+struct EditStopParams {
+    edit: crate::sftp::edits::EditId,
+}
+
+fn run_edit_stop(ctx: Ctx, params: Value) -> Out {
+    async move {
+        let EditStopParams { edit } = parse("sftp.edit_stop", params)?;
+        if !ctx.session.sftp().stop_edit(edit) {
+            return Err(CommandError::NotFound(format!("edit {edit}")));
+        }
+        Ok(Value::Null)
     }
     .boxed()
 }

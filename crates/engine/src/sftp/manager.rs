@@ -100,11 +100,23 @@ pub struct SftpManager {
     open: Mutex<HashMap<SftpId, Arc<Open>>>,
     next: AtomicU64,
     transfers: Arc<super::transfers::Transfers>,
+    edits: super::edits::Edits,
 }
 
 impl SftpManager {
-    pub(crate) fn new(ctx: Arc<Context>, events: crate::events::EventBus) -> Self {
-        SftpManager { ctx, open: Mutex::new(HashMap::new()), next: AtomicU64::new(1), transfers: Arc::new(super::transfers::Transfers::new(events)) }
+    /// The sessions; files open in the editor are copied under `edit_root`.
+    pub(crate) fn new(ctx: Arc<Context>, events: crate::events::EventBus, edit_root: PathBuf) -> Self {
+        SftpManager {
+            ctx,
+            open: Mutex::new(HashMap::new()),
+            next: AtomicU64::new(1),
+            transfers: Arc::new(super::transfers::Transfers::new(events)),
+            edits: super::edits::Edits::new(edit_root),
+        }
+    }
+
+    pub(crate) fn edits(&self) -> &super::edits::Edits {
+        &self.edits
     }
 
     /// The uploads and downloads of every session.
@@ -236,6 +248,7 @@ impl SftpManager {
             return false;
         };
         self.transfers.cancel_all(id);
+        self.edits.stop_all(id);
         open.client.close();
         if let Ok(open) = Arc::try_unwrap(open) {
             crate::pool::release(open.connection).await;

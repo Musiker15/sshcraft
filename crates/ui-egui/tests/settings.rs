@@ -106,6 +106,9 @@ fn a_clipboard_host_can_be_removed() {
     until(&mut h, "the data", |app| !app.data.hosts.is_empty() && !app.data.settings.terminal.clipboard_hosts.is_empty());
     settings_page(&mut h, "Terminal");
     assert!(h.query_by_label("web").is_some(), "the host is listed by name");
+    // The section is longer than the window; the button comes into view first.
+    h.get_by_label("Remove").scroll_to_me();
+    h.run_steps(3);
     h.get_by_label("Remove").click();
     until(&mut h, "the removed host", |app| app.data.settings.terminal.clipboard_hosts.is_empty());
     // The page shows the change at once; the engine has it once its save ran.

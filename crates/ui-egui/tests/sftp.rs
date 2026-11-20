@@ -107,3 +107,55 @@ fn sync_sends_the_newer_files_of_this_folder_up() {
     wait(&mut h, "the file was not sent", |_| std::fs::read(&sent).is_ok_and(|d| d == b"new"));
     assert_eq!(std::fs::read(root.path().join("on-the-server.txt")).unwrap(), b"hi", "nothing there is touched");
 }
+
+/// Without a text editor the pane says where to set one; with one the file opens there, each save
+/// goes back to the server, and *Stop editing* deletes the copy.
+#[test]
+fn a_file_opens_in_the_text_editor_and_each_save_goes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session, _server, root) = opened(dir.path());
+    let tab = h.state().ui.page;
+    let select = |h: &mut H| {
+        let pane = h.state_mut().sftp.values_mut().next().unwrap();
+        pane.remote.selected.clear();
+        pane.remote.selected.insert("on-the-server.txt".into());
+        h.run_steps(2);
+    };
+    select(&mut h);
+    h.get_by_label("Open in editor").click();
+    h.run_steps(3);
+    h.get_by_label("Open settings").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.page, Page::Settings);
+
+    // An editor is named; the test stands in for it.
+    let started: std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>> = std::sync::Arc::default();
+    let seen = started.clone();
+    session.set_editor_launcher(std::sync::Arc::new(move |_editor: &std::path::Path, file: &std::path::Path| {
+        seen.lock().unwrap().push(file.to_path_buf());
+        Ok(())
+    }));
+    let editor = std::env::current_exe().unwrap();
+    let mut settings = session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.get", serde_json::json!({}))).unwrap();
+    settings["sftp"]["editor"] = serde_json::json!(editor);
+    session.runtime().block_on(session.execute(sshcraft_engine::Caller::User, "settings.save", serde_json::json!({ "settings": settings }))).unwrap();
+    h.state_mut().data.dirty |= sshcraft_ui_egui::data::Refresh::SETTINGS;
+    wait(&mut h, "the settings did not come back", |app| app.data.settings.sftp.editor.is_some());
+
+    h.state_mut().ui.page = tab;
+    select(&mut h);
+    h.get_by_label("Open in editor").click();
+    wait(&mut h, "the editor did not start", |app| app.sftp.values().any(|v| !v.edits.is_empty()));
+    let copy = started.lock().unwrap().first().cloned().unwrap();
+    assert_eq!(std::fs::read(&copy).unwrap(), b"hi");
+    h.run_steps(2);
+    assert!(h.query_by_label("In the text editor").is_some());
+
+    std::fs::write(&copy, b"saved in the editor").unwrap();
+    let on_server = root.path().join("on-the-server.txt");
+    wait(&mut h, "the save did not go back", |_| std::fs::read(&on_server).is_ok_and(|d| d == b"saved in the editor"));
+
+    h.get_by_label("Stop editing").click();
+    wait(&mut h, "the copy was not deleted", |_| !copy.exists());
+    assert!(h.state().sftp.values().all(|v| v.edits.is_empty()));
+}

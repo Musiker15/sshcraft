@@ -581,6 +581,34 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Previous command" => "Vorheriger Befehl",
         "Next command" => "Nächster Befehl",
         "Copy the output of the last command" => "Ausgabe des letzten Befehls kopieren",
+        "The text editor of the settings is not there or did not start." => "Der Texteditor aus den Einstellungen fehlt oder startete nicht.",
+        "The file is too large to edit here." => "Die Datei ist zu groß, um sie hier zu bearbeiten.",
+        "The file changed on the server since it was opened." => "Die Datei wurde auf dem Server geändert, seit sie geöffnet wurde.",
+        "Open in editor" => "Im Editor öffnen",
+        "Opens in the text editor of the settings" => "Öffnet sich im Texteditor aus den Einstellungen",
+        "In the text editor" => "Im Texteditor",
+        "Each save goes back to {host}." => "Jedes Speichern geht zurück an {host}.",
+        "Stop editing" => "Bearbeiten beenden",
+        "No text editor set" => "Kein Texteditor festgelegt",
+        "Files open only in the text editor you choose under Settings, Terminal. Nothing else opens them, since opening a downloaded file can run it." => {
+            "Dateien öffnen sich nur im Texteditor, den du unter Einstellungen, Terminal festlegst. Sonst öffnet sie nichts, weil eine heruntergeladene Datei beim Öffnen ausgeführt werden kann."
+        }
+        "Open settings" => "Einstellungen öffnen",
+        "Changed on the server" => "Auf dem Server geändert",
+        "{name} changed on {host} since you opened it. Your save was not sent. Overwrite the server's version with yours?" => {
+            "{name} wurde auf {host} geändert, seit du die Datei geöffnet hast. Dein Speichern wurde nicht gesendet. Die Fassung auf dem Server mit deiner überschreiben?"
+        }
+        "Overwrite" => "Überschreiben",
+        "{name} is open in the text editor. Each save goes back to {host}." => {
+            "{name} ist im Texteditor geöffnet. Jedes Speichern geht zurück an {host}."
+        }
+        "Saved {name} to {host}." => "{name} auf {host} gespeichert.",
+        "{name} was not sent to {host}: {why}" => "{name} wurde nicht an {host} gesendet: {why}",
+        "Text editor" => "Texteditor",
+        "Choose…" => "Auswählen…",
+        "SFTP files open only in this program, never in the one the system links to their type." => {
+            "SFTP-Dateien öffnen sich nur in diesem Programm, nie in dem, das das System mit ihrem Typ verknüpft."
+        }
         "Fold or show the output of the last command" => "Ausgabe des letzten Befehls ein- oder ausklappen",
         "Show all folded output" => "Alle eingeklappten Ausgaben zeigen",
         "One line folded, click to show" => "Eine Zeile eingeklappt, zum Zeigen klicken",

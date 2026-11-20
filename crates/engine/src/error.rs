@@ -152,6 +152,12 @@ pub enum ErrorCode {
     HostKeyChanged,
     /// The server's host key was not accepted when SSHCraft asked.
     HostKeyRejected,
+    /// No text editor is set, or the one set is not there or did not start.
+    EditorMissing,
+    /// The file is larger than SSHCraft opens in the editor.
+    FileTooLarge,
+    /// The file changed on the server since it was opened: nothing was sent.
+    ChangedElsewhere,
 }
 
 impl From<&ResolveError> for ErrorCode {

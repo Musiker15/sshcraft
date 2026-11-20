@@ -46,6 +46,6 @@ submissions follow. S1 (SFTP) is done ([sftp.md](sftp.md)).
 | Step | Result |
 |---|---|
 | M1 | Android tablets (13+, arm64): the egui interface in a NativeActivity with a key bar, touch scrolling and Android's clipboard; the master key in the Android Keystore; sync; the APK built and signed by `cargo xtask android` ([android.md](android.md)) |
-| S1 | SFTP: an SFTP tab per host with this computer and the host side by side (one at a time under 700 points, the host alone on Android); folders, rename, permissions, delete after counting; uploads, downloads, copies from server to server and one-way folder syncs with a queue, progress, cancel and part files; names from the server checked before they become a local path ([sftp.md](sftp.md)) |
+| S1 | SFTP: an SFTP tab per host with this computer and the host side by side (one at a time under 700 points, the host alone on Android); folders, rename, permissions, delete after counting; uploads, downloads, copies from server to server and one-way folder syncs with a queue, progress, cancel and part files; files edited in the text editor of the settings, each save sent back unless the file changed on the server; names from the server checked before they become a local path ([sftp.md](sftp.md)) |
 
 M2 (GameActivity, phones, notifications), M3 (iOS and iPadOS). A database client follows as a separate sister app.
