@@ -272,6 +272,9 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "{name}: Passwörter von {count} Hosts oder Gruppen, beim Verbinden geholt"
         }
         "Keys from the SSH agent (Proton Pass), when a host uses one" => "Schlüssel aus dem SSH-Agent (Proton Pass), wenn ein Host einen nutzt",
+        "Keys from the SSH agent that SSH_AUTH_SOCK names, when a host uses one" => {
+            "Schlüssel aus dem SSH-Agent, den SSH_AUTH_SOCK nennt, wenn ein Host einen nutzt"
+        }
         "AI agents connect here, from this computer only" => "KI-Agents verbinden sich hier, nur von diesem Rechner",
         "SSHCraft does not check for updates and sends no telemetry" => "SSHCraft sucht nicht nach Updates und sendet keine Telemetrie",
         "App lock" => "App-Sperre",

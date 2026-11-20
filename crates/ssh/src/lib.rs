@@ -14,7 +14,7 @@ use russh::{ChannelMsg, ChannelWriteHalf};
 use sshcraft_model::policy::Disconnect;
 use tokio::sync::mpsc;
 
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 pub mod agent;
 mod auth;
 pub mod authorized_keys;

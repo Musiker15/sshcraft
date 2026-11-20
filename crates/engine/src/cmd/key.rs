@@ -59,7 +59,7 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
-/// Keys the SSH agent (Proton Pass) offers: only public facts, never key material.
+/// Keys the SSH agent offers: only public facts, never key material.
 fn run_agent_list(ctx: Ctx, _: Value) -> Out {
     async move {
         let keys = ctx.session.sessions().agent_keys().await.map_err(|(code, detail)| CommandError::Failed { code, detail })?;

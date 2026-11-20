@@ -10,7 +10,7 @@ not SSH (a local shell and a serial port).
 
 A host signs in with what it has, in this order:
 
-1. its **key** (`publickey`), from the vault or from the SSH agent (Proton Pass);
+1. its **key** (`publickey`), from the vault or from the SSH agent (Proton Pass on Windows, the agent `SSH_AUTH_SOCK` names elsewhere);
 2. its **stored password** (`password`), if the server offers that method;
 3. **keyboard-interactive**, if offered. A stored password answers at most one round, and only a
    round with exactly one hidden question that does not ask for a code. A question for a
@@ -203,8 +203,9 @@ connection. Locking the app closes every shared connection. Switch it off under
 ## Agent forwarding
 
 Off unless switched on for a host or group. When on, the target (never a jump host) may use the
-SSH agent of this device, Proton Pass on Windows, while the session is open. Where no agent can be
-forwarded yet (macOS, Linux and FreeBSD for now), the status line under the terminal says so. Keys from SSHCraft's
+SSH agent of this device while the session is open: Proton Pass on Windows, elsewhere the agent
+`SSH_AUTH_SOCK` names (ssh-agent, gpg-agent, the desktop keyring, Proton Pass or 1Password).
+Where no agent is running, the status line under the terminal says so. Keys from SSHCraft's
 own vault are never forwarded. Anyone with root on the server can use the forwarded agent in that
 time, so switch it on only where you need it. A server that opens an agent channel without
 forwarding switched on is refused.

@@ -34,6 +34,9 @@ finish-args:
   # the user saves a linked host back (sshconfig.write), with a copy of the old file in
   # ~/.ssh/.sshcraft-backup first.
   - --filesystem=~/.ssh
+  # The SSH agent of the session (SSH_AUTH_SOCK) for signing in with its keys and for agent
+  # forwarding.
+  - --socket=ssh-auth
   # Open/Save dialogs (import, export, logs) use the file-chooser portal (rfd), so broad
   # filesystem access isn't needed. Serial ports and the host's own shell are not reachable from
   # the sandbox; use the deb, rpm, AppImage or tarball for them.
