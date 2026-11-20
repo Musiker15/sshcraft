@@ -121,6 +121,19 @@ impl Terminal {
         (low..line).rev().find(|l| self.line_marked(*l))
     }
 
+    /// Whether `line` carries only the mark `A` leaves (its last cell): the first line of a prompt
+    /// whose `B` has not come yet. The line of an earlier prompt went through `B` and is marked
+    /// whole.
+    fn marked_by_prompt_start_only(&self, line: i32) -> bool {
+        let grid = self.term.grid();
+        if line < grid.topmost_line().0 || line > grid.bottommost_line().0 {
+            return false;
+        }
+        let row = &grid[Line(line)];
+        let last = grid.columns().saturating_sub(1);
+        last > 0 && !row[Column(0)].flags.contains(MARK) && row[Column(last)].flags.contains(MARK)
+    }
+
     pub(crate) fn apply_shell_mark(&mut self, mark: ShellMark) {
         // A full-screen program has its own screen: its marks would pair with nothing.
         if self.term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
@@ -155,10 +168,13 @@ impl Terminal {
             }
             ShellMark::CommandStart => {
                 // The prompt's own line is where the command is typed: it takes the mark from
-                // the line `A` marked (the first line of a prompt over several lines).
+                // the line `A` marked (the first line of a prompt over several lines). A prompt
+                // drawn again after a new window size erased its own line first; the marked line
+                // above is then an earlier prompt's, which keeps its mark.
                 if !self.line_marked(cursor.0)
                     && self.commands.records.back().is_some_and(|r| r.state == CommandState::Prompt)
                     && let Some(old) = self.marked_above(cursor.0)
+                    && self.marked_by_prompt_start_only(old)
                 {
                     self.unmark_line(old);
                 }
