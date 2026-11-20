@@ -168,25 +168,41 @@ fn general(app: &mut SshcraftApp, ui: &mut Ui) {
     ui.label(
         egui::RichText::new(if available && tablet {
             tr("0 never locks. Unlocking asks for your fingerprint, face or screen lock, and keys and passwords ask again.")
-        } else if available {
+        } else if available && cfg!(windows) {
             tr("0 never locks. Unlocking asks Windows Hello, and keys and passwords ask it again.")
+        } else if available {
+            tr("0 never locks. Unlocking asks for your password or fingerprint, and keys and passwords ask again.")
         } else if tablet {
             tr("Set up a fingerprint, face or screen lock on this device to use the app lock.")
-        } else {
+        } else if cfg!(windows) {
             tr("Not on this system yet: unlocking needs Windows Hello.")
+        } else if cfg!(target_os = "macos") {
+            tr("Not on this system yet.")
+        } else {
+            tr("Needs polkit with SSHCraft's action, which the .deb, .rpm, Arch and FreeBSD packages install.")
         })
         .weak(),
     );
     save(app, |s| s.general.lock_after_minutes = minutes);
     // Agents cannot change this one: settings.save has no agent access.
     let mut hello = app.data.settings.general.hello_before_secrets;
-    ui.checkbox(&mut hello, tr("Ask Windows Hello before the first stored key or password"));
-    ui.label(
-        egui::RichText::new(tr(
-            "Once per start. Off, anything running as your Windows user can use the stored keys and passwords through SSHCraft without a question.",
-        ))
-        .weak(),
-    );
+    let (ask, why) = if cfg!(windows) {
+        (
+            tr("Ask Windows Hello before the first stored key or password"),
+            tr(
+                "Once per start. Off, anything running as your Windows user can use the stored keys and passwords through SSHCraft without a question.",
+            ),
+        )
+    } else {
+        (
+            tr("Ask for your password or fingerprint before the first stored key or password"),
+            tr(
+                "Once per start, where polkit can ask. Off, anything running as your user can use the stored keys and passwords through SSHCraft without a question.",
+            ),
+        )
+    };
+    ui.checkbox(&mut hello, ask);
+    ui.label(egui::RichText::new(why).weak());
     save(app, |s| s.general.hello_before_secrets = hello);
     ui.add_space(12.0);
     crate::pages::backup::section(app, ui);

@@ -92,7 +92,18 @@ reader nor a screenshot sees them; the control channel answers only `{"locked": 
 refuses to read terminals or switch pages. The idle time is checked also while the window is
 hidden, before the input that brings it back counts. The approval for keys and passwords, and
 KeePassXC database passwords, are asked again; passwords from password managers need Windows
-Hello like stored ones. Unlocking needs Windows Hello; elsewhere the lock is not offered yet.
+Hello like stored ones. Unlocking needs Windows Hello, on Linux and FreeBSD polkit (below); on
+macOS the lock is not offered yet.
+
+On Linux and FreeBSD, polkit takes the place of Windows Hello, for the lock and for the question
+before the first stored key or password. The packages (.deb, .rpm, Arch, FreeBSD) install the
+action `de.musiker15.sshcraft.unlock` with `auth_self`: the desktop's authentication agent asks
+for the user's own password or fingerprint, never an administrator's, and nothing is kept between
+questions. SSHCraft runs `pkcheck` for its own process with an argument list. A wrong password or
+a dismissed dialog counts as declined. Where polkit cannot ask (no authentication agent, the
+action not installed, as with the AppImage, the tarball or the Flatpak), it counts as "no sign-in
+on this system", as on a PC without Windows Hello: the lock is not offered and keys need no
+question, so nobody is locked out of their own sessions.
 
 The backup file holds secrets in plain form inside, sealed with Argon2id (64 MiB, 3 passes) and
 XChaCha20-Poly1305; its header is authenticated and a file cannot ask for more than 256 MiB or 8

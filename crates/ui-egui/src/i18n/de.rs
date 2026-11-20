@@ -292,6 +292,22 @@ pub fn translate(text: &str) -> Option<&'static str> {
             "Die Sitzungen laufen weiter. Entsperre mit Windows Hello, um sie zu sehen."
         }
         "Unlock" => "Entsperren",
+        "Sessions keep running. Unlock with your password or fingerprint to see them." => {
+            "Die Sitzungen laufen weiter. Entsperre mit deinem Passwort oder Fingerabdruck, um sie zu sehen."
+        }
+        "0 never locks. Unlocking asks for your password or fingerprint, and keys and passwords ask again." => {
+            "0 sperrt nie. Zum Entsperren fragt SSHCraft nach deinem Passwort oder Fingerabdruck, und Schlüssel und Passwörter fragen erneut."
+        }
+        "Not on this system yet." => "Auf diesem System noch nicht.",
+        "Needs polkit with SSHCraft's action, which the .deb, .rpm, Arch and FreeBSD packages install." => {
+            "Braucht polkit mit der Aktion von SSHCraft, die die Pakete für .deb, .rpm, Arch und FreeBSD installieren."
+        }
+        "Ask for your password or fingerprint before the first stored key or password" => {
+            "Vor dem ersten gespeicherten Schlüssel oder Passwort nach Passwort oder Fingerabdruck fragen"
+        }
+        "Once per start, where polkit can ask. Off, anything running as your user can use the stored keys and passwords through SSHCraft without a question." => {
+            "Einmal pro Start, wo polkit fragen kann. Aus kann alles, was unter deinem Benutzer läuft, die gespeicherten Schlüssel und Passwörter ohne Rückfrage über SSHCraft nutzen."
+        }
         "Backup" => "Sicherung",
         "One file with your hosts, groups, identities, keys, passwords, snippets and host keys, encrypted with a passphrase. Restoring adds what is missing and changes nothing that is here." => {
             "Eine Datei mit deinen Hosts, Gruppen, Identitäten, Schlüsseln, Passwörtern, Snippets und Hostschlüsseln, verschlüsselt mit einer Passphrase. Beim Wiederherstellen kommt hinzu, was fehlt; was hier ist, bleibt unverändert."

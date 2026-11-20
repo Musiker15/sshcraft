@@ -24,8 +24,8 @@ A key can come with a passphrase, or you can give a new key one. You choose whet
 **saves** it:
 
 - **Saved** (the default): the key is kept decrypted inside the vault, which itself is sealed
-  with a master key from the Windows Credential Manager. Windows Hello is asked once per run
-  before the first such key is used.
+  with a master key from the Windows Credential Manager. Windows Hello (polkit on Linux and
+  FreeBSD) is asked once per run before the first such key is used.
 - **Asked**: the key stays encrypted with its passphrase inside the vault. SSHCraft asks for the
   passphrase every time the key is used, at most three times per connection; Windows Hello is not
   asked then, the passphrase is the check. The decrypted key exists only in memory while signing
