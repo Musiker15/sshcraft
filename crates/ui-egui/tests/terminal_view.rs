@@ -261,3 +261,45 @@ fn a_right_drag_is_reported_as_right() {
     assert!(input.contains("\x1b[<34;"), "{input:?}");
     assert!(!input.contains("\x1b[<32;"), "{input:?}");
 }
+
+fn press(f: &mut Fixture, at: Pos2) {
+    f.harness.hover_at(at);
+    f.harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    f.harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    f.harness.run_steps(2);
+}
+
+#[test]
+fn the_bar_of_a_prompt_folds_its_output_and_the_folded_row_shows_it_again() {
+    let session = b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07one\r\ntwo\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07";
+    let mut f = fixture(session);
+    f.harness.run_steps(2);
+    // A click in the text of the prompt line folds nothing.
+    let text = cell(&f, 3, 0);
+    press(&mut f, text);
+    assert!(f.term.borrow().screen().folds.is_empty());
+    let bar = Pos2::new(f.harness.get_by_label("Terminal").rect().min.x + 1.0, cell(&f, 0, 0).y);
+    press(&mut f, bar);
+    let folds = f.term.borrow().screen().folds;
+    assert_eq!(folds.iter().map(|r| (r.row, r.lines)).collect::<Vec<_>>(), [(1, 2)]);
+    let folded = cell(&f, 12, 1);
+    press(&mut f, folded);
+    assert!(f.term.borrow().screen().folds.is_empty());
+    assert_eq!(f.term.borrow().screen().text().lines().nth(1), Some("one"));
+}
+
+#[test]
+fn a_tap_on_the_bar_folds_even_when_the_finger_leaves_no_pointer() {
+    let session = b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07one\r\ntwo\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07";
+    let mut f = fixture(session);
+    f.harness.run_steps(2);
+    let bar = Pos2::new(f.harness.get_by_label("Terminal").rect().min.x + 1.0, cell(&f, 0, 0).y);
+    f.harness.event(Event::PointerMoved(bar));
+    f.harness.event(Event::PointerButton { pos: bar, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    f.harness.run_steps(1);
+    // A lifted finger: the release and the pointer leaving arrive together.
+    f.harness.event(Event::PointerButton { pos: bar, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    f.harness.event(Event::PointerGone);
+    f.harness.run_steps(2);
+    assert_eq!(f.term.borrow().screen().folds.len(), 1);
+}

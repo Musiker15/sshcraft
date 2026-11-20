@@ -85,6 +85,8 @@ impl Terminal {
         let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
         selection.update(end, Side::Right);
         self.term.selection = Some(selection);
+        // A match in folded output shows it again.
+        self.unfold_line(start.line.0);
         self.term.scroll_to_point(start);
         let m = SearchMatch { start: Self::grid_point(start), end: Self::grid_point(end) };
         self.last_match = Some((query_key(query), m));

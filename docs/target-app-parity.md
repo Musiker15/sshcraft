@@ -28,7 +28,7 @@ with other clients, with sources, is the German
 | Dropdown window on a global shortcut, hex view of received bytes | not compared yet | yes (F6); no images and no ZMODEM or trzsz |
 | Containers on a host as targets (Docker, Podman, Kubernetes), launch actions, macros, dynamic groups in the host list | not compared yet | yes (F7); launch actions only after they were allowed on the device; no Kerberos and no PKCS#11 |
 | Snippets, history, completion | yes | yes, with placeholders and a snippet bar |
-| Shell integration (command marks and exit codes), notification when a command ends, triggers and highlights, hint mode, compose field, login scripts, program status of agents | not compared yet | yes (F3); login scripts only after they were allowed on the device |
+| Shell integration (command marks, exit codes, folding the output), notification when a command ends, triggers and highlights, hint mode, compose field, login scripts, program status of agents | not compared yet | yes (F3); login scripts only after they were allowed on the device |
 | Colour, badge and theme per host or group | not compared yet | yes |
 | Session logs | yes | yes |
 | Sync | Termius cloud, subscription | own server, end-to-end encrypted, free |

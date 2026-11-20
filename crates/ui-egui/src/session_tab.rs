@@ -1075,6 +1075,10 @@ fn run_terminal_command(tab: &mut SessionTab, command: &str, ctx: &egui::Context
                 ctx.copy_text(text);
             }
         }
+        "ui.terminal.fold_output" => {
+            tab.term.fold_last();
+        }
+        "ui.terminal.unfold_all" => tab.term.unfold_all(),
         _ => {}
     }
 }

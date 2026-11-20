@@ -42,6 +42,9 @@ impl Terminal {
 
     /// Scrolls `lines` towards the history (negative: towards the newest output).
     pub fn scroll(&mut self, lines: i32) {
+        if self.scroll_folded(lines) {
+            return;
+        }
         // The emulator adds this to its offset as i32: keep it within what can be scrolled.
         let most = i32::try_from(self.term.grid().history_size().saturating_add(self.term.grid().screen_lines())).unwrap_or(i32::MAX);
         self.term.scroll_display(Scroll::Delta(lines.clamp(-most, most)));
@@ -54,9 +57,8 @@ impl Terminal {
     /// The grid point under screen cell `col`, `row`, taking the scroll position into account.
     pub fn point_at(&self, col: u16, row: u16) -> GridPoint {
         let size = self.size;
-        let offset = i32::try_from(self.term.grid().display_offset()).unwrap_or(i32::MAX);
-        let row = i32::from(row.min(size.rows.saturating_sub(1)));
-        GridPoint { line: row.saturating_sub(offset), col: col.min(size.cols.saturating_sub(1)) }
+        let line = self.view_line(usize::from(row.min(size.rows.saturating_sub(1))));
+        GridPoint { line, col: col.min(size.cols.saturating_sub(1)) }
     }
 
     /// The text of grid line `line` (clamped), without trailing blanks.
