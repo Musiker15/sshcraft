@@ -609,6 +609,12 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "SFTP files open only in this program, never in the one the system links to their type." => {
             "SFTP-Dateien öffnen sich nur in diesem Programm, nie in dem, das das System mit ihrem Typ verknüpft."
         }
+        "Fold or show the output of the last command" => "Ausgabe des letzten Befehls ein- oder ausklappen",
+        "Show all folded output" => "Alle eingeklappten Ausgaben zeigen",
+        "One line folded, click to show" => "Eine Zeile eingeklappt, zum Zeigen klicken",
+        "{n} lines folded, click to show" => "{n} Zeilen eingeklappt, zum Zeigen klicken",
+        "Click to fold the output" => "Klicken, um die Ausgabe einzuklappen",
+        "Click to show the output" => "Klicken, um die Ausgabe zu zeigen",
         "Running since {time}" => "Läuft seit {time}",
         "Exit code {code}, {took}, started {time}" => "Exit-Code {code}, {took}, gestartet {time}",
         "Finished, {took}, started {time}" => "Beendet, {took}, gestartet {time}",

@@ -1,11 +1,13 @@
 //! What the terminal shows, in SSHCraft's own types: the renderer never sees the emulator.
 
 use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Term, TermMode};
 use alacritty_terminal::vte::ansi::{self, NamedColor};
 use bitflags::bitflags;
 
+use crate::fold::{FoldRow, ViewRow, row_of_line};
 use crate::limits::MAX_LINK_BYTES;
 use crate::listener::Listener;
 
@@ -25,6 +27,8 @@ pub struct Screen {
     pub links: Vec<String>,
     /// Visible prompt lines and their commands (shell integration), top to bottom.
     pub commands: Vec<crate::CommandRow>,
+    /// Rows that stand for folded output, top to bottom; their cells are blank.
+    pub folds: Vec<crate::FoldRow>,
 }
 
 impl Screen {
@@ -222,53 +226,71 @@ fn cell_view(cell: &Cell, links: &mut Links) -> CellView {
     CellView { text, fg: color(cell.fg), bg: color(cell.bg), flags: f, link }
 }
 
-pub(crate) fn screen(term: &Term<Listener>) -> Screen {
+/// The screen for the rows of `view` (see `fold.rs`), top to bottom.
+pub(crate) fn screen(term: &Term<Listener>, view: &[ViewRow]) -> Screen {
     let content = term.renderable_content();
+    let grid = term.grid();
     let cols = term.columns();
     let rows = term.screen_lines();
-    let offset = i32::try_from(content.display_offset).unwrap_or(i32::MAX);
     let mut cells = vec![CellView::default(); cols.saturating_mul(rows)];
     let mut links = Links::default();
+    let mut folds = Vec::new();
     let range = content.selection;
-    for indexed in content.display_iter {
-        let Ok(row) = usize::try_from(indexed.point.line.0.saturating_add(offset)) else { continue };
-        let col = indexed.point.column.0;
-        if row < rows
-            && col < cols
-            && let Some(slot) = cells.get_mut(row * cols + col)
-        {
-            *slot = cell_view(indexed.cell, &mut links);
-            if range.is_some_and(|r| r.contains(indexed.point)) {
-                slot.flags |= CellFlags::SELECTED;
+    let lines = grid.topmost_line().0..=grid.bottommost_line().0;
+    for (row, shown) in view.iter().enumerate().take(rows) {
+        let line = match *shown {
+            ViewRow::Line(line) if lines.contains(&line) => line,
+            ViewRow::Line(_) => continue,
+            ViewRow::Folded(fold) => {
+                let hidden = usize::try_from(fold.last.saturating_sub(fold.first)).unwrap_or(0).saturating_add(1);
+                folds.push(FoldRow { row, id: fold.id, lines: hidden });
+                continue;
+            }
+        };
+        let cells_of_line = &grid[Line(line)];
+        for col in 0..cols {
+            if let Some(slot) = cells.get_mut(row.saturating_mul(cols).saturating_add(col)) {
+                *slot = cell_view(&cells_of_line[Column(col)], &mut links);
+                if range.is_some_and(|r| r.contains(Point::new(Line(line), Column(col)))) {
+                    slot.flags |= CellFlags::SELECTED;
+                }
             }
         }
     }
     let selection = range.and_then(|r| {
-        let last_row = i32::try_from(rows.saturating_sub(1)).unwrap_or(0);
-        let start_row = r.start.line.0.saturating_add(offset);
-        let end_row = r.end.line.0.saturating_add(offset);
-        if end_row < 0 || start_row > last_row {
+        let start_row = view.iter().position(|v| v.high() >= r.start.line.0)?;
+        let end_row = view.iter().rposition(|v| v.low() <= r.end.line.0)?;
+        if start_row > end_row {
             return None;
         }
         let last_col = cols.saturating_sub(1);
-        let start = if start_row < 0 { (0, 0) } else { (r.start.column.0.min(last_col), start_row) };
-        let end = if end_row > last_row { (last_col, last_row) } else { (r.end.column.0.min(last_col), end_row) };
-        let point = |(c, row): (usize, i32)| (u16::try_from(c).unwrap_or(0), u16::try_from(row).unwrap_or(0));
-        Some(SelectionView { start: point(start), end: point(end), block: r.is_block })
+        let start_col = match view.get(start_row) {
+            Some(ViewRow::Line(line)) if *line == r.start.line.0 => r.start.column.0.min(last_col),
+            _ => 0,
+        };
+        let end_col = match view.get(end_row) {
+            Some(ViewRow::Line(line)) if *line == r.end.line.0 => r.end.column.0.min(last_col),
+            _ => last_col,
+        };
+        let point = |c: usize, row: usize| (u16::try_from(c).unwrap_or(0), u16::try_from(row).unwrap_or(0));
+        Some(SelectionView { start: point(start_col, start_row), end: point(end_col, end_row), block: r.is_block })
     });
-    let cursor_row = content.cursor.point.line.0.saturating_add(offset);
+    let cursor_line = content.cursor.point.line.0;
+    let cursor_found = row_of_line(view, cursor_line);
+    let above = view.first().is_none_or(|v| cursor_line < v.low());
     let shape = match content.cursor.shape {
         ansi::CursorShape::Beam => Some(CursorShape::Beam),
         ansi::CursorShape::Underline => Some(CursorShape::Underline),
         ansi::CursorShape::Block | ansi::CursorShape::HollowBlock => Some(CursorShape::Block),
         ansi::CursorShape::Hidden => None,
     };
-    let last_row = i32::try_from(rows.saturating_sub(1)).unwrap_or(0);
+    let last_row = rows.saturating_sub(1);
+    let cursor_row = cursor_found.unwrap_or(if above { 0 } else { last_row });
     let cursor = CursorView {
         col: u16::try_from(content.cursor.point.column.0.min(cols.saturating_sub(1))).unwrap_or(0),
-        row: u16::try_from(cursor_row.clamp(0, last_row)).unwrap_or(0),
+        row: u16::try_from(cursor_row.min(last_row)).unwrap_or(0),
         shape: shape.unwrap_or(CursorShape::Block),
-        visible: shape.is_some() && (0..=last_row).contains(&cursor_row) && content.mode.contains(TermMode::SHOW_CURSOR),
+        visible: shape.is_some() && cursor_found.is_some_and(|row| row <= last_row) && content.mode.contains(TermMode::SHOW_CURSOR),
     };
     Screen {
         cols: u16::try_from(cols).unwrap_or(u16::MAX),
@@ -280,5 +302,6 @@ pub(crate) fn screen(term: &Term<Listener>) -> Screen {
         modes: modes(content.mode),
         links: links.list,
         commands: Vec::new(),
+        folds,
     }
 }

@@ -65,7 +65,7 @@ impl Macro {
 }
 
 /// Actions a shortcut can trigger.
-pub const SHORTCUT_ACTIONS: [&str; 31] = [
+pub const SHORTCUT_ACTIONS: [&str; 33] = [
     "palette",
     "newTab",
     "closeTab",
@@ -101,6 +101,9 @@ pub const SHORTCUT_ACTIONS: [&str; 31] = [
     "quickConnect",
     // Added with the hex view (F6).
     "hexView",
+    // Added with folding command output.
+    "foldOutput",
+    "unfoldAll",
 ];
 /// Days a finished session log is kept; 0 keeps it until it is deleted.
 pub const LOG_RETENTION_DAYS: [u32; 5] = [0, 7, 30, 90, 365];

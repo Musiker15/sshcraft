@@ -2,7 +2,7 @@
 //! with the line as output scrolls and goes with it when the line leaves the history or is
 //! erased: the emulator resets a cell completely when it reuses or clears it.
 
-use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
 
@@ -51,17 +51,15 @@ impl Terminal {
     /// Scrolls the next mark above (`Up`) or below (`Down`) the top of the view to the top.
     /// Returns whether there was one.
     pub fn jump_to_mark(&mut self, direction: Direction) -> bool {
-        let offset = i32::try_from(self.term.grid().display_offset()).unwrap_or(i32::MAX);
-        let top = offset.saturating_neg();
+        // The top row of the view, which folds below it can move above the grid's.
+        let top = self.view_line(0);
         let marks = self.marks();
         let target = match direction {
             Direction::Up => marks.iter().rev().find(|m| m.line < top),
             Direction::Down => marks.iter().find(|m| m.line > top),
         };
         let Some(target) = target else { return false };
-        // Showing line `target.line` at the top needs an offset of `-target.line`.
-        let wanted = target.line.saturating_neg().max(0);
-        self.term.scroll_display(Scroll::Delta(wanted.saturating_sub(offset)));
+        self.scroll_line_to_top(target.line);
         true
     }
 }

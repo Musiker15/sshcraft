@@ -158,3 +158,17 @@ fn marks_inside_a_full_screen_program_are_left_out() {
     t.feed(&[b"\x1b[?1049h".as_slice(), A, b"$ ", B, b"x\r\n", C, &end("0"), b"\x1b[?1049l"].concat());
     assert!(t.command_history().is_empty());
 }
+
+#[test]
+fn redrawing_the_prompt_after_a_resize_keeps_earlier_prompts() {
+    let mut t = term(40, 12);
+    t.feed(&[session("0").as_slice(), b"pwd\r\n", C, b"/home\r\n", &end("0"), A, b"$ ", B].concat());
+    let before = t.screen().commands;
+    assert_eq!(before.len(), 3, "{before:?}");
+    // What readline sends after a new window size: back to the start of the line, erase it,
+    // the prompt again with its `B`.
+    for _ in 0..3 {
+        t.feed(&[b"\r\x1b[K\r$ ".as_slice(), B].concat());
+    }
+    assert_eq!(t.screen().commands, before);
+}

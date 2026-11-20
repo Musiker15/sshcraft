@@ -14,6 +14,7 @@ use alacritty_terminal::term::cell::Flags;
 use chrono::{DateTime, Utc};
 
 use crate::filter::ShellMark;
+use crate::fold::{ViewRow, row_of_line};
 use crate::marks::MARK;
 use crate::{Direction, Notice, Terminal};
 
@@ -43,6 +44,8 @@ pub enum CommandState {
 /// One command the shell reported.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandRecord {
+    /// Counts up from 1 for each command of this terminal; what a fold refers to.
+    id: u64,
     pub state: CommandState,
     /// The exit code, when the shell gave one.
     pub exit: Option<i32>,
@@ -56,18 +59,32 @@ pub struct CommandRecord {
     output_end: Option<usize>,
 }
 
+impl CommandRecord {
+    /// What [`Terminal::toggle_fold`] takes.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 /// A visible prompt line and its command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandRow {
     /// The row on the screen, 0 at the top.
     pub row: usize,
     pub record: CommandRecord,
+    /// The command finished and printed at least one line below its prompt, so its output can
+    /// fold.
+    pub foldable: bool,
+    /// Its output is folded.
+    pub folded: bool,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct Commands {
-    records: VecDeque<CommandRecord>,
+    pub(crate) records: VecDeque<CommandRecord>,
     notices: Vec<Notice>,
+    /// The id of the newest record.
+    last_id: u64,
 }
 
 impl Commands {
@@ -90,7 +107,7 @@ impl Terminal {
 
     /// Prompt lines from the newest line upwards, at most [`PAIRING_LINES`] lines, stopping at
     /// `top`.
-    fn prompt_lines_from_bottom(&self, top: i32) -> Vec<i32> {
+    pub(crate) fn prompt_lines_from_bottom(&self, top: i32) -> Vec<i32> {
         let grid = self.term.grid();
         let bottom = grid.bottommost_line().0;
         let top = top.max(grid.topmost_line().0).max(bottom.saturating_sub(PAIRING_LINES));
@@ -121,6 +138,19 @@ impl Terminal {
         (low..line).rev().find(|l| self.line_marked(*l))
     }
 
+    /// Whether `line` carries only the mark `A` leaves (its last cell): the first line of a prompt
+    /// whose `B` has not come yet. The line of an earlier prompt went through `B` and is marked
+    /// whole.
+    fn marked_by_prompt_start_only(&self, line: i32) -> bool {
+        let grid = self.term.grid();
+        if line < grid.topmost_line().0 || line > grid.bottommost_line().0 {
+            return false;
+        }
+        let row = &grid[Line(line)];
+        let last = grid.columns().saturating_sub(1);
+        last > 0 && !row[Column(0)].flags.contains(MARK) && row[Column(last)].flags.contains(MARK)
+    }
+
     pub(crate) fn apply_shell_mark(&mut self, mark: ShellMark) {
         // A full-screen program has its own screen: its marks would pair with nothing.
         if self.term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
@@ -138,11 +168,14 @@ impl Terminal {
                         self.unmark_line(old);
                     }
                 } else {
-                    let records = &mut self.commands.records;
-                    if records.len() >= MAX_COMMANDS {
-                        records.pop_front();
+                    let commands = &mut self.commands;
+                    if commands.records.len() >= MAX_COMMANDS {
+                        commands.records.pop_front();
                     }
-                    records.push_back(CommandRecord {
+                    commands.last_id = commands.last_id.saturating_add(1);
+                    let id = commands.last_id;
+                    commands.records.push_back(CommandRecord {
+                        id,
                         state: CommandState::Prompt,
                         exit: None,
                         started: None,
@@ -155,10 +188,13 @@ impl Terminal {
             }
             ShellMark::CommandStart => {
                 // The prompt's own line is where the command is typed: it takes the mark from
-                // the line `A` marked (the first line of a prompt over several lines).
+                // the line `A` marked (the first line of a prompt over several lines). A prompt
+                // drawn again after a new window size erased its own line first; the marked line
+                // above is then an earlier prompt's, which keeps its mark.
                 if !self.line_marked(cursor.0)
                     && self.commands.records.back().is_some_and(|r| r.state == CommandState::Prompt)
                     && let Some(old) = self.marked_above(cursor.0)
+                    && self.marked_by_prompt_start_only(old)
                 {
                     self.unmark_line(old);
                 }
@@ -231,22 +267,64 @@ impl Terminal {
         self.jump_to_mark(direction)
     }
 
-    /// The visible prompt lines with their commands.
-    pub(crate) fn command_rows(&self, display_offset: usize, rows: usize) -> Vec<CommandRow> {
-        let offset = i32::try_from(display_offset).unwrap_or(i32::MAX);
-        let top = offset.saturating_neg();
-        let last_row = i32::try_from(rows).unwrap_or(i32::MAX).saturating_sub(1);
-        let mut out: Vec<CommandRow> = self
-            .prompt_lines_from_bottom(top)
-            .into_iter()
+    /// The visible prompt lines with their commands, for the rows of `view`.
+    pub(crate) fn command_rows(&self, view: &[ViewRow]) -> Vec<CommandRow> {
+        let Some(top) = view.first().map(|r| r.low()) else { return Vec::new() };
+        let prompts = self.prompt_lines_from_bottom(top);
+        let mut out: Vec<CommandRow> = prompts
+            .iter()
             .zip(self.commands.records.iter().rev())
-            .filter_map(|(line, record)| {
-                let row = line.saturating_add(offset);
-                (0..=last_row).contains(&row).then(|| CommandRow { row: usize::try_from(row).unwrap_or(0), record: record.clone() })
+            .enumerate()
+            .filter_map(|(index, (&line, record))| {
+                let row = row_of_line(view, line)?;
+                let next = index.checked_sub(1).and_then(|i| prompts.get(i).copied());
+                let foldable = self.fold_range(line, record, next).is_some();
+                let folded = foldable && self.folds.ids.contains(&record.id);
+                Some(CommandRow { row, record: record.clone(), foldable, folded })
             })
             .collect();
         out.reverse();
         out
+    }
+
+    /// The first and last line of the output of the finished command `record`, whose prompt is
+    /// on `prompt` and the next prompt below on `next`; `None` while it runs.
+    fn output_lines(&self, prompt: i32, record: &CommandRecord, next: Option<i32>) -> Option<(i32, i32)> {
+        if record.state != CommandState::Finished {
+            return None;
+        }
+        let first = prompt.saturating_add(i32::try_from(record.output_offset?).ok()?);
+        // The output ends where the cursor was when the command ended, else before the next
+        // prompt line, else at the newest line.
+        let last = match record.output_end.and_then(|e| i32::try_from(e).ok()) {
+            Some(end) => prompt.saturating_add(end).saturating_sub(1),
+            None => next.map_or(self.term.grid().bottommost_line().0, |n| n.saturating_sub(1)),
+        };
+        Some((first, last))
+    }
+
+    /// The lines a fold of `record` hides: its output, from the line below its prompt and above
+    /// the next prompt; `None` when there is no such line.
+    pub(crate) fn fold_range(&self, prompt: i32, record: &CommandRecord, next: Option<i32>) -> Option<(i32, i32)> {
+        let (first, mut last) = self.output_lines(prompt, record, next)?;
+        if let Some(next) = next {
+            last = last.min(next.saturating_sub(1));
+        }
+        (first > prompt && first <= last).then_some((first, last))
+    }
+
+    /// Every command whose output can fold: its id and the lines a fold hides, newest first.
+    pub(crate) fn fold_ranges_all(&self) -> Vec<(u64, (i32, i32))> {
+        let prompts = self.prompt_lines_from_bottom(i32::MIN);
+        prompts
+            .iter()
+            .zip(self.commands.records.iter().rev())
+            .enumerate()
+            .filter_map(|(index, (&line, record))| {
+                let next = index.checked_sub(1).and_then(|i| prompts.get(i).copied());
+                self.fold_range(line, record, next).map(|range| (record.id, range))
+            })
+            .collect()
     }
 
     /// The output of the newest finished command, line by line, at most [`MAX_OUTPUT_BYTES`].
@@ -254,14 +332,8 @@ impl Terminal {
         let prompts = self.prompt_lines_from_bottom(i32::MIN);
         let (index, record) = self.commands.records.iter().rev().enumerate().find(|(_, r)| r.state == CommandState::Finished)?;
         let prompt = *prompts.get(index)?;
-        let first = prompt.saturating_add(i32::try_from(record.output_offset?).ok()?);
-        // The output ends where the cursor was when the command ended, else before the next
-        // prompt line, else at the newest line.
         let next = index.checked_sub(1).and_then(|i| prompts.get(i).copied());
-        let last = match record.output_end.and_then(|e| i32::try_from(e).ok()) {
-            Some(end) => prompt.saturating_add(end).saturating_sub(1),
-            None => next.map_or(self.term.grid().bottommost_line().0, |n| n.saturating_sub(1)),
-        };
+        let (first, last) = self.output_lines(prompt, record, next)?;
         Some(self.lines_text(first, last))
     }
 
