@@ -163,8 +163,9 @@ maintainer's step, never an automatic one:
   skips the AppImage. The deb asks for the newest glibc version the binaries use, read from them
   with `readelf`, so it always matches the machine they were built on.
 - **Flatpak:** [`packaging/linux/flatpak-bundle.sh`](../packaging/linux/flatpak-bundle.sh) wraps
-  the tarball. The sandbox has the network, the Secret Service and `~/.ssh` (written only when the
-  user saves a linked host back); serial ports and the host's own shell stay outside it.
+  the tarball. The sandbox has the network, the Secret Service, the SSH agent (`--socket=ssh-auth`)
+  and `~/.ssh` (written only when the user saves a linked host back); serial ports, the host's own
+  shell and polkit stay outside it, so the Flatpak offers no app lock.
 - **Arch Linux:** [`packaging/linux/arch/package.sh`](../packaging/linux/arch/package.sh) writes
   a PKGBUILD for the tarball and runs makepkg as an unprivileged user in an Arch Linux container.
   It depends on everything the window needs on X11 (libx11, libxcursor, libxi, libxrandr,
