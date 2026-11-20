@@ -216,7 +216,13 @@ fn the_hello_switch_is_in_the_general_settings_and_saves() {
     h.state_mut().ui.page = sshcraft_ui_egui::state::Page::Settings;
     h.run_steps(4);
     assert!(h.state().data.settings.general.hello_before_secrets, "on by default");
-    h.get_by_label("Ask Windows Hello before the first stored key or password").click();
+    // Windows names Windows Hello; Linux, FreeBSD and macOS name the password or fingerprint.
+    let label = if cfg!(windows) {
+        "Ask Windows Hello before the first stored key or password"
+    } else {
+        "Ask for your password or fingerprint before the first stored key or password"
+    };
+    h.get_by_label(label).click();
     let deadline = Instant::now() + Duration::from_secs(10);
     while h.state().data.settings.general.hello_before_secrets {
         assert!(Instant::now() < deadline, "the switch was not saved");
