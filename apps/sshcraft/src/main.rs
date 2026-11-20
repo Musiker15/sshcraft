@@ -218,7 +218,8 @@ fn main() -> ExitCode {
     // Portable mode: the data beside the program, its master key sealed with a passphrase that
     // is asked before the engine opens. A running copy is found first, so nobody types the
     // passphrase only to learn that SSHCraft runs already.
-    let portable_key = if sshcraft_platform::portable_root().is_some() {
+    let mut portable_key: Option<PassphraseMasterKey> = None;
+    if sshcraft_platform::portable_root().is_some() {
         set_language(system_language());
         match sshcraft_platform::lock_data_dir(&data_dir) {
             Ok(lock) => drop(lock),
@@ -226,19 +227,21 @@ fn main() -> ExitCode {
             Err(sshcraft_platform::PlatformError::DataInUse(_)) if open.is_none() && reveal_running() => return ExitCode::SUCCESS,
             Err(e) => return show_problem(format!("{}\n\n{e}", tr("SSHCraft could not open its data."))),
         }
-        match unlock(&data_dir) {
-            Ok(Some(key)) => Some(key),
-            Ok(None) => return ExitCode::SUCCESS,
-            Err(e) => return show_problem(format!("{}\n\n{e}", tr("SSHCraft could not start."))),
+        let unlocked = unlock(&data_dir);
+        if let Err(e) = &unlocked {
+            return show_problem(format!("{}\n\n{e}", tr("SSHCraft could not start.")));
         }
-    } else {
-        None
-    };
+        portable_key = unlocked.ok().flatten();
+        // The window was closed or *Quit* chosen.
+        if portable_key.is_none() {
+            return ExitCode::SUCCESS;
+        }
+    }
     let window = WindowHandle::default();
     let mut config =
         SessionConfig::for_app(data_dir, runtime.handle().clone(), Arc::new(WindowPresence(window.clone())), platform::authenticator(window.clone()));
-    if let Some(key) = portable_key {
-        config.master_key = Box::new(key);
+    if let Some(provider) = portable_key {
+        config.master_key = Box::new(provider);
     }
     let (session, vault) = {
         let _inside = runtime.enter();
