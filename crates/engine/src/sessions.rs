@@ -370,7 +370,7 @@ impl KeyGate {
     }
 }
 
-/// Opens a connection to the SSH agent (Proton Pass on Windows, an in-memory agent in tests).
+/// Opens a connection to the SSH agent ([`SystemAgent`] in the app, an in-memory agent in tests).
 #[async_trait::async_trait]
 pub trait AgentConnector: Send + Sync + 'static {
     async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, SshError>;
@@ -381,19 +381,27 @@ pub trait AgentConnector: Send + Sync + 'static {
     }
 }
 
-/// The Windows agent pipe served by the Proton Pass desktop app.
-pub struct WindowsAgent;
+/// The system's SSH agent: the OpenSSH pipe on Windows (served by the Proton Pass desktop app),
+/// the socket `SSH_AUTH_SOCK` names elsewhere.
+pub struct SystemAgent;
 
 #[async_trait::async_trait]
-impl AgentConnector for WindowsAgent {
+impl AgentConnector for SystemAgent {
     async fn connect(&self) -> Result<sshcraft_ssh::DynAgent, SshError> {
         #[cfg(windows)]
         {
             sshcraft_ssh::agent::open_windows_agent().await
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
         {
-            Err(SshError::AgentUnavailable("no agent support on this platform yet".into()))
+            let Some(path) = sshcraft_ssh::agent::env_socket() else {
+                return Err(SshError::AgentUnavailable(format!("{} is not set", sshcraft_ssh::agent::AUTH_SOCK)));
+            };
+            sshcraft_ssh::agent::open_unix_agent(&path).await
+        }
+        #[cfg(not(any(windows, unix)))]
+        {
+            Err(SshError::AgentUnavailable("no agent on this platform".into()))
         }
     }
 
@@ -402,7 +410,12 @@ impl AgentConnector for WindowsAgent {
         {
             Some(Arc::new(sshcraft_ssh::agent::WindowsAgentOpener))
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
+        {
+            sshcraft_ssh::agent::env_socket()
+                .map(|path| Arc::new(sshcraft_ssh::agent::UnixAgentOpener::new(path)) as Arc<dyn sshcraft_ssh::AgentOpener>)
+        }
+        #[cfg(not(any(windows, unix)))]
         {
             None
         }

@@ -61,7 +61,7 @@ pub use error::{EngineError, ErrorCode, ErrorKind};
 pub use events::{EngineEvent, EventBus, UiRequest};
 pub use gate::{AgentConnection, AgentPrompt, Confirmer};
 pub use journal::JournalEntry;
-pub use sessions::{AgentConnector, EndReason, SessionId, SessionStatus, SessionTarget, WindowsAgent};
+pub use sessions::{AgentConnector, EndReason, SessionId, SessionStatus, SessionTarget, SystemAgent};
 pub use terminal::{TermEvent, TerminalStream};
 
 /// Deepest nesting accepted in the parameters of a command.
@@ -86,7 +86,7 @@ pub struct SessionConfig {
     pub settings: craft_settings::Location,
     /// Finds Proton Pass's `pass-cli` (`passcli::locate_installed` in the app).
     pub pass_cli: passcli::LocatePassCli,
-    /// The SSH agent: the Proton Pass pipe ([`WindowsAgent`]) in the app.
+    /// The SSH agent: [`SystemAgent`] in the app.
     pub agent: Arc<dyn AgentConnector>,
     /// Answers questions about agents' actions in tests. `None` (the app): the question goes to
     /// the window through the event bus, and without a window the answer is no.
@@ -114,7 +114,7 @@ impl SessionConfig {
             event_capacity: EVENT_CAPACITY,
             settings: craft_settings::Location::Auto,
             pass_cli: passcli::locate_installed(),
-            agent: Arc::new(WindowsAgent),
+            agent: Arc::new(SystemAgent),
             confirmer: None,
         }
     }
