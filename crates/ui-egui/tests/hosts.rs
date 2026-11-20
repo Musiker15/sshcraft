@@ -451,3 +451,24 @@ fn a_container_host_in_a_tmux_group_is_no_tmux_tab() {
     assert!(hosts::uses_tmux_control(h.state(), plain));
     assert!(!hosts::uses_tmux_control(h.state(), boxed), "the container opens instead of tmux");
 }
+
+#[test]
+fn setting_up_shell_integration_asks_first_and_never_deletes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    // A port nothing listens on: the command runs and fails to connect.
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let id = HostId(uuid::Uuid::new_v4());
+    run(&session, "host.save", json!({ "host": { "id": id, "name": "web", "settings": { "address": "127.0.0.1", "port": port } } }));
+    h.run_steps(3);
+    until(&mut h, "the host", |app| app.data.hosts.iter().any(|r| r.host.id == id));
+
+    h.state_mut().ui.confirm = Some(hosts::Confirm::SetUpShell(id, "web".into()));
+    h.run_steps(2);
+    h.get_by_label_contains("Set up shell integration on web?");
+    assert!(h.query_by_label("Delete").is_none(), "the dialog offers no deletion");
+    h.get_by_label("Set up").click();
+    until(&mut h, "the result", |app| !app.toasts.texts().is_empty());
+    assert!(h.state().ui.confirm.is_none(), "the dialog closed");
+    assert!(h.state().data.hosts.iter().any(|r| r.host.id == id), "the host is still there");
+}

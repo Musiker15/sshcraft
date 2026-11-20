@@ -21,8 +21,15 @@ it started.
   finds a match in folded output opens it, and new output does not touch it. Only a finished
   command that printed something folds, and a full-screen program is never folded.
 
-SSHCraft never installs anything on a server. Add the lines for your shell to its start file
-yourself:
+SSHCraft sets it up on a server only when you ask for it. In the host's menu, *Shell integration ›
+Set up on the server…* adds the lines below to the start file of your login shell there
+(`~/.bashrc`, `~/.zshrc` or `$ZDOTDIR/.zshrc`, or fish's `config.fish`), between two marker lines
+and only for interactive shells, after asking. They take effect with the next session. *Remove
+from the server…* takes the block out of all three files again; a block that lost its last
+marker line is left alone, so nothing else in the file goes with it. With another login shell
+nothing changes. Agents cannot do either.
+
+To add the lines yourself instead, put the ones for your shell into its start file:
 
 **bash** (`~/.bashrc`):
 

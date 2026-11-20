@@ -196,6 +196,29 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Edit host" => "Host bearbeiten",
         "Environment" => "Umgebung",
         "Forget host key" => "Host-Schlüssel vergessen",
+        "Shell integration" => "Shell-Integration",
+        "Set up on the server…" => "Auf dem Server einrichten …",
+        "Remove from the server…" => "Vom Server entfernen …",
+        "Set up" => "Einrichten",
+        "Set up shell integration on {name}? SSHCraft adds a marked block to the start file of your login shell on the server (~/.bashrc, ~/.zshrc or fish's config.fish). It starts with the next session, and Remove from the server takes it out again." => {
+            "Shell-Integration auf {name} einrichten? SSHCraft hängt einen markierten Block an die Startdatei deiner Login-Shell auf dem Server an (~/.bashrc, ~/.zshrc oder config.fish von fish). Er wirkt ab der nächsten Sitzung, und „Vom Server entfernen“ nimmt ihn wieder heraus."
+        }
+        "Remove shell integration from {name}? SSHCraft takes its block out of ~/.bashrc, ~/.zshrc and fish's config.fish on the server." => {
+            "Shell-Integration von {name} entfernen? SSHCraft nimmt seinen Block aus ~/.bashrc, ~/.zshrc und der config.fish von fish auf dem Server heraus."
+        }
+        "Shell integration is set up for {shell} on {name}. It starts with the next session." => {
+            "Die Shell-Integration für {shell} ist auf {name} eingerichtet. Sie wirkt ab der nächsten Sitzung."
+        }
+        "Shell integration was set up for {shell} on {name} already." => "Die Shell-Integration für {shell} war auf {name} schon eingerichtet.",
+        "The login shell on {name} is neither bash, zsh nor fish, so nothing was changed." => {
+            "Die Login-Shell auf {name} ist weder bash noch zsh noch fish, deshalb wurde nichts geändert."
+        }
+        "Shell integration was removed from {name}." => "Die Shell-Integration wurde von {name} entfernt.",
+        "Shell integration was not set up on {name}." => "Auf {name} war keine Shell-Integration eingerichtet.",
+        "The server of {name} did not run the script. It needs sh." => "Der Server von {name} hat das Skript nicht ausgeführt. Es braucht sh.",
+        "The start file on {name} could not be changed. If the block lost its last line, take it out by hand." => {
+            "Die Startdatei auf {name} ließ sich nicht ändern. Fehlt dem Block seine letzte Zeile, nimm ihn von Hand heraus."
+        }
         "Grid" => "Raster",
         "Group" => "Gruppe",
         "Identity" => "Identität",

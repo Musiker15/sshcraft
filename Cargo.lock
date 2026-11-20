@@ -6190,6 +6190,7 @@ name = "sshcraft-ssh"
 version = "0.3.1"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "data-encoding",
  "futures",
  "rand 0.10.3",

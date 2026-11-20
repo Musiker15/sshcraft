@@ -150,7 +150,11 @@ What a server prints may not reach beyond the terminal on its own:
   attributes, focus) go only to their own session, never to the other panes.
 - **Shell integration (OSC 133):** the terminal remembers at most 1000 commands and copies at
   most 1 MiB of output; the searches for prompt lines are bounded, so many marks or a long
-  history cannot make a frame slow.
+  history cannot make a frame slow. It goes onto a server only when the user asks for it for
+  that host, after a question that names the files: one fixed `sh` command whose block of lines
+  travels Base64-encoded, so no character of it means anything to the shell, and which never
+  carries text from the user or the server. Removing it deletes only between both marker lines
+  and rewrites the file in place, keeping its owner and rights. Agents have no right to either.
 - **Desktop notifications (OSC 9, OSC 777):** title and body lose control and bidi characters
   and are cut to 128 and 1024 characters. The title always starts with the host's name, each
   tab shows at most one every 5 seconds, and the setting turns them off.

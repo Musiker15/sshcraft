@@ -30,6 +30,8 @@ host.list
 host.reachable
 host.recent
 host.save
+host.shell_integration_install
+host.shell_integration_remove
 host.shortcut
 hostkey.export
 hostkey.list

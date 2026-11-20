@@ -1323,6 +1323,40 @@ async fn install_key_reports_unsupported_on_unknown_output() {
 }
 
 #[tokio::test]
+async fn shell_integration_runs_its_script_and_reads_the_outcome() {
+    use sshcraft_ssh::shell_integration::{Outcome, Shell, install_command, remove_command};
+    let f = fixture(true).await;
+    f.server.set_exec_output(
+        "SSHCRAFT_SHELL=zsh
+SSHCRAFT_ADDED
+",
+    );
+    let outcome = f.manager.shell_integration(f.host_id, true).await.unwrap();
+    assert_eq!(outcome, Outcome::Added { shell: Shell::Zsh });
+    f.server.set_exec_output(
+        "SSHCRAFT_REMOVED
+",
+    );
+    assert_eq!(f.manager.shell_integration(f.host_id, false).await.unwrap(), Outcome::Removed);
+    assert_eq!(f.server.received_commands(), vec![install_command(), remove_command()]);
+}
+
+#[tokio::test]
+async fn shell_integration_reports_failed_and_unsupported() {
+    let f = fixture(true).await;
+    f.server.set_exec_output(
+        "SSHCRAFT_FAILED
+",
+    );
+    assert_eq!(f.manager.shell_integration(f.host_id, false).await.unwrap_err().0, ErrorCode::ShellIntegrationFailed);
+    f.server.set_exec_output(
+        "tcsh: sh: Command not found.
+",
+    );
+    assert_eq!(f.manager.shell_integration(f.host_id, true).await.unwrap_err().0, ErrorCode::ShellIntegrationUnsupported);
+}
+
+#[tokio::test]
 async fn key_from_other_device_reports_key_not_on_device() {
     let f = fixture(true).await;
     let host = f.host_on(f.server.port, KeyRef::Stored { id: KeyId::new() }, None);
