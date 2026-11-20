@@ -345,7 +345,8 @@ fn the_app_lock_follows_the_devices_screen_lock() {
     let mut h = harness(dir.path(), Form::Tablet);
     h.state_mut().lock_available = true;
     settings(&mut h, Section::General);
-    assert!(h.query_by_label_contains("fingerprint").is_some(), "the settings name the fingerprint");
+    // The tablet's own words; the switch before stored keys names the fingerprint too off Windows.
+    assert!(h.query_by_label_contains("fingerprint, face or screen lock").is_some(), "the settings name the fingerprint");
     h.state_mut().lock.locked = true;
     h.run_steps(3);
     assert!(h.query_by_label_contains("fingerprint, face or screen lock").is_some(), "the lock screen says how to unlock");
