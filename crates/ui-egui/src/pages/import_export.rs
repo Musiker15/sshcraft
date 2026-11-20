@@ -131,6 +131,8 @@ pub enum DialogFor {
         id: u64,
         remote: String,
     },
+    /// The text editor SFTP files open in.
+    Editor,
 }
 
 #[derive(Deserialize)]
@@ -180,6 +182,10 @@ pub fn take_dialog_answers(app: &mut SshcraftApp) {
             DialogFor::Backup { restore } => crate::pages::backup::dialog_answer(app, restore, path),
             DialogFor::SftpUpload { id, dir } => crate::sftp_tab::picked_upload(app, id, dir, path),
             DialogFor::SftpDownload { id, remote } => crate::sftp_tab::picked_download(app, id, remote, path),
+            DialogFor::Editor => {
+                let editor = path.display().to_string();
+                crate::pages::settings::save(app, |s| s.sftp.editor = Some(editor));
+            }
             DialogFor::ImportSource => {
                 if let Some(import) = app.ui.import.as_mut() {
                     import.path = Some(path);

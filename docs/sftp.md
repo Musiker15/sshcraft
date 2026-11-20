@@ -99,6 +99,25 @@ from the server checked before they become a local path. The folder on the host 
 sync makes none. Without a local side (Android) there is no sync. A program passes the rule
 `newer` itself to `sftp.upload`, `sftp.download` or `sftp.copy` to get the same comparison.
 
+## Editing a file in a text editor
+
+**Open in editor**, with one file on the host selected, opens it in the editor you named under
+*Settings → Terminal → Text editor*. Nothing else ever opens a file: not the program the system links
+to its type, since opening a downloaded file there can run it.
+
+- The editor is a program file you choose. It starts with the file as its only argument, never
+  through a shell.
+- The file is copied into SSHCraft's data folder first. Files over 16 MiB and anything that is
+  not a plain file are refused.
+- Every time you save, the copy goes back to the host: under a part name first, renamed over the
+  file when it is complete, with the file's permissions kept.
+- If the file changed on the host since you opened it, nothing is sent. The SFTP tab asks
+  whether to overwrite the host's version with yours; *Cancel* keeps the host's, and your next
+  save asks again.
+- *Stop editing* in the SFTP tab, closing the tab or quitting SSHCraft deletes the copy. A copy
+  left behind by a crash goes at the next start.
+- Without a local side (Android) there is no editing.
+
 ## What is refused, and why
 
 SSHCraft treats everything the server sends as hostile:
@@ -126,7 +145,8 @@ SFTP speaks only the protocol, on its own channel. No name ever goes into a comm
 The commands are `sftp.open`, `sftp.close`, `sftp.list`, `sftp.local_list`, `sftp.mkdir`,
 `sftp.rename`, `sftp.chmod`, `sftp.count`, `sftp.delete`, `sftp.upload`, `sftp.download`,
 `sftp.copy`, `sftp.sync`, `sftp.download_file`, `sftp.transfers`, `sftp.cancel`, `sftp.clear_transfers`,
-`sftp.retry` and `sftp.reconnect`. Their parameters are in the palette's
+`sftp.retry`, `sftp.reconnect`, `sftp.edit`, `sftp.edits`, `sftp.edit_save`, `sftp.edit_sync` and
+`sftp.edit_stop`. Their parameters are in the palette's
 command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engine event
 `TransferStatus`. Agents have no access to any of them.
 
@@ -134,5 +154,6 @@ command list and in `crates/engine/src/cmd/sftp.rs`. Progress comes as the engin
 
 Some things are not there yet ([gaps.md](gaps.md)):
 
-- opening or editing a file in another program, since opening a downloaded file can run it;
+- opening a file in the program the system links to its type, since that can run it; only the
+  text editor you name opens files;
 - a sync in both directions at once, or one that deletes what is gone from the source.

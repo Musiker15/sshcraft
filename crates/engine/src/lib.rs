@@ -245,7 +245,7 @@ impl Session {
         // A host or rule that sync removed (or a share that ended) stops forwarding.
         let observer = sync::BusObserver { events: events.clone(), forwards: forwards.clone() };
         let sync = sync::SyncManager::new(store.clone(), vault.as_ref().ok().cloned(), Arc::new(observer));
-        let sftp = sftp::SftpManager::new(sessions.context(), events.clone());
+        let sftp = sftp::SftpManager::new(sessions.context(), events.clone(), config.data_dir.join("edits"));
         let inner = Inner {
             store,
             vault,
@@ -378,6 +378,12 @@ impl Session {
 
     pub(crate) fn agent_sessions(&self) -> &agent_sessions::AgentSessions {
         &self.0.agent_sessions
+    }
+
+    /// Starts the stand-in the tests give instead of the text editor.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn set_editor_launcher(&self, launcher: sftp::edits::Launcher) {
+        self.sftp().set_editor_launcher(launcher);
     }
 
     pub(crate) fn sftp(&self) -> &sftp::SftpManager {

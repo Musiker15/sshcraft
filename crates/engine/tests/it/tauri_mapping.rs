@@ -167,6 +167,11 @@ const NEW: &[&str] = &[
     "sftp.download_file",
     "sftp.copy",
     "sftp.sync",
+    "sftp.edit",
+    "sftp.edits",
+    "sftp.edit_save",
+    "sftp.edit_sync",
+    "sftp.edit_stop",
 ];
 
 #[test]

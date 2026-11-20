@@ -288,6 +288,7 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     let mut t = app.data.settings.terminal.clone();
     let mut logs = app.data.settings.logs.clone();
     let mut local_shell: Option<Value> = t.local_shell.as_ref().and_then(|s| serde_json::to_value(s).ok());
+    let mut editor_removed = false;
     let shells = app.ui.settings.shells.clone().unwrap_or_default();
     egui::Grid::new("sshcraft-terminal").num_columns(2).min_col_width(160.0).spacing([16.0, 10.0]).show(ui, |ui| {
         ui.label(tr("Terminal type"));
@@ -310,6 +311,29 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
             }
         });
         ui.end_row();
+        if crate::sftp_tab::LOCAL_SIDE {
+            ui.label(tr("Text editor"));
+            ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    match app.data.settings.sftp.editor.as_deref() {
+                        Some(path) => ui.label(egui::RichText::new(visible(path)).monospace()),
+                        None => ui.label(egui::RichText::new(tr("Not set")).color(tokens.text_dim)),
+                    };
+                    if crate::widgets::buttons::ghost(ui, tr("Choose…"), 28.0).clicked() {
+                        let dialog = crate::file_dialogs::FileDialog::open().title(tr("Text editor"));
+                        app.dialogs.ask(dialog, crate::pages::import_export::DialogFor::Editor);
+                    }
+                    if app.data.settings.sftp.editor.is_some() && crate::widgets::buttons::ghost(ui, tr("Remove"), 28.0).clicked() {
+                        editor_removed = true;
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(tr("SFTP files open only in this program, never in the one the system links to their type."))
+                        .color(tokens.text_dim),
+                );
+            });
+            ui.end_row();
+        }
         ui.label(tr("Scrollback"));
         ui.horizontal_wrapped(|ui| {
             ui.add(egui::DragValue::new(&mut t.scrollback).range(sshcraft_engine::settings::SCROLLBACK).speed(100.0));
@@ -396,6 +420,9 @@ fn terminal(app: &mut SshcraftApp, ui: &mut Ui) {
     save(app, |s| {
         s.terminal = t;
         s.logs = logs;
+        if editor_removed {
+            s.sftp.editor = None;
+        }
     });
     macros(app, ui);
 }

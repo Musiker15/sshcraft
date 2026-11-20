@@ -102,6 +102,11 @@ sftp.count
 sftp.delete
 sftp.download
 sftp.download_file
+sftp.edit
+sftp.edit_save
+sftp.edit_stop
+sftp.edit_sync
+sftp.edits
 sftp.list
 sftp.local_list
 sftp.mkdir

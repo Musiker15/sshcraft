@@ -421,6 +421,8 @@ impl SshcraftApp {
             crate::link::tick(self, ctx);
         }
         crate::lock::tick(self, ctx);
+        // Saves in the text editor go back while the window is behind it.
+        crate::sftp_tab::tick_edits(self, ctx);
         crate::control::process(self, ctx);
         crate::quit::logic(self, ctx);
         // Also while the window is hidden or minimised: a second start brings it back.

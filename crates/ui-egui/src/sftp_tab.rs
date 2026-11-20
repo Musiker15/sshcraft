@@ -132,6 +132,20 @@ pub enum Dialog {
         local: String,
         remote: String,
     },
+    /// No text editor is set: files open nowhere else.
+    EditorMissing,
+    /// A file saved in the editor changed on the server since it was opened.
+    Changed {
+        edit: u64,
+        name: String,
+    },
+}
+
+/// A file of this pane open in the text editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditOpen {
+    pub edit: u64,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +198,8 @@ pub struct SftpView {
     pub dialog: Option<Dialog>,
     /// The connection went away; the host's side offers to connect again.
     pub lost: bool,
+    /// Its files open in the text editor.
+    pub edits: Vec<EditOpen>,
 }
 
 impl SftpView {
@@ -197,6 +213,7 @@ impl SftpView {
             narrow: SideKind::Remote,
             dialog: None,
             lost: false,
+            edits: Vec::new(),
         }
     }
 
@@ -229,6 +246,15 @@ enum Action {
     },
     Reconnect,
     ClearTransfers,
+    /// Open the remote file in the text editor.
+    Edit(String),
+    StopEdit(u64),
+    /// Send an edited file; `force` overwrites a file that changed on the server.
+    SaveEdit {
+        edit: u64,
+        force: bool,
+    },
+    OpenSettings,
 }
 
 /// The payload of a drag from one side to the other: the side and the names.
@@ -311,6 +337,9 @@ fn error_text(e: &sshcraft_engine::EngineError) -> String {
                 ErrorCode::SignInFailed => tr("Sign-in failed."),
                 ErrorCode::SignInCancelled => tr("Sign-in was cancelled."),
                 ErrorCode::Timeout => tr("The server did not answer in time."),
+                ErrorCode::EditorMissing => tr("The text editor of the settings is not there or did not start."),
+                ErrorCode::FileTooLarge => tr("The file is too large to edit here."),
+                ErrorCode::ChangedElsewhere => tr("The file changed on the server since it was opened."),
                 _ => return detail.as_deref().map_or_else(|| visible(&format!("{code:?}")), visible),
             };
             match detail {
@@ -420,6 +449,7 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: u64) {
         let both = LOCAL_SIDE && width >= TWO_SIDES_FROM;
         // The strip: its frame and heading, then up to four rows; more scroll.
         let strip = if transfers.is_empty() { 0.0 } else { (transfers.len().min(4) as f32) * ROW_TRANSFER + 74.0 };
+        let strip = strip + if view.edits.is_empty() { 0.0 } else { (view.edits.len().min(3) as f32) * ROW_EDIT + 64.0 };
         let height = (ui.available_height() - strip).max(160.0);
         if both {
             let half = (width - 12.0) / 2.0;
@@ -447,6 +477,10 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: u64) {
         if !transfers.is_empty() {
             ui.add_space(10.0);
             transfer_strip(ui, &transfers, &mut actions);
+        }
+        if !view.edits.is_empty() {
+            ui.add_space(10.0);
+            edit_strip(ui, &view, &mut actions);
         }
     });
     dialog(ui.ctx(), &mut view, &others, &mut actions);
@@ -556,6 +590,13 @@ fn side_panel(ui: &mut Ui, view: &mut SftpView, kind: SideKind, size: egui::Vec2
                     let path = child_path(kind, &side.path, &name);
                     if ghost(ui, tr("Rename"), BUTTON).clicked() {
                         actions.push(Action::Ask(Dialog::Rename { path: path.clone(), name: name.clone() }));
+                    }
+                    let file = side.entries.iter().any(|e| e.name == name && e.kind == "file");
+                    if LOCAL_SIDE
+                        && file
+                        && ghost(ui, tr("Open in editor"), BUTTON).on_hover_text(tr("Opens in the text editor of the settings")).clicked()
+                    {
+                        actions.push(Action::Edit(path.clone()));
                     }
                     let mode = side.entries.iter().find(|e| e.name == name).and_then(|e| e.permissions).map(|m| format!("{m:o}")).unwrap_or_default();
                     if ghost(ui, tr("Permissions"), BUTTON).clicked() {
@@ -794,6 +835,35 @@ fn date(seconds: u64) -> Option<String> {
     Some(utc.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
 }
 
+/// The height of a row of the files in the editor.
+const ROW_EDIT: f32 = 34.0;
+
+/// The files of this pane open in the text editor, each with *Stop editing*.
+fn edit_strip(ui: &mut Ui, view: &SftpView, actions: &mut Vec<Action>) {
+    let tokens = Tokens::get(ui.ctx());
+    egui::Frame::new().fill(tokens.panel).stroke(Stroke::new(1.0, tokens.separator)).corner_radius(tokens.radius_card).inner_margin(10.0).show(
+        ui,
+        |ui| {
+            ui.set_width(ui.available_width());
+            crate::widgets::buttons::heading(ui, tr("In the text editor"), 14.0);
+            ui.colored_label(tokens.text_dim, trf("Each save goes back to {host}.", &[("host", &visible(&view.name))]));
+            egui::ScrollArea::vertical().id_salt("sftp-edits").max_height(3.0 * ROW_EDIT).show(ui, |ui| {
+                for e in &view.edits {
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(ROW_EDIT);
+                        // Beside the name, not at the right edge, where the messages of each save
+                        // would cover it.
+                        if ghost(ui, tr("Stop editing"), 28.0).clicked() {
+                            actions.push(Action::StopEdit(e.edit));
+                        }
+                        ui.label(visible(&e.name));
+                    });
+                }
+            });
+        },
+    );
+}
+
 fn transfer_strip(ui: &mut Ui, transfers: &[Value], actions: &mut Vec<Action>) {
     let tokens = Tokens::get(ui.ctx());
     egui::Frame::new().fill(tokens.panel).stroke(Stroke::new(1.0, tokens.separator)).corner_radius(tokens.radius_card).inner_margin(10.0).show(
@@ -964,6 +1034,37 @@ fn dialog(ctx: &egui::Context, view: &mut SftpView, others: &[OtherPane], action
                 let (cancel, go) = buttons(ui, tr("Delete"), count.is_some());
                 if go {
                     actions.push(Action::Run("sftp.delete", json!({ "id": view.id, "paths": paths })));
+                    close = true;
+                } else if cancel {
+                    close = true;
+                }
+            }
+            Dialog::EditorMissing => {
+                crate::widgets::buttons::title(ui, tr("No text editor set"));
+                ui.add_space(8.0);
+                ui.label(tr(
+                    "Files open only in the text editor you choose under Settings, Terminal. Nothing else opens them, since opening a downloaded file can run it.",
+                ));
+                ui.add_space(12.0);
+                let (cancel, go) = buttons(ui, tr("Open settings"), true);
+                if go {
+                    actions.push(Action::OpenSettings);
+                    close = true;
+                } else if cancel {
+                    close = true;
+                }
+            }
+            Dialog::Changed { edit, name } => {
+                crate::widgets::buttons::title(ui, tr("Changed on the server"));
+                ui.add_space(8.0);
+                ui.label(trf(
+                    "{name} changed on {host} since you opened it. Your save was not sent. Overwrite the server's version with yours?",
+                    &[("name", &visible(&name)), ("host", &visible(&view.name))],
+                ));
+                ui.add_space(12.0);
+                let (cancel, go) = buttons(ui, tr("Overwrite"), true);
+                if go {
+                    actions.push(Action::SaveEdit { edit, force: true });
                     close = true;
                 } else if cancel {
                     close = true;
@@ -1164,7 +1265,113 @@ fn act(app: &mut SshcraftApp, id: u64, action: Action) {
             app.transfers.retain(|_, t| matches!(t["state"]["kind"].as_str(), Some("queued" | "running")));
             app.run_reported("sftp.clear_transfers", json!({}));
         }
+        Action::Edit(remote) => {
+            if app.data.settings.sftp.editor.is_none() {
+                if let Some(view) = app.sftp.get_mut(&id) {
+                    view.dialog = Some(Dialog::EditorMissing);
+                }
+                return;
+            }
+            app.runner.run(
+                "sftp.edit",
+                json!({ "id": id, "remote": remote }),
+                Box::new(move |app, result| match result {
+                    Ok(opened) => {
+                        let (Some(edit), Some(name)) = (opened["edit"].as_u64(), opened["name"].as_str()) else { return };
+                        let Some(view) = app.sftp.get_mut(&id) else { return };
+                        if !view.edits.iter().any(|e| e.edit == edit) {
+                            view.edits.push(EditOpen { edit, name: name.to_owned() });
+                        }
+                        let host = view.name.clone();
+                        app.toasts.info(&trf(
+                            "{name} is open in the text editor. Each save goes back to {host}.",
+                            &[("name", &visible(name)), ("host", &visible(&host))],
+                        ));
+                    }
+                    Err(e) => app.toasts.error(&error_text(&e)),
+                }),
+            );
+        }
+        Action::StopEdit(edit) => {
+            if let Some(view) = app.sftp.get_mut(&id) {
+                view.edits.retain(|e| e.edit != edit);
+            }
+            app.run_reported("sftp.edit_stop", json!({ "edit": edit }));
+        }
+        Action::SaveEdit { edit, force } => app.runner.run(
+            "sftp.edit_save",
+            json!({ "edit": edit, "force": force }),
+            Box::new(move |app, result| match result {
+                Ok(_) => saved(app, edit),
+                Err(e) => app.toasts.error(&error_text(&e)),
+            }),
+        ),
+        Action::OpenSettings => {
+            app.ui.page = crate::state::Page::Settings;
+            app.ui.settings.section = crate::pages::settings::Section::Terminal;
+        }
     }
+}
+
+/// The pane and name of the file `edit` in the editor.
+fn edit_owner(app: &SshcraftApp, edit: u64) -> Option<(u64, String, String)> {
+    app.sftp.values().find_map(|v| v.edits.iter().find(|e| e.edit == edit).map(|e| (v.id, e.name.clone(), v.name.clone())))
+}
+
+fn saved(app: &mut SshcraftApp, edit: u64) {
+    if let Some((_, name, host)) = edit_owner(app, edit) {
+        app.toasts.info(&trf("Saved {name} to {host}.", &[("name", &visible(&name)), ("host", &visible(&host))]));
+    }
+}
+
+/// How often the copies in the editor are looked at.
+const EDIT_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// While files are open in the editor, sends what was saved, once a second; also while the window
+/// is hidden behind the editor.
+pub fn tick_edits(app: &mut SshcraftApp, ctx: &egui::Context) {
+    if app.sftp.values().all(|v| v.edits.is_empty()) {
+        return;
+    }
+    ctx.request_repaint_after(EDIT_SYNC_EVERY);
+    let key = egui::Id::unique("sshcraft-edit-sync");
+    let now = std::time::Instant::now();
+    let due = ctx.data(|d| d.get_temp::<Option<std::time::Instant>>(key)).flatten().is_none_or(|last| now.duration_since(last) >= EDIT_SYNC_EVERY);
+    let busy_key = key.with("busy");
+    if !due || ctx.data(|d| d.get_temp::<bool>(busy_key)).unwrap_or(false) {
+        return;
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(key, Some(now));
+        d.insert_temp(busy_key, true);
+    });
+    let ctx = ctx.clone();
+    app.runner.run(
+        "sftp.edit_sync",
+        json!({}),
+        Box::new(move |app, result| {
+            ctx.data_mut(|d| d.insert_temp(busy_key, false));
+            let Ok(report) = result else { return };
+            let ids = |key: &str| report[key].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect::<Vec<_>>()).unwrap_or_default();
+            for edit in ids("uploaded") {
+                saved(app, edit);
+            }
+            for edit in ids("conflicts") {
+                if let Some((pane, name, _)) = edit_owner(app, edit)
+                    && let Some(view) = app.sftp.get_mut(&pane)
+                    && view.dialog.is_none()
+                {
+                    view.dialog = Some(Dialog::Changed { edit, name });
+                }
+            }
+            for failed in report["failed"].as_array().into_iter().flatten() {
+                let Some((_, name, host)) = failed["edit"].as_u64().and_then(|e| edit_owner(app, e)) else { continue };
+                let why = failed["message"].as_str().map(visible).unwrap_or_default();
+                app.toasts
+                    .error(&trf("{name} was not sent to {host}: {why}", &[("name", &visible(&name)), ("host", &visible(&host)), ("why", &why)]));
+            }
+        }),
+    );
 }
 
 /// Runs `command`; on success the remote side is read again (a transfer refreshes when it ends).

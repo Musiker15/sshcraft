@@ -448,6 +448,18 @@ pub struct Integrations {
     pub ssh_config_live: bool,
 }
 
+/// SFTP.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sftp {
+    /// The text editor files open in: an absolute path to a program, started with the file as
+    /// its only argument. Nothing else ever opens a file.
+    pub editor: Option<String>,
+}
+
+/// The longest path of the text editor, in bytes.
+pub const MAX_EDITOR_PATH: usize = 4096;
+
 /// Everything in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -459,6 +471,7 @@ pub struct EngineSettings {
     pub logs: Logs,
     pub serial: Serial,
     pub integrations: Integrations,
+    pub sftp: Sftp,
 }
 
 impl Settings for EngineSettings {
@@ -505,6 +518,13 @@ impl EngineSettings {
         let mut seen = std::collections::BTreeSet::new();
         self.terminal.snippet_bar.retain(|id| !id.is_empty() && id.len() <= 64 && seen.insert(id.clone()));
         self.terminal.snippet_bar.truncate(MAX_SNIPPET_BAR);
+        // A text editor is a program file named by its whole path, nothing a shell would read.
+        self.sftp.editor = self
+            .sftp
+            .editor
+            .take()
+            .map(|e| e.trim().to_owned())
+            .filter(|e| !e.is_empty() && e.len() <= MAX_EDITOR_PATH && !e.chars().any(char::is_control) && std::path::Path::new(e).is_absolute());
         self.shortcuts.bindings = std::mem::take(&mut self.shortcuts.bindings)
             .into_iter()
             .filter(|(action, _)| SHORTCUT_ACTIONS.contains(&action.as_str()))

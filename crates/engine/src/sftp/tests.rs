@@ -686,3 +686,158 @@ async fn a_sync_needs_two_folders() {
     assert_eq!(job["state"]["kind"], "failed", "{job}");
     assert!(!f.root.path().join("missing").exists(), "nothing is made on the server");
 }
+
+/// What the stand-in editor was started with: the editor and the file.
+type Started = std::sync::Arc<std::sync::Mutex<Vec<(std::path::PathBuf, std::path::PathBuf)>>>;
+
+/// Names a text editor (this test program, which is a file) and records what it is started with
+/// instead of starting anything.
+async fn with_editor(f: &Fixture) -> (std::path::PathBuf, Started) {
+    let editor = std::env::current_exe().unwrap();
+    let mut settings = run(f, "settings.get", json!({})).await.unwrap();
+    settings["sftp"]["editor"] = json!(editor);
+    run(f, "settings.save", json!({ "settings": settings })).await.unwrap();
+    let started: Started = std::sync::Arc::default();
+    let seen = started.clone();
+    f.session.set_editor_launcher(std::sync::Arc::new(move |editor: &std::path::Path, file: &std::path::Path| {
+        seen.lock().unwrap().push((editor.to_path_buf(), file.to_path_buf()));
+        Ok(())
+    }));
+    (editor, started)
+}
+
+/// Changes a file and its size, so a change is seen whatever the clock.
+fn rewrite(path: &std::path::Path, text: &str) {
+    std::fs::write(path, text).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_opens_in_the_editor_and_each_save_goes_back() {
+    let f = fixture().await;
+    let (editor, started) = with_editor(&f).await;
+    std::fs::write(f.root.path().join("notes.txt"), b"one").unwrap();
+    let opened = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/notes.txt" })).await.unwrap();
+    let local = std::path::PathBuf::from(opened["local"].as_str().unwrap());
+    assert!(local.starts_with(f._dir.path().join("edits")), "{}", local.display());
+    assert_eq!(std::fs::read(&local).unwrap(), b"one");
+    assert_eq!(*started.lock().unwrap(), [(editor, local.clone())]);
+
+    // Nothing saved yet: nothing goes.
+    let report = run(&f, "sftp.edit_sync", json!({})).await.unwrap();
+    assert_eq!(report["uploaded"], json!([]));
+
+    rewrite(&local, "one and two");
+    let report = run(&f, "sftp.edit_sync", json!({})).await.unwrap();
+    assert_eq!(report["uploaded"], json!([opened["edit"]]), "{report}");
+    assert_eq!(std::fs::read(f.root.path().join("notes.txt")).unwrap(), b"one and two");
+    // The file kept its permissions, through its part.
+    assert_eq!(f.server.sftp_mode("/.notes.txt.sshcraft-part").map(|m| m & 0o7777), Some(0o644));
+    no_parts(f.root.path());
+
+    // Once sent, the same save is not sent again, and a later one goes too.
+    assert_eq!(run(&f, "sftp.edit_sync", json!({})).await.unwrap()["uploaded"], json!([]));
+    rewrite(&local, "three");
+    assert_eq!(run(&f, "sftp.edit_sync", json!({})).await.unwrap()["uploaded"], json!([opened["edit"]]));
+    assert_eq!(std::fs::read(f.root.path().join("notes.txt")).unwrap(), b"three");
+
+    // Opening it again starts the editor on the same copy.
+    let again = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/notes.txt" })).await.unwrap();
+    assert_eq!(again["edit"], opened["edit"]);
+    assert_eq!(started.lock().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_changed_on_the_server_is_not_overwritten() {
+    let f = fixture().await;
+    with_editor(&f).await;
+    let remote = f.root.path().join("conf");
+    std::fs::write(&remote, b"a").unwrap();
+    let opened = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/conf" })).await.unwrap();
+    let local = std::path::PathBuf::from(opened["local"].as_str().unwrap());
+    std::fs::write(&remote, b"changed there").unwrap();
+    rewrite(&local, "changed here");
+    let report = run(&f, "sftp.edit_sync", json!({})).await.unwrap();
+    assert_eq!(report["conflicts"], json!([opened["edit"]]), "{report}");
+    assert_eq!(std::fs::read(&remote).unwrap(), b"changed there");
+    // It is said once, not every time the copies are looked at.
+    assert_eq!(run(&f, "sftp.edit_sync", json!({})).await.unwrap()["conflicts"], json!([]));
+    let refused = run(&f, "sftp.edit_save", json!({ "edit": opened["edit"] })).await.unwrap_err();
+    assert_eq!(code(refused), ErrorCode::ChangedElsewhere);
+    run(&f, "sftp.edit_save", json!({ "edit": opened["edit"], "force": true })).await.unwrap();
+    assert_eq!(std::fs::read(&remote).unwrap(), b"changed here");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_named_editor_opens_and_only_a_small_plain_file() {
+    let f = fixture().await;
+    std::fs::write(f.root.path().join("small"), b"x").unwrap();
+    let none = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/small" })).await.unwrap_err();
+    assert_eq!(code(none), ErrorCode::EditorMissing);
+
+    // A path that is not a program file is not started.
+    let mut settings = run(&f, "settings.get", json!({})).await.unwrap();
+    settings["sftp"]["editor"] = json!(f.root.path().join("no-such-editor"));
+    run(&f, "settings.save", json!({ "settings": settings.clone() })).await.unwrap();
+    let missing = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/small" })).await.unwrap_err();
+    assert_eq!(code(missing), ErrorCode::EditorMissing);
+    // Nor is anything a shell would read: a relative name is dropped when the settings are saved.
+    settings["sftp"]["editor"] = json!("notepad");
+    let saved = run(&f, "settings.save", json!({ "settings": settings })).await.unwrap();
+    assert_eq!(saved["sftp"]["editor"], Value::Null);
+
+    let (_, started) = with_editor(&f).await;
+    std::fs::create_dir(f.root.path().join("folder")).unwrap();
+    let folder = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/folder" })).await.unwrap_err();
+    assert_eq!(code(folder), ErrorCode::NotSupported);
+    let big = std::fs::File::create(f.root.path().join("big")).unwrap();
+    big.set_len(crate::sftp::edits::MAX_EDIT_BYTES + 1).unwrap();
+    let large = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/big" })).await.unwrap_err();
+    assert_eq!(code(large), ErrorCode::FileTooLarge);
+    assert!(started.lock().unwrap().is_empty(), "nothing started for a refused file");
+    assert_eq!(run(&f, "sftp.edits", json!({})).await.unwrap(), json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_or_closing_deletes_the_copy() {
+    let f = fixture().await;
+    with_editor(&f).await;
+    std::fs::write(f.root.path().join("a"), b"a").unwrap();
+    let opened = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/a" })).await.unwrap();
+    let local = std::path::PathBuf::from(opened["local"].as_str().unwrap());
+    run(&f, "sftp.edit_stop", json!({ "edit": opened["edit"] })).await.unwrap();
+    assert!(!local.exists());
+    assert!(run(&f, "sftp.edit_stop", json!({ "edit": opened["edit"] })).await.is_err());
+
+    let opened = run(&f, "sftp.edit", json!({ "id": f.id, "remote": "/a" })).await.unwrap();
+    let local = std::path::PathBuf::from(opened["local"].as_str().unwrap());
+    run(&f, "sftp.close", json!({ "id": f.id })).await.unwrap();
+    assert!(!local.exists());
+    assert_eq!(run(&f, "sftp.edits", json!({})).await.unwrap(), json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn copies_a_crash_left_go_at_the_next_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let left = dir.path().join("edits").join("7");
+    std::fs::create_dir_all(&left).unwrap();
+    std::fs::write(left.join("secret.conf"), b"x").unwrap();
+    let _session = Session::open(SessionConfig::for_tests(dir.path())).unwrap().0;
+    assert!(!dir.path().join("edits").join("7").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_cannot_open_a_file_in_the_editor() {
+    let f = fixture().await;
+    with_editor(&f).await;
+    std::fs::write(f.root.path().join("a"), b"a").unwrap();
+    let agent = Caller::Agent { name: AgentName::new("claude-code").unwrap(), via: Via::Mcp, conn: ConnId(1) };
+    for (id, params) in [
+        ("sftp.edit", json!({ "id": f.id, "remote": "/a" })),
+        ("sftp.edits", json!({})),
+        ("sftp.edit_sync", json!({})),
+        ("sftp.edit_save", json!({ "edit": 1, "force": true })),
+        ("sftp.edit_stop", json!({ "edit": 1 })),
+    ] {
+        assert!(f.session.execute(agent.clone(), id, params).await.is_err(), "{id}");
+    }
+}

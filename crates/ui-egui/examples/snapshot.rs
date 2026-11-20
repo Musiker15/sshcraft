@@ -232,6 +232,7 @@ fn sample_sftp(app: &mut SshcraftApp) {
         entry("README.md", "file", 4_096, 1_790_000_000, 0o644),
     ];
     view.remote.selected.insert("docker-compose.yml".into());
+    view.edits.push(sshcraft_ui_egui::sftp_tab::EditOpen { edit: 1, name: "docker-compose.yml".into() });
     view.local.loading = false;
     view.local.path = "/home/me/Projects".into();
     view.local.entries = vec![
