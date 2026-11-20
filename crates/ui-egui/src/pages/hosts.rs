@@ -5,6 +5,7 @@
 use egui::{FontId, Sense, Ui, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sshcraft_engine::ErrorCode;
 use sshcraft_engine::settings::HostView;
 use sshcraft_model::model::{Group, GroupId, Host, HostId};
 
@@ -78,6 +79,14 @@ pub(crate) fn select(app: &mut SshcraftApp, pos: usize, id: HostId, modifiers: e
         selection.hosts.clear();
         selection.anchor = Some(pos);
     }
+}
+
+/// Whether host `id` is reached over SSH (set on it or on a group above it), not Telnet.
+pub fn speaks_ssh(app: &SshcraftApp, id: HostId) -> bool {
+    let Some(row) = app.data.hosts.iter().find(|r| r.host.id == id) else { return false };
+    let groups: Vec<Group> = app.data.groups.iter().map(|g| g.group.clone()).collect();
+    let chain = crate::pages::host_form::chain(row.host.group_id, &groups);
+    row.host.settings.protocol.or_else(|| chain.iter().find_map(|g| g.defaults.protocol)).unwrap_or_default() == sshcraft_model::model::Protocol::Ssh
 }
 
 /// Whether host `id` runs tmux in control mode (set on it or on a group above it).
@@ -304,6 +313,10 @@ fn update_cache(app: &mut SshcraftApp) {
 pub enum Confirm {
     DeleteHost(HostId, String),
     DeleteGroup(GroupId, String),
+    /// Write the shell integration block into the host's start file.
+    SetUpShell(HostId, String),
+    /// Take the shell integration block out of the host's start files.
+    RemoveShell(HostId, String),
 }
 
 pub fn new_host(app: &mut SshcraftApp) {
@@ -635,9 +648,55 @@ pub(crate) fn host_menu(app: &mut SshcraftApp, ui: &mut Ui, row: &HostRow, all_g
             }),
         );
     }
+    if speaks_ssh(app, id) {
+        ui.menu_button(tr("Shell integration"), |ui| {
+            if ui.button(tr("Set up on the server…")).clicked() {
+                app.ui.confirm = Some(Confirm::SetUpShell(id, row.host.name.clone()));
+            }
+            if ui.button(tr("Remove from the server…")).clicked() {
+                app.ui.confirm = Some(Confirm::RemoveShell(id, row.host.name.clone()));
+            }
+        });
+    }
     if ui.button(tr("Delete")).clicked() {
         ask_delete_host(app, id);
     }
+}
+
+/// Runs `host.shell_integration_install` or `_remove` and says what happened on the server.
+fn run_shell_integration(app: &mut SshcraftApp, id: HostId, name: &str, install: bool) {
+    let name = visible(name);
+    let command = if install { "host.shell_integration_install" } else { "host.shell_integration_remove" };
+    app.runner.run(
+        command,
+        json!({ "host_id": id }),
+        Box::new(move |app, result| match result {
+            Ok(v) => {
+                let shell = v.get("shell").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+                let vars = [("name", name.as_str()), ("shell", shell.as_str())];
+                let text = match v.get("outcome").and_then(serde_json::Value::as_str).unwrap_or_default() {
+                    "added" => trf("Shell integration is set up for {shell} on {name}. It starts with the next session.", &vars),
+                    "already_present" => trf("Shell integration was set up for {shell} on {name} already.", &vars),
+                    "other_shell" => trf("The login shell on {name} is neither bash, zsh nor fish, so nothing was changed.", &vars),
+                    "removed" => trf("Shell integration was removed from {name}.", &vars),
+                    _ => trf("Shell integration was not set up on {name}.", &vars),
+                };
+                app.toasts.info(&text);
+            }
+            Err(e) => {
+                let vars = [("name", name.as_str())];
+                match e.failure() {
+                    ErrorCode::ShellIntegrationUnsupported => {
+                        app.toasts.error(&trf("The server of {name} did not run the script. It needs sh.", &vars))
+                    }
+                    ErrorCode::ShellIntegrationFailed => app
+                        .toasts
+                        .error(&trf("The start file on {name} could not be changed. If the block lost its last line, take it out by hand.", &vars)),
+                    _ => app.toasts.error(&e.to_string()),
+                }
+            }
+        }),
+    );
 }
 
 fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
@@ -645,6 +704,19 @@ fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
     let text = match &confirm {
         Confirm::DeleteHost(_, name) => trf("Delete the host {name}?", &[("name", &visible(name))]),
         Confirm::DeleteGroup(_, name) => trf("Delete the group {name} with its subgroups and all their hosts?", &[("name", &visible(name))]),
+        Confirm::SetUpShell(_, name) => trf(
+            "Set up shell integration on {name}? SSHCraft adds a marked block to the start file of your login shell on the server (~/.bashrc, ~/.zshrc or fish's config.fish). It starts with the next session, and Remove from the server takes it out again.",
+            &[("name", &visible(name))],
+        ),
+        Confirm::RemoveShell(_, name) => trf(
+            "Remove shell integration from {name}? SSHCraft takes its block out of ~/.bashrc, ~/.zshrc and fish's config.fish on the server.",
+            &[("name", &visible(name))],
+        ),
+    };
+    let action = match &confirm {
+        Confirm::DeleteHost(..) | Confirm::DeleteGroup(..) => tr("Delete"),
+        Confirm::SetUpShell(..) => tr("Set up"),
+        Confirm::RemoveShell(..) => tr("Remove"),
     };
     crate::widgets::modal(ctx, egui::Id::unique("sshcraft-confirm")).show(ctx, |ui| {
         crate::widgets::fit_dialog(ui);
@@ -652,9 +724,11 @@ fn confirm(app: &mut SshcraftApp, ctx: &egui::Context) {
         ui.label(text);
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button(tr("Delete")).clicked() {
+            if ui.button(action).clicked() {
                 match &confirm {
                     Confirm::DeleteHost(id, _) => app.run_reported("host.delete", json!({ "id": id })),
+                    Confirm::SetUpShell(id, name) => run_shell_integration(app, *id, name, true),
+                    Confirm::RemoveShell(id, name) => run_shell_integration(app, *id, name, false),
                     Confirm::DeleteGroup(id, _) => {
                         if app.ui.hosts.group == Some(*id) {
                             app.ui.hosts.group = None;

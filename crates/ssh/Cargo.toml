@@ -23,6 +23,7 @@ zeroize = { workspace = true }
 tokio-socks = "0.5.3"
 data-encoding = { workspace = true }
 rand = { workspace = true }
+base64 = { workspace = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]

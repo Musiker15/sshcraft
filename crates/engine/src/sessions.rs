@@ -16,6 +16,7 @@ use sshcraft_model::policy::{Disconnect, HostKeyStatus, check_host_key, next_rec
 
 use crate::waker::{PING_TIMEOUT, WakeEvent};
 use sshcraft_ssh::authorized_keys::{InstallOutcome, install_command, parse_outcome};
+use sshcraft_ssh::shell_integration::Outcome as ShellIntegrationOutcome;
 use sshcraft_ssh::{
     Auth, AuthPromptLine, AuthPrompter, AuthRequest, Credential, Hop, HostKeyVerifier, ProxyConfig, ProxyTarget, RouteParams, SessionOptions,
     ShellEvent, ShellWriter, SshError,
@@ -545,6 +546,20 @@ impl SessionManager {
         parse_outcome(&output).map_err(|e| match e {
             sshcraft_ssh::authorized_keys::AuthorizedKeysError::Failed => (ErrorCode::InstallKeyFailed, None),
             sshcraft_ssh::authorized_keys::AuthorizedKeysError::Unsupported => (ErrorCode::InstallKeyUnsupported, None),
+        })
+    }
+
+    /// Sets up shell integration in the start file of the host's login shell (`install`), or
+    /// takes it out again, with the scripts of [`sshcraft_ssh::shell_integration`].
+    pub async fn shell_integration(&self, host_id: HostId, install: bool) -> Result<ShellIntegrationOutcome, (ErrorCode, Option<String>)> {
+        use sshcraft_ssh::shell_integration::{ShellIntegrationError, install_command, parse_outcome, remove_command};
+        let command = if install { install_command() } else { remove_command() };
+        let (session, _) = connect_session(&self.ctx, host_id, &OpenedKeys::default(), true).await.map_err(failure_code)?;
+        let output = session.exec(&command, 64 * 1024).await.map_err(|e| (ErrorCode::ShellIntegrationFailed, Some(e.to_string())))?;
+        crate::pool::release(session).await;
+        parse_outcome(&output).map_err(|e| match e {
+            ShellIntegrationError::Failed => (ErrorCode::ShellIntegrationFailed, None),
+            ShellIntegrationError::Unsupported => (ErrorCode::ShellIntegrationUnsupported, None),
         })
     }
 

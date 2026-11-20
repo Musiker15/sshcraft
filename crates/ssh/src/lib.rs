@@ -21,6 +21,7 @@ pub mod authorized_keys;
 pub mod hostkeys;
 mod proxy;
 pub mod sftp;
+pub mod shell_integration;
 pub mod socks;
 mod tunnel;
 pub mod x11;

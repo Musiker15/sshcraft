@@ -57,6 +57,18 @@ pub fn specs() -> Vec<CommandSpec> {
             run_reachable,
         ),
         command("host.forget_key", "Forget the host key", "{ host_id }", run_forget_key),
+        command(
+            "host.shell_integration_install",
+            "Set up shell integration on a host",
+            "{ host_id } -> { outcome: added | already_present | other_shell, shell?: bash | zsh | fish }",
+            run_shell_integration_install,
+        ),
+        command(
+            "host.shell_integration_remove",
+            "Remove shell integration from a host",
+            "{ host_id } -> { outcome: removed | absent }",
+            run_shell_integration_remove,
+        ),
         query("host.info", "Host details", "{ host: id or unique name }", run_info),
         command("host.exec", "Run a command on a host", "{ host: id or unique name, command, timeout_secs?: 1 to 600, 60 if missing }", run_exec),
     ]
@@ -632,6 +644,26 @@ fn run_reachable(ctx: Ctx, params: Value) -> Out {
 #[derive(Deserialize)]
 struct ForgetParams {
     host_id: HostId,
+}
+
+/// Writes the shell integration block into the start file of the host's login shell. Changes
+/// the server only because the user asked for it for this host; agents have no right to it.
+fn run_shell_integration_install(ctx: Ctx, params: Value) -> Out {
+    shell_integration(ctx, params, "host.shell_integration_install", true)
+}
+
+/// Takes the shell integration block out of the host's start files again.
+fn run_shell_integration_remove(ctx: Ctx, params: Value) -> Out {
+    shell_integration(ctx, params, "host.shell_integration_remove", false)
+}
+
+fn shell_integration(ctx: Ctx, params: Value, id: &'static str, install: bool) -> Out {
+    Box::pin(async move {
+        let ForgetParams { host_id } = parse(id, params)?;
+        let outcome =
+            ctx.session.sessions().shell_integration(host_id, install).await.map_err(|(code, detail)| CommandError::Failed { code, detail })?;
+        to_value(&outcome)
+    })
 }
 
 /// Removes the stored host key for the host's effective address and port.

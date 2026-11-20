@@ -172,6 +172,8 @@ const NEW: &[&str] = &[
     "sftp.edit_save",
     "sftp.edit_sync",
     "sftp.edit_stop",
+    "host.shell_integration_install",
+    "host.shell_integration_remove",
 ];
 
 #[test]

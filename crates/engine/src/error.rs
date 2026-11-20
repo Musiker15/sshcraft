@@ -106,6 +106,10 @@ pub enum ErrorCode {
     /// The server did not run the `authorized_keys` script (no `sh`).
     InstallKeyUnsupported,
     InstallKeyFailed,
+    /// The server did not run the shell integration script (no `sh`).
+    ShellIntegrationUnsupported,
+    /// The shell integration script could not change the shell's start file.
+    ShellIntegrationFailed,
     /// A key bound to this device cannot go to a sync server.
     DeviceBound,
     /// The user cancelled a sign-in question (password, code, passphrase).
