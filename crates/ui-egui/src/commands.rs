@@ -44,7 +44,7 @@ const fn cmd(id: &'static str, action: &'static str, label: &'static str, defaul
     UiCommand { id, action, label, defaults, scope: Scope::App, enabled: always, in_palette: true }
 }
 
-static COMMANDS: [UiCommand; 31] = [
+static COMMANDS: [UiCommand; 33] = [
     cmd("ui.palette", "palette", "Open the command palette", &["Ctrl+Shift+P", "Ctrl+K"]),
     cmd("ui.tab.new", "newTab", "New tab", &["Ctrl+Shift+T"]),
     cmd("ui.app.quick_connect", "quickConnect", "Quick connect", &["Ctrl+Shift+O"]),
@@ -87,6 +87,12 @@ static COMMANDS: [UiCommand; 31] = [
         enabled: in_terminal,
         ..cmd("ui.terminal.copy_output", "copyOutput", "Copy the output of the last command", &[])
     },
+    UiCommand {
+        scope: Scope::Terminal,
+        enabled: in_terminal,
+        ..cmd("ui.terminal.fold_output", "foldOutput", "Fold or show the output of the last command", &[])
+    },
+    UiCommand { scope: Scope::Terminal, enabled: in_terminal, ..cmd("ui.terminal.unfold_all", "unfoldAll", "Show all folded output", &[]) },
     UiCommand {
         scope: Scope::Terminal,
         enabled: in_terminal,

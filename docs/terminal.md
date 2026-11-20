@@ -14,6 +14,12 @@ it started.
 - **Previous and next command:** Ctrl+Shift+Up and Ctrl+Shift+Down scroll to the prompt above or
   below.
 - **Copy the output of the last command:** from the command palette.
+- **Fold the output of a command:** click the bar left of its prompt. The output becomes one row
+  that says how many lines it hides; click that row to show them again. *Fold or show the output
+  of the last command* and *Show all folded output* are in the command palette. A fold only
+  changes what the window shows: selecting across it copies the hidden lines too, a search that
+  finds a match in folded output opens it, and new output does not touch it. Only a finished
+  command that printed something folds, and a full-screen program is never folded.
 
 SSHCraft never installs anything on a server. Add the lines for your shell to its start file
 yourself:
@@ -54,8 +60,7 @@ end
 ```
 
 fish has no hook at the end of its prompt, so very long commands can lose the mark of their
-prompt line; the bar then shifts by one. Folding the output of a command is not there yet
-([gaps.md](gaps.md)).
+prompt line; the bar then shifts by one.
 
 ## Notifications
 

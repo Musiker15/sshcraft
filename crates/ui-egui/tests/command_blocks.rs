@@ -110,3 +110,18 @@ fn the_gutter_shows_how_a_command_ended() {
     assert_ne!(colors[1], colors[2], "failure and running differ");
     assert!(describe(&history[1]).contains('2'), "{}", describe(&history[1]));
 }
+
+#[test]
+fn the_palette_folds_the_last_output_and_shows_all_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    let (id, _server) = tab(&mut h);
+    feed(&mut h, id, &[command("one\r\ntwo\r\n", 0).as_slice(), PROMPT].concat());
+    let folds = |h: &H| h.state().terminals.get(&id).unwrap().term.screen().folds.len();
+    sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.fold_output");
+    h.run_steps(2);
+    assert_eq!(folds(&h), 1);
+    sshcraft_ui_egui::commands::run(h.state_mut(), "ui.terminal.unfold_all");
+    h.run_steps(2);
+    assert_eq!(folds(&h), 0);
+}

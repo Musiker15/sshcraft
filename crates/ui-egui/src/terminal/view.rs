@@ -51,6 +51,9 @@ struct State {
     skip_alt_text: bool,
     /// A long press started a selection that the drag now extends (touch only).
     touch_select: bool,
+    /// Where the last press began: a finger lifted from a touch screen leaves no pointer
+    /// position for the click.
+    press: Option<Pos2>,
 }
 
 const MOUSE_ANY: TermModes = TermModes::MOUSE_REPORT.union(TermModes::MOUSE_DRAG).union(TermModes::MOUSE_MOTION);
@@ -105,6 +108,21 @@ fn report_buttons(ui: &Ui, frame: &Frame, col: u16, row: u16, out: &mut Vec<u8>)
             }
         }
     });
+}
+
+/// A click or tap on the bar left of a prompt folds its output; one on the row of a folded output
+/// shows it again. Returns whether the click was one of these.
+fn fold_click(response: &Response, frame: &Frame, state: &State, term: &mut Terminal) -> bool {
+    if !response.clicked() {
+        return false;
+    }
+    let Some(pos) = response.interact_pointer_pos().or(state.press) else { return false };
+    let screen = term.screen();
+    let (_, row) = frame.cell_at(pos);
+    let fold = super::blocks::bar_at(pos, frame.rect, &frame.metrics, &screen.commands).or_else(|| super::blocks::fold_at(row, &screen.folds));
+    let Some(id) = fold else { return false };
+    term.toggle_fold(id);
+    true
 }
 
 /// A click: Ctrl opens the link under it, two select a word, three a line, one clears.
@@ -298,6 +316,7 @@ fn draw(
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette.bg);
     paint(&painter, &layout(&screen, &metrics, palette, font, rect.min, focused, frame.ligatures));
+    super::blocks::paint_folds(&painter, response, rect, &metrics, &screen.folds, palette, font);
     super::blocks::paint_gutter(&painter, response, rect, &metrics, &screen.commands);
     let cursor = Rect::from_min_size(
         pos2(rect.min.x + f32::from(screen.cursor.col) * metrics.width, rect.min.y + f32::from(screen.cursor.row) * metrics.height),
@@ -361,10 +380,15 @@ impl TerminalView<'_> {
             state.focused = focused;
         }
 
+        if let Some(origin) = ui.input(|i| i.pointer.press_origin()) {
+            state.press = Some(origin);
+        }
         // A finger, not a mouse or trackpad on the same tablet: those select as on the desktop.
         let finger =
             touch_screen && (state.touch_select || ui.input(|i| i.any_touches() || i.events.iter().any(|e| matches!(e, Event::Touch { .. }))));
-        if !(finger && touch(&response, &frame, &mut state, term, &mut out.reports)) {
+        // A click on a fold is the fold's, not the selection's or the program's.
+        let folded = fold_click(&response, &frame, &state, term);
+        if !folded && !(finger && touch(&response, &frame, &mut state, term, &mut out.reports)) {
             mouse(ui, &response, &frame, term, &mut out);
         }
         if response.hovered() {
