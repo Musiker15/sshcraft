@@ -34,6 +34,7 @@ raw-window-handle = { workspace = true }
 winresource = "0.1.34"
 
 [dev-dependencies]
+serde_json = { workspace = true }
 sshcraft-engine = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 

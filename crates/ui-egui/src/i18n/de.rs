@@ -961,6 +961,7 @@ pub fn translate(text: &str) -> Option<&'static str> {
         "Connection" => "Verbindung",
         "The port is a number from 0 to 65535." => "Der Port ist eine Zahl von 0 bis 65535.",
         "Copy" => "Kopieren",
+        "Cut" => "Ausschneiden",
         "Allow agent control" => "Steuerung durch Agenten erlauben",
         "Port (0: any free port)" => "Port (0: ein freier Port)",
         "Agents can connect on 127.0.0.1:{port}." => "Agenten können sich über 127.0.0.1:{port} verbinden.",

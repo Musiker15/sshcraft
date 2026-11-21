@@ -1041,6 +1041,28 @@ fn status_text(status: Option<&SessionStatus>) -> (String, bool) {
     }
 }
 
+/// The terminal's right-click menu. Paste goes to the terminal as Ctrl+Shift+V does: through
+/// egui's paste from the system clipboard, or the app's paste source where it has one (Android).
+fn terminal_menu(response: &egui::Response, term: &mut sshcraft_term::Terminal, paste_source: Option<&crate::app::PasteSource>) {
+    response.context_menu(|ui| {
+        let selection = term.selection_text();
+        if ui.add_enabled(selection.is_some(), egui::Button::new(tr("Copy"))).clicked() {
+            if let Some(text) = selection {
+                ui.ctx().copy_text(text);
+            }
+            ui.close();
+        }
+        if ui.button(tr("Paste")).clicked() {
+            response.request_focus();
+            match paste_source.and_then(|source| source()) {
+                Some(text) => crate::field_menu::paste_next_frame(ui.ctx(), response.id, text),
+                None => ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            }
+            ui.close();
+        }
+    });
+}
+
 /// A terminal command (palette or shortcut) for the tab `tab` of session `id`.
 fn run_terminal_command(tab: &mut SessionTab, command: &str, ctx: &egui::Context, id: SessionId) {
     match command {
@@ -1644,6 +1666,13 @@ pub fn show(app: &mut SshcraftApp, ui: &mut Ui, id: SessionId, focused: bool) {
     } else if focused && (first || switched || ctx.memory(|m| m.focused().is_none())) {
         response.response.request_focus();
     }
+    // A right click opens Copy and Paste, unless the program has the mouse (then with Shift).
+    if response.mouse_free && !blocked {
+        let paste_source = app.paste_source.clone();
+        let Some(tab) = app.terminals.get_mut(&id) else { return };
+        terminal_menu(&response.response, &mut tab.term, paste_source.as_ref());
+    }
+    let Some(tab) = app.terminals.get_mut(&id) else { return };
     let can_send = !ended(tab.status.as_ref()) && !blocked;
     // The terminal's own reports go to its own session only.
     if !response.reports.is_empty() && can_send {

@@ -481,3 +481,41 @@ fn a_macro_waits_for_its_text_and_can_be_stopped() {
     assert!(h.state().terminals[&id].macro_run.is_none());
     assert!(!h.state().terminals[&id].term.screen().text().contains("echo nope"));
 }
+
+/// A right click into the (only) terminal on the screen.
+fn right_click_terminal(h: &mut H) {
+    h.get_by_role(egui::accesskit::Role::Terminal).click_secondary();
+    h.run_steps(2);
+}
+
+#[test]
+fn a_right_click_in_the_terminal_copies_and_pastes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, session) = app_harness(dir.path());
+    let (_server, id) = host(&session, "web", true);
+    h.run_steps(2);
+    let tab = connect(&mut h, id);
+    until(&mut h, "the connection", |app| connected(app, tab));
+    h.run_steps(10);
+    feed(&mut h, tab, b"\x1b[2J\x1b[Hhello world");
+    {
+        let term = &mut h.state_mut().terminals.get_mut(&tab).unwrap().term;
+        let start: GridPoint = term.point_at(0, 0);
+        let end = term.point_at(4, 0);
+        term.select_start(start, SelectionKind::Simple);
+        term.select_update(end);
+    }
+    h.run_steps(1);
+    right_click_terminal(&mut h);
+    h.get_by_label("Copy").click();
+    assert_eq!(copied_in(&mut h, 3).as_deref(), Some("hello"));
+
+    right_click_terminal(&mut h);
+    h.get_by_label("Paste").click();
+    h.run_steps(1);
+    let asked = h.output().viewport_output.values().any(|v| v.commands.contains(&ViewportCommand::RequestPaste));
+    assert!(asked, "the paste asks the system for the clipboard");
+    h.event(Event::Paste("pasted-text".into()));
+    h.run_steps(1);
+    until(&mut h, "the echo", |app| app.terminals.get(&tab).is_some_and(|t| t.term.visible_text().contains("pasted-text")));
+}

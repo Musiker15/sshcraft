@@ -53,6 +53,17 @@ allow = ["CDLA-Permissive-2.0"]
 crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
 
+# clipboard-win and error-code: through arboard in egui-winit, the Windows clipboard of the
+# desktop app (copy and paste with other programs). BSL-1.0 is a permissive licence; allowed for
+# these two crates by Moritz on 2026-11-21.
+[[licenses.exceptions]]
+crate = "clipboard-win"
+allow = ["BSL-1.0"]
+
+[[licenses.exceptions]]
+crate = "error-code"
+allow = ["BSL-1.0"]
+
 [licenses.private]
 ignore = true
 

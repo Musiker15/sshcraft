@@ -44,6 +44,8 @@ pub struct SshcraftApp {
     pub key_bar_session: Option<sshcraft_engine::SessionId>,
     /// The Paste button for text fields on a tablet.
     pub field_paste: crate::field_paste::FieldPaste,
+    /// The right-click menu of a text field (Cut, Copy, Paste).
+    pub field_menu: crate::field_menu::FieldMenu,
     pub session: Session,
     pub runner: Runner,
     pub data: Data,
@@ -149,6 +151,7 @@ impl SshcraftApp {
             paste_source: None,
             key_bar_session: None,
             field_paste: crate::field_paste::FieldPaste::default(),
+            field_menu: crate::field_menu::FieldMenu::default(),
             handoff_dir: None,
             handoff_next: 0.0,
             control: None,
@@ -483,6 +486,7 @@ impl SshcraftApp {
         crate::session_tab::pump_all(self, &ctx);
         crate::session_tab::refresh_titles(self);
         crate::session_tab::mark_looked_at(self);
+        crate::field_menu::before(&ctx);
         let keep_field = crate::field_paste::before(self, ui);
         ui.scope_builder(visible(ui), |ui| crate::shell::show(self, ui));
         crate::session_tab::take_request(self);
@@ -535,6 +539,7 @@ impl SshcraftApp {
         }
         self.toasts.show(&ctx);
         crate::field_paste::after(self, &ctx, keep_field);
+        crate::field_menu::after(self, &ctx);
         crate::window::resize_edges(self, &ctx);
         self.forms.observe(crate::forms::shape(&self.ui));
     }
