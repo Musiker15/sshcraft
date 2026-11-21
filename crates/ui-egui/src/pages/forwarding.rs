@@ -305,29 +305,32 @@ fn form_grid(ui: &mut Ui, form: &mut ForwardForm, hosts: &[(HostId, String)]) {
             });
         });
         ui.end_row();
-        ui.label(tr("Name"));
-        ui.add(egui::TextEdit::singleline(&mut form.rule.name).hint_text(tr("optional")).char_limit(100));
+        let label = ui.label(tr("Name"));
+        ui.add(egui::TextEdit::singleline(&mut form.rule.name).hint_text(tr("optional")).char_limit(100)).labelled_by(label.id);
         ui.end_row();
-        ui.label(if form.rule.kind == ForwardKind::Remote { tr("Address on the server") } else { tr("Address here") });
+        let label = ui.label(if form.rule.kind == ForwardKind::Remote { tr("Address on the server") } else { tr("Address here") }).id;
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut form.rule.bind_address).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(253));
+            ui.add(egui::TextEdit::singleline(&mut form.rule.bind_address).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(253))
+                .labelled_by(label);
             ui.label(tr("Port"));
             ui.add(egui::DragValue::new(&mut form.rule.bind_port).range(1..=65535));
         });
         ui.end_row();
         if form.rule.kind == ForwardKind::Socket {
-            ui.label(tr("Socket on the server"));
+            let label = ui.label(tr("Socket on the server"));
             ui.add(
                 egui::TextEdit::singleline(&mut form.rule.target_host)
                     .hint_text("/run/app.sock")
                     .desired_width(crate::widgets::fit(ui, 320.0))
                     .char_limit(107),
-            );
+            )
+            .labelled_by(label.id);
             ui.end_row();
         } else if form.rule.kind != ForwardKind::Dynamic {
-            ui.label(if form.rule.kind == ForwardKind::Remote { tr("Target here") } else { tr("Target from the server") });
+            let label = ui.label(if form.rule.kind == ForwardKind::Remote { tr("Target here") } else { tr("Target from the server") }).id;
             ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut form.rule.target_host).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(253));
+                ui.add(egui::TextEdit::singleline(&mut form.rule.target_host).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(253))
+                    .labelled_by(label);
                 ui.label(tr("Port"));
                 ui.add(egui::DragValue::new(&mut form.rule.target_port).range(1..=65535));
             });

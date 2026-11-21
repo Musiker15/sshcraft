@@ -144,8 +144,8 @@ pub fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         crate::widgets::buttons::title(ui, trf("Share {name}", &[("name", &visible(&form.title))]));
         ui.label(egui::RichText::new(tr("Only with accounts on the same server.")).color(tokens.text_dim));
         ui.horizontal_wrapped(|ui| {
-            ui.label(tr("Email"));
-            ui.add(egui::TextEdit::singleline(&mut form.email).desired_width(crate::widgets::fit(ui, 260.0)).char_limit(320));
+            let label = ui.label(tr("Email"));
+            ui.add(egui::TextEdit::singleline(&mut form.email).desired_width(crate::widgets::fit(ui, 260.0)).char_limit(320)).labelled_by(label.id);
             do_find = ui.add_enabled(!form.email.trim().is_empty(), egui::Button::new(tr("Find"))).clicked();
         });
         if let Some(r) = form.recipient.clone() {

@@ -264,7 +264,9 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
         }
         if let Some(comment) = viewer.comment.as_mut() {
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::multiline(comment).desired_rows(2).desired_width(crate::widgets::fit(ui, 400.0)).char_limit(MAX_COMMENT));
+                let field =
+                    ui.add(egui::TextEdit::multiline(comment).desired_rows(2).desired_width(crate::widgets::fit(ui, 400.0)).char_limit(MAX_COMMENT));
+                crate::field_names::name(ui, &field, tr("Comment"));
                 if ui.add_enabled(!comment.trim().is_empty(), egui::Button::new(tr("Add comment"))).clicked() {
                     action = Some(ViewerAction::Comment);
                 }

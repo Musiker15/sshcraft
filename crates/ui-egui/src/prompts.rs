@@ -357,8 +357,8 @@ pub fn show(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.add_space(6.0);
                 egui::Grid::new(("sshcraft-prompt-lines", prompt.id)).num_columns(2).min_col_width(130.0).show(ui, |ui| {
                     for (i, ((text, echo), value)) in lines.iter().zip(prompt.answers.iter_mut()).enumerate() {
-                        ui.label(visible(text));
-                        let field = crate::widgets::secret_field(ui, value, answer_id(prompt.id, i), !echo, "", 300.0);
+                        let label = ui.label(visible(text));
+                        let field = crate::widgets::secret_field(ui, value, answer_id(prompt.id, i), !echo, "", 300.0).labelled_by(label.id);
                         // The keyboard goes to the first answer, not to the terminal behind.
                         if first_frame && on_screen && i == 0 {
                             field.request_focus();
