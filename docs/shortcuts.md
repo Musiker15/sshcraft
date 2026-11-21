@@ -75,3 +75,8 @@ menu's underlined letter opens it.
 In the command palette, the arrow keys move the selection, Enter opens it and Escape closes the
 palette. On the host list, Enter or a double click connects to the selected host, a right click
 opens its menu.
+
+Copy and paste use the system clipboard. In a text field, Ctrl+C, Ctrl+X and Ctrl+V work as
+usual, and a right click offers Cut, Copy and Paste. In the terminal, Ctrl+C stays the interrupt
+for the shell unless text is selected; a right click offers Copy and Paste. While a program in
+the terminal uses the mouse (vim, htop, tmux with mouse mode), Shift+right click opens the menu.
