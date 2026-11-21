@@ -27,13 +27,16 @@ sshcraft-engine = { workspace = true }
 sshcraft-fido = { workspace = true }
 sshcraft-ui-egui = { workspace = true }
 # Not the workspace's eframe: its accesskit feature needs GameActivity (eframe refuses it with
-# NativeActivity), so screen readers on Android wait for the GameActivity build (docs/gaps.md).
+# NativeActivity). Screen readers go through accesskit_android directly (src/a11y.rs).
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "android-native-activity"] }
 # The version eframe uses (the storytold fork through [patch]); its AndroidApp type must match.
 winit = { version = "0.30.13", default-features = false, features = ["android-native-activity"] }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 android_clipboard = "0.1.0"
+# Screen readers: AccessKit's adapter on NativeActivity's view (src/a11y.rs). The dex with its
+# Java delegate comes with the crate, so `cargo xtask android` builds no Java of it.
+accesskit_android = { version = "0.9.1", features = ["embedded-dex"] }
 # The keyboard's text connection (src/keyboard.rs) and the biometric prompt (src/biometric.rs):
 # the VM and the activity from android-activity.
 jni = "0.22.4"
@@ -45,7 +48,8 @@ log = "0.4.35"
 # android-activity calls the exported `android_main`, and exporting a symbol counts as unsafe
 # code; the keyboard's text connection and the biometric prompt need the raw JavaVM and activity.
 # The workspace forbids unsafe, so this crate states its own lints like `crates/fido`: denied
-# crate-wide and allowed on `android_main` and in `src/keyboard.rs` and `src/biometric.rs` only.
+# crate-wide and allowed on `android_main` and in `src/keyboard.rs`, `src/biometric.rs` and
+# `src/a11y.rs` only.
 # The clippy entries match the workspace.
 [lints.rust]
 unsafe_code = "deny"

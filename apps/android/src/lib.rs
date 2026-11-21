@@ -215,6 +215,8 @@ pub fn clipboard_keys(events: &mut Vec<egui::Event>, clipboard: impl FnOnce() ->
 }
 
 #[cfg(target_os = "android")]
+mod a11y;
+#[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
 mod background;
@@ -224,6 +226,15 @@ mod biometric;
 mod files;
 #[cfg(target_os = "android")]
 mod keyboard;
+
+/// At most this many requests of a screen reader go into one frame; the rest wait for the next.
+pub const SCREEN_READER_PER_FRAME: usize = 64;
+
+/// What a screen reader asked for (a tap, a focus, a scroll) as egui input of this frame, at
+/// most [`SCREEN_READER_PER_FRAME`], so a flood of requests cannot stall a frame.
+pub fn screen_reader_input(requests: impl Iterator<Item = egui::accesskit::ActionRequest>, events: &mut Vec<egui::Event>) {
+    events.extend(requests.take(SCREEN_READER_PER_FRAME).map(egui::Event::AccessKitActionRequest));
+}
 
 /// Where `config.toml` lives: in the app's own data folder. Android has no config folder the
 /// settings library could find, so it fell back to a folder the app cannot write, and every
@@ -239,6 +250,33 @@ mod tests {
 
     fn window() -> Rect {
         Rect::from_min_max(pos2(0.0, 0.0), pos2(1280.0, 800.0))
+    }
+
+    fn click(node: u64) -> egui::accesskit::ActionRequest {
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: egui::accesskit::NodeId(node),
+            data: None,
+        }
+    }
+
+    #[test]
+    fn screen_reader_requests_join_the_frame_in_order_and_bounded() {
+        let mut events = vec![Event::Text("a".into())];
+        screen_reader_input([click(1), click(2)].into_iter(), &mut events);
+        assert!(matches!(&events[1], Event::AccessKitActionRequest(r) if r.target_node.0 == 1));
+        assert!(matches!(&events[2], Event::AccessKitActionRequest(r) if r.target_node.0 == 2));
+
+        // More than a frame takes: the rest stay in the channel for the next frame.
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for node in 0..100 {
+            sender.send(click(node)).unwrap();
+        }
+        let mut events = Vec::new();
+        screen_reader_input(receiver.try_iter(), &mut events);
+        assert_eq!(events.len(), SCREEN_READER_PER_FRAME);
+        assert_eq!(receiver.try_iter().count(), 100 - SCREEN_READER_PER_FRAME);
     }
 
     #[test]

@@ -48,6 +48,8 @@ public class MainActivity extends NativeActivity {
     private static final int MAX_WAITING = 1 << 20;
 
     private InputView input;
+    /** The view NativeActivity draws into; screen readers read the app through it. */
+    private View screen;
 
     /** Picked files as "id<TAB>path<TAB>name" ("id<TAB>": cancelled), until Rust takes them. */
     private static final ConcurrentLinkedQueue<String> PICKED = new ConcurrentLinkedQueue<>();
@@ -225,6 +227,7 @@ public class MainActivity extends NativeActivity {
             for (int i = 0; i < group.getChildCount(); i++) {
                 View child = group.getChildAt(i);
                 if (child != input) {
+                    screen = child;
                     child.setFocusable(false);
                     child.setFocusableInTouchMode(false);
                 }
@@ -294,6 +297,14 @@ public class MainActivity extends NativeActivity {
         }
         Insets used = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime() | WindowInsets.Type.displayCutout());
         return pack(used.left) | pack(used.top) << 16 | pack(used.right) << 32 | pack(used.bottom) << 48;
+    }
+
+    /**
+     * The view NativeActivity draws into. Rust hangs AccessKit's accessibility delegate on it,
+     * so TalkBack reads the app's widgets where they are drawn.
+     */
+    public View screen() {
+        return screen;
     }
 
     /** The oldest entry of {@link #COMMITTED}, or null when there is none. */
