@@ -36,6 +36,9 @@ pub struct SshcraftApp {
     /// Whether the user's presence can unlock the app here: Windows Hello on Windows, the
     /// fingerprint, face or screen lock on an Android device that has one (set by the app).
     pub lock_available: bool,
+    /// Whether an SSH agent can be reached here at all. An Android app has no `SSH_AUTH_SOCK`
+    /// and no agent to talk to, so the keys page leaves the agent's card out there.
+    pub agent_available: bool,
     /// Ctrl and Alt held on the tablet's key bar.
     pub key_bar: crate::terminal::key_bar::KeyBar,
     /// Where the key bar's Paste reads from; nothing is pasted without one.
@@ -147,6 +150,7 @@ impl SshcraftApp {
             dropdown_hidden: false,
             form: Form::Desktop,
             lock_available: crate::lock::supported(),
+            agent_available: !cfg!(target_os = "android"),
             key_bar: crate::terminal::key_bar::KeyBar::default(),
             paste_source: None,
             key_bar_session: None,

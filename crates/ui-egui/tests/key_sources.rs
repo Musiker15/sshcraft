@@ -58,6 +58,18 @@ fn an_unreachable_agent_is_said() {
 }
 
 #[test]
+fn without_an_agent_the_card_is_left_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness_with(dir.path(), |_| {});
+    h.state_mut().agent_available = false;
+    h.state_mut().ui.page = Page::Keys;
+    h.run_steps(5);
+    assert!(h.query_by_label("In the SSH agent").is_none(), "no card for an agent that is not there");
+    assert!(h.query_by_label_contains("cannot be reached").is_none());
+    assert!(!h.state().ui.agent_keys.is_loaded(), "the agent is not even asked");
+}
+
+#[test]
 fn a_key_is_imported_from_proton_pass() {
     let dir = tempfile::tempdir().unwrap();
     let private = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap().to_openssh(LineEnding::LF).unwrap().to_string();
