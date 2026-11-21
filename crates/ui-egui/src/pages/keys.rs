@@ -176,8 +176,8 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-key-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| match &mut dialog {
             KeyDialog::Generate(form) => {
-                ui.label(tr("Name"));
-                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
+                let label = ui.label(tr("Name"));
+                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0))).labelled_by(label.id);
                 ui.end_row();
                 ui.label(tr("Type"));
                 egui::ComboBox::from_id_salt("sshcraft-key-type").selected_text(form.kind.label()).show_ui(ui, |ui| {
@@ -187,15 +187,16 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                     }
                 });
                 ui.end_row();
-                ui.label(tr("Passphrase"));
-                crate::widgets::secret_field(ui, &mut form.passphrase, egui::Id::unique("sshcraft-key-passphrase"), true, tr("optional"), 280.0);
+                let label = ui.label(tr("Passphrase"));
+                crate::widgets::secret_field(ui, &mut form.passphrase, egui::Id::unique("sshcraft-key-passphrase"), true, tr("optional"), 280.0)
+                    .labelled_by(label.id);
                 ui.end_row();
             }
             KeyDialog::Import(form) => {
-                ui.label(tr("Name"));
-                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
+                let label = ui.label(tr("Name"));
+                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0))).labelled_by(label.id);
                 ui.end_row();
-                ui.label(tr("Private key"));
+                let label = ui.label(tr("Private key")).id;
                 fixed_height(ui, "sshcraft-import-text", |ui| {
                     let id = egui::Id::unique("sshcraft-private-key");
                     ui.add(
@@ -204,11 +205,12 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                             .desired_rows(6)
                             .desired_width(crate::widgets::fit(ui, 280.0))
                             .font(egui::TextStyle::Monospace),
-                    );
+                    )
+                    .labelled_by(label);
                     crate::widgets::forget_undo(ui.ctx(), id);
                 });
                 ui.end_row();
-                ui.label(tr("Passphrase"));
+                let label = ui.label(tr("Passphrase"));
                 crate::widgets::secret_field(
                     ui,
                     &mut form.passphrase,
@@ -216,15 +218,16 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                     true,
                     tr("if the key has one"),
                     280.0,
-                );
+                )
+                .labelled_by(label.id);
                 ui.end_row();
                 ui.label("");
                 ui.checkbox(&mut form.save_passphrase, tr("Save the passphrase"));
                 ui.end_row();
             }
             KeyDialog::Security(form) => {
-                ui.label(tr("Name"));
-                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
+                let label = ui.label(tr("Name"));
+                ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0))).labelled_by(label.id);
                 ui.end_row();
                 ui.label(tr("Where"));
                 ui.horizontal_wrapped(|ui| {
@@ -243,19 +246,20 @@ fn dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 ui.end_row();
             }
             KeyDialog::Passphrase { passphrase, .. } => {
-                ui.label(tr("Passphrase"));
-                crate::widgets::secret_field(ui, passphrase, egui::Id::unique("sshcraft-key-passphrase"), true, "", 280.0);
+                let label = ui.label(tr("Passphrase"));
+                crate::widgets::secret_field(ui, passphrase, egui::Id::unique("sshcraft-key-passphrase"), true, "", 280.0).labelled_by(label.id);
                 ui.end_row();
             }
             KeyDialog::Certificate { text, .. } => {
-                ui.label(tr("Certificate"));
+                let label = ui.label(tr("Certificate")).id;
                 fixed_height(ui, "sshcraft-certificate-text", |ui| {
                     ui.add(
                         egui::TextEdit::multiline(text)
                             .desired_rows(4)
                             .desired_width(crate::widgets::fit(ui, 280.0))
                             .font(egui::TextStyle::Monospace),
-                    );
+                    )
+                    .labelled_by(label);
                 });
                 ui.end_row();
             }
@@ -319,11 +323,11 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         crate::widgets::buttons::title(ui, if form.id.is_some() { tr("Edit identity") } else { tr("New identity") });
         ui.add_space(8.0);
         egui::Grid::new("sshcraft-identity-fields").num_columns(2).spacing([12.0, 8.0]).min_col_width(120.0).show(ui, |ui| {
-            ui.label(tr("Name"));
-            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0)));
+            let label = ui.label(tr("Name"));
+            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 280.0))).labelled_by(label.id);
             ui.end_row();
-            ui.label(tr("User"));
-            ui.add(egui::TextEdit::singleline(&mut form.username).desired_width(crate::widgets::fit(ui, 280.0)));
+            let label = ui.label(tr("User"));
+            ui.add(egui::TextEdit::singleline(&mut form.username).desired_width(crate::widgets::fit(ui, 280.0))).labelled_by(label.id);
             ui.end_row();
             ui.label(tr("Key"));
             let shown = form
@@ -338,10 +342,11 @@ fn identity_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
                 }
             });
             ui.end_row();
-            ui.label(tr("Password"));
+            let label = ui.label(tr("Password")).id;
             ui.horizontal_wrapped(|ui| {
                 let hint = if form.has_password { tr("Stored; type to replace") } else { tr("None stored") };
-                crate::widgets::secret_field(ui, &mut form.password, egui::Id::unique("sshcraft-identity-password"), true, hint, 200.0);
+                crate::widgets::secret_field(ui, &mut form.password, egui::Id::unique("sshcraft-identity-password"), true, hint, 200.0)
+                    .labelled_by(label);
                 if form.has_password {
                     ui.checkbox(&mut form.remove_password, tr("Remove"));
                 }

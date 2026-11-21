@@ -236,9 +236,11 @@ fn appearance(app: &mut SshcraftApp, ui: &mut Ui) {
             }
         });
         ui.end_row();
-        ui.label(tr("Terminal font"));
+        let label = ui.label(tr("Terminal font"));
         let typed = app.ui.settings.font_family.get_or_insert_with(|| a.font_family.clone());
-        let response = ui.add(egui::TextEdit::singleline(typed).desired_width(crate::widgets::fit(ui, 300.0)).hint_text(tr("comma separated")));
+        let response = ui
+            .add(egui::TextEdit::singleline(typed).desired_width(crate::widgets::fit(ui, 300.0)).hint_text(tr("comma separated")))
+            .labelled_by(label.id);
         if response.lost_focus() {
             a.font_family = typed.trim().to_string();
             app.ui.settings.font_family = None;

@@ -271,8 +271,8 @@ pub fn dialogs(app: &mut SshcraftApp, ctx: &egui::Context) {
 }
 
 fn field(ui: &mut Ui, label: &str, value: &mut String) {
-    ui.label(label);
-    ui.add(egui::TextEdit::singleline(value).desired_width(crate::widgets::fit(ui, 300.0)).char_limit(500));
+    let label = ui.label(label);
+    ui.add(egui::TextEdit::singleline(value).desired_width(crate::widgets::fit(ui, 300.0)).char_limit(500)).labelled_by(label.id);
     ui.end_row();
 }
 
@@ -287,8 +287,8 @@ fn create_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         egui::Grid::new("sshcraft-create").num_columns(2).min_col_width(130.0).show(ui, |ui| {
             field(ui, tr("Server name"), &mut form.server_name);
             field(ui, tr("Server address"), &mut form.origin);
-            ui.label(tr("API key"));
-            secret_field(ui, &mut form.api_key, egui::Id::unique("sshcraft-api-key"), true, "", 300.0);
+            let label = ui.label(tr("API key"));
+            secret_field(ui, &mut form.api_key, egui::Id::unique("sshcraft-api-key"), true, "", 300.0).labelled_by(label.id);
             ui.end_row();
             field(ui, tr("Your name"), &mut form.name);
             field(ui, tr("Email"), &mut form.email);
@@ -348,11 +348,11 @@ fn join_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         egui::Grid::new("sshcraft-join").num_columns(2).min_col_width(130.0).show(ui, |ui| {
             field(ui, tr("Server name"), &mut form.server_name);
             field(ui, tr("Server address"), &mut form.origin);
-            ui.label(tr("API key"));
-            secret_field(ui, &mut form.api_key, egui::Id::unique("sshcraft-join-api-key"), true, "", 300.0);
+            let label = ui.label(tr("API key"));
+            secret_field(ui, &mut form.api_key, egui::Id::unique("sshcraft-join-api-key"), true, "", 300.0).labelled_by(label.id);
             ui.end_row();
-            ui.label(tr("Account key"));
-            secret_field(ui, &mut form.account_key, egui::Id::unique("sshcraft-account-key"), true, "", 300.0);
+            let label = ui.label(tr("Account key"));
+            secret_field(ui, &mut form.account_key, egui::Id::unique("sshcraft-account-key"), true, "", 300.0).labelled_by(label.id);
             ui.end_row();
             field(ui, tr("This device's name"), &mut form.device_name);
         });

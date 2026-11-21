@@ -37,6 +37,8 @@ where it can have one.
     it deletes goes to the trash; there is an encrypted backup file. (Termius vaults that emptied
     after updates.)
 11. **Accessibility:** egui with AccessKit, the terminal readable as linear text by screen readers.
+    Every text field has a name: the label beside it, or its hint (`crates/ui-egui/src/field_names.rs`,
+    checked by `tests/field_names.rs`). A password field gives only dots.
 12. **Supply chain:** one official download address, signed packages through winget, Homebrew and
     Flathub, checksums, an SBOM; reproducible builds as a goal. (Xshell backdoor, fake PuTTY
     downloads.)

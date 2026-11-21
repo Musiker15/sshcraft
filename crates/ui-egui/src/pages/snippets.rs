@@ -293,18 +293,19 @@ pub fn dialogs(app: &mut SshcraftApp, ctx: &egui::Context) {
 
 fn form_body(ui: &mut Ui, form: &mut SnippetForm, hosts: &[(HostId, String)]) {
     egui::Grid::new("sshcraft-snippet-form").num_columns(2).min_col_width(110.0).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label(tr("Name"));
-        ui.add(egui::TextEdit::singleline(&mut form.name).char_limit(MAX_NAME));
+        let label = ui.label(tr("Name"));
+        ui.add(egui::TextEdit::singleline(&mut form.name).char_limit(MAX_NAME)).labelled_by(label.id);
         ui.end_row();
-        ui.label(tr("Package"));
-        ui.add(egui::TextEdit::singleline(&mut form.package).hint_text(tr("optional")).char_limit(MAX_NAME));
+        let label = ui.label(tr("Package"));
+        ui.add(egui::TextEdit::singleline(&mut form.package).hint_text(tr("optional")).char_limit(MAX_NAME)).labelled_by(label.id);
         ui.end_row();
     });
-    ui.label(tr("Content"));
+    let label = ui.label(tr("Content")).id;
     egui::ScrollArea::vertical().id_salt("sshcraft-snippet-content").max_height(160.0).min_scrolled_height(160.0).auto_shrink([false, false]).show(
         ui,
         |ui| {
-            ui.add(egui::TextEdit::multiline(&mut form.content).desired_rows(7).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace));
+            ui.add(egui::TextEdit::multiline(&mut form.content).desired_rows(7).desired_width(f32::INFINITY).font(egui::TextStyle::Monospace))
+                .labelled_by(label);
         },
     );
     ui.label(tr("Default hosts"));
@@ -408,8 +409,8 @@ fn run_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
             ui.label(egui::RichText::new(tr("Values")).strong());
             egui::Grid::new("sshcraft-snippet-values").num_columns(2).show(ui, |ui| {
                 for (name, value) in &mut job.values {
-                    ui.label(visible(name));
-                    ui.add(egui::TextEdit::singleline(value).desired_width(crate::widgets::fit(ui, 320.0)));
+                    let label = ui.label(visible(name));
+                    ui.add(egui::TextEdit::singleline(value).desired_width(crate::widgets::fit(ui, 320.0))).labelled_by(label.id);
                     ui.end_row();
                 }
             });

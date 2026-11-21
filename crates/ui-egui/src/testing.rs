@@ -83,5 +83,7 @@ fn harness_for(
     );
     // The app was made with a context of its own: the harness's needs the system's fonts too.
     harness.ctx.add_font_provider(Arc::new(egui_system_font_provider::SystemFontProvider::new()));
+    // And the names of text fields, as SshcraftApp::new gives its context.
+    harness.ctx.add_plugin(crate::field_names::FieldNames);
     (harness, session)
 }

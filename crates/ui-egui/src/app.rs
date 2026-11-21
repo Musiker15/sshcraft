@@ -109,6 +109,8 @@ impl SshcraftApp {
         // in names from servers and imports.
         crate::fonts::install_embedded(ctx, crate::fonts::CRAFT_FONTS);
         ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
+        // Text fields with only a hint get it as their name for screen readers.
+        ctx.add_plugin(crate::field_names::FieldNames);
         let events = session.subscribe();
         // Sync with every server that has it on, and the session logs' housekeeping. Without
         // this, sync ran only in the session that set a server up, and every restart said
