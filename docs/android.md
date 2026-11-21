@@ -75,8 +75,10 @@ the bar puts the selection on Android's clipboard.
   into the app's cache first, and a file to write is written there and copied into the document
   each time the app closes it. Up to eight such copies stay in the cache.
 - No AI agents: the control channel, MCP and `sshcraft-cli` are desktop only.
-- No dropdown window, no desktop shortcuts, no X11 forwarding, no FIDO keys and no screen reader
-  support yet.
+- No dropdown window, no desktop shortcuts, no X11 forwarding and no FIDO keys.
+- Screen readers such as TalkBack read the app and work it: AccessKit hangs on the view
+  NativeActivity draws into (`src/a11y.rs`), and what TalkBack asks for (a tap, a focus) comes
+  back as input of the next frame. Password fields give only dots.
 - A word the keyboard is still composing shows where it will go, in the terminal and in a field,
   and the keyboard's choice replaces it.
 - The sync server's certificate is checked against Mozilla's list of public authorities, not

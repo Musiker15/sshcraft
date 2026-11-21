@@ -105,9 +105,10 @@ crash on hostile input is a security bug. **This outranks feature work.**
   (`webauthn.dll`, WinRT). That crate states its own lints with `unsafe_code = "deny"`; only
   `webauthn.rs` and `presence.rs` allow it, and every block has a `// SAFETY:` comment.
   `apps/android`: android-activity calls the exported `android_main`, and `#[unsafe(no_mangle)]`
-  counts as unsafe code; the keyboard's text connection needs the raw JavaVM and activity from
-  ndk-context. That crate states its own lints the same way and allows unsafe on `android_main`
-  and in `src/keyboard.rs` only, every block with a `// SAFETY:` comment. Do not add `unsafe` anywhere else; if a platform API
+  counts as unsafe code; the keyboard's text connection, the biometric prompt and the screen
+  reader adapter need the raw JavaVM and activity from ndk-context. That crate states its own
+  lints the same way and allows unsafe on `android_main` and in `src/keyboard.rs`,
+  `src/biometric.rs` and `src/a11y.rs` only, every block with a `// SAFETY:` comment. Do not add `unsafe` anywhere else; if a platform API
   needs it, use a maintained safe wrapper crate.
 
 ## Non-negotiables

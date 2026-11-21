@@ -12,6 +12,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "accesskit_android"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "039f2421a22320d0c3ceee3f388a3bd01fe7aeb528b996c3ae34da8ad40a45d5"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer",
+ "jni 0.21.1",
+ "log",
+]
+
+[[package]]
 name = "accesskit_atspi_common"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5940,6 +5952,7 @@ dependencies = [
 name = "sshcraft-android"
 version = "0.4.0"
 dependencies = [
+ "accesskit_android",
  "android_clipboard",
  "android_logger",
  "async-trait",

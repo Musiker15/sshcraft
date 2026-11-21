@@ -37,6 +37,8 @@ struct Tablet {
     reported: Vec<String>,
     /// The word the keyboard is composing (crate::Composer).
     composer: crate::Composer,
+    /// TalkBack and other accessibility services (crate::a11y); none if it could not attach.
+    screen_reader: Option<crate::a11y::ScreenReader>,
 }
 
 impl Tablet {
@@ -170,6 +172,9 @@ impl eframe::App for Tablet {
             self.edges = edges;
             self.content_changed = true;
         }
+        if let Some(reader) = &self.screen_reader {
+            reader.feed(raw_input);
+        }
         if !raw_input.events.is_empty() {
             self.last_input = std::time::Instant::now();
         }
@@ -277,6 +282,14 @@ fn run(android: AndroidApp) {
             app.notifier = Box::new(crate::background::Notices);
             app.paste_source = Some(Arc::new(clipboard_text));
             app.report_vault(vault);
+            // Without it the app still works, only a screen reader cannot read it.
+            let screen_reader = match crate::a11y::ScreenReader::attach(&cc.egui_ctx, handle.activity_as_ptr()) {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    log::warn!("screen readers cannot reach the app: {e}");
+                    None
+                }
+            };
             Ok(Box::new(Tablet {
                 app,
                 android: handle,
@@ -291,6 +304,7 @@ fn run(android: AndroidApp) {
                 sessions: 0,
                 reported: Vec::new(),
                 composer: crate::Composer::default(),
+                screen_reader,
             }))
         }),
     );
