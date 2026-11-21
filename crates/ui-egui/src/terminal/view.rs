@@ -37,6 +37,9 @@ pub struct TerminalResponse {
     pub open_link: Option<String>,
     /// Text for the clipboard (the selection, on copy).
     pub copy: Option<String>,
+    /// The mouse is the user's, not the program's (none asked for it, or Shift is held): a right
+    /// click may open the terminal's menu.
+    pub mouse_free: bool,
 }
 
 /// State kept between frames, per widget.
@@ -346,8 +349,15 @@ impl TerminalView<'_> {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let id = response.id;
         let mut state: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let mut out =
-            TerminalResponse { response: response.clone(), input: Vec::new(), reports: Vec::new(), resize: None, open_link: None, copy: None };
+        let mut out = TerminalResponse {
+            response: response.clone(),
+            input: Vec::new(),
+            reports: Vec::new(),
+            resize: None,
+            open_link: None,
+            copy: None,
+            mouse_free: true,
+        };
 
         // Fit the terminal to the space. A collapsed area (a hidden split, a tab being laid out)
         // keeps the size: shrinking to 2x1 would reflow the history away and tell the server.
@@ -366,6 +376,7 @@ impl TerminalView<'_> {
         let focused = ui.memory(|m| m.has_focus(id));
         let frame =
             Frame { rect, metrics, size, modes, modifiers, report_mouse: modes.intersects(MOUSE_ANY) && !modifiers.shift, focused, ligatures };
+        out.mouse_free = !frame.report_mouse;
         if focused {
             let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true };
             ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));

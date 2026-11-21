@@ -472,3 +472,22 @@ fn setting_up_shell_integration_asks_first_and_never_deletes() {
     assert!(h.state().ui.confirm.is_none(), "the dialog closed");
     assert!(h.state().data.hosts.iter().any(|r| r.host.id == id), "the host is still there");
 }
+
+#[test]
+fn a_right_click_in_a_field_offers_cut_copy_and_paste() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _session) = app_harness(dir.path());
+    h.run_steps(3);
+    h.get_by_role(egui::accesskit::Role::TextInput).click_secondary();
+    h.run_steps(2);
+    h.get_by_label("Cut");
+    h.get_by_label("Copy");
+    h.get_by_label("Paste").click();
+    h.run_steps(1);
+    let asked = h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::RequestPaste));
+    assert!(asked, "the paste asks the system for the clipboard");
+    h.event(egui::Event::Paste("web".into()));
+    h.run_steps(2);
+    assert_eq!(h.state().ui.hosts.search, "web", "the paste went into the field that was right-clicked");
+    assert!(h.query_by_label("Cut").is_none(), "the menu closed");
+}
