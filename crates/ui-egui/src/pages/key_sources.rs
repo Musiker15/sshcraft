@@ -87,8 +87,11 @@ fn load_agent_keys(app: &mut SshcraftApp) {
     );
 }
 
-/// The agent's keys, below the vault's.
+/// The agent's keys, below the vault's. Left out where there is no agent (Android).
 pub fn agent_section(app: &mut SshcraftApp, ui: &mut Ui) {
+    if !app.agent_available {
+        return;
+    }
     if !app.ui.agent_keys.is_loaded() && !app.ui.agent_keys.loading {
         load_agent_keys(app);
     }
