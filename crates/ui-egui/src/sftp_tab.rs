@@ -986,6 +986,7 @@ fn dialog(ctx: &egui::Context, view: &mut SftpView, others: &[OtherPane], action
                 crate::widgets::buttons::title(ui, tr("Rename"));
                 ui.add_space(8.0);
                 let field = ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                crate::field_names::name(ui, &field, tr("Name"));
                 let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.add_space(12.0);
                 let (cancel, go) = buttons(ui, tr("Rename"), !name.trim().is_empty());

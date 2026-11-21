@@ -125,20 +125,23 @@ pub fn show_dialog(app: &mut SshcraftApp, ctx: &egui::Context) {
         crate::widgets::buttons::title(ui, tr("Save as workspace"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(tr("Name"));
-            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 300.0)).char_limit(100));
+            let label = ui.label(tr("Name"));
+            ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(crate::widgets::fit(ui, 300.0)).char_limit(100)).labelled_by(label.id);
         });
         ui.add_space(6.0);
         egui::ScrollArea::vertical().max_height(260.0).min_scrolled_height(260.0).auto_shrink([false, false]).show(ui, |ui| {
             egui::Grid::new("sshcraft-template-panes").num_columns(3).min_col_width(150.0).show(ui, |ui| {
-                ui.label(egui::RichText::new(tr("Title")).strong());
-                ui.label(egui::RichText::new(tr("Directory")).strong());
-                ui.label(egui::RichText::new(tr("Command")).strong());
+                let title = ui.label(egui::RichText::new(tr("Title")).strong()).id;
+                let directory = ui.label(egui::RichText::new(tr("Directory")).strong()).id;
+                let command = ui.label(egui::RichText::new(tr("Command")).strong()).id;
                 ui.end_row();
                 for pane in &mut form.panes {
-                    ui.add(egui::TextEdit::singleline(&mut pane.title).desired_width(crate::widgets::fit(ui, 150.0)).char_limit(100));
-                    ui.add(egui::TextEdit::singleline(&mut pane.cwd).desired_width(crate::widgets::fit(ui, 180.0)).char_limit(1000));
-                    ui.add(egui::TextEdit::singleline(&mut pane.command).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(1000));
+                    ui.add(egui::TextEdit::singleline(&mut pane.title).desired_width(crate::widgets::fit(ui, 150.0)).char_limit(100))
+                        .labelled_by(title);
+                    ui.add(egui::TextEdit::singleline(&mut pane.cwd).desired_width(crate::widgets::fit(ui, 180.0)).char_limit(1000))
+                        .labelled_by(directory);
+                    ui.add(egui::TextEdit::singleline(&mut pane.command).desired_width(crate::widgets::fit(ui, 200.0)).char_limit(1000))
+                        .labelled_by(command);
                     ui.end_row();
                 }
             });
