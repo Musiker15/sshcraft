@@ -2299,9 +2299,9 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -6176,7 +6176,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "craft-quit",
@@ -6201,7 +6201,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-android"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "accesskit_android",
  "android_clipboard",
@@ -6222,7 +6222,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "clap",
@@ -6239,7 +6239,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-engine"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6282,7 +6282,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-fido"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "ciborium",
@@ -6302,7 +6302,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-import"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "csv",
  "data-encoding",
@@ -6320,7 +6320,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-link"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "data-encoding",
  "futures",
@@ -6339,7 +6339,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-local"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "portable-pty",
  "serde",
@@ -6352,7 +6352,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-mcp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -6367,7 +6367,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-model"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "getrandom 0.4.3",
  "hmac",
@@ -6380,7 +6380,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-platform"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "directories",
  "if-addrs",
@@ -6392,7 +6392,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-proto"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chacha20poly1305",
  "data-encoding",
@@ -6411,7 +6411,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-server"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "clap",
  "sshcraft-server-lib",
@@ -6423,7 +6423,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-server-lib"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -6451,7 +6451,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-ssh"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -6472,7 +6472,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-store"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "android-native-keyring-store",
  "argon2",
@@ -6495,7 +6495,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-sync"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "data-encoding",
  "futures",
@@ -6521,7 +6521,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-telnet"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "sshcraft-model",
  "thiserror 2.0.21",
@@ -6530,7 +6530,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-term"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "alacritty_terminal",
  "base64 0.23.1",
@@ -6543,7 +6543,7 @@ dependencies = [
 
 [[package]]
 name = "sshcraft-ui-egui"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",
@@ -7262,9 +7262,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -8430,7 +8430,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde_json",
  "zip",

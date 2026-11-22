@@ -1,6 +1,6 @@
 # SSHCraft roadmap
 
-> **Last updated:** 2026-11-20 · **Stage:** v0.4.0; S1 (SFTP) done
+> **Last updated:** 2026-11-22 · **Stage:** v0.4.1; S1 (SFTP) done
 
 SSHCraft reached its first feature set (sub-plans 1 to 15: hosts, keys, connections, workspaces,
 port forwarding, snippets, session logs, sync, sharing, AI agents) as a Tauri app, kept at the tag
