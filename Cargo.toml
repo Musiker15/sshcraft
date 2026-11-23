@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 csv = "1.4.0"
 data-encoding = "2.11.1"
-qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+qrcode = { version = "0.15.0", default-features = false, features = ["svg"] }
 wait-timeout = "0.2.1"
 sys-locale = "0.3.2"
 url = "2.5.8"
@@ -69,13 +69,13 @@ eframe = { version = "0.37", default-features = false, features = ["wgpu", "defa
 egui_kittest = "0.37"
 egui_system_font_provider = "0.37"
 # The version egui_system_font_provider of the fork uses, so the font stack is not built twice.
-fontique = { version = "0.11.1", default-features = false, features = ["system"] }
+fontique = { version = "0.13.0", default-features = false, features = ["system"] }
 image = { version = "0.25.10", default-features = false }
 
 # ssh and storage
 russh = "0.65.1"
 russh-sftp = "3.0.1"
-rusqlite = { version = "0.42.0", features = ["bundled"] }
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 keyring = "4.2.0"
 keyring-core = "1.0.1"
 webpki-root-certs = "1.0.12"
